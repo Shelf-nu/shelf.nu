@@ -52,7 +52,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-delete": PermissionAction.delete,
     };
 
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -68,7 +68,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           organizationId,
           userId,
           currentSearchParams,
-          isSelfServiceOrBase,
+          assignedOnly: !access.audits.seeAll,
         });
 
         sendNotification({
@@ -82,13 +82,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
 
       case "bulk-delete": {
-        const { auditIds } = parseData(formData, BulkDeleteAuditsSchema);
+        const { auditIds, confirmation } = parseData(
+          formData,
+          BulkDeleteAuditsSchema
+        );
 
         const { count } = await bulkDeleteAudits({
           auditIds,
           organizationId,
           userId,
           currentSearchParams,
+          confirmation,
         });
 
         const isSingle = count === 1;

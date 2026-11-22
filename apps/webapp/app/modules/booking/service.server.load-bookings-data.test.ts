@@ -11,10 +11,9 @@
  * 1. READ — the standard visibility rule: SELF_SERVICE / BASE users see only
  *    bookings they are custodian of (via EITHER custody link), unless the
  *    workspace has switched `selfServiceCanSeeBookings` /
- *    `baseUserCanSeeBookings` on. `requirePermission` resolves that into
- *    `canSeeAllBookings`. This loader previously gated on the role alone, so
- *    the workspace override never reached these two dialogs.
- * 2. WRITE — what `validateBookingOwnership` accepts on submit: creator OR
+ *    `baseUserCanSeeBookings` on. The caller's `access.bookings.seeAll`
+ *    carries that answer.
+ * 2. WRITE: what `validateBookingOwnership` accepts on submit: creator OR
  *    custodian, for SELF_SERVICE / BASE, independent of that toggle. A picker
  *    exists to choose a mutation target, so offering a row the action then
  *    rejects is a 403 dead end.
@@ -26,6 +25,7 @@
  * @see {@link file://./../../utils/booking-authorization.server.ts}
  */
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
 import { loadBookingsData } from "./service.server";
 
@@ -69,11 +69,14 @@ const WRITE_RESTRICTION = {
 /**
  * Runs the loader and returns the `where` Prisma was asked for.
  *
- * @param role - The caller's effective role, driving the write restriction.
- * @param canSeeAllBookings - The resolved read-visibility flag under test.
+ * @param role - The caller's role
+ * @param workspaceLetsThemSee - Whether the workspace see-toggles are on
  * @returns The Prisma `where` from the resulting booking query.
  */
-async function whereFor(role: OrganizationRoles, canSeeAllBookings: boolean) {
+async function whereFor(
+  role: OrganizationRoles,
+  workspaceLetsThemSee: boolean
+) {
   findManyMock.mockClear();
 
   await loadBookingsData({
@@ -82,8 +85,12 @@ async function whereFor(role: OrganizationRoles, canSeeAllBookings: boolean) {
     ),
     organizationId: ORGANIZATION_ID,
     userId: USER_ID,
-    role,
-    canSeeAllBookings,
+    access: accessFor(
+      [role],
+      workspaceLetsThemSee
+        ? { selfServiceCanSeeBookings: true, baseUserCanSeeBookings: true }
+        : {}
+    ),
     ids: ["a1"],
   });
 

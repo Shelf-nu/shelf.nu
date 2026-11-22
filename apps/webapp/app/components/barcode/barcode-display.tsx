@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect } from "react";
 import type { BarcodeType } from "@prisma/client";
+import { BWIP_FORMAT, IS_TWO_DIMENSIONAL } from "~/modules/barcode/bwip-format";
 import { tw } from "~/utils/tw";
 
 // Cached import - only loads bwip-js once but keeps it in separate chunk
@@ -41,16 +42,9 @@ export function BarcodeDisplay({
         // Load bwip-js dynamically (cached after first load)
         const bwipjs = await getBwipjs();
 
-        // Map barcode types to bwip-js format strings
-        const formatMap: Record<BarcodeType, string> = {
-          Code128: "code128",
-          Code39: "code39",
-          DataMatrix: "datamatrix",
-          ExternalQR: "qrcode",
-          EAN13: "ean13",
-        };
-
-        const bcid = formatMap[type];
+        // The symbology map is shared with the PDF encoder, so a code printed
+        // on a sheet has the same bars as the code shown here.
+        const bcid = BWIP_FORMAT[type];
         if (!bcid) {
           return;
         }
@@ -61,8 +55,7 @@ export function BarcodeDisplay({
           text: value,
           scale: scale, // Use scale for all barcode types
           // Height only for linear barcodes (not for DataMatrix or QR codes)
-          ...(type !== "DataMatrix" &&
-            type !== "ExternalQR" && { height: height }),
+          ...(!IS_TWO_DIMENSIONAL[type] && { height: height }),
           includetext: displayValue,
           textxalign: "center",
           textsize: fontSize,

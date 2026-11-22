@@ -1,6 +1,8 @@
 ---
 description: Bulk operations must emit the same activity events as their singular counterparts, including cascade events from relation cleanup
-globs: ["apps/webapp/app/modules/**/*.ts", "apps/webapp/app/routes/**/*.ts"]
+paths:
+  - "apps/webapp/app/modules/**/*.ts"
+  - "apps/webapp/app/routes/**/*.ts"
 ---
 
 When you add or modify a bulk operation (e.g. `bulkRemoveAssetsFromKits`,

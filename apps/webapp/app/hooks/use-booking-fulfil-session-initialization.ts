@@ -19,9 +19,14 @@
  * operator switches flows without unmounting the fulfil scanner
  * cleanly, stale scans would bleed across sessions.
  *
+ * Clearing the atom on the way out would also drop the operator's work, so
+ * the scanned codes are mirrored into a draft that outlives the page. The
+ * atom's lifecycle is unchanged: the draft sits beside it, scoped to this
+ * booking, and is read back on entry. See
+ * {@link file://./use-scan-draft.ts}.
+ *
  * @see {@link file://./../routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx}
- * @see {@link file://./../atoms/qr-scanner.ts} — see §A of the Phase
- *   3d-Polish plan for atom design rationale.
+ * @see {@link file://./../atoms/qr-scanner.ts}
  * @see {@link file://./use-booking-checkin-session-initialization.ts}
  */
 
@@ -32,6 +37,7 @@ import {
   endFulfilSessionAtom,
   setFulfilSessionAtom,
 } from "~/atoms/qr-scanner";
+import { useScanDraft } from "~/hooks/use-scan-draft";
 
 /**
  * Arguments for {@link useBookingFulfilSessionInitialization}.
@@ -86,6 +92,13 @@ export function useBookingFulfilSessionInitialization(
   // booking.
   const initializedBookingIdRef = useRef<string | null>(null);
 
+  // Keeps the scanned codes through a reload, a closed tab or an error page.
+  const { restoreDraft } = useScanDraft({
+    scope: "fulfil",
+    targetId: session.bookingId,
+    seededTargetIdRef: initializedBookingIdRef,
+  });
+
   // Effect 1: seed session metadata + expected model requests. Runs
   // once per bookingId. `setFulfilSession` clears `scannedItemsAtom`
   // as a side effect, so we guard against re-running on unrelated
@@ -96,7 +109,9 @@ export function useBookingFulfilSessionInitialization(
     }
     initializedBookingIdRef.current = session.bookingId;
     setFulfilSession(session);
-  }, [session, session.bookingId, setFulfilSession]);
+    // After the clear above, so a parked list is what the operator sees.
+    restoreDraft();
+  }, [session, session.bookingId, setFulfilSession, restoreDraft]);
 
   // Effect 2: cleanup on unmount (or when the bookingId changes, in
   // case the same drawer instance is reused for a different booking).

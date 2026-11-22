@@ -29,6 +29,12 @@ import {
   assertPriceIsForAddon,
   assertPriceMatchesTier,
 } from "~/modules/billing/price-validation.server";
+import { PURCHASES_UNAVAILABLE_MESSAGE } from "~/modules/billing/purchase-copy";
+import {
+  assertUserMayPurchase,
+  pricesOfferedTo,
+  ssoUserMayPurchase,
+} from "~/modules/billing/sso-purchase-gate.server";
 import { getWorkspacePlansForUser } from "~/modules/billing/workspace-plans.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
@@ -82,6 +88,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           customerId: true,
           tierId: true,
           usedFreeTrial: true,
+          sso: true,
         } satisfies Prisma.UserSelect,
       }),
       getUserTierLimit(userId),
@@ -95,6 +102,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const workspaceAccessedThroughOthers =
       findPaidWorkspaceThroughOthers(workspacePlans);
 
+    /**
+     * Whether this user may start a Team purchase from this page. SSO users
+     * may only buy for a TEAM workspace they own.
+     */
+    const canPurchase = ssoUserMayPurchase({
+      sso: user.sso,
+      ownsTeamWorkspace: workspacePlans.some(
+        (row) => row.type === "TEAM" && row.paidBy.isYou
+      ),
+      target: "team",
+    });
+
     /** Get the Stripe customer */
     const customer = (await getStripeCustomer(
       await getOrCreateCustomerId(user)
@@ -102,7 +121,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /* Get the prices, products, subscriptions, and invoices from Stripe */
     const [
-      prices,
+      allPrices,
       openInvoices,
       paidInvoicesData,
       upcomingInvoicesData,
@@ -114,6 +133,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getCustomerUpcomingInvoices(customer),
       getCustomerSubscriptionsWithProducts(customer.id),
     ]);
+
+    /** Plans this user could actually buy: SSO users are never offered Plus. */
+    const prices = pricesOfferedTo({ prices: allPrices, sso: user.sso });
 
     // Transform paid invoices to simplified type for UI
     const paidInvoices: PaidInvoice[] = paidInvoicesData.map((inv) => ({
@@ -166,6 +188,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       hasPersonalWorkspace: workspacePlans.some(
         (row) => row.type === "PERSONAL"
       ),
+      canPurchase,
       prices,
       customer,
       subscriptionsWithProducts,
@@ -212,6 +235,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           barcodePriceId: z.string().optional(),
         })
       );
+
+    // Refuse before any price lookup, checkout or trial: the tier decides
+    // which workspace the purchase bills.
+    await assertUserMayPurchase({
+      userId,
+      target: shelfTier === "tier_1" ? "personal" : "team",
+    });
 
     // `shelfTier` and every price id here come from the form. The tier is
     // written straight to `user.tierId` below and the add-on ids become raw
@@ -339,6 +369,7 @@ export default function SubscriptionPage() {
     workspacePlans,
     workspaceAccessedThroughOthersName,
     hasPersonalWorkspace,
+    canPurchase,
   } = useLoaderData<typeof loader>();
   const user = useUserData();
   const hasUnpaidInvoice = user?.hasUnpaidInvoice ?? false;
@@ -366,6 +397,7 @@ export default function SubscriptionPage() {
     hasSubscription: !hasNoSubscription,
     hasWorkspacePlan,
     hasPaidAccessThroughOthers: !!workspaceAccessedThroughOthersName,
+    canPurchase,
   });
 
   /**
@@ -415,7 +447,9 @@ export default function SubscriptionPage() {
         <div className="mb-8 mt-3">
           <WorkspacePlansTable
             rows={workspacePlans}
-            onUpgradePersonal={() => setPricingOpen(true)}
+            onUpgradePersonal={
+              canPurchase ? () => setPricingOpen(true) : undefined
+            }
           />
         </div>
 
@@ -454,6 +488,22 @@ export default function SubscriptionPage() {
             </div>
             <h3 className="text-text-lg font-semibold">Choose a plan</h3>
             <PricingTable prices={prices} />
+          </div>
+        ) : null}
+
+        {billingSectionState === "purchases-unavailable" ? (
+          <div className="mb-8 flex items-center gap-3 rounded border border-gray-300 p-4">
+            <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+              <InfoIcon />
+            </div>
+            <div>
+              <p className="text-[14px] font-medium text-gray-700">
+                Purchases are unavailable
+              </p>
+              <p className="text-[13px] text-gray-600">
+                {PURCHASES_UNAVAILABLE_MESSAGE}
+              </p>
+            </div>
           </div>
         ) : null}
 

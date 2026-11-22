@@ -12,7 +12,9 @@
  * @see {@link file://./../../../app/routes/_layout+/audits.$auditId.note.tsx}
  * @see {@link file://./../../../app/modules/audit/comment-policy.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createActionArgs } from "@mocks/remix";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
@@ -44,7 +46,7 @@ vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 // the comment-policy refusal under test.
 vi.mock("~/modules/audit/service.server", async (importOriginal) => {
   const actual = await importOriginal<typeof AuditService>();
-  return { ...actual, requireAuditAssigneeForBaseSelfService: vi.fn() };
+  return { ...actual, requireAuditAssigneeForScopedViewer: vi.fn() };
 });
 
 // why: note creation is not exercised; the module writes through Prisma.
@@ -103,7 +105,7 @@ describe("add a comment to an audit", () => {
     vi.clearAllMocks();
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as never);
   });
 
@@ -129,7 +131,7 @@ describe("delete an audit note", () => {
     vi.clearAllMocks();
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as never);
     vi.mocked(db.auditSession.findFirst).mockResolvedValue({
       id: "audit-1",

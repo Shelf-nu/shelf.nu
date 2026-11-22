@@ -38,6 +38,7 @@ export type FieldChangeAction =
   | "ASSET_MIN_QUANTITY_CHANGED"
   | "ASSET_CUSTOM_FIELD_CHANGED"
   | "ASSET_PREFERRED_BARCODE_CHANGED"
+  | "ASSET_AVAILABLE_TO_BOOK_CHANGED"
   | "BOOKING_STATUS_CHANGED"
   | "BOOKING_DATES_CHANGED"
   | "BOOKING_MODEL_REQUEST_CHANGED"
@@ -101,6 +102,7 @@ export type CustodyEventInput = BaseEventInput & {
 export type AssetLifecycleAction =
   | "ASSET_CREATED"
   | "ASSET_ARCHIVED"
+  | "ASSET_UNARCHIVED"
   | "ASSET_DELETED";
 
 export type AssetLifecycleEventInput = BaseEventInput & {
@@ -133,7 +135,8 @@ export type BookingLifecycleAction =
   | "BOOKING_PARTIAL_CHECKIN"
   | "BOOKING_PARTIAL_CHECKOUT"
   | "BOOKING_CANCELLED"
-  | "BOOKING_ARCHIVED";
+  | "BOOKING_ARCHIVED"
+  | "BOOKING_APPROVED";
 
 export type BookingLifecycleEventInput = BaseEventInput & {
   action: BookingLifecycleAction;

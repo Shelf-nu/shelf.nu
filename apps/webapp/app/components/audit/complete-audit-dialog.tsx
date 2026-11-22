@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { Form } from "react-router";
 import { AuditImageUploadSection } from "~/components/audit/audit-image-upload-box";
+import { ScanSubmitFailureAlert } from "~/components/scanner/drawer/scan-submit-failure-alert";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -14,14 +15,31 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { AuditUnitTotals } from "~/modules/audit/quantity";
+import { describeAuditUnits } from "~/modules/audit/quantity";
 
 type CompleteAuditDialogProps = {
   /** Whether the button should be disabled */
   disabled?: boolean;
+  /**
+   * Why completion is disabled, shown inside the open dialog: the reason
+   * elsewhere on the page sits behind its overlay.
+   */
+  disabledReason?: string | null;
   /** Audit session name for display */
   auditName: string;
   /** Container for portal rendering */
   portalContainer?: HTMLElement;
+  /**
+   * Also put the intent in the form's action URL. Only the audit scanner sets
+   * this: its client action reads the intent from the URL, so it can tell a
+   * completion from a background save without parsing the photos in the
+   * multipart body. A search-only action resolves against the page the form is
+   * on, which on the scanner is the scan route itself. Other pages that show
+   * this dialog must leave it off and keep the default action, which posts to
+   * the route that renders the form whatever tab is open.
+   */
+  intentInActionUrl?: boolean;
   /** Stats for display in confirmation */
   stats: {
     expectedCount: number;
@@ -29,6 +47,8 @@ type CompleteAuditDialogProps = {
     missingCount: number;
     unexpectedCount: number;
   };
+  /** Unit totals of the audit's quantity-tracked rows; null when it has none. */
+  units?: AuditUnitTotals | null;
 };
 
 /**
@@ -42,9 +62,12 @@ type CompleteAuditDialogProps = {
  */
 export default function CompleteAuditDialog({
   disabled,
+  disabledReason = null,
   auditName,
   portalContainer,
+  intentInActionUrl = false,
   stats,
+  units = null,
 }: CompleteAuditDialogProps) {
   const [open, setOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -68,7 +91,11 @@ export default function CompleteAuditDialog({
           });
         }}
       >
-        <Form method="post" encType="multipart/form-data">
+        <Form
+          method="post"
+          encType="multipart/form-data"
+          action={intentInActionUrl ? "?intent=complete-audit" : undefined}
+        >
           <input type="hidden" name="intent" value="complete-audit" />
 
           <AlertDialogHeader>
@@ -131,6 +158,11 @@ export default function CompleteAuditDialog({
                     </span>
                   </div>
                 </div>
+                {units ? (
+                  <p className="mt-3 text-sm text-gray-600">
+                    {describeAuditUnits(units)}
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
@@ -157,13 +189,34 @@ export default function CompleteAuditDialog({
             </div>
           </AlertDialogDescription>
 
+          {/* The drawer's own notice sits behind this dialog's overlay, so a
+              completion that got no answer has to say so here, before the
+              operator confirms again. */}
+          <ScanSubmitFailureAlert />
+
+          {disabled && disabledReason ? (
+            <p
+              role="alert"
+              className="mt-2 rounded border border-warning-300 bg-warning-25 px-3 py-2 text-[13px] text-warning-800"
+            >
+              {disabledReason}
+            </p>
+          ) : null}
+
           <AlertDialogFooter className="mt-4">
             <AlertDialogCancel asChild>
               <Button variant="secondary" type="button">
                 Cancel
               </Button>
             </AlertDialogCancel>
-            <Button type="submit" variant="primary" disabled={formDisabled}>
+            {/* The gate applies inside an open dialog too: it can close while
+                the dialog is open (a refused scan removal makes the list
+                stale), and a completion cannot be undone. */}
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={disabled || formDisabled}
+            >
               {formDisabled ? "Completing..." : "Complete Audit"}
             </Button>
           </AlertDialogFooter>

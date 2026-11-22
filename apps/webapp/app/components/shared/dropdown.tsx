@@ -122,13 +122,81 @@ const DropdownMenuContent = React.forwardRef<
   );
 });
 
+/** The keys Radix treats as "select this item". */
+const ITEM_SELECTION_KEYS = ["Enter", " "];
+
+/** What counts as a row's own control: a link or a button inside the item. */
+const ROW_CONTROL_SELECTOR = "a[href], button";
+
+/**
+ * How long a typed letter keeps the menu's type-ahead going. Radix clears its
+ * search buffer one second after the last letter, and treats a Space inside
+ * that window as part of the word, not as "select".
+ */
+const TYPEAHEAD_WINDOW_MS = 1000;
+
+/** When a letter was last typed in any menu, for the type-ahead window. */
+let lastTypeAheadAt = 0;
+
+/**
+ * Whether a key feeds the menu's type-ahead: one printable character other
+ * than Space, with no modifier held.
+ *
+ * @param event - The keydown on the menu item
+ */
+function isTypeAheadKey(event: React.KeyboardEvent<HTMLElement>): boolean {
+  return (
+    event.key.length === 1 &&
+    event.key !== " " &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey
+  );
+}
+
+/**
+ * Forwards Enter or Space on a menu row to the link or button inside it.
+ *
+ * Radix selects an item from the keyboard by clicking the item element itself,
+ * and that click never reaches a control nested inside it. Most rows here put
+ * their action on such a control (a `Button` with `onClick` or `to`, a dialog
+ * trigger), so without this the keyboard does nothing on them. Clicking the
+ * control instead does exactly what a mouse click does: its own handler runs,
+ * then the click bubbles to the item and its `onSelect` runs once.
+ *
+ * A disabled control is not clicked and the row does nothing, the same as a
+ * mouse click on it. A row with no inner control, or one that is itself the
+ * control (`asChild` on a link or button), keeps Radix's own handling.
+ *
+ * @param event - The keydown on the menu item
+ */
+function forwardSelectionToRowControl(event: React.KeyboardEvent<HTMLElement>) {
+  if (!ITEM_SELECTION_KEYS.includes(event.key)) return;
+  const item = event.currentTarget;
+  // Only keys pressed on the row itself: a key inside a nested field is its own.
+  if (event.target !== item || item.matches(ROW_CONTROL_SELECTOR)) return;
+  const control = item.querySelector<HTMLElement>(ROW_CONTROL_SELECTOR);
+  if (!control) return;
+  // Stops Radix clicking the item as well, which would select the row twice.
+  event.preventDefault();
+  const isDisabled =
+    control.matches(":disabled") ||
+    control.getAttribute("aria-disabled") === "true";
+  if (!isDisabled) control.click();
+}
+
+/**
+ * A menu row. Enter and Space do what clicking the row's own link or button
+ * does (see {@link forwardSelectionToRowControl}); a row with no inner control
+ * behaves as a plain Radix item.
+ */
 const DropdownMenuItem = React.forwardRef<
   ElementRef<typeof DropdownMenuPrimitive.Item>,
   ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean;
   }
 >(function DropdownMenuItem(
-  { className, inset, disabled = false, ...props },
+  { className, inset, disabled = false, onKeyDown, ...props },
   ref
 ) {
   return (
@@ -140,6 +208,30 @@ const DropdownMenuItem = React.forwardRef<
         disabled && "pointer-events-none cursor-not-allowed opacity-50",
         className
       )}
+      // Radix runs its own keydown handler after this one, and skips it once
+      // `preventDefault()` has been called.
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.defaultPrevented) return;
+        if (isTypeAheadKey(event)) {
+          lastTypeAheadAt = Date.now();
+          return;
+        }
+        // A Space while typing ahead continues the search (Radix handles it).
+        if (
+          event.key === " " &&
+          Date.now() - lastTypeAheadAt < TYPEAHEAD_WINDOW_MS
+        ) {
+          return;
+        }
+        // `disabled` is not handed to Radix (it would drop the row from roving
+        // focus), so stop the keyboard here, the way the class stops the mouse.
+        if (disabled && ITEM_SELECTION_KEYS.includes(event.key)) {
+          event.preventDefault();
+          return;
+        }
+        forwardSelectionToRowControl(event);
+      }}
       {...props}
     />
   );

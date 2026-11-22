@@ -11,9 +11,11 @@
  * Each concrete selector (DateFormatSelect, TimeFormatSelect, WeekStartSelect)
  * is a thin wrapper that supplies its own typed `options` and `ariaLabel`; the
  * entire Popover / trigger / hidden-input / listbox / keyboard / selection
- * markup lives here so the three stay byte-identical in behavior.
+ * markup lives here so the three stay byte-identical in behavior. The reminder
+ * dialog's Repeat control uses it too.
  *
  * @see {@link file://./date-format-select.tsx}
+ * @see {@link file://./../../asset-reminder/reminder-recurrence-fields.tsx}
  * @see {@link file://./time-format-select.tsx}
  * @see {@link file://./week-start-select.tsx}
  * @see {@link file://./language-region-form.tsx}
@@ -49,6 +51,13 @@ export type EnumPreferenceSelectProps<T extends string> = {
   ariaLabel: string;
   /** Optional class applied to the trigger button. */
   className?: string;
+  /** Optional id for the trigger, so a `<label htmlFor>` can point at it. */
+  id?: string;
+  /**
+   * Locks the control on its current value. The hidden input still submits
+   * that value, since it is not itself disabled.
+   */
+  disabled?: boolean;
 };
 
 /**
@@ -61,6 +70,8 @@ export type EnumPreferenceSelectProps<T extends string> = {
  * @param props.options - Selectable options in display order
  * @param props.ariaLabel - Accessible label for the listbox popover
  * @param props.className - Optional trigger class
+ * @param props.id - Optional trigger id
+ * @param props.disabled - Locks the control on its current value
  * @returns The enum preference selector control
  */
 export function EnumPreferenceSelect<T extends string>({
@@ -70,6 +81,8 @@ export function EnumPreferenceSelect<T extends string>({
   options,
   ariaLabel,
   className,
+  id,
+  disabled = false,
 }: EnumPreferenceSelectProps<T>) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -83,16 +96,22 @@ export function EnumPreferenceSelect<T extends string>({
   }
 
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover
+      open={isOpen && !disabled}
+      onOpenChange={(open) => setIsOpen(open && !disabled)}
+    >
       <PopoverTrigger asChild>
         <button
           ref={triggerRef}
+          id={id}
+          disabled={disabled}
           // type="button" required by local-rules/require-button-type — the
           // trigger sits inside the LanguageRegionForm <Form>, so the native
           // "submit" default would submit on open.
           type="button"
           className={tw(
             "flex min-h-[44px] w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left",
+            disabled && "cursor-not-allowed bg-gray-50 opacity-70",
             className
           )}
         >

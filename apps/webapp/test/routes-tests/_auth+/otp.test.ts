@@ -171,6 +171,28 @@ describe("otp action — account resolution", () => {
     detectFormatPrefsFromHints.mockReturnValue(DETECTED);
   });
 
+  it("passes the visitor's address to Supabase with the code check", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vitest.stubEnv("FLY_APP_NAME", "");
+    vitest.stubEnv("TRUSTED_PROXY_HOPS", "1");
+    // @ts-expect-error missing vitest type
+    findUserById.mockResolvedValue({ id: USER_ID, onboarded: true });
+    const request = otpRequest(USER_EMAIL);
+    request.headers.set("X-Forwarded-For", "203.0.113.7");
+
+    try {
+      await action(actionArgs(request));
+    } finally {
+      vitest.unstubAllEnvs();
+    }
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(verifyOtpAndSignin).toHaveBeenCalledWith(USER_EMAIL, "123456", {
+      clientIp: "203.0.113.7",
+    });
+  });
+
   it("signs an existing account in without creating another, whatever case is typed", async () => {
     // why: the account already exists for this auth user.
     // @ts-expect-error missing vitest type
@@ -180,6 +202,26 @@ describe("otp action — account resolution", () => {
 
     expect(findUserById).toHaveBeenCalledWith(USER_ID);
     expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it("forgets the list settings the browser kept from an earlier account", async () => {
+    // @ts-expect-error missing vitest type
+    findUserById.mockResolvedValue({ id: USER_ID, onboarded: true });
+    const request = otpRequest(USER_EMAIL);
+    request.headers.set(
+      "Cookie",
+      "org-9_bookingFilter_v2=cz1aWg%3D%3D; user-prefs=e30%3D"
+    );
+
+    const response = (await action(actionArgs(request))) as Response;
+    const setCookies = response.headers.getSetCookie();
+
+    expect(setCookies).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^org-9_bookingFilter_v2=;.*Max-Age=0/),
+        expect.stringMatching(/^user-prefs=.*Max-Age=0/),
+      ])
+    );
   });
 
   it("carries on when a concurrent sign-in created the account first", async () => {

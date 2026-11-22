@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode, ComponentType, FormEvent } from "react";
+import type { CSSProperties, ReactNode, FormEvent } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
@@ -10,6 +10,10 @@ import { Table, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { tw } from "~/utils/tw";
 import BaseDrawer from "./base-drawer";
+import type { BlockersVariant } from "./blockers-factory";
+import { ScanItemGroup } from "./scan-item-group";
+import type { ScanSavedCheck } from "./scan-submit-failure-alert";
+import { ScanSubmitFailureAlert } from "./scan-submit-failure-alert";
 
 // Props for the configurable drawer
 type ConfigurableDrawerProps<T> = {
@@ -35,8 +39,12 @@ type ConfigurableDrawerProps<T> = {
   isLoading?: boolean;
   // Item rendering function
   renderItem?: (qrId: string, item: T) => ReactNode;
-  // Blockers component (from createBlockers)
-  Blockers?: ComponentType;
+  /**
+   * The blockers from `createBlockers`. Called as a function, never rendered
+   * as `<Blockers />`: it is recreated on every render of the drawer, and a
+   * component type that changes each render would remount the card.
+   */
+  Blockers?: (props?: { variant?: BlockersVariant }) => ReactNode;
   // Whether form submission should be disabled
   disableSubmit?: boolean;
 
@@ -66,8 +74,20 @@ type ConfigurableDrawerProps<T> = {
   headerContent?: ReactNode;
   // Optional custom render function for all items (if you need full control over rendering)
   customRenderAllItems?: () => ReactNode;
+  /**
+   * Renders the list as separate groups (e.g. `ScanItemGroup` cards) instead of
+   * one table. Each group brings its own table, so the drawer does not wrap
+   * them in one. Takes precedence over `customRenderAllItems` and `renderItem`.
+   */
+  renderGroups?: () => ReactNode;
   // Custom height for the collapsed state when items are present (default: 170)
   collapsedHeight?: number;
+  /**
+   * Where the operator can check whether a save went through, linked from the
+   * notice shown when a save gets no answer. Without it the notice still
+   * shows, with no link.
+   */
+  savedCheck?: ScanSavedCheck;
 };
 
 /**
@@ -97,15 +117,23 @@ export default function ConfigurableDrawer<T>({
   form,
   headerContent,
   customRenderAllItems,
+  renderGroups,
   collapsedHeight,
+  savedCheck,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
   const itemsLength = Object.keys(items).length;
   const hasItems = itemsLength > 0;
 
-  // Create the title with item count
+  // Drawers that render one row per item get their rows in a "Scanned this
+  // session" card, which carries the count. Custom renderers keep a table.
+  const rowsInCard = !renderGroups && !customRenderAllItems && !!renderItem;
+
+  // A string title gets the item count, unless a card already shows it.
   const drawerTitle =
-    typeof title === "string" ? `${title} (${itemsLength})` : title;
+    typeof title === "string" && !rowsInCard && !renderGroups
+      ? `${title} (${itemsLength})`
+      : title;
 
   // Default empty state content if none provided
   const defaultEmptyState = (expanded: boolean) => (
@@ -141,8 +169,13 @@ export default function ConfigurableDrawer<T>({
       collapsedHeight={collapsedHeight}
       footer={(expanded) => (
         <>
-          {/* Blockers */}
-          {Blockers && <Blockers />}
+          {/* A save that got no answer: the list is intact, check first.
+              The notice is about the list, so it goes once the list is
+              emptied. */}
+          {hasItems ? <ScanSubmitFailureAlert savedCheck={savedCheck} /> : null}
+
+          {/* Why the action is disabled; the fixes are in the list's card. */}
+          {Blockers ? Blockers({ variant: "note" }) : null}
 
           {/* Action form */}
           {form ? (
@@ -155,12 +188,12 @@ export default function ConfigurableDrawer<T>({
             <When truthy={hasItems}>
               <Form
                 ref={zo.ref}
-                className="mb-4 flex w-full"
+                className="flex w-full"
                 method={method}
                 action={actionUrl}
                 onSubmit={onSubmit}
               >
-                <div className="flex w-full gap-2 p-3">
+                <div className="flex w-full gap-2 px-3 py-2">
                   {/* Render form fields from formData */}
                   {Object.entries(formData).map(([key, value]) => {
                     if (Array.isArray(value)) {
@@ -206,27 +239,39 @@ export default function ConfigurableDrawer<T>({
       )}
     >
       {() => (
-        <>
-          {/* Item List */}
-          <Table className="overflow-y-auto">
-            <ListHeader hideFirstColumn className="border-none">
-              <Th className="p-0"> </Th>
-              <Th className="p-0"> </Th>
-            </ListHeader>
+        <div className="flex flex-col gap-2 py-2">
+          {/* Blockers lead the list: they are what stands between the
+              operator and the action. */}
+          {Blockers ? Blockers({ variant: "card" }) : null}
 
-            <tbody>
-              <AnimatePresence>
-                {customRenderAllItems
-                  ? customRenderAllItems()
-                  : renderItem
-                  ? Object.entries(items).map(([qrId, item]) =>
-                      renderItem(qrId, item)
-                    )
-                  : null}
-              </AnimatePresence>
-            </tbody>
-          </Table>
-        </>
+          {renderGroups ? (
+            renderGroups()
+          ) : rowsInCard ? (
+            <ScanItemGroup
+              label="Scanned this session"
+              count={itemsLength}
+              tone="active"
+              openWhenCountGrows
+            >
+              {Object.entries(items).map(
+                ([qrId, item]) => renderItem?.(qrId, item)
+              )}
+            </ScanItemGroup>
+          ) : (
+            <Table className="overflow-y-auto">
+              <ListHeader hideFirstColumn className="border-none">
+                <Th className="p-0"> </Th>
+                <Th className="p-0"> </Th>
+              </ListHeader>
+
+              <tbody>
+                <AnimatePresence>
+                  {customRenderAllItems ? customRenderAllItems() : null}
+                </AnimatePresence>
+              </tbody>
+            </Table>
+          )}
+        </div>
       )}
     </BaseDrawer>
   );

@@ -5,8 +5,10 @@ import { bookingsApi } from "./bookings";
 import { auditsApi } from "./audits";
 import { dashboardApi } from "./dashboard";
 import { kitsApi } from "./kits";
+import { notificationsApi } from "./notifications";
 
 export { onAuthError } from "./client";
+export { onForbidden } from "./forbidden";
 export { invalidateResponseCache } from "./cache";
 
 // ── API Functions ──────────────────────────────────────
@@ -19,4 +21,5 @@ export const api = {
   ...bookingsApi,
   ...auditsApi,
   ...kitsApi,
+  ...notificationsApi,
 };

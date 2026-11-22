@@ -16,14 +16,14 @@ vi.mock("~/modules/api/mobile-code-resolve.server", () => ({
 
 // why: scan provenance writes hit the DB; the contract under test is WHAT the
 // route passes to the service (coords included/omitted), not the persistence
-// itself — createScan's own behavior is covered by its co-located test.
+// itself, which is covered by app/modules/scan/record-scan.test.ts.
 vi.mock("~/modules/scan/service.server", () => ({
-  createScan: vi.fn(),
+  recordScanNonFatal: vi.fn(),
 }));
 
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
-import { createScan } from "~/modules/scan/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { loader } from "~/routes/api+/mobile+/qr.$qrId";
 
 /**
@@ -32,7 +32,7 @@ import { loader } from "~/routes/api+/mobile+/qr.$qrId";
  *   must reach the wire for unclaimed codes, and must be absent for plain
  *   failures (additive contract);
  * - optional scan geolocation — valid `X-Scan-Latitude`/`X-Scan-Longitude` headers are
- *   forwarded to `createScan` as strings (web format parity), while invalid /
+ *   forwarded to `recordScanNonFatal` as strings (web format parity), while invalid /
  *   partial / absent coordinates are silently ignored and NEVER affect the
  *   resolve response.
  *
@@ -66,7 +66,7 @@ async function callLoader(
   return { body: data, status: init?.status ?? 200 };
 }
 
-/** A successful resolve with a recordable QR id (provenance IS written). */
+/** A successful QR resolve (provenance IS written). */
 function mockOkResolve() {
   const qr = {
     id: "qr-1",
@@ -79,7 +79,13 @@ function mockOkResolve() {
   vi.mocked(resolveMobileScannedCode).mockResolvedValue({
     ok: true,
     qr,
-    recordableQrId: "qr-1",
+    scanToRecord: {
+      codeType: "QR",
+      qrId: "qr-1",
+      assetId: "asset-1",
+      kitId: null,
+      organizationId: "org-1",
+    },
   } as never);
   return qr;
 }
@@ -109,7 +115,7 @@ describe("GET /api/mobile/qr/:qrId error payload", () => {
       reason: "unclaimed",
       qrId: "qr-1",
     });
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
   it("omits reason/qrId entirely for plain failures (additive contract)", async () => {
@@ -143,7 +149,7 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
 
     expect(status).toBe(200);
     expect(body.qr).toEqual(qr);
-    expect(createScan).toHaveBeenCalledWith(
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
       expect.objectContaining({
         qrId: "qr-1",
         // Stored as strings — the Scan model's columns are String and the web
@@ -165,8 +171,8 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
 
     expect(status).toBe(200);
     expect(body.qr).toEqual(qr);
-    expect(createScan).toHaveBeenCalledTimes(1);
-    const args = vi.mocked(createScan).mock.calls[0][0];
+    expect(recordScanNonFatal).toHaveBeenCalledTimes(1);
+    const args = vi.mocked(recordScanNonFatal).mock.calls[0][0];
     expect(args).not.toHaveProperty("latitude");
     expect(args).not.toHaveProperty("longitude");
   });
@@ -186,19 +192,19 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
       "X-Scan-Longitude": "4.9",
     });
 
-    expect(createScan).toHaveBeenCalledTimes(2);
-    for (const [args] of vi.mocked(createScan).mock.calls) {
+    expect(recordScanNonFatal).toHaveBeenCalledTimes(2);
+    for (const [args] of vi.mocked(recordScanNonFatal).mock.calls) {
       expect(args).not.toHaveProperty("latitude");
       expect(args).not.toHaveProperty("longitude");
     }
   });
 
-  it("ignores a partial pair — coordinates only make sense together", async () => {
+  it("ignores a partial pair: coordinates only make sense together", async () => {
     mockOkResolve();
 
     await callLoader("qr-1", "?latitude=52.370216");
 
-    const args = vi.mocked(createScan).mock.calls[0][0];
+    const args = vi.mocked(recordScanNonFatal).mock.calls[0][0];
     expect(args).not.toHaveProperty("latitude");
     expect(args).not.toHaveProperty("longitude");
   });
@@ -210,11 +216,17 @@ describe("GET /api/mobile/qr/:qrId scan geolocation", () => {
 
     expect(status).toBe(200);
     expect(body.qr).toEqual(qr);
-    expect(createScan).toHaveBeenCalledWith({
+    expect(recordScanNonFatal).toHaveBeenCalledWith({
+      codeType: "QR",
+      code: "qr-1",
+      qrId: "qr-1",
+      assetId: "asset-1",
+      kitId: null,
+      organizationId: "org-1",
+      source: "COMPANION",
       userAgent: "mobile-companion",
       userId: "user-1",
-      qrId: "qr-1",
-      deleted: false,
+      writeNote: true,
     });
   });
 });

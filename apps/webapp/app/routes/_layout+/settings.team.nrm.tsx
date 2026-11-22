@@ -18,7 +18,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
 import { TeamMembersActionsDropdown } from "~/components/workspace/nrm-actions-dropdown";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/service.server";
 import { getHeldCustodyCount } from "~/modules/team-member/custody-count";
 import { deleteNRM } from "~/modules/team-member/service.server";
@@ -31,6 +31,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportNRM } from "~/utils/subscription.server";
 
@@ -43,7 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await requirePermission({
         userId,
         request,
-        entity: PermissionEntity.teamMember,
+        entity: PermissionEntity.nonRegisteredMember,
         action: PermissionAction.read,
       });
 
@@ -97,11 +98,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // The only intent is `delete`, so the whole action is gated on it.
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.update,
+      entity: PermissionEntity.nonRegisteredMember,
+      action: PermissionAction.delete,
     });
 
     const formData = await request.formData();
@@ -152,9 +154,31 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * The Non-registered members tab: the list, its toolbar and its row actions.
+ *
+ * Each control shows with the `nonRegisteredMember` grant of the action it
+ * performs. The routes behind them keep their own gates.
+ */
 export default function NrmSettings() {
   const { canImportNRM } = useLoaderData<typeof loader>();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const can = (action: PermissionAction) =>
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.nonRegisteredMember,
+      action,
+    });
+  const rowPermissions: TeamMemberRowPermissions = {
+    // Inviting creates a registered team member, a different grant.
+    canInvite: userHasPermission({
+      roles,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.create,
+    }),
+    canEdit: can(PermissionAction.update),
+    canDelete: can(PermissionAction.delete),
+  };
 
   return (
     <div>
@@ -166,25 +190,30 @@ export default function NrmSettings() {
       <ListContentWrapper>
         <Filters>
           <div className="flex items-center justify-end gap-2">
-            <ExportNrmButton />
-            <ImportNrmButton canImportNRM={canImportNRM} />
+            {can(PermissionAction.export) ? <ExportNrmButton /> : null}
+            {can(PermissionAction.import) ? (
+              <ImportNrmButton canImportNRM={canImportNRM} />
+            ) : null}
 
-            <Button
-              variant="primary"
-              to="add-member"
-              className="mt-2 w-full md:mt-0 md:w-max"
-            >
-              <span className=" whitespace-nowrap">Add NRM</span>
-            </Button>
+            {can(PermissionAction.create) ? (
+              <Button
+                variant="primary"
+                to="add-member"
+                className="mt-2 w-full md:mt-0 md:w-max"
+              >
+                <span className=" whitespace-nowrap">Add NRM</span>
+              </Button>
+            ) : null}
           </div>
         </Filters>
 
         <List
           bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+            can(PermissionAction.delete) ? <BulkActionsDropdown /> : undefined
           }
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={TeamMemberRow}
+          extraItemComponentProps={rowPermissions}
           customEmptyStateContent={{
             title: "No non-registered members yet",
             text: "Non-registered members are name-only records for assigning custody. They can't log in.",
@@ -208,9 +237,27 @@ export default function NrmSettings() {
   );
 }
 
+/** Which row actions the caller may use, computed once for the whole list. */
+type TeamMemberRowPermissions = {
+  /** Holds `teamMember:create`: shows the Invite user item. */
+  canInvite: boolean;
+  /** Holds `nonRegisteredMember:update`: shows the Edit item. */
+  canEdit: boolean;
+  /** Holds `nonRegisteredMember:delete`: shows the Delete item. */
+  canDelete: boolean;
+};
+
+/**
+ * One NRM row of the list.
+ *
+ * @param props.item - The member, with its custody counts
+ * @param props.extraProps - The caller's row permissions, passed by `List`
+ */
 function TeamMemberRow({
   item,
+  extraProps,
 }: {
+  extraProps: TeamMemberRowPermissions;
   item: Prisma.TeamMemberGetPayload<{
     include: {
       _count: {
@@ -232,7 +279,12 @@ function TeamMemberRow({
       <Td className="w-full whitespace-normal">{item.name}</Td>
       <Td className="text-right">{getHeldCustodyCount(item._count)}</Td>
       <Td className="text-right">
-        <TeamMembersActionsDropdown teamMember={item} />
+        <TeamMembersActionsDropdown
+          teamMember={item}
+          canInvite={extraProps.canInvite}
+          canEdit={extraProps.canEdit}
+          canDelete={extraProps.canDelete}
+        />
       </Td>
     </>
   );

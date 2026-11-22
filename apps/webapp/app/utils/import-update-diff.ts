@@ -8,8 +8,18 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { parseLinkInput } from "@shelf/links";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  isAssetDescriptionTooLong,
+} from "~/utils/asset-description";
+import { countCharacters } from "~/utils/count-characters";
 import { decodeCsvListCell } from "~/utils/csv-cells";
-import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import {
+  getDefinitionFromCsvHeader,
+  isImportableCustomFieldDate,
+  parseYesNo,
+} from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
   AssetChangePreview,
@@ -72,47 +82,29 @@ export function normalizeExportedCurrencyValue(value: string): string {
   return v;
 }
 
-/**
- * Normalizes a Yes/No string to a boolean. Case-insensitive, trims whitespace.
- *
- * @param value - Raw string from CSV cell
- * @returns `true` for "yes", `false` for "no", `undefined` for anything else
- */
-export function parseYesNo(value: string): boolean | undefined {
-  const lower = value.trim().toLowerCase();
-  if (lower === "yes") return true;
-  if (lower === "no") return false;
-  return undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Backup-Export Detection
 // ---------------------------------------------------------------------------
 
 /**
  * Raw Prisma field/relation names that only ever appear TOGETHER as headers
- * in the workspace **backup** export (`exportAssetsBackupToCsv` in
- * `~/utils/csv.server.ts`). That export writes `Object.keys(asset)`
- * verbatim as the header row — a fixed shape (same `include` on every row)
- * — including relation keys whose cells are raw JSON blobs (`{}`, `[]`,
- * `{"name":"Foo"}`) rather than plain values.
+ * in a legacy workspace **backup** file. Shelf no longer produces these, but
+ * workspaces still hold old copies. The backup wrote `Object.keys(asset)`
+ * verbatim as its header row, including relation keys whose cells are raw
+ * JSON blobs (`{}`, `[]`, `{"name":"Foo"}`) rather than plain values.
  *
- * Before this branch, that file was rejected outright by the update
- * importer because identifier matching was case-sensitive. This branch's
- * case-insensitive matching + `sequentialId` alias means a backup file can
- * now slip past the identifier check — and if it does, its `category`,
- * `tags`, and `assetModel` cells would be proposed as literal new entities
- * (a category named `{}`, a tag named `[]`, an AssetModel with a JSON
- * name).
+ * Identifier matching is case-insensitive and accepts the `sequentialId`
+ * alias, so a backup file's `id` column passes the identifier check. Let
+ * through, its `category`, `tags` and `assetModel` cells would be proposed as
+ * literal new entities (a category named `{}`, a tag named `[]`, an
+ * AssetModel with a JSON name).
  *
  * `isBackupExportHeaderRow` requires ALL of these to be present, not just
  * one: a single marker like `notes` is a plausible name for a workspace's
- * own custom field (a real regression caught in review — a custom field
- * literally named "Notes" false-positived a single-marker version of this
- * guard). All five only co-occur when the file really is a raw backup
- * export; they never appear in the asset-index export (which uses display
- * labels like "Created at", with a space) or the import-ready export
- * (which never emits them at all).
+ * own custom field, and a custom field named "Notes" must not trip the
+ * guard. All five only co-occur in a raw backup file; they never appear in
+ * the asset-index export (which uses display labels like "Created at", with
+ * a space) or the import-ready export (which never emits them at all).
  */
 const BACKUP_EXPORT_ONLY_HEADERS = [
   "assetLocations",
@@ -123,8 +115,8 @@ const BACKUP_EXPORT_ONLY_HEADERS = [
 ];
 
 /**
- * Detects a workspace backup export (Settings → General → Export backup)
- * fed into the update importer by mistake.
+ * Detects a legacy workspace backup file fed into the update importer by
+ * mistake.
  * See {@link BACKUP_EXPORT_ONLY_HEADERS} for why requiring ALL markers
  * (not just one) is what makes this a safe, unambiguous signal.
  *
@@ -167,7 +159,7 @@ export function isBackupExportHeaderRow(headers: string[]): boolean {
  */
 export function analyzeUpdateHeaders(
   headers: string[],
-  orgCustomFields: Pick<CustomField, "id" | "name" | "type">[]
+  orgCustomFields: Pick<CustomField, "id" | "name" | "type" | "format">[]
 ): HeaderAnalysis {
   const updatableColumns: ParsedColumn[] = [];
   const ignoredColumns: string[] = [];
@@ -257,8 +249,13 @@ export function analyzeUpdateHeaders(
     // Check if it's a known fixed-field header via the reverse map
     // (case-insensitive — see map construction above).
     const internalField = fieldByLowerHeader.get(lowerHeader);
+    // A workspace custom field outranks the export-only `qrUrl` column with
+    // the same header. The asset export leaves `qrUrl` out in that case, so
+    // the header can only be the custom field.
+    const isCustomFieldNamedQrUrl =
+      internalField === "qrUrl" && cfByName.has(lowerHeader);
 
-    if (internalField) {
+    if (internalField && !isCustomFieldNamedQrUrl) {
       if (UPDATABLE_FIELDS.has(internalField)) {
         updatableColumns.push({
           csvHeader: header,
@@ -308,6 +305,7 @@ export function analyzeUpdateHeaders(
           cfDef: {
             name: cf.name,
             type: cf.type,
+            format: cf.format,
             helpText: "",
             required: false,
             active: true,
@@ -441,14 +439,16 @@ export function compareCoreField(
     }
 
     case "description": {
-      // Plain scalar, compared the same way as `name` — a simple
-      // string-equality diff. Unlike `name`, the underlying DB column is
-      // nullable, so an unset description reads as "". This function
-      // never sees an empty CSV cell (computeAssetDiffs branches to
-      // detectClearing first), and `description` isn't handled there
-      // either — like `name`, an empty cell is a no-op, not a clear.
+      // Plain scalar with a string-equality diff. The DB column is
+      // nullable, so an unset description reads as "". The cell arrives
+      // trimmed, so it is compared with the trimmed stored text: a stored
+      // description that differs only by surrounding whitespace is not a
+      // change. This function never sees an empty CSV cell
+      // (computeAssetDiffs branches to detectClearing first), and
+      // `description` isn't handled there either, so like `name`, an empty
+      // cell is a no-op, not a clear.
       const current = asset.description ?? "";
-      if (csvValue !== current) {
+      if (csvValue !== current.trim()) {
         return {
           field: displayName,
           currentValue: current || "(none)",
@@ -713,7 +713,7 @@ export function compareCoreField(
 /**
  * Compares a custom field value between the CSV cell and the existing asset.
  *
- * @param cfDef - Custom field definition (name, type)
+ * @param cfDef - Custom field definition (name, type, format)
  * @param csvValue - Trimmed value from the CSV cell
  * @param asset - Existing asset loaded from the database
  * @param displayName - Human-readable column name for the change record
@@ -740,11 +740,20 @@ export function compareCustomField(
   switch (cfDef.type) {
     case "TEXT":
     case "OPTION": {
-      if (csvValue !== currentStr) {
+      // Same rule as every other write: a Link field takes web links only and
+      // stores them as `parseLinkInput` writes them, so the cell is compared
+      // in that form (`www.x.com/a.pdf` matches `https://www.x.com/a.pdf`).
+      const link = cfDef.format === "LINK" ? parseLinkInput(csvValue) : null;
+      const newValue = link?.ok ? link.url : csvValue;
+      if (newValue !== currentStr) {
         return {
           field: displayName,
           currentValue: currentStr || "(empty)",
-          newValue: csvValue,
+          newValue,
+          ...(link &&
+            !link.ok && {
+              warning: `"${csvValue}" is not a web link. ${link.message}`,
+            }),
         };
       }
       return null;
@@ -795,18 +804,8 @@ export function compareCustomField(
       // Current raw value is also stored as the date string
       const currentDate = currentStr ? currentStr.substring(0, 10) : "";
       if (csvValue !== currentDate) {
-        // Validate format AND that the date is a real calendar date
-        // (new Date normalizes overflow — e.g. Feb 31 → Mar 3 — so we
-        // must check that the parsed date matches the original input)
-        let isValidDate = false;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(csvValue)) {
-          const [y, m, d] = csvValue.split("-").map(Number);
-          const parsed = new Date(Date.UTC(y, m - 1, d));
-          isValidDate =
-            parsed.getUTCFullYear() === y &&
-            parsed.getUTCMonth() === m - 1 &&
-            parsed.getUTCDate() === d;
-        }
+        // Same rule as the importer: YYYY-MM-DD and a real calendar day.
+        const isValidDate = isImportableCustomFieldDate(csvValue);
         return {
           field: displayName,
           currentValue: currentDate || "(empty)",
@@ -992,6 +991,19 @@ export function detectClearing(
 // ---------------------------------------------------------------------------
 
 /**
+ * The failed-row reason for a description the import would save over the
+ * length limit.
+ *
+ * @param description - The description the row would save
+ * @returns The reason, or `null` when the description fits
+ */
+function overLimitDescriptionReason(description: string): string | null {
+  if (!isAssetDescriptionTooLong(description)) return null;
+  const length = countCharacters(description).toLocaleString("en-US");
+  return `Description too long: ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`;
+}
+
+/**
  * Computes field-by-field diffs between CSV rows and existing assets.
  * Handles duplicate detection, fallback identifier matching, and
  * cross-validation of identifiers.
@@ -1064,6 +1076,18 @@ export function computeAssetDiffs({
       continue;
     }
 
+    // Archived assets are read-only (issue #382). `updateAsset` refuses them at
+    // apply time regardless; the preview reports the row as failed up front,
+    // because its job is to say what will happen BEFORE anything is saved.
+    if (existingAsset.archivedAt) {
+      failedRows.push({
+        rowNumber,
+        id: assetId,
+        reason: "Asset is archived — reinstate it before updating",
+      });
+      continue;
+    }
+
     // Check for duplicate assets by canonical UUID (not CSV identifier string)
     const firstSeenRow = seenIds.get(existingAsset.id);
     if (firstSeenRow !== undefined) {
@@ -1126,6 +1150,13 @@ export function computeAssetDiffs({
 
     // Compute per-field diffs
     const changes: FieldChange[] = [];
+    /**
+     * Why the whole row is refused, when one of its changes cannot be saved.
+     * Only a description the file changes is measured, so a stored
+     * description already over the limit never blocks a row that leaves it
+     * as it is.
+     */
+    let rowRefusal: string | null = null;
 
     for (const [colIdx, column] of headerAnalysis.columnIndexMap) {
       const csvValue = row[colIdx]?.trim() ?? "";
@@ -1174,6 +1205,9 @@ export function computeAssetDiffs({
         );
         if (change) {
           changes.push(change);
+          if (column.internalKey === "description") {
+            rowRefusal ??= overLimitDescriptionReason(change.newValue);
+          }
         }
       } else if (column.kind === "customField" && column.cfDef) {
         const change = compareCustomField(
@@ -1188,7 +1222,9 @@ export function computeAssetDiffs({
       }
     }
 
-    if (changes.length === 0) {
+    if (rowRefusal) {
+      failedRows.push({ rowNumber, id: assetId, reason: rowRefusal });
+    } else if (changes.length === 0) {
       skippedAssets.push({
         id: assetId,
         title: existingAsset.title,

@@ -4,7 +4,7 @@ This guide covers everything you need to know for developing Shelf.nu locally af
 
 ## Prerequisites ✅
 
-- ✅ **Node.js** (>=22.20.0)
+- ✅ **Node.js** (>=24.22.3)
 - ✅ **pnpm** (9.15.4+) — install via `corepack enable && corepack prepare pnpm@9.15.4 --activate`
 - ✅ **Git**
 - ✅ **Supabase project** configured ([Setup Guide](./supabase-setup.md))
@@ -357,7 +357,8 @@ DIRECT_URL="your-supabase-direct-connection"
 ENABLE_PREMIUM_FEATURES="false"
 
 # Session security
-SESSION_SECRET="your-local-session-secret"
+# Production logs an INSECURE CONFIGURATION error for example values: generate one with openssl rand -hex 32
+SESSION_SECRET="generate-with-openssl-rand-hex-32"
 ```
 
 ---

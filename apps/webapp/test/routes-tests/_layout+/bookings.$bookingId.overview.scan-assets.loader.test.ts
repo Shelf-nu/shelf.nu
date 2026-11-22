@@ -3,12 +3,12 @@
  *
  * Pins:
  *  - `assignSession` is null when the booking reserves no models, so the
- *    screen renders exactly as it did before this reservation context
- *    existed;
+ *    screen renders a plain scan list;
  *  - each outstanding model request reports `remaining` as `quantity`
  *    minus `fulfilledQuantity`, not the raw booked count;
  *  - a request with `fulfilledAt` set is settled and does not surface as
- *    outstanding, even when `fulfilledQuantity` is still below `quantity`;
+ *    outstanding, even when `fulfilledQuantity` is still below `quantity`,
+ *    but its model is still listed in `reservedModels`;
  *  - a standalone `BookingAsset` row with no reservation stamp is
  *    claimable, and one that already answered a reservation is not;
  *  - a SELF_SERVICE or BASE user who is neither the booking's creator nor its
@@ -18,7 +18,9 @@
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.scan-assets.tsx}
  */
 
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 // why: the loader's own logic under test is deriving `assignSession` from
@@ -88,6 +90,7 @@ async function runLoader() {
         booked: number;
         remaining: number;
       }>;
+      reservedModels: Array<{ assetModelId: string; assetModelName: string }>;
       alreadyIncluded: Array<{ id: string; claimable: boolean }>;
     } | null;
   };
@@ -114,11 +117,11 @@ async function runLoaderExpectingRefusal() {
 describe("scan-assets loader assignSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-      userOrganizations: [],
-    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({
+        roles: [OrganizationRoles.ADMIN],
+      }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+    );
     vi.mocked(db.asset.findMany).mockResolvedValue([]);
   });
 
@@ -177,7 +180,13 @@ describe("scan-assets loader assignSession", () => {
       }) as unknown as Awaited<ReturnType<typeof getBooking>>
     );
 
-    expect((await runLoader()).assignSession).toBeNull();
+    // Settled, so nothing is owed. The model is still reserved, though, and
+    // the session carries it so an extra scan of it reads as over the count.
+    const { assignSession } = await runLoader();
+    expect(assignSession?.expectedModelRequests).toEqual([]);
+    expect(assignSession?.reservedModels).toEqual([
+      { assetModelId: "model-1", assetModelName: "Model One" },
+    ]);
   });
 
   it("marks an unstamped standalone row claimable and a stamped one not", async () => {
@@ -253,11 +262,11 @@ describe("scan-assets loader ownership gate", () => {
   });
 
   function mockRole(role: string) {
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role,
-      userOrganizations: [],
-    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({
+        roles: [role as OrganizationRoles],
+      }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+    );
   }
 
   it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
@@ -306,6 +315,8 @@ describe("scan-assets loader ownership gate", () => {
     mockRole("BASE");
     vi.mocked(getBooking).mockResolvedValue(
       bookingWith({
+        // BASE adds items only while its booking is a draft.
+        status: "DRAFT",
         creatorId: "someone-else",
         custodianUserId: "user-1",
       }) as unknown as Awaited<ReturnType<typeof getBooking>>

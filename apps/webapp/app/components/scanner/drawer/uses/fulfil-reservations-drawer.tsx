@@ -67,19 +67,22 @@ import { useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
-import { ChevronDownIcon, Package as PackageIcon } from "lucide-react";
+import { Package as PackageIcon } from "lucide-react";
 import { z } from "zod";
 import {
   clearScannedItemsAtom,
   expectedModelRequestsAtom,
   fulfilSessionAtom,
   removeScannedItemAtom,
+  removeMultipleScannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   scannedItemsAtom,
   type FulfilSessionInfo,
 } from "~/atoms/qr-scanner";
 import CheckoutDialog, {
   CheckoutIntentEnum,
+  REVERT_TO_DRAFT_RESCHEDULE_HINT,
+  type CheckoutDialogBooking,
 } from "~/components/booking/checkout-dialog";
 import type { ModelProgress } from "~/components/booking/model-pending-rows";
 import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
@@ -88,6 +91,7 @@ import { Form } from "~/components/custom-form";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import type {
   ScannedAssetRow,
   ScannedKitRow,
@@ -103,6 +107,12 @@ import { tw } from "~/utils/tw";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
+import { ScanItemGroup } from "../scan-item-group";
+import {
+  bookingSavedCheck,
+  ScanSubmitFailureAlert,
+} from "../scan-submit-failure-alert";
+import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
 
 /**
  * Zod schema for the fulfil-and-checkout form payload.
@@ -147,6 +157,12 @@ type FulfilReservationsDrawerProps = {
   isLoading?: boolean;
   /** Forwarded through to `ConfigurableDrawer`. */
   defaultExpanded?: boolean;
+  /**
+   * Pools already on the booking that sit at two or more locations and have
+   * not gone out yet. The check-out confirmation asks where each one's units
+   * leave from, for the ones this submit sends out.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
@@ -168,6 +184,7 @@ export default function FulfilReservationsDrawer({
   style,
   isLoading,
   defaultExpanded = false,
+  sourceQuestions,
 }: FulfilReservationsDrawerProps) {
   const session = useAtomValue(fulfilSessionAtom);
   const expectedModelRequests = useAtomValue(expectedModelRequestsAtom);
@@ -175,6 +192,7 @@ export default function FulfilReservationsDrawer({
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
+  const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
   /**
    * Ids of the concrete `BookingAsset`s already on the booking. An asset in
@@ -296,6 +314,18 @@ export default function FulfilReservationsDrawer({
   }, [scannedBuckets.rows]);
 
   /**
+   * The "From location" questions for what this submit sends out: every pool
+   * on the booking when the whole booking goes out, only the scanned ones
+   * when only scanned items leave.
+   */
+  const sourceQuestionsToAsk = useMemo(() => {
+    if (!sourceQuestions?.length) return [];
+    if (!session?.checksOutScannedOnly) return sourceQuestions;
+    const scanned = new Set(assetIdsToSubmit);
+    return sourceQuestions.filter((question) => scanned.has(question.assetId));
+  }, [sourceQuestions, session?.checksOutScannedOnly, assetIdsToSubmit]);
+
+  /**
    * Kit ids to submit: every resolved kit scan. Unresolved scans are excluded
    * for the same reason asset scans are — the server can't act on an id we
    * don't know yet.
@@ -366,9 +396,16 @@ export default function FulfilReservationsDrawer({
       .map((row) => row.asset!.id);
   }, [scannedBuckets.rows, items, alreadyIncludedIds]);
 
+  // Codes that resolved to nothing. The matcher parks them with the
+  // unmatched rows so their row still mounts; here they block.
+  const invalidCodeQrIds = Object.entries(items)
+    .filter(([, item]) => !!item?.error)
+    .map(([qrId]) => qrId);
+
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs: [
       {
+        id: "kit-members",
         condition: kitMemberScanIds.length > 0,
         count: kitMemberScanIds.length,
         message: (count: number) => (
@@ -381,8 +418,19 @@ export default function FulfilReservationsDrawer({
           "Scan the kit to take all of it, or scan another unit of the same model. Sending one member out on its own would split the kit.",
         onResolve: () => removeAssetsFromList(kitMemberScanIds),
       },
+      {
+        id: "invalid-codes",
+        condition: invalidCodeQrIds.length > 0,
+        count: invalidCodeQrIds.length,
+        message: (count: number) => (
+          <>
+            <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+            {count > 1 ? "are" : "is"} invalid.
+          </>
+        ),
+        onResolve: () => removeItemsFromList(invalidCodeQrIds),
+      },
     ],
-    onResolveAll: () => removeAssetsFromList(kitMemberScanIds),
   });
 
   // Early return AFTER all hooks so the hook order stays stable
@@ -416,9 +464,11 @@ export default function FulfilReservationsDrawer({
       renderItem={(data) => (
         <ScannedAssetRowBody
           asset={data as AssetFromQr}
+          scannedCode={row.qrId}
           bucket={row.bucket}
           viaKitName={row.viaKitName}
           claimedModelName={row.claimedModelName}
+          matchedModelName={row.matchedModelName}
         />
       )}
     />
@@ -444,17 +494,18 @@ export default function FulfilReservationsDrawer({
   );
 
   /**
-   * Custom renderer that interleaves the buckets top-to-bottom
-   * (pending → matched → included → duplicate → unmatched →
-   * already-included).
-   * Duplicates sit ABOVE unmatched so the operator sees the blocker
-   * (red "Already on this booking") before the softer yellow warning.
-   *
-   * Kits join the group their contribution matches: one that assigns
-   * reserved units reads as good news beside the matched scans, one that
-   * assigns none beside the yellow warnings it shares copy with.
+   * Renders the list as foldable groups, each its own card, matching the other
+   * booking scan drawers:
+   * - "Scanned this session" (reopens on a new scan), in the order the
+   *   operator should read it: scans that assign reserved units (with the kits
+   *   that do), members riding with their kit, items already on the booking,
+   *   then the red "Already on this booking" rows above the yellow unmatched
+   *   warnings, so the stronger signal comes first.
+   * - "Pending": reserved units no scan has assigned yet.
+   * - "Already included": rows on the booking before this session, folded.
+   * A group with nothing in it is not rendered.
    */
-  const customRenderAllItems = (): ReactNode => {
+  const renderGroups = (): ReactNode => {
     const matched = scannedBuckets.rows.filter((r) => r.bucket === "matched");
     const matchingKits = scannedBuckets.kitRows.filter(
       (r) => r.matchedMemberCount > 0
@@ -471,40 +522,52 @@ export default function FulfilReservationsDrawer({
       (r) => r.bucket === "unmatched"
     );
     const viaKit = scannedBuckets.rows.filter((r) => r.bucket === "viaKit");
+    const scannedCount = Object.keys(items).length;
 
     return (
       <>
-        {/* Bucket 1: pending synthetic rows (gray "Pending" badge). */}
-        {pendingModelRows.map((row) => (
-          <PendingModelRow key={row.key} assetModelName={row.assetModelName} />
-        ))}
+        {scannedCount > 0 ? (
+          <ScanItemGroup
+            label="Scanned this session"
+            count={scannedCount}
+            tone="active"
+            openWhenCountGrows
+          >
+            {matched.map(renderScannedItemRow)}
+            {claimed.map(renderScannedItemRow)}
+            {matchingKits.map(renderScannedKitRow)}
+            {viaKit.map(renderScannedItemRow)}
+            {included.map(renderScannedItemRow)}
+            {duplicate.map(renderScannedItemRow)}
+            {unmatched.map(renderScannedItemRow)}
+            {nonMatchingKits.map(renderScannedKitRow)}
+          </ScanItemGroup>
+        ) : null}
 
-        {/* Bucket 2: matched scanned rows (green "Ready" chip), then the
-            kits whose members assign reserved units. */}
-        {matched.map(renderScannedItemRow)}
-        {claimed.map(renderScannedItemRow)}
-        {matchingKits.map(renderScannedKitRow)}
+        {pendingModelRows.length > 0 ? (
+          <ScanItemGroup
+            label="Pending"
+            count={pendingModelRows.length}
+            tone="muted"
+          >
+            {pendingModelRows.map((row) => (
+              <PendingModelRow
+                key={row.key}
+                assetModelName={row.assetModelName}
+              />
+            ))}
+          </ScanItemGroup>
+        ) : null}
 
-        {/* Scanned alongside their own kit: the kit above assigns them, so
-            they sit with it rather than among the warnings. */}
-        {viaKit.map(renderScannedItemRow)}
-
-        {/* Items already on the booking, scanned to check them out. */}
-        {included.map(renderScannedItemRow)}
-
-        {/* Bucket 3: duplicate scanned rows (red "Already on this
-            booking" blocker). Rendered above the yellow warnings so
-            the operator clears the blocker first. */}
-        {duplicate.map(renderScannedItemRow)}
-
-        {/* Bucket 4: unmatched scanned rows (yellow warning badge), then
-            the kits that assign nothing but still go out. */}
-        {unmatched.map(renderScannedItemRow)}
-        {nonMatchingKits.map(renderScannedKitRow)}
-
-        {/* Bucket 5: already-included collapser (collapsed by default). */}
         {session.alreadyIncluded.length > 0 ? (
-          <AlreadyIncludedCollapser assets={session.alreadyIncluded} />
+          <ScanItemGroup
+            label="Already included"
+            count={session.alreadyIncluded.length}
+            tone="done"
+            defaultOpen={false}
+          >
+            <AlreadyIncludedRows assets={session.alreadyIncluded} />
+          </ScanItemGroup>
         ) : null}
       </>
     );
@@ -533,12 +596,13 @@ export default function FulfilReservationsDrawer({
 
   return (
     <ConfigurableDrawer
+      savedCheck={bookingSavedCheck(session.bookingId)}
       schema={fulfilAndCheckoutSchema}
       items={items}
       onClearItems={clearList}
       title="Fulfil reservations & check out"
       isLoading={isLoading}
-      customRenderAllItems={customRenderAllItems}
+      renderGroups={renderGroups}
       // Render body even when nothing has been scanned yet — pending
       // rows still need to be visible so the operator knows what's
       // expected.
@@ -558,6 +622,9 @@ export default function FulfilReservationsDrawer({
             id: session.bookingId,
             name: session.bookingName,
             from: new Date(session.bookingFrom),
+            // For the expired-reservation prompt; see `CheckoutDialog`.
+            status: session.bookingStatus,
+            to: session.bookingTo,
           }}
           assetIds={assetIdsToSubmit}
           kitIds={kitIdsToSubmit}
@@ -569,6 +636,7 @@ export default function FulfilReservationsDrawer({
           disableSubmit={shouldDisableSubmit || hasBlockers}
           notice={notice}
           unassignedUnits={unassignedUnits}
+          sourceQuestions={sourceQuestionsToAsk}
           // Only a RESERVED booking's first check-out can move its start date.
           suppressEarlyCheckoutPrompt={session.bookingStatus !== "RESERVED"}
         />
@@ -670,7 +738,7 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  * Body of a scanned-asset row (rendered inside `GenericItemRow`'s
  * `renderItem` slot). Branches on `bucket` for the status chip:
  *
- * - `"matched"`   → green "Ready" chip.
+ * - `"matched"`   → green chip naming the model whose unit it fills.
  * - `"viaKit"`    → blue chip naming the scanned kit it arrives with. Not a
  *   warning and not a second assignment: the kit row is what assigns it, and
  *   this row says so rather than looking like an idle duplicate.
@@ -686,14 +754,19 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  */
 function ScannedAssetRowBody({
   asset,
+  scannedCode,
   bucket,
   viaKitName,
   claimedModelName,
+  matchedModelName,
 }: {
   asset: AssetFromQr;
+  /** The code the operator scanned to add this row. */
+  scannedCode: string;
   bucket: ScannedAssetRow["bucket"];
   viaKitName?: string;
   claimedModelName?: string;
+  matchedModelName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -706,6 +779,10 @@ function ScannedAssetRowBody({
         <span className="word-break whitespace-break-spaces font-medium text-gray-800">
           {asset.title}
         </span>
+        <ScannedAssetIdentifiers
+          sequentialId={asset.sequentialId}
+          scannedCode={scannedCode}
+        />
         <div className="flex flex-wrap items-center gap-1">
           <span className={assetTypePillClass}>asset</span>
           {bucket === "matched" ? (
@@ -713,8 +790,11 @@ function ScannedAssetRowBody({
               color={BADGE_COLORS.green.bg}
               textColor={BADGE_COLORS.green.text}
               withDot={false}
+              className="max-w-full"
             >
-              Ready
+              {matchedModelName
+                ? `Ready, counts toward ${matchedModelName}`
+                : "Ready"}
             </Badge>
           ) : bucket === "viaKit" ? (
             <Badge
@@ -830,93 +910,66 @@ function ScannedKitRowBody({
 }
 
 /**
- * Collapser wrapping the "Already included" section — concrete
- * `BookingAsset`s that were on the booking before this session
- * started. Closed by default because the operator usually only cares
- * about what's still outstanding, but expandable so they can confirm
- * the full picture matches their expectation.
+ * The rows already on the booking before this session started
+ * (`BookingAsset`s). The drawer boxes them in a folded "Already included"
+ * card: the operator usually only cares about what is still outstanding, but
+ * can open it to confirm the full picture.
  *
- * Read-only: no remove button, no inputs. The server owns these rows;
- * this scanner flow only _adds_ new ones.
+ * Read-only: no remove button, no inputs. The server owns these rows; this
+ * scanner flow only _adds_ new ones.
  */
-function AlreadyIncludedCollapser({
+function AlreadyIncludedRows({
   assets,
 }: {
   assets: Exclude<FulfilSessionInfo, null>["alreadyIncluded"];
 }) {
-  const [open, setOpen] = useState(false);
-
   return (
     <>
-      <Tr skipEntrance>
-        <td
-          colSpan={2}
-          className="bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600"
-        >
-          <button
-            type="button"
-            onClick={() => setOpen((prev) => !prev)}
-            aria-expanded={open}
-            className="flex w-full items-center gap-2"
-          >
-            <ChevronDownIcon
-              aria-hidden="true"
-              className={tw(
-                "size-4 shrink-0 text-gray-500 transition-transform duration-150",
-                open ? "rotate-0" : "-rotate-90"
-              )}
-            />
-            <span>Already included ({assets.length})</span>
-          </button>
-        </td>
-      </Tr>
-      {open
-        ? assets.map((asset) => (
-            <Tr key={`already-included-${asset.id}`} skipEntrance>
-              <td className="w-full p-0 md:p-0">
-                <div className="flex items-center justify-between gap-3 p-4 md:px-6">
-                  <div className="flex items-center gap-2">
-                    <ImageWithPreview
-                      thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-                      alt={asset.title || "Asset"}
-                      className="size-[54px] rounded-[2px]"
-                    />
-                    <div className="flex flex-col gap-1">
-                      <span className="word-break whitespace-break-spaces font-medium text-gray-800">
-                        {asset.title}
-                        {/* QUANTITY_TRACKED assets are booked as an
+      {assets.map((asset) => (
+        <Tr key={`already-included-${asset.id}`} skipEntrance>
+          <td className="w-full p-0 md:p-0">
+            <div className="flex items-center justify-between gap-3 p-4 md:px-6">
+              <div className="flex items-center gap-2">
+                <ImageWithPreview
+                  thumbnailUrl={asset.thumbnailImage || asset.mainImage}
+                  alt={asset.title || "Asset"}
+                  className="size-[54px] rounded-[2px]"
+                />
+                <div className="flex flex-col gap-1">
+                  <span className="word-break whitespace-break-spaces font-medium text-gray-800">
+                    {asset.title}
+                    {/* QUANTITY_TRACKED assets are booked as an
                             aggregate count (e.g. "Pens × 20"). Without
                             the suffix the operator can't tell a row
                             representing 20 pens from one representing
                             1 pen. INDIVIDUAL assets always carry
                             `quantity: 1` so we suppress the suffix for
                             them to avoid `× 1` noise. */}
-                        {asset.type === "QUANTITY_TRACKED" ? (
-                          <span className="ml-1.5 text-xs font-medium text-gray-500">
-                            &times; {asset.bookedQuantity}
-                          </span>
-                        ) : null}
+                    {asset.type === "QUANTITY_TRACKED" ? (
+                      <span className="ml-1.5 text-xs font-medium text-gray-500">
+                        &times; {asset.bookedQuantity}
                       </span>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className={assetTypePillClass}>asset</span>
-                        <Badge
-                          color={BADGE_COLORS.green.bg}
-                          textColor={BADGE_COLORS.green.text}
-                          withDot={false}
-                        >
-                          Already included
-                        </Badge>
-                      </div>
-                    </div>
+                    ) : null}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className={assetTypePillClass}>asset</span>
+                    <Badge
+                      color={BADGE_COLORS.green.bg}
+                      textColor={BADGE_COLORS.green.text}
+                      withDot={false}
+                    >
+                      Already included
+                    </Badge>
                   </div>
                 </div>
-              </td>
-              <td>
-                <div className="w-[52px]" />
-              </td>
-            </Tr>
-          ))
-        : null}
+              </div>
+            </div>
+          </td>
+          <td>
+            <div className="w-[52px]" />
+          </td>
+        </Tr>
+      ))}
     </>
   );
 }
@@ -925,8 +978,8 @@ function AlreadyIncludedCollapser({
  * Props for {@link FulfilCheckoutForm}.
  */
 type FulfilCheckoutFormProps = {
-  /** Booking summary for `CheckoutDialog`'s early-checkout detection. */
-  booking: { id: string; name: string; from: Date };
+  /** Booking summary for `CheckoutDialog`'s early and expired prompts. */
+  booking: CheckoutDialogBooking;
   /** Matched + unmatched scanned asset ids to attach to the booking. */
   assetIds: string[];
   /** Scanned kit ids to attach to the booking as kit-driven rows. */
@@ -944,6 +997,8 @@ type FulfilCheckoutFormProps = {
   unassignedUnits: UnassignedModelUnits[];
   /** Skips the early check-out prompt; see `CheckoutDialog`. */
   suppressEarlyCheckoutPrompt: boolean;
+  /** Pools to ask "From location" for; see `CheckoutDialog`. */
+  sourceQuestions: CheckoutSourceQuestion[];
 };
 
 /**
@@ -975,6 +1030,7 @@ function FulfilCheckoutForm({
   notice,
   unassignedUnits,
   suppressEarlyCheckoutPrompt,
+  sourceQuestions,
 }: FulfilCheckoutFormProps) {
   /**
    * Form DOM node ref — used as the portal container for the
@@ -1029,12 +1085,26 @@ function FulfilCheckoutForm({
         </Button>
 
         <CheckoutDialog
+          // The drawer's own notice is behind this dialog, so this one
+          // carries the same link to where the save can be checked.
+          notice={
+            <ScanSubmitFailureAlert
+              savedCheck={bookingSavedCheck(booking.id)}
+            />
+          }
           booking={booking}
           disabled={disableSubmit || isLoading}
           portalContainer={formElement || undefined}
           formId="fulfil-and-checkout-form"
           unassignedUnits={unassignedUnits}
+          sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
+          // A booking waiting on model units checks out here, and its header
+          // Check out leads back to this drawer, so new dates come from
+          // reverting it to draft.
+          expiredRescheduleHint={REVERT_TO_DRAFT_RESCHEDULE_HINT}
+          // The drawer lists what goes out, so it is the confirmation step.
+          confirm={false}
           // `grow` (the CheckoutDialog default) makes the button stretch
           // across the drawer — with the disabled primary-300 tint this
           // reads as an alarming peach block. Size to content instead.

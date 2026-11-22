@@ -19,7 +19,9 @@ import {
   isHandledClientError,
   isLikeShelfError,
 } from "~/utils/error";
+import { redactSensitive } from "~/utils/redact";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
+import { withoutUnloggedHeaders } from "~/utils/unlogged-headers";
 
 /**
  * Resolve the release identifier for this server process. Read from the
@@ -73,13 +75,12 @@ if (SENTRY_DSN) {
       return breadcrumb;
     },
     /**
-     * Performance transactions are kept, with email addresses masked. They
+     * Performance transactions are kept, with credentials scrubbed from the
+     * request (see {@link scrubEventRequest}) and email addresses masked. They
      * must NOT go through the error-event filter: a transaction carries no
      * exception, and that filter drops every event without one.
      */
-    beforeSendTransaction(event) {
-      return maskEmailsInSentryPayload(event);
-    },
+    beforeSendTransaction: handleBeforeSendTransaction,
     beforeSend(event, hint) {
       const kept = handleBeforeSendError(event, hint);
       return kept && maskEmailsInSentryPayload(kept);
@@ -96,12 +97,42 @@ if (SENTRY_DSN) {
 }
 
 /**
+ * Hook for performance transactions: scrubs credentials from the request
+ * (see {@link scrubEventRequest}) and masks email addresses.
+ *
+ * @param event - The transaction about to be sent
+ * @returns The transaction to send
+ */
+export function handleBeforeSendTransaction<E extends Event>(event: E): E {
+  scrubEventRequest(event);
+  return maskEmailsInSentryPayload(event);
+}
+
+/**
+ * Removes credentials from the request Sentry attached to an event, in place:
+ * every parsed cookie (the session and the SSO verifier and challenge among
+ * them), and every `UNLOGGED_HEADERS` header (raw `cookie`, `authorization`,
+ * the Cloudflare proxy secret). Sentry's SDK copies the incoming request's
+ * headers and cookies onto errors and transactions alike.
+ *
+ * @param event - The event about to be sent
+ */
+export function scrubEventRequest(event: Event): void {
+  if (event.request?.cookies) {
+    delete event.request.cookies;
+  }
+  if (event.request?.headers) {
+    event.request.headers = withoutUnloggedHeaders(event.request.headers);
+  }
+}
+
+/**
  * Filter for ERROR events (not transactions). Drops:
  *  - non-Error exceptions
  *  - ShelfError instances flagged `shouldBeCaptured: false`
  *  - client-disconnect / abort errors that bypass `makeShelfError`
  *
- * Also redacts the auth-session cookie and attaches our ShelfError
+ * Also scrubs credentials from the request (see {@link scrubEventRequest}) and attaches our ShelfError
  * metadata as Sentry tags / extras. Email masking runs on the result, in the
  * `beforeSend` hook.
  */
@@ -129,10 +160,7 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
     return null;
   }
 
-  /** Hide the __authSession cookie */
-  if (event.request?.cookies) {
-    event.request.cookies["__authSession"] = "hidden";
-  }
+  scrubEventRequest(event);
 
   const context = makeSentryContext(exception);
   if (!context) {
@@ -213,13 +241,19 @@ function redactSecrets(data: unknown): Record<string, unknown> {
 /**
  * Build a Sentry overlay (user / tags / extras) from a ShelfError.
  *
+ * Everything in `extra` taken from the error (its `additionalData`, `message`
+ * and `cause`) also goes through `redactSensitive`, the same pass the log line
+ * gets: it strips credentials embedded in URLs and caps each string, so a field
+ * as large as the client chose to send cannot reach Sentry whole. `traceId` is
+ * a short id the server generates, so it is included as is.
+ *
  * Returns `undefined` for anything that isn't a ShelfError so the caller
  * can fall through to the scope-derived event without overlaying noisy
  * fallback tags ("Unknown" / "?"). Plain Errors that bubble up still get
  * captured — they just don't gain Shelf-specific tagging they can't
  * provide meaningful values for.
  */
-function makeSentryContext(exception: unknown) {
+export function makeSentryContext(exception: unknown) {
   if (!isLikeShelfError(exception)) {
     return;
   }
@@ -233,16 +267,22 @@ function makeSentryContext(exception: unknown) {
       shelf_trace_id: exception.traceId || "Unknown",
     },
     extra: {
-      ...redactSecrets(exception.additionalData),
+      // redactSecrets first: its walk is cycle-safe, so redactSensitive only
+      // ever sees an acyclic tree.
+      ...redactSensitive(redactSecrets(exception.additionalData)),
       traceId: exception.traceId,
-      message: exception.message,
+      message: redactSensitive(exception.message),
       cause: {
-        message: (exception.cause as Error | null)?.message,
+        message: redactSensitive((exception.cause as Error | null)?.message),
         // Redact the raw cause chain too; otherwise it bypasses redactSecrets
         // and the "no secret can reach Sentry (at any depth)" guarantee would
-        // not actually hold.
-        raw: JSON.stringify(
-          redactValue(exception.cause, new WeakSet<object>())
+        // not actually hold. The object is redacted before it is stringified,
+        // because URL credentials are only found in a string that is a URL,
+        // and the JSON is capped as a whole.
+        raw: redactSensitive(
+          JSON.stringify(
+            redactSensitive(redactValue(exception.cause, new WeakSet<object>()))
+          )
         ),
       },
     },

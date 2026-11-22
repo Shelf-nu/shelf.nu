@@ -33,6 +33,8 @@ vitest.mock("~/database/db.server", () => ({
     asset: {
       findMany: vitest.fn(),
       updateMany: vitest.fn(),
+      // why: the list counts each model's archived assets to show active ones.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     // why: `createLoadUserForNotes` is NOT mocked, so the real memoized loader
     // runs and reads this stub to build the note's author link.
@@ -54,6 +56,11 @@ vitest.mock("~/database/db.server", () => ({
     // `defaultCategoryId` is supplied.
     category: {
       findFirst: vitest.fn(),
+    },
+    // why: the asset form's model list can ask for each model's default
+    // custom field values.
+    assetModelCustomFieldDefault: {
+      findMany: vitest.fn().mockResolvedValue([]),
     },
   },
 }));
@@ -235,13 +242,24 @@ describe("getAssetModels", () => {
 
   it("returns paginated asset models with asset counts", async () => {
     const mockModels = [
-      createAssetModelFactory({ id: "model-1", name: "Model A" }),
-      createAssetModelFactory({ id: "model-2", name: "Model B" }),
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 3 },
+      },
+      {
+        ...createAssetModelFactory({ id: "model-2", name: "Model B" }),
+        _count: { assets: 2 },
+      },
     ];
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue(mockModels);
     // @ts-expect-error mock setup
     db.assetModel.count.mockResolvedValue(2);
+    // why: one of model-1's three assets is archived.
+    // @ts-expect-error mock setup
+    db.asset.groupBy.mockResolvedValueOnce([
+      { assetModelId: "model-1", _count: { _all: 1 } },
+    ]);
 
     const result = await getAssetModels({
       organizationId: "org-123",
@@ -249,7 +267,20 @@ describe("getAssetModels", () => {
       perPage: 10,
     });
 
-    expect(result.assetModels).toEqual(mockModels);
+    // `_count.assets` keeps every linked asset (the delete warning needs
+    // them all); `activeAssetCount` is what the list shows.
+    expect(result.assetModels).toEqual([
+      { ...mockModels[0], activeAssetCount: 2 },
+      { ...mockModels[1], activeAssetCount: 2 },
+    ]);
+    expect(db.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-123",
+          archivedAt: { not: null },
+        }),
+      })
+    );
     expect(result.totalAssetModels).toBe(2);
     expect(db.assetModel.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -262,6 +293,208 @@ describe("getAssetModels", () => {
         }),
       })
     );
+  });
+
+  it("groups each model's default custom field values when asked for them", async () => {
+    const mockModels = [
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 1 },
+      },
+      {
+        ...createAssetModelFactory({ id: "model-2", name: "Model B" }),
+        _count: { assets: 0 },
+      },
+    ];
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue(mockModels);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(2);
+    // @ts-expect-error mock setup
+    db.assetModelCustomFieldDefault.findMany.mockResolvedValueOnce([
+      {
+        assetModelId: "model-1",
+        customFieldId: "brand",
+        value: { raw: "Westermo", valueOption: "Westermo" },
+      },
+      {
+        assetModelId: "model-1",
+        customFieldId: "firmware",
+        value: { raw: "v2" },
+      },
+    ]);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      withCustomFieldDefaults: true,
+    });
+
+    expect(db.assetModelCustomFieldDefault.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assetModelId: { in: ["model-1", "model-2"] } },
+      })
+    );
+    expect(result.assetModels[0]).toMatchObject({
+      id: "model-1",
+      customFieldDefaults: [
+        {
+          customFieldId: "brand",
+          value: { raw: "Westermo", valueOption: "Westermo" },
+        },
+        { customFieldId: "firmware", value: { raw: "v2" } },
+      ],
+    });
+    // A model without defaults still gets an empty list, not a missing key.
+    expect(result.assetModels[1]).toMatchObject({
+      id: "model-2",
+      customFieldDefaults: [],
+    });
+  });
+
+  it("puts the included model first when it falls outside the page", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    const ownModel = {
+      ...createAssetModelFactory({ id: "model-own", name: "Old Model" }),
+      _count: { assets: 4 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(150);
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(ownModel);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      perPage: 100,
+      includeId: "model-own",
+    });
+
+    // Scoped to the workspace, so another workspace's id cannot be pulled in.
+    expect(db.assetModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "model-own", organizationId: "org-123" },
+      })
+    );
+    expect(result.assetModels.map((m) => m.id)).toEqual([
+      "model-own",
+      "model-1",
+    ]);
+    expect(result.assetModels[0]).toMatchObject({ activeAssetCount: 4 });
+    // The total still counts the workspace's models, not the list length.
+    expect(result.totalAssetModels).toBe(150);
+  });
+
+  it("gives the included model its defaults and active count", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    const ownModel = {
+      ...createAssetModelFactory({ id: "model-own", name: "Old Model" }),
+      _count: { assets: 4 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(150);
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(ownModel);
+    // why: one of the included model's four assets is archived.
+    // @ts-expect-error mock setup
+    db.asset.groupBy.mockResolvedValueOnce([
+      { assetModelId: "model-own", _count: { _all: 1 } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModelCustomFieldDefault.findMany.mockResolvedValueOnce([
+      {
+        assetModelId: "model-own",
+        customFieldId: "brand",
+        value: { raw: "Westermo" },
+      },
+    ]);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      perPage: 100,
+      withCustomFieldDefaults: true,
+      includeId: "model-own",
+    });
+
+    // Both lookups cover the included model, not only the page.
+    expect(db.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetModelId: { in: expect.arrayContaining(["model-own"]) },
+        }),
+      })
+    );
+    expect(db.assetModelCustomFieldDefault.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetModelId: { in: expect.arrayContaining(["model-own"]) },
+        },
+      })
+    );
+    expect(result.assetModels[0]).toMatchObject({
+      id: "model-own",
+      activeAssetCount: 3,
+      customFieldDefaults: [
+        { customFieldId: "brand", value: { raw: "Westermo" } },
+      ],
+    });
+  });
+
+  it("does not look up a model for an asset without one", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(0);
+
+    await getAssetModels({ organizationId: "org-123", includeId: null });
+
+    expect(db.assetModel.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("does not list the included model twice when it is on the page", async () => {
+    const pageModel = {
+      ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+      _count: { assets: 1 },
+    };
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([pageModel]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(1);
+    // why: the lookup runs alongside the page query, so it returns the same row.
+    // @ts-expect-error mock setup
+    db.assetModel.findFirst.mockResolvedValueOnce(pageModel);
+
+    const result = await getAssetModels({
+      organizationId: "org-123",
+      includeId: "model-1",
+    });
+
+    expect(result.assetModels.map((m) => m.id)).toEqual(["model-1"]);
+  });
+
+  it("does not read defaults unless asked for them", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 1 },
+      },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.count.mockResolvedValue(1);
+
+    const result = await getAssetModels({ organizationId: "org-123" });
+
+    expect(db.assetModelCustomFieldDefault.findMany).not.toHaveBeenCalled();
+    expect(result.assetModels[0]).not.toHaveProperty("customFieldDefaults");
   });
 
   it("applies search filter on name and description (case-insensitive)", async () => {
@@ -667,10 +900,16 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes specific asset models by IDs", async () => {
     // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+    ]);
+    // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 2 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["model-1", "model-2"],
+      confirmation: "2",
       organizationId: "org-123",
       userId: "user-1",
     });
@@ -685,20 +924,80 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes all asset models when ALL_SELECTED key is present", async () => {
     // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+      { id: "model-3" },
+    ]);
+    // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
       userId: "user-1",
+      confirmation: "3",
     });
 
     // why: the assets of a deleted model need no image cleanup — they never
     // stored a copy, so ON DELETE SET NULL alone drops them to the placeholder.
     expect(db.asset.updateMany).not.toHaveBeenCalled();
-    expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
+    expect(db.assetModel.findMany).toHaveBeenCalledWith({
       where: { organizationId: "org-123" },
+      select: { id: true },
     });
+    // The write is the rows read, so the confirmed count is the count removed.
+    expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["model-1", "model-2", "model-3"] },
+        organizationId: "org-123",
+      },
+    });
+  });
+
+  it("scopes a select-all to the index search, read from the `s` param", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([{ id: "model-1" }]);
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["all-selected"],
+      organizationId: "org-123",
+      userId: "user-1",
+      currentSearchParams: "s=sony&page=2",
+      confirmation: "1",
+    });
+
+    expect(db.assetModel.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-123",
+        OR: [
+          { name: { contains: "sony", mode: "insensitive" } },
+          { description: { contains: "sony", mode: "insensitive" } },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it("refuses a select-all whose typed count is not what it matches", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+    ]);
+
+    await expect(
+      bulkDeleteAssetModels({
+        assetModelIds: ["all-selected"],
+        organizationId: "org-123",
+        userId: "user-1",
+        confirmation: "1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: { expectedConfirmation: 2 },
+    });
+    expect(db.assetModel.deleteMany).not.toHaveBeenCalled();
   });
 
   it("records the unlink per asset, grouped by the model each one left", async () => {
@@ -724,6 +1023,7 @@ describe("bulkDeleteAssetModels", () => {
 
     await bulkDeleteAssetModels({
       assetModelIds: ["model-1", "model-2"],
+      confirmation: "2",
       organizationId: "org-123",
       userId: "user-1",
     });
@@ -754,6 +1054,8 @@ describe("bulkDeleteAssetModels", () => {
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
       userId: "user-1",
+      // The suite's read resolves to no models.
+      confirmation: "0",
     });
 
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {

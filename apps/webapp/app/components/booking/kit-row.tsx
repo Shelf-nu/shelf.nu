@@ -20,7 +20,8 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   hasAssetBookingConflicts,
@@ -33,10 +34,17 @@ import type {
 } from "~/modules/booking/service.server";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { getBookingContextKitStatus } from "~/utils/booking-assets";
+import { mayRemoveBookingItems } from "~/utils/bookings";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "./availability-label";
 import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import ListAssetContent from "./list-asset-content";
+import { NextReservationBadge } from "./next-reservation-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { CategoryBadge } from "../assets/category-badge";
 import KitImage from "../kits/kit-image";
@@ -92,10 +100,21 @@ export default function KitRow({
   partialCheckoutDetails,
   shouldShowCheckoutColumns,
 }: KitRowProps) {
-  const { isBase } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
   const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
-  const { isDraft, isReserved, isInProgress, isFinished } =
-    useBookingStatusHelpers(bookingStatus);
+  const { isInProgress, isFinished } = useBookingStatusHelpers(bookingStatus);
+  // The kit's Remove menu follows the same rule as the server's remove gate:
+  // the booking:update grant and the statuses the caller's policy lists.
+  const canRemoveKit = mayRemoveBookingItems({
+    canUpdateBooking: userHasPermission({
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    }),
+    access: roleAccess,
+    bookingStatus,
+  });
   // Workspace pref + addon entitlement — resolver short-circuits to QR when
   // the org has lost the barcode add-on, so this read is always safe.
   const currentOrganization = useCurrentOrganization();
@@ -263,6 +282,11 @@ export default function KitRow({
               tooltipContent="This kit is already added to a booking that is overlapping the selected time period."
             />
           </When>
+          {/* While the kit is out, the booking it is promised to next
+              decides by when it has to be back. */}
+          <When truthy={isInProgress}>
+            <NextReservationBadge kind="kit" id={kit.id} />
+          </When>
           {/*
             Deliberately the count of RENDERED slices, never the kit's
             `_count.assetKits`. The latter is CURRENT membership, so a kit
@@ -342,9 +366,7 @@ export default function KitRow({
                 className={tw(`size-6 ${!isExpanded ? "rotate-180" : ""}`)}
               />
             </Button>
-            {(!isBase && isDraft) || isReserved ? (
-              <KitRowActionsDropdown kit={kit} />
-            ) : null}
+            {canRemoveKit ? <KitRowActionsDropdown kit={kit} /> : null}
           </div>
         </Td>
       </ListItem>

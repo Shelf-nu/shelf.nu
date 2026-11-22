@@ -12,21 +12,25 @@
  *
  * Transitions:
  *   - Enter low   (`isLow && lowStockNotifiedAt == null`): send the low-stock
- *     alert (in-app to the acting user + email to owner AND admins), then
- *     stamp `lowStockNotifiedAt`.
+ *     alert (in-app to the acting user + email to the inventory-alert
+ *     audience), then stamp `lowStockNotifiedAt`.
  *   - Recover     (`!isLow && lowStockNotifiedAt != null`): clear the stamp,
  *     then send the "back in stock" recovered notice (in-app + email).
  *   - Otherwise   → no-op (already-notified-and-still-low, or fine-and-was-fine).
  *
  * "Available" is computed as total quantity minus units currently in custody.
  *
+ * The emails carry the facts an owner needs without opening the app (what
+ * took the stock down, where the rest sits, what else is low). This module
+ * loads those facts; `emails/low-stock-copy.ts` words them.
+ *
  * THRESHOLD SEMANTICS: a threshold exists iff `minQuantity != null`, and the
  * asset is low iff `available <= minQuantity`. This intentionally treats
  * `minQuantity === 0` as a valid out-of-stock threshold (alert when nothing is
  * available). The shared `@shelf/quantity-control` `isLowStock` predicate uses
  * the same rule (only `null` disables the threshold), so this server path and
- * the package agree — the companion app can adopt the package predicate without
- * diverging from these alerts.
+ * the package agree, and the companion app can adopt the package predicate
+ * without diverging from these alerts.
  *
  * The debounce is BEST-EFFORT and non-transactional: two truly-concurrent
  * decrements could each read a `null` marker and double-fire the alert. That is
@@ -35,42 +39,281 @@
  * failure can never roll back a committed stock change.
  *
  * @see {@link file://./service.server.ts} - adjustQuantity that triggers this check
- * @see {@link file://../organization/service.server.ts} - getOrganizationAdminsForNotification
+ * @see {@link file://../organization/service.server.ts} - getOrganizationNotificationAudience
  * @see {@link file://../../utils/emitter/send-notification.server.ts} - notification emitter
  * @see {@link file://../../emails/low-stock-alert.tsx} - low-stock alert email template
  * @see {@link file://../../emails/low-stock-recovered.tsx} - recovered email template
+ * @see {@link file://../../emails/low-stock-copy.ts} - email wording
  */
 
+import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { StockLevelEmailProps } from "~/emails/components/stock-level-email";
 import { lowStockAlertHtml, lowStockAlertText } from "~/emails/low-stock-alert";
+import {
+  describePlacements,
+  describeStockMovement,
+  isFreshMovement,
+  MOVEMENT_GROUP_WINDOW_MS,
+  type MinimumChange,
+  lowStockSubject,
+  recoveredSubject,
+} from "~/emails/low-stock-copy";
 import {
   lowStockRecoveredHtml,
   lowStockRecoveredText,
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import {
+  generateWhereClause,
+  POOL_AGGREGATE_JOIN,
+  POOL_AVAILABLE_EXPR,
+} from "~/modules/asset/query.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
+import {
+  MOVE_CATEGORY,
+  OPENING_BALANCE_CATEGORY,
+} from "~/modules/consumption-log/stock-ledger";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
+import { resolveFormatPrefs } from "~/utils/date-format";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError } from "~/utils/error";
+import { SERVER_URL } from "~/utils/env";
+import { ShelfError, type AdditionalData } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { resolveUserGreetingName, type UserNameFields } from "~/utils/user";
 
 /** Which low-stock email to build and send. */
 type LowStockEmailVariant = "alert" | "recovered";
 
+/** The `ConsumptionLog` columns the "What happened" sentence reads. */
+const MOVEMENT_LOG_SELECT = {
+  category: true,
+  quantity: true,
+  note: true,
+  createdAt: true,
+  userId: true,
+  performedBy: { select: USER_NAME_SELECT },
+  custodianId: true,
+  custodian: { select: { name: true, user: { select: USER_NAME_SELECT } } },
+  booking: { select: { id: true, name: true } },
+} satisfies Prisma.ConsumptionLogSelect;
+
 /**
- * Sends the low-stock alert (or recovered notice) email to every OWNER and
- * ADMIN of the organization. Resilient by design:
+ * Ledger rows that record no operation: a MOVE only changes where units sit,
+ * and an OPENING_BALANCE restates the stock a pool already had. "What
+ * happened" names the operation that changed the stock, so neither is read.
+ */
+const NOT_BOOKKEEPING: Prisma.ConsumptionLogWhereInput = {
+  category: { notIn: [MOVE_CATEGORY, OPENING_BALANCE_CATEGORY] },
+};
+
+/** Newest first; `id` breaks ties between rows written in the same instant. */
+const NEWEST_FIRST: Prisma.ConsumptionLogOrderByWithRelationInput[] = [
+  { createdAt: "desc" },
+  { id: "desc" },
+];
+
+/**
+ * Loads every row of the asset's newest operation, newest first.
+ *
+ * There is no row cap: one check-in writes a row per disposition and per
+ * booking slice, and an asset can sit in any number of kits. The newest row
+ * names the operation; its other rows share its user and its booking or
+ * custodian, within {@link MOVEMENT_GROUP_WINDOW_MS} before it. Those are the
+ * keys `pickLatestMovement` groups by, so the two agree. A row with neither a
+ * booking nor a custodian is one write (an adjustment, a restock, an asset
+ * edit): it comes back with the rows of the same category written in the same
+ * instant, which is how the ledger splits one write over several places.
+ *
+ * @param assetId - The asset, already verified to belong to the organization
+ * @returns The operation's rows, newest first; empty when the asset has none
+ */
+async function loadLatestMovementRows(assetId: string) {
+  const newest = await db.consumptionLog.findFirst({
+    where: { assetId, ...NOT_BOOKKEEPING },
+    orderBy: NEWEST_FIRST,
+    select: MOVEMENT_LOG_SELECT,
+  });
+  if (!newest) {
+    return [];
+  }
+  const bookingId = newest.booking?.id ?? null;
+  if (!bookingId && !newest.custodianId) {
+    return db.consumptionLog.findMany({
+      where: {
+        assetId,
+        category: newest.category,
+        userId: newest.userId,
+        bookingId: null,
+        custodianId: null,
+        createdAt: newest.createdAt,
+      },
+      orderBy: NEWEST_FIRST,
+      select: MOVEMENT_LOG_SELECT,
+    });
+  }
+  return db.consumptionLog.findMany({
+    where: {
+      assetId,
+      ...NOT_BOOKKEEPING,
+      userId: newest.userId,
+      bookingId,
+      custodianId: newest.custodianId,
+      createdAt: {
+        gte: new Date(newest.createdAt.getTime() - MOVEMENT_GROUP_WINDOW_MS),
+        lte: newest.createdAt,
+      },
+    },
+    orderBy: NEWEST_FIRST,
+    select: MOVEMENT_LOG_SELECT,
+  });
+}
+
+/**
+ * Runs a read the mail can do without. A failure is logged and answers `null`,
+ * so the mail still goes out with the row-less wording instead of not at all.
+ *
+ * Takes a thunk so a read that throws before returning its promise is caught
+ * too.
+ *
+ * @param read - Starts the read
+ * @param fact - What the read loads, for the log message
+ * @param additionalData - Ids for the log entry
+ */
+function optionalRead<T>(
+  read: () => Promise<T>,
+  fact: string,
+  additionalData: AdditionalData
+): Promise<T | null> {
+  return Promise.resolve()
+    .then(read)
+    .catch((cause: unknown) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: `Failed to load the ${fact} for a low-stock email`,
+          additionalData,
+          label: "Notification",
+        })
+      );
+      return null;
+    });
+}
+
+/**
+ * Reads the name fields out of an activity event's actor snapshot, which is
+ * JSON and so untyped at runtime.
+ *
+ * @param snapshot - `ActivityEvent.actorSnapshot`
+ * @returns The actor's name fields, or null when the event has no actor
+ */
+function actorFromSnapshot(
+  snapshot: Prisma.JsonValue | null
+): UserNameFields | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return null;
+  }
+  const text = (value: Prisma.JsonValue | undefined) =>
+    typeof value === "string" ? value : null;
+  return {
+    firstName: text(snapshot.firstName),
+    lastName: text(snapshot.lastName),
+    displayName: text(snapshot.displayName),
+  };
+}
+
+/**
+ * Turns the newest `ASSET_MIN_QUANTITY_CHANGED` event into a
+ * {@link MinimumChange}. `fromValue` and `toValue` are JSON: a number, or null
+ * when the asset had no minimum. An event without a numeric new minimum cannot
+ * have triggered a low-stock check, so it is ignored.
+ *
+ * @param event - The event row, or null when there is none or the read failed
+ */
+function toMinimumChange(
+  event: {
+    occurredAt: Date;
+    fromValue: Prisma.JsonValue | null;
+    toValue: Prisma.JsonValue | null;
+    actorSnapshot: Prisma.JsonValue | null;
+  } | null
+): MinimumChange | null {
+  if (!event || typeof event.toValue !== "number") {
+    return null;
+  }
+  return {
+    from: typeof event.fromValue === "number" ? event.fromValue : null,
+    to: event.toValue,
+    createdAt: event.occurredAt,
+    by: actorFromSnapshot(event.actorSnapshot),
+  };
+}
+
+/**
+ * How many other assets in the workspace the mail's "other low items" link
+ * finds. The recipients are owners and admins, who see the advanced list, so
+ * this counts with that list's `lowStockOnly` predicate: Free now at or below
+ * the Min quantity, archived assets left out.
+ *
+ * @param params.organizationId - Workspace to count in
+ * @param params.assetId - The asset the mail is about, left out of the count
+ * @returns The number of other low-stock assets
+ */
+async function countOtherLowStockAssets({
+  organizationId,
+  assetId,
+}: {
+  organizationId: string;
+  assetId: string;
+}): Promise<number> {
+  const where = generateWhereClause(
+    organizationId,
+    null,
+    [],
+    undefined,
+    null,
+    "UTC",
+    true
+  );
+  const rows = await db.$queryRaw<{ count: number }[]>`
+    SELECT COUNT(*)::int AS count
+    FROM "Asset" a
+    ${POOL_AGGREGATE_JOIN}
+    ${where} AND a.id <> ${assetId}
+  `;
+  return rows[0]?.count ?? 0;
+}
+
+/**
+ * Sends the low-stock alert (or back-in-stock notice) to every member whose
+ * role receives inventory alerts (`notifications.inventoryAlerts`), rendered
+ * once per recipient so each copy greets them,
+ * names their address in the footer and prints dates in their format.
+ *
+ * Besides the organization and the recipients it loads the facts the mail
+ * prints: the newest `ConsumptionLog` rows and the newest minimum change (what
+ * happened), the asset's placements (where it is), and how many other items
+ * are low. Each of those is
+ * optional: a failed read is logged and the mail goes out without the fact it
+ * could not load, never with a guess. When no fresh record explains the
+ * change, the acting user is loaded so the mail can still say who made it.
+ *
+ * Resilient by design:
  *   - the whole block is wrapped in try/catch so an email failure can never
  *     break the caller (which has already committed the stock change);
- *   - each per-recipient send is ALSO wrapped so one bad address can't abort
- *     the loop for the remaining recipients.
+ *   - each recipient's render and send is ALSO wrapped so one bad address
+ *     can't abort the loop for the remaining recipients.
  *
  * @param params.variant - "alert" (crossed into low stock) or "recovered"
- * @param params.organizationId - Organization whose admins/owner receive the email
- * @param params.assetId - Asset the notice is about (used for the "View Asset" link)
+ * @param params.organizationId - Organization whose inventory-alert audience receives the email
+ * @param params.assetId - Asset the notice is about
  * @param params.assetTitle - Asset display title
  * @param params.available - Current available quantity (total minus in-custody)
  * @param params.minQuantity - The configured minimum-quantity threshold
- * @param params.unitOfMeasure - Unit label for the quantities in the email
+ * @param params.unitOfMeasure - `Asset.unitOfMeasure`; `null` and `""` mean no unit
+ * @param params.inCustody - Units of the asset held in custody
+ * @param params.userId - The user whose action triggered the check, if any
  */
 async function sendLowStockEmails({
   variant,
@@ -80,6 +323,8 @@ async function sendLowStockEmails({
   available,
   minQuantity,
   unitOfMeasure,
+  inCustody,
+  userId,
 }: {
   variant: LowStockEmailVariant;
   organizationId: string;
@@ -87,50 +332,166 @@ async function sendLowStockEmails({
   assetTitle: string;
   available: number;
   minQuantity: number;
-  unitOfMeasure: string;
+  unitOfMeasure: string | null;
+  inCustody: number;
+  userId?: string | null;
 }): Promise<void> {
   try {
-    /**
-     * Recipients: owner + admins. `getOrganizationAdminsForNotification`
-     * returns both OWNER and ADMIN role holders (the owner included), which
-     * widens the previous owner-only alerting.
-     */
-    const [org, recipients] = await Promise.all([
+    const ids = { assetId, organizationId };
+    const [
+      org,
+      recipients,
+      logRows,
+      placementRows,
+      custodySourceRows,
+      otherLowCount,
+      minimumEvent,
+    ] = await Promise.all([
       db.organization.findUnique({
         where: { id: organizationId },
-        select: { name: true },
+        select: { name: true, customEmailFooter: true },
       }),
-      getOrganizationAdminsForNotification({ organizationId }),
+      getOrganizationNotificationAudience({
+        organizationId,
+        audience: "inventoryAlerts",
+      }),
+      optionalRead(
+        () => loadLatestMovementRows(assetId),
+        "newest consumption log rows",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.assetLocation.findMany({
+            where: { assetId, organizationId },
+            select: {
+              quantity: true,
+              assetKitId: true,
+              location: { select: { name: true } },
+            },
+          }),
+        "placements",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.custody.findMany({
+            // Operator custody taken from a location; kit custody holds kit
+            // slice units, which never come off a manual placement.
+            where: {
+              assetId,
+              kitCustodyId: null,
+              location: { is: { organizationId } },
+            },
+            select: { quantity: true, location: { select: { name: true } } },
+          }),
+        "custody per source location",
+        ids
+      ),
+      optionalRead(
+        () => countOtherLowStockAssets({ organizationId, assetId }),
+        "count of other low-stock items",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.activityEvent.findFirst({
+            // A minimum change writes no log row; this event is its record.
+            where: {
+              organizationId,
+              assetId,
+              action: "ASSET_MIN_QUANTITY_CHANGED",
+            },
+            orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+            select: {
+              occurredAt: true,
+              fromValue: true,
+              toValue: true,
+              actorSnapshot: true,
+            },
+          }),
+        "newest minimum change",
+        ids
+      ),
     ]);
 
-    const organizationName = org?.name ?? "your organization";
-    const props = {
-      assetTitle,
-      available,
-      minQuantity,
-      unitOfMeasure,
-      assetId,
-      organizationName,
-    };
+    /**
+     * The acting user names the change only when neither the log nor a
+     * minimum change can: an old record belongs to an earlier change.
+     */
+    const now = new Date();
+    const logs = logRows ?? [];
+    const minimumChange = toMinimumChange(minimumEvent);
+    const actingUser =
+      userId &&
+      !isFreshMovement(logs[0], now) &&
+      !isFreshMovement(minimumChange, now)
+        ? await optionalRead(
+            () =>
+              db.user.findUnique({
+                where: { id: userId },
+                select: USER_NAME_SELECT,
+              }),
+            "acting user",
+            { ...ids, userId }
+          )
+        : null;
 
-    const html =
-      variant === "alert"
-        ? await lowStockAlertHtml(props)
-        : await lowStockRecoveredHtml(props);
-    const text =
-      variant === "alert"
-        ? lowStockAlertText(props)
-        : lowStockRecoveredText(props);
+    const organizationName = org?.name ?? "your organization";
+    /** A failed read is unknown, not "not placed": the row is left out. */
+    const placements = placementRows
+      ? describePlacements(
+          placementRows,
+          (custodySourceRows ?? []).flatMap((row) =>
+            row.location
+              ? [{ quantity: row.quantity, location: row.location }]
+              : []
+          )
+        )
+      : null;
+    const numbers = { assetTitle, available, minQuantity, unitOfMeasure };
     const subject =
       variant === "alert"
-        ? `Low stock alert: ${assetTitle}`
-        : `Back in stock: ${assetTitle}`;
+        ? lowStockSubject(numbers)
+        : recoveredSubject(numbers);
 
     for (const recipient of recipients) {
       if (!recipient.email) {
         continue;
       }
       try {
+        const prefs = resolveFormatPrefs(recipient, null);
+        const props: StockLevelEmailProps = {
+          ...numbers,
+          recipient: {
+            greetingName: resolveUserGreetingName(recipient),
+            email: recipient.email,
+          },
+          assetId,
+          organizationName,
+          customEmailFooter: org?.customEmailFooter ?? null,
+          movement: describeStockMovement({
+            logs,
+            minimumChange,
+            actingUser,
+            prefs,
+            unitOfMeasure,
+            now,
+          }),
+          placements,
+          inCustody,
+          otherLowCount: otherLowCount ?? 0,
+          serverUrl: SERVER_URL,
+        };
+        const html =
+          variant === "alert"
+            ? await lowStockAlertHtml(props)
+            : await lowStockRecoveredHtml(props);
+        const text =
+          variant === "alert"
+            ? lowStockAlertText(props)
+            : lowStockRecoveredText(props);
+
         sendEmail({ to: recipient.email, subject, html, text });
       } catch (cause) {
         /** One bad recipient must not break the loop or the caller. */
@@ -216,15 +577,34 @@ async function runLowStockCheck({
   assetId,
   userId,
   organizationId,
+  silent = false,
 }: {
   assetId: string;
   userId?: string | null;
   organizationId: string;
+  /**
+   * Run the state transitions WITHOUT sending anything, no email, no in-app
+   * toast. The `lowStockNotifiedAt` marker is still stamped or cleared exactly
+   * as it would be, so a later genuine crossing and the "back in stock"
+   * recovery notice both still work.
+   *
+   * Exists for BULK callers. This notifier emails the owner AND every admin,
+   * and a bulk threshold change can put hundreds of assets into the low band in
+   * one click, that is hundreds of notifier runs, each mailing several people,
+   * for a change the user just made deliberately and can already see as amber
+   * badges on the screen in front of them. Alerting is for stock moving while
+   * nobody is watching, not for the operation the user just performed.
+   *
+   * Do NOT reach for this to quieten a noisy single-asset path; the debounce
+   * marker already handles repeat firing. Defaults to `false` so every existing
+   * call site behaves exactly as before.
+   */
+  silent?: boolean;
 }): Promise<void> {
   const asset = await db.asset.findFirst({
     // org-scoped: scope the low-stock lookup to the caller's org
     // (cross-org IDOR guard).
-    where: { id: assetId, organizationId },
+    where: { id: assetId, organizationId, archivedAt: null },
     select: {
       id: true,
       title: true,
@@ -267,25 +647,55 @@ async function runLowStockCheck({
     return;
   }
 
-  /** Compute available = total - inCustody */
-  const custodySum = await db.custody.aggregate({
-    where: { assetId },
-    _sum: { quantity: true },
-  });
-  const available = (asset.quantity ?? 0) - (custodySum._sum.quantity ?? 0);
+  /**
+   * Free now, measured the way `getAssetAvailability` measures it: direct
+   * custody only (a kit's inherited custody rows sit inside the kit figure),
+   * units earmarked to kits, and standalone units that have actually left on
+   * a booking. The `Stock status` column and the "Low stock only" filter read
+   * the same three terms, so this alert fires exactly when they show
+   * Running low, never for a row they call Enough, and never silent on a row
+   * they flag.
+   *
+   * `inCustody` is what the email reports as held by people, so it keeps the
+   * kit custody rows too.
+   */
+  const [directCustodySum, custodySum, kitSum, checkedOut] = await Promise.all([
+    db.custody.aggregate({
+      where: { assetId, kitCustodyId: null },
+      _sum: { quantity: true },
+    }),
+    db.custody.aggregate({
+      where: { assetId },
+      _sum: { quantity: true },
+    }),
+    db.assetKit.aggregate({
+      where: { assetId, organizationId },
+      _sum: { quantity: true },
+    }),
+    computeCheckedOutBreakdownForAsset(db, assetId, organizationId),
+  ]);
+  const inCustody = custodySum._sum.quantity ?? 0;
+  const available = Math.max(
+    0,
+    (asset.quantity ?? 0) -
+      (directCustodySum._sum.quantity ?? 0) -
+      (kitSum._sum.quantity ?? 0) -
+      checkedOut.standalone
+  );
 
   /**
    * PRESERVED predicate: low iff available is at or below the threshold.
    * `minQuantity === 0` legitimately alerts at out-of-stock (available <= 0).
    */
   const isLow = available <= asset.minQuantity;
+  /** In-app toast wording only; the emails format units via `formatQuantity`. */
   const unitLabel = asset.unitOfMeasure ?? "units";
 
   if (isLow && asset.lowStockNotifiedAt == null) {
     /* ----------------------- Enter low: fire alert ----------------------- */
 
-    /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    /** In-app notification for the acting user (skipped when none, or silent). */
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Low stock alert",
         message: `${asset.title} has ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -294,20 +704,28 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "alert",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "alert",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: asset.unitOfMeasure,
+        inCustody,
+        userId,
+      });
+    }
 
     /**
      * Stamp the debounce marker AFTER sending so a further decrement while the
-     * asset stays low won't re-alert. Best-effort (see file header): a failed
-     * stamp just means the next decrement re-fires — never a rollback.
+     * asset stays low won't re-alert. Stamped even in silent mode: the marker
+     * records "this low-stock episode is accounted for", which is exactly true
+     * when the user set the threshold themselves, and leaving it null would
+     * make the very next stock movement fire the alert we just suppressed.
+     * Best-effort (see file header): a failed stamp just means the next
+     * decrement re-fires, never a rollback.
      */
     try {
       await db.asset.update({
@@ -356,7 +774,7 @@ async function runLowStockCheck({
     }
 
     /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Back in stock",
         message: `${asset.title} is back above its threshold: ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -365,15 +783,19 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "recovered",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "recovered",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: asset.unitOfMeasure,
+        inCustody,
+        userId,
+      });
+    }
   }
   /* else: no transition — already-notified-and-still-low, or fine-and-was-fine. */
 }
@@ -410,6 +832,95 @@ export async function checkAndNotifyLowStock(
           assetId: params.assetId,
           organizationId: params.organizationId,
         },
+      })
+    );
+  }
+}
+
+/** One row of the {@link syncLowStockMarkers} read. */
+type LowStockMarkerRow = {
+  id: string;
+  /** A threshold is set and Free now is at or below it. */
+  is_low: boolean;
+  /** `lowStockNotifiedAt` is set. */
+  marked: boolean;
+};
+
+/**
+ * Brings `lowStockNotifiedAt` up to date for many assets at once, with the
+ * marker transitions of {@link checkAndNotifyLowStock} in silent mode and none
+ * of its notices: no email, no in-app toast.
+ *
+ * For bulk callers that move assets into or out of the low band on purpose (a
+ * bulk Min quantity change), where the user can already see the result and a
+ * notice per asset would mail several people hundreds of times. The marker
+ * still has to follow the band, or the next stock movement alerts for an
+ * episode that is already known.
+ *
+ * Per quantity-tracked, active asset among `assetIds` in the workspace:
+ * - low (threshold set, Free now at or below it) and unmarked: stamp now
+ * - not low (including no threshold) and marked: clear
+ * - otherwise: leave it
+ *
+ * Free now is read with the SQL the asset index uses (`POOL_AGGREGATE_JOIN`
+ * and `POOL_AVAILABLE_EXPR`), so a stamped asset is one the "Low stock" toggle
+ * finds. Costs one read and at most two writes, whatever the number of assets.
+ *
+ * Best-effort: runs after the caller's write has committed, so a failure is
+ * logged and never thrown. A stale marker only means the next stock movement
+ * re-evaluates.
+ *
+ * @param params.assetIds - Assets to reconcile; ids outside the workspace are ignored
+ * @param params.organizationId - Workspace that scopes every read and write
+ */
+export async function syncLowStockMarkers({
+  assetIds,
+  organizationId,
+}: {
+  assetIds: string[];
+  organizationId: string;
+}): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  try {
+    const rows = await db.$queryRaw<LowStockMarkerRow[]>(Prisma.sql`
+      SELECT
+        a.id,
+        COALESCE(
+          a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity",
+          false
+        ) AS is_low,
+        (a."lowStockNotifiedAt" IS NOT NULL) AS marked
+      FROM public."Asset" a
+      ${POOL_AGGREGATE_JOIN}
+      WHERE a."organizationId" = ${organizationId}
+        AND a."archivedAt" IS NULL
+        AND a.type = 'QUANTITY_TRACKED'
+        AND a.id = ANY(${assetIds}::text[])
+    `);
+
+    const toStamp = rows.filter((r) => r.is_low && !r.marked).map((r) => r.id);
+    const toClear = rows.filter((r) => !r.is_low && r.marked).map((r) => r.id);
+
+    if (toStamp.length > 0) {
+      await db.asset.updateMany({
+        where: { id: { in: toStamp }, organizationId },
+        data: { lowStockNotifiedAt: new Date() },
+      });
+    }
+    if (toClear.length > 0) {
+      await db.asset.updateMany({
+        where: { id: { in: toClear }, organizationId },
+        data: { lowStockNotifiedAt: null },
+      });
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to sync low-stock markers",
+        additionalData: { organizationId, assetCount: assetIds.length },
+        label: "Notification",
       })
     );
   }

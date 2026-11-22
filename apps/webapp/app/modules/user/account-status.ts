@@ -14,10 +14,12 @@
  *
  * @see {@link file://./../../routes/_layout+/admin-dashboard+/users.tsx}
  */
-import { OrganizationRoles, OrganizationType, TierId } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
+import { OrganizationType, TierId } from "@prisma/client";
 
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { formatDate } from "~/utils/date-format";
+import { isWorkspaceOwner } from "~/utils/permissions/role-access";
 
 /** A workspace membership, as far as the status label is concerned. */
 export type MembershipForAccountStatus = {
@@ -59,8 +61,8 @@ function isPaidTier(tierId: TierId): boolean {
 /**
  * The team workspace this user owns, if any.
  *
- * Ownership is recorded twice — as an OWNER role and as the organization's
- * `userId` — so both are accepted.
+ * Ownership is recorded twice, as an OWNER role and as the organization's
+ * `userId`, so both are accepted.
  */
 function findOwnedTeam(
   user: UserForAccountStatus
@@ -68,8 +70,7 @@ function findOwnedTeam(
   return user.userOrganizations.find(
     (uo) =>
       uo.organization.type === OrganizationType.TEAM &&
-      (uo.roles.includes(OrganizationRoles.OWNER) ||
-        uo.organization.userId === user.id)
+      (isWorkspaceOwner(uo.roles) || uo.organization.userId === user.id)
   );
 }
 
@@ -86,7 +87,7 @@ function findJoinedTeam(
   const joinedTeams = user.userOrganizations.filter(
     (uo) =>
       uo.organization.type === OrganizationType.TEAM &&
-      !uo.roles.includes(OrganizationRoles.OWNER)
+      !isWorkspaceOwner(uo.roles)
   );
 
   return (

@@ -2,7 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DescriptionComponent } from "./description-component";
 
-// Mock the Button component
+// why: the real Button pulls in react-router and tooltip wiring; a plain
+// button keeps these tests about the description logic.
 vi.mock("~/components/shared/button", () => ({
   Button: vi.fn(({ children, onClick, className, ...props }) => (
     <button onClick={onClick} className={className} {...props}>
@@ -11,7 +12,8 @@ vi.mock("~/components/shared/button", () => ({
   )),
 }));
 
-// Mock Radix UI Popover components
+// why: Radix renders popover content in a portal only once opened; these
+// stubs render it inline so its text can be asserted without a real open.
 vi.mock("@radix-ui/react-popover", () => ({
   Popover: vi.fn(({ children, open, onOpenChange }) => (
     <div
@@ -221,6 +223,58 @@ describe("DescriptionComponent", () => {
       const button = screen.getByRole("button");
       expect(button.textContent).toContain(
         "Thisisaverylongdescriptionwithoutanyspacesthatshou..."
+      );
+    });
+  });
+
+  describe("Multi-line descriptions", () => {
+    it("gives a short multi-line description a popover", () => {
+      render(<DescriptionComponent oldText={"Line A\nLine B"} />);
+
+      expect(screen.getByRole("button").textContent).toBe("Line A Line B...");
+      expect(screen.getByTestId("popover-content").textContent).toContain(
+        "Line A\nLine B"
+      );
+    });
+
+    it("truncates the whitespace-collapsed text of many short lines", () => {
+      const sixLines = [
+        "Charger cable",
+        "Spare battery pack",
+        "Carrying case",
+        "Lens cap",
+        "User manual",
+        "Warranty card",
+      ].join("\n");
+      render(<DescriptionComponent newText={sixLines} />);
+
+      expect(screen.getByRole("button").textContent).toBe(
+        "Charger cable Spare battery pack Carrying case Len..."
+      );
+      expect(screen.getByTestId("popover-content").textContent).toContain(
+        sixLines
+      );
+    });
+
+    it("keeps a short single-line description inline", () => {
+      render(<DescriptionComponent oldText="One line only" />);
+
+      expect(screen.getByText("One line only")).toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("gives a short multi-line new text a popover in a change", () => {
+      render(
+        <DescriptionComponent oldText="Old desc" newText={"First\r\nSecond"} />
+      );
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0].textContent).toBe("First Second...");
+      expect(screen.getByText("Old desc")).toBeInTheDocument();
+      expect(screen.getByText("New Description:")).toBeInTheDocument();
+      expect(screen.getByTestId("popover-content").textContent).toContain(
+        "First\r\nSecond"
       );
     });
   });

@@ -1,4 +1,4 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -17,20 +17,23 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckoutDrawer from "~/components/scanner/drawer/uses/partial-checkout-drawer";
 import { db } from "~/database/db.server";
 import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-checkin-session-initialization";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
+import { outranksReservations } from "~/modules/booking/helpers";
 import {
   checkoutAssets,
   computeBookingAssetRemainingToCheckOut,
   computeBookingAssetSliceRemainingToCheckOut,
+  findKitsBookedElsewhere,
   getBooking,
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
+  assertRequestMayBeCheckedOut,
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -39,46 +42,47 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canPartialCheckInOut } from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
+import { scanSaveError } from "~/utils/scan-save-error.server";
+import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
 /**
- * Checkout-eligibility guard shared by the loader and the action.
+ * Check-out guard shared by the loader and the action of the partial
+ * check-out page.
  *
- * Self-service users may check out only their OWN (custodian) booking and only
- * in a checkout-eligible status; everyone else is gated by
- * `canUserManageBookingAssets`. This MUST run in the action too, not just the
- * loader: a Remix action can be POSTed directly (bypassing the loader), and
- * `PermissionAction.checkout` alone is granted to SELF_SERVICE — so without it a
- * self-service user could check out assets in another user's booking in the
- * same organization.
+ * `canPartialCheckInOut` answers it: the manage-items rule, or, for roles
+ * whose policy has `bookings.partialScanAsCustodian`, a RESERVED, ONGOING or
+ * OVERDUE booking the caller is the custodian of. Creating the booking is not
+ * enough. It MUST run in the action as well as the loader: an action can be
+ * POSTed directly, and `booking:checkout` alone lets SELF_SERVICE reach any
+ * booking in the workspace.
  *
  * @throws {ShelfError} 403 when the caller may not check out this booking
- * @returns the loaded booking (so the loader can reuse it without re-fetching)
+ * @returns the loaded booking, so the loader can reuse it
  */
 async function assertUserCanCheckoutBooking({
   bookingId,
   organizationId,
   userId,
-  role,
+  access,
   userOrganizations,
   request,
 }: {
   bookingId: string;
   organizationId: string;
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
   userOrganizations: Awaited<
     ReturnType<typeof requirePermission>
   >["userOrganizations"];
   request: Request;
 }) {
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
   const booking = await getBooking({
     id: bookingId,
     organizationId,
@@ -86,19 +90,15 @@ async function assertUserCanCheckoutBooking({
     request,
   });
 
-  // Self-service users are allowed when the booking is reservable/ongoing/overdue
-  // AND they are the custodian. The generic canUserManageBookingAssets blocks
-  // self-service on non-draft bookings, but that restriction is for
-  // adding/removing assets, not for checking out.
-  const isCheckoutEligible =
-    booking.status === "RESERVED" ||
-    booking.status === "ONGOING" ||
-    booking.status === "OVERDUE";
-  const isCustodian = booking.custodianUserId === userId;
-  const canCheckout =
-    isSelfService && isCheckoutEligible && isCustodian
-      ? true
-      : canUserManageBookingAssets(booking, isSelfService);
+  const canCheckout = canPartialCheckInOut({
+    access,
+    booking: {
+      status: booking.status,
+      custodianUserId: booking.custodianUserId,
+    },
+    userId,
+    direction: "checkout",
+  });
 
   if (!canCheckout) {
     throw new ShelfError({
@@ -123,22 +123,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
-      }
-    );
+      });
 
     const booking = await assertUserCanCheckoutBooking({
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       userOrganizations,
       request,
+    });
+
+    // A pending request is approved first, never checked out: the scanner is
+    // not opened for it. Its check-out is refused in the service too.
+    await assertRequestMayBeCheckedOut({
+      bookingId: booking.id,
+      organizationId,
     });
 
     // Always fetch partial check-out data for scanner validation. We need this
@@ -186,7 +192,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * kit-driven-first, so per-slice and per-asset agree on the pool size.
      *
      * Calling `computeBookingAssetSliceRemainingToCheckOut` (and NOT
-     * `computeBookingAssetSliceRemaining`, which is the check-IN equivalent)
+     * `computeBookingCheckinRemaining`, which is the check-IN equivalent)
      * is load-bearing — using the wrong helper silently shows check-IN
      * remaining counts on the checkout drawer.
      */
@@ -360,6 +366,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
+    /**
+     * Pools on this booking at two or more locations that have not gone out
+     * yet. The drawer shows a "From location" select under each one's
+     * quantity input.
+     */
+    const checkoutSourceQuestions = await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId: booking.id,
+    });
+
+    /**
+     * Kits on this booking that another booking holds, so the drawer can raise
+     * the refusal as a blocker instead of only at submit. Same lookup, window
+     * and in-flight rule as `partialCheckoutBooking`, so the two cannot
+     * disagree.
+     */
+    const kitsBookedElsewhere = (
+      await findKitsBookedElsewhere({
+        slices: booking.bookingAssets.map((ba) => ({
+          assetId: ba.assetId,
+          assetKitId: ba.assetKitId,
+          sourceKitId: ba.sourceKitId,
+        })),
+        bookingId: booking.id,
+        from: booking.from,
+        to: booking.to,
+        organizationId,
+        ignoreReservedConflicts: outranksReservations(booking.status),
+      })
+    ).map(({ id, assetIds }) => ({ id, assetIds }));
+
     return payload({
       title,
       header,
@@ -369,6 +406,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       remainingToCheckOutByAsset,
       expectedAssets,
       expectedKits,
+      checkoutSourceQuestions,
+      kitsBookedElsewhere,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -385,14 +424,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
-      }
-    );
+      });
 
     // Re-apply the same custodian/eligibility guard as the loader. The action
     // is directly POST-able and PermissionAction.checkout is granted to
@@ -402,7 +440,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       userOrganizations,
       request,
     });
@@ -414,6 +452,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // QUANTITY_TRACKED assets. The schema extension lives on
     // `partialCheckoutAssetsSchema` (imported by `checkoutAssets`), so
     // forwarding the FormData unchanged is sufficient.
+    // Everything on this page went through the scanner, except the slices the
+    // drawer names in `selectedBookingAssetIds`: those were checked "without
+    // scanning" and are recorded as selected.
     return await checkoutAssets({
       formData,
       request,
@@ -421,12 +462,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       userId,
       authSession,
+      provenance: { surface: "web", method: "scanned" },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
+
+/**
+ * Keeps the scanner, and the list on it, on screen when the save request gets
+ * no answer (a gateway timeout, an unreachable server, a dropped connection).
+ * The drawer then tells the operator to check before confirming again,
+ * because a request cut off in transit may still have been saved.
+ */
+export const clientAction = keepScanListOnSubmitFailure;
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -452,6 +502,7 @@ export default function CheckoutAssetsFromBooking() {
    * different booking (or to check-in) doesn't see stale data.
    */
   useBookingCheckinSessionInitialization({
+    draftScope: "checkout",
     session: {
       bookingId: booking.id,
       bookingName: booking.name,
@@ -461,8 +512,10 @@ export default function CheckoutAssetsFromBooking() {
     expectedAssets,
   });
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -481,7 +534,11 @@ export default function CheckoutAssetsFromBooking() {
 
       <PartialCheckoutDrawer isLoading={isLoading} defaultExpanded={true} />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -490,9 +547,6 @@ export default function CheckoutAssetsFromBooking() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

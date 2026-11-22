@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
+import { BOOKING_PSEUDO_STATUS_LABELS } from "@shelf/labels";
+import { useRerenderAt } from "~/hooks/use-rerender-at";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isReservationExpired } from "~/modules/booking/helpers";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { bookingStatusColorMap } from "~/utils/bookings";
 import { Badge } from "../shared/badge";
 import {
@@ -11,42 +15,114 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 
+/**
+ * A booking's status badge. On a reserved booking the member holds, it adds a
+ * "subject to review" tooltip when that member's reservations are requests.
+ * A reservation request still waiting for a decision gets a second,
+ * "Pending approval" badge beside the status, so the state is visible
+ * wherever the status is.
+ */
 export function BookingStatusBadge({
   status,
   custodianUserId,
+  to,
+  isPendingApproval = false,
 }: {
   status: BookingStatus;
   /** Id of the custodian if it's a user */
   custodianUserId: string | undefined;
+  /**
+   * The booking's end date. With it, a RESERVED booking whose end has passed
+   * reads "Expired" in gray instead of "Reserved" in blue: the stored status
+   * is unchanged, the chip just stops promising a pickup that never came (see
+   * `isReservationExpired`). Call sites that must show the stored status
+   * verbatim, such as activity notes, leave it out.
+   */
+  to?: Date | string | null;
+  /**
+   * Derived by the caller with `isBookingPendingApproval`: the workspace
+   * requires approval and this RESERVED booking has not been approved yet.
+   */
+  isPendingApproval?: boolean;
 }) {
-  const { isBase } = useUserRoleHelper();
+  const reservationIsRequest = useReservationIsRequest();
   const user = useUserData();
+  // The Expired label reads the clock, so a page left open re-renders at the
+  // reservation's end. Past, missing or non-RESERVED dates schedule nothing.
+  useRerenderAt(status === BookingStatus.RESERVED && to ? new Date(to) : null);
 
   /**
    * This is used to show the extra info tooltip when the booking is
    * reserved and the user is the custodian of the booking.
-   * This is only shown for base users.
+   * Shown to members whose reservations are requests (they cannot check out).
+   * A pending request carries its own badge and tooltip instead.
    */
+  const isExpired = isReservationExpired(status, to);
   const shouldShowExtraInfo =
-    isBase &&
+    reservationIsRequest &&
     status === BookingStatus.RESERVED &&
+    // A dead request is not under review any more.
+    !isExpired &&
+    !isPendingApproval &&
     custodianUserId &&
     custodianUserId === user?.id;
 
-  const colors = bookingStatusColorMap[status];
-  return (
+  const colors = isExpired ? BADGE_COLORS.gray : bookingStatusColorMap[status];
+  const label = isExpired ? "EXPIRED" : status;
+  const statusBadge = (
     <Badge color={colors.bg} textColor={colors.text} withDot={false}>
       {shouldShowExtraInfo ? (
         <ExtraInfoTooltip>
           <span className="block whitespace-nowrap lowercase first-letter:uppercase">
-            {status} - subject to review
+            {label} - subject to review
           </span>
         </ExtraInfoTooltip>
       ) : (
         <span className="block whitespace-nowrap lowercase first-letter:uppercase">
-          {status}
+          {label}
         </span>
       )}
+    </Badge>
+  );
+
+  if (!isPendingApproval) return statusBadge;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {statusBadge}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <PendingApprovalChip />
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-72">
+            <p>
+              This booking request is waiting for approval by an administrator
+              or manager. The items are held for the booking period, but they
+              cannot be checked out until the request is approved.
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+}
+
+/**
+ * The amber "Pending approval" chip on its own, without a tooltip. The status
+ * badge wraps it in an explanation for a live booking; an activity note shows
+ * it bare, as the state the booking was in when the note was written.
+ */
+export function PendingApprovalChip() {
+  return (
+    <Badge
+      color={BADGE_COLORS.orange.bg}
+      textColor={BADGE_COLORS.orange.text}
+      withDot={false}
+    >
+      <span className="block whitespace-nowrap">
+        {BOOKING_PSEUDO_STATUS_LABELS.PENDING_APPROVAL}
+      </span>
     </Badge>
   );
 }
@@ -58,9 +134,9 @@ function ExtraInfoTooltip({ children }: { children: ReactNode }) {
         <TooltipTrigger>{children}</TooltipTrigger>
         <TooltipContent side="top" className="max-w-72">
           <p>
-            Your booking is currently reserved, however the admin can choose to
-            reject or close it at any point of time, if there are conflicts with
-            other bookings.
+            Your booking is currently reserved, however an administrator or
+            manager can choose to reject or close it at any point of time, if
+            there are conflicts with other bookings.
           </p>
         </TooltipContent>
       </Tooltip>

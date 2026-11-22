@@ -1,9 +1,16 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { BookingsListSchema } from "~/components/booking/bookings-list-fields";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
+import { BulkCheckinBookingsSchema } from "~/components/booking/bulk-checkin-dialog";
+import { BulkCheckoutBookingsSchema } from "~/components/booking/bulk-checkout-dialog";
 import { BulkDeleteBookingSchema } from "~/components/booking/bulk-delete-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import {
+  bulkCheckinBookings,
+  bulkCheckoutBookings,
+} from "~/modules/booking/bulk-check-in-out.server";
 import {
   bulkArchiveBookings,
   bulkCancelBookings,
@@ -33,20 +40,36 @@ export async function action({ request, context }: ActionFunctionArgs) {
       formData,
       z
         .object({
-          intent: z.enum(["bulk-delete", "bulk-archive", "bulk-cancel"]),
+          intent: z.enum([
+            "bulk-delete",
+            "bulk-archive",
+            "bulk-cancel",
+            "bulk-checkout",
+            "bulk-checkin",
+          ]),
         })
         .and(CurrentSearchParamsSchema)
     );
 
+    // The list the dialog was opened on, which a "Select all" stands for. It
+    // only narrows: the services AND it with the workspace and ownership scope.
+    const list = parseData(formData, BookingsListSchema);
+
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
-      "bulk-archive": PermissionAction.update,
-      "bulk-cancel": PermissionAction.update,
+      // Archive and cancel have their own grants. `update` is not the gate
+      // for them: every role that writes bookings holds it.
+      "bulk-archive": PermissionAction.archive,
+      "bulk-cancel": PermissionAction.cancel,
+      // The list's check-out and check-in ask for the same grants the booking
+      // page's one-click buttons ask for.
+      "bulk-checkout": PermissionAction.checkout,
+      "bulk-checkin": PermissionAction.checkin,
     };
 
-    // `role` decides whether the bulk query is scoped to the caller's own
-    // bookings. It is the same authority the singular write paths use.
-    const { organizationId, role } = await requirePermission({
+    // `access` decides whether the bulk query is scoped to the caller's own
+    // bookings, the same authority the singular write paths use.
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -55,15 +78,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { bookingIds } = parseData(formData, BulkDeleteBookingSchema);
+        const { bookingIds, confirmation } = parseData(
+          formData,
+          BulkDeleteBookingSchema
+        );
 
         await bulkDeleteBookings({
           bookingIds,
           organizationId,
           userId,
-          role,
+          access,
           hints: getClientHint(request),
           currentSearchParams,
+          list,
+          confirmation,
         });
 
         sendNotification({
@@ -83,8 +111,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
-          role,
+          access,
           currentSearchParams,
+          list,
         });
 
         sendNotification({
@@ -104,14 +133,61 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
-          role,
+          access,
           hints: getClientHint(request),
           currentSearchParams,
+          list,
         });
 
         sendNotification({
           title: "Bookings cancelled",
           message: "Your bookings has been cancelled successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }));
+      }
+
+      case "bulk-checkout": {
+        const { bookingIds } = parseData(formData, BulkCheckoutBookingsSchema);
+
+        await bulkCheckoutBookings({
+          bookingIds,
+          organizationId,
+          userId,
+          access,
+          hints: getClientHint(request),
+          currentSearchParams,
+          list,
+        });
+
+        sendNotification({
+          title: "Bookings checked out",
+          message: "Your bookings have been checked out successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return data(payload({ success: true }));
+      }
+
+      case "bulk-checkin": {
+        const { bookingIds } = parseData(formData, BulkCheckinBookingsSchema);
+
+        await bulkCheckinBookings({
+          bookingIds,
+          organizationId,
+          userId,
+          access,
+          hints: getClientHint(request),
+          currentSearchParams,
+          list,
+        });
+
+        sendNotification({
+          title: "Bookings checked in",
+          message: "Your bookings have been checked in successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

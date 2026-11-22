@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/custody.assign";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // @vitest-environment node
@@ -113,7 +114,7 @@ describe("POST /api/mobile/custody/assign", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     });
 

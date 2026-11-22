@@ -1,0 +1,325 @@
+/**
+ * Bookings bulk actions: each intent is gated on its own permission, through
+ * the real matrix, and the services receive the caller's access.
+ *
+ * Archive and cancel need `booking:archive` / `booking:cancel`. BASE holds
+ * archive but not cancel, and neither BASE nor SELF_SERVICE holds
+ * `booking:delete`, so both are refused bulk delete outright. Check-out and check-in need `booking:checkout` /
+ * `booking:checkin`, the grants the booking page's one-click buttons ask for.
+ * Delete and archive pass the caller's access to their service, which scopes
+ * them (drafts-only delete, own bookings only).
+ *
+ * The dialogs also post which bookings list they were opened on (a kit's or an
+ * asset's Bookings tab, or the index), which a "Select all" stands for. The
+ * route hands it to the services and refuses a request naming both.
+ *
+ * @see {@link file://../../../app/routes/api+/bookings.bulk-actions.ts}
+ */
+import { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
+import { ShelfError } from "~/utils/error";
+import { PermissionEntity } from "~/utils/permissions/permission.data";
+import type { PermissionAction } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+
+// why: data() must return a real Response so the error path has a status
+vi.mock("react-router", async () => ({
+  ...(await vi.importActual("react-router")),
+  data: (body: unknown, init?: ResponseInit) =>
+    new Response(JSON.stringify(body), { status: init?.status ?? 200 }),
+}));
+
+// why: requirePermission loads the membership from the database; this stand-in
+// applies the same matrix to a chosen role so the gate under test is real
+const { requirePermissionMock } = vi.hoisted(() => ({
+  requirePermissionMock: vi.fn(),
+}));
+vi.mock("~/utils/roles.server", () => ({
+  requirePermission: requirePermissionMock,
+}));
+
+// why: the bulk services are the sinks a refused request must never reach
+vi.mock("~/modules/booking/service.server", () => ({
+  bulkArchiveBookings: vi.fn(),
+  bulkCancelBookings: vi.fn(),
+  bulkDeleteBookings: vi.fn(),
+}));
+vi.mock("~/modules/booking/bulk-check-in-out.server", () => ({
+  bulkCheckoutBookings: vi.fn(),
+  bulkCheckinBookings: vi.fn(),
+}));
+
+// why: the success toast goes through the event emitter
+vi.mock("~/utils/emitter/send-notification.server", () => ({
+  sendNotification: vi.fn(),
+}));
+
+import {
+  bulkCheckinBookings,
+  bulkCheckoutBookings,
+} from "~/modules/booking/bulk-check-in-out.server";
+import {
+  bulkArchiveBookings,
+  bulkCancelBookings,
+  bulkDeleteBookings,
+} from "~/modules/booking/service.server";
+import { action } from "~/routes/api+/bookings.bulk-actions";
+
+// @vitest-environment node
+
+/** The arguments the route passes to `requirePermission` that this suite reads. */
+type PermissionArgs = { entity: PermissionEntity; action: PermissionAction };
+
+/** Makes `requirePermission` answer with the real matrix for `role`. */
+function asRole(role: OrganizationRoles) {
+  requirePermissionMock.mockImplementation(
+    async ({ entity, action: permissionAction }: PermissionArgs) => {
+      if (
+        !userHasPermission({ roles: [role], entity, action: permissionAction })
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: "Forbidden",
+          status: 403,
+          label: "Permission",
+          shouldBeCaptured: false,
+        });
+      }
+      return permissionContext({ roles: [role] });
+    }
+  );
+}
+
+/** POSTs `intent` for one selected booking as user-1, plus any `fields`. */
+function post(intent: string, fields: Record<string, string> = {}) {
+  const body = new URLSearchParams({
+    intent,
+    "bookingIds[0]": "booking-1",
+    ...fields,
+  });
+  return action({
+    request: new Request("https://app.shelf.nu/api/bookings/bulk-actions", {
+      method: "POST",
+      body,
+    }),
+    params: {},
+    context: { getSession: () => ({ userId: "user-1" }) },
+  } as never) as unknown as Promise<Response>;
+}
+
+describe("POST /api/bookings/bulk-actions", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([
+    ["bulk-delete", bulkDeleteBookings],
+    ["bulk-cancel", bulkCancelBookings],
+    ["bulk-checkout", bulkCheckoutBookings],
+    ["bulk-checkin", bulkCheckinBookings],
+  ] as const)(
+    "refuses BASE %s, which lacks the action's own grant",
+    async (intent, service) => {
+      asRole(OrganizationRoles.BASE);
+      const response = await post(intent);
+      expect(response.status).toBe(403);
+      expect(service).not.toHaveBeenCalled();
+    }
+  );
+
+  it("asks for booking:archive and booking:cancel, not booking:update", async () => {
+    asRole(OrganizationRoles.ADMIN);
+    await post("bulk-archive");
+    await post("bulk-cancel");
+    const calls = requirePermissionMock.mock.calls as [PermissionArgs][];
+    expect(calls.map(([args]) => args.action)).toEqual(["archive", "cancel"]);
+    expect(
+      calls.every(([args]) => args.entity === PermissionEntity.booking)
+    ).toBe(true);
+  });
+
+  it("asks for booking:checkout and booking:checkin for the list's check-out and check-in", async () => {
+    asRole(OrganizationRoles.ADMIN);
+    await post("bulk-checkout");
+    await post("bulk-checkin");
+    const calls = requirePermissionMock.mock.calls as [PermissionArgs][];
+    expect(calls.map(([args]) => args.action)).toEqual(["checkout", "checkin"]);
+  });
+
+  it.each([
+    ["bulk-checkout", bulkCheckoutBookings],
+    ["bulk-checkin", bulkCheckinBookings],
+  ] as const)(
+    "hands %s the caller's access and client hints, as the singular paths get them",
+    async (intent, service) => {
+      asRole(OrganizationRoles.SELF_SERVICE);
+      const response = await post(intent);
+      expect(response.status).toBe(200);
+      expect(service).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingIds: ["booking-1"],
+          organizationId: "org-1",
+          userId: "user-1",
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ writeAll: false }),
+          }),
+        })
+      );
+    }
+  );
+
+  it("answers a refused bulk-checkout with the service's own status and message", async () => {
+    asRole(OrganizationRoles.ADMIN);
+    vi.mocked(bulkCheckoutBookings).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: '"Camera" is not reserved. Nothing was changed.',
+        label: "Booking",
+        status: 400,
+      })
+    );
+    const response = await post("bulk-checkout");
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: '"Camera" is not reserved. Nothing was changed.' },
+    });
+  });
+
+  it("lets SELF_SERVICE bulk-archive, scoped to its own bookings by access", async () => {
+    asRole(OrganizationRoles.SELF_SERVICE);
+    const response = await post("bulk-archive");
+    expect(response.status).toBe(200);
+    expect(bulkArchiveBookings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ writeAll: false }),
+        }),
+      })
+    );
+  });
+
+  it("refuses SELF_SERVICE bulk delete, which it holds no grant for", async () => {
+    asRole(OrganizationRoles.SELF_SERVICE);
+    const response = await post("bulk-delete");
+    expect(response.status).toBe(403);
+    expect(bulkDeleteBookings).not.toHaveBeenCalled();
+  });
+
+  it("passes access to bulk delete", async () => {
+    asRole(OrganizationRoles.MANAGER);
+    await post("bulk-delete");
+    expect(bulkDeleteBookings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({ role: "MANAGER" }),
+      })
+    );
+  });
+
+  it("lets BASE bulk archive, scoped by the caller's access", async () => {
+    asRole(OrganizationRoles.BASE);
+    await post("bulk-archive");
+    expect(bulkArchiveBookings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({ role: "BASE" }),
+      })
+    );
+  });
+});
+
+describe("POST /api/bookings/bulk-actions: which list a select all stands for", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    asRole(OrganizationRoles.ADMIN);
+  });
+
+  const INTENTS = [
+    ["bulk-delete", bulkDeleteBookings],
+    ["bulk-archive", bulkArchiveBookings],
+    ["bulk-cancel", bulkCancelBookings],
+    ["bulk-checkout", bulkCheckoutBookings],
+    ["bulk-checkin", bulkCheckinBookings],
+  ] as const;
+
+  it.each(INTENTS)(
+    "hands %s the kit's bookings when the dialog posts a kitId",
+    async (intent, service) => {
+      const response = await post(intent, {
+        bookingsList: "kit",
+        kitId: "kit-1",
+      });
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: { kind: "kit", kitId: "kit-1" },
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "hands %s the asset's bookings when the dialog posts an assetId",
+    async (intent, service) => {
+      const response = await post(intent, {
+        bookingsList: "asset",
+        assetId: "asset-1",
+      });
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: { kind: "asset", assetId: "asset-1" },
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "hands %s the bookings index when the dialog posts bookingsList=index",
+    async (intent, service) => {
+      const response = await post(intent, { bookingsList: "index" });
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: { kind: "index" },
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "hands %s no list when the form names none, so select all can refuse it",
+    async (intent, service) => {
+      const response = await post(intent);
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: null,
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "refuses %s when a kit's list posts no kitId",
+    async (intent, service) => {
+      const response = await post(intent, { bookingsList: "kit" });
+
+      expect(response.status).toBe(400);
+      expect(service).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(INTENTS)(
+    "refuses %s when both a kitId and an assetId are posted",
+    async (intent, service) => {
+      const response = await post(intent, {
+        bookingsList: "kit",
+        kitId: "kit-1",
+        assetId: "asset-1",
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          message:
+            "A bookings list belongs to a kit or to an asset, not to both.",
+        },
+      });
+      expect(service).not.toHaveBeenCalled();
+    }
+  );
+});

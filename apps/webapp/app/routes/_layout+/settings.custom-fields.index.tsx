@@ -20,7 +20,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
@@ -33,7 +33,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import { fieldTypeLabel } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -41,6 +41,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription.server";
 
@@ -126,7 +127,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 /** The custom fields list, with its create button and bulk actions. */
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  // The bulk menu offers Activate and Deactivate.
+  const showBulkActions = userHasPermission({
+    roles,
+    entity: PermissionEntity.customField,
+    action: PermissionAction.update,
+  });
 
   return (
     <>
@@ -151,7 +158,7 @@ export default function CustomFieldsIndexPage() {
         </Button>
       </div>
       <List
-        bulkActions={isBaseOrSelfService ? undefined : <BulkActionsDropdown />}
+        bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
         ItemComponent={CustomFieldRow}
         headerChildren={
           <>
@@ -183,9 +190,7 @@ function CustomFieldRow({
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1">
               <span className="block">{item.name}</span>
-              <span className="text-gray-600">
-                {FIELD_TYPE_NAME[item.type]}
-              </span>
+              <span className="text-gray-600">{fieldTypeLabel(item)}</span>
             </div>
           </div>
         </Link>

@@ -1,0 +1,74 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Scanning a quantity-tracked asset asks how many units to book"
+tags:
+  - bookings
+  - quantity
+  - scanner
+  - high-impact
+
+---
+# Test: scanning a quantity-tracked asset into a booking opens the quantity
+# sheet (web parity: the scan drawer's per-row quantity input), the drawer row
+# shows the amount as a chip, and the booking then holds that many.
+#
+# Requires: the DRAFT booking "ZZ Qty parity picker" from
+# 15-quantity-asset-picker.yaml, and the quantity-tracked asset
+# "Repro Super Clamp" linked to QR ${SHELF_TEST_QTY_QR_ID} (29 pcs).
+
+- runFlow: ../../shared/login.yaml
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Search bookings..."
+    timeout: 15000
+- tapOn: "Search bookings..."
+- inputText: "ZZ Qty parity"
+- extendedWaitUntil:
+    visible: ".*ZZ Qty parity picker.*"
+    timeout: 15000
+# The open keyboard swallows the first tap outside the field; close it first.
+- hideKeyboard
+- tapOn: ".*ZZ Qty parity picker.*"
+- extendedWaitUntil:
+    visible: "Scan assets or kits to add to this booking"
+    timeout: 15000
+- tapOn: "Scan assets or kits to add to this booking"
+
+# ── Scan the quantity-tracked asset by code ──
+# Dev builds hide the manual code entry behind a toggle.
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QTY_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "How many to book?"
+    timeout: 15000
+- takeScreenshot: qty-scan-sheet
+- tapOn: "Increase quantity"
+- tapOn: "Add 2 pcs"
+
+# ── The drawer row carries the amount ──
+- extendedWaitUntil:
+    visible: "2 pcs, tap to change quantity"
+    timeout: 10000
+- takeScreenshot: qty-scan-drawer
+- tapOn:
+    id: "batch-drawer-submit"
+- extendedWaitUntil:
+    visible: "Add to Booking"
+    timeout: 10000
+- tapOn: "Add"
+- extendedWaitUntil:
+    visible: "Done"
+    timeout: 20000
+- takeScreenshot: qty-scan-done
+- tapOn: "OK"
+
+# ── The booking holds 2 units of the scanned asset ──
+- extendedWaitUntil:
+    visible: ".*Repro Super Clamp.*2 pcs booked.*"
+    timeout: 20000
+- takeScreenshot: qty-scan-booked

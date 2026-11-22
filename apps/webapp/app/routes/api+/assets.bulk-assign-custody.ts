@@ -1,5 +1,8 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -37,13 +40,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
-      await requirePermission({
-        request,
-        userId,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.custody,
-      });
+    const {
+      organizationId,
+      role,
+      canUseBarcodes,
+      access,
+      currentOrganization,
+    } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.custody,
+    });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -55,7 +63,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams, quantities } = parseData(
+    const {
+      assetIds,
+      custodian,
+      currentSearchParams,
+      quantities,
+      sourceLocations,
+    } = parseData(
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
@@ -77,7 +91,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /**
      * Validate the custodian belongs to the same organization (early 404).
-     * The SELF_SERVICE "assign-to-self" guard lives in the services, not here.
+     * The "assign only to yourself" guard (`access.custody.assign`) lives in
+     * the services, not here.
      * The name fields are what the per-unit audit notes render.
      */
     const custodianRecord = await getTeamMember({
@@ -102,10 +117,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     /**
-     * The SELF_SERVICE "assign-to-self" guard lives inside the services
-     * themselves: `bulkCheckOutAssets` for whole assets and
-     * `checkOutQuantity` for the per-unit path, so web and mobile share one
-     * source of truth. The route passes `role` through to both.
+     * The caller's custody scope is enforced inside the services themselves:
+     * `bulkCheckOutAssets` for whole assets and `checkOutQuantity` for the
+     * per-unit path, so web and mobile share one source of truth. The route
+     * passes `access.custody.assign` through to both.
      */
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -116,13 +131,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Every per-unit assignment is checked before anything is written,
-    // including the SELF_SERVICE rule.
+    // including the "assign only to yourself" rule and, for a pool placed at
+    // two or more locations, what the scanner's chosen location has left.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
+      sourceLocations,
       organizationId,
       custodian: custodianRecord,
-      role,
+      custodyAssign: access.custody.assign,
       userId,
     });
 
@@ -135,14 +152,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           custodianId: custodian.id,
           custodianName: custodian.name,
           organizationId,
           currentSearchParams,
           settings,
+          lastAuditDateAccess: lastAuditDateAccessFor(
+            access,
+            currentOrganization
+          ),
+          bookableScope: resolveBookableListScope({ access, userId }),
           timeZone,
+          custodySearchScope: custodySearchScopeFor({
+            canSeeAllCustody: access.custody.seeAll,
+            userId,
+          }),
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
           // select-all custodian filter to the caller's own custody, otherwise a
           // self-service user could act on exactly the set a colleague holds.
@@ -150,7 +176,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             teamMemberIds: new URLSearchParams(
               currentSearchParams ?? ""
             ).getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
           }),
@@ -160,10 +186,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const refusals = await assignQuantities({
       quantityAssetIds,
       quantities,
+      sourceLocations,
       custodian: custodianRecord,
       userId,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
     });
     if (refusals.length) throw quantityRefusalsError("assigned", refusals);
 

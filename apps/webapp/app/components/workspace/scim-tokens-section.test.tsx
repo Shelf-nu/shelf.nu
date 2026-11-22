@@ -1,7 +1,8 @@
 import { QrIdDisplayPreference } from "@prisma/client";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import type { ScimTokenItem } from "./edit-form";
 import { TooltipProvider } from "../shared/tooltip";
 
@@ -11,6 +12,13 @@ const mockUseFetcher = vi.fn();
 const mockUseLoaderData = vi.fn();
 const mockUseRouteLoaderData = vi.fn();
 const mockUseNavigation = vi.fn(() => ({ state: "idle" as const }));
+const mockUseLocation = vi.fn(() => ({
+  pathname: "/settings/general",
+  search: "",
+  hash: "",
+  state: null,
+  key: "default",
+}));
 
 // why: isolate component from react-router hooks that depend on a running router
 vi.mock("react-router", async () => {
@@ -24,6 +32,7 @@ vi.mock("react-router", async () => {
     useLoaderData: () => mockUseLoaderData(),
     useRouteLoaderData: (...args: unknown[]) => mockUseRouteLoaderData(...args),
     useNavigation: () => mockUseNavigation(),
+    useLocation: () => mockUseLocation(),
     Link: ({ to, children, ...rest }: any) => (
       <a {...rest} href={typeof to === "string" ? to : undefined}>
         {children}
@@ -47,6 +56,7 @@ const ssoDetails = {
   selfServiceGroupId: "group-ss",
   baseUserGroupId: "group-base",
   adminGroupId: "group-admin",
+  managerGroupId: null,
 };
 
 function createLoaderData(overrides: Record<string, unknown> = {}) {
@@ -100,9 +110,10 @@ const routeLoaderDefaults: Record<string, unknown> = {
       },
     },
   },
-  // useUserRoleHelper → useRouteLoaderData("routes/_layout+/_layout")
+  // useRoleAccess and useOrganizationRoles → useRouteLoaderData("routes/_layout+/_layout")
   "routes/_layout+/_layout": {
     currentOrganizationUserRoles: ["OWNER"],
+    roleAccess: accessFor(["OWNER"]),
   },
 };
 
@@ -177,7 +188,10 @@ describe("WorkspaceScimTokensSection", () => {
     it("should not render when user is not owner", () => {
       mockUseRouteLoaderData.mockImplementation((routeId: string) => {
         if (routeId === "routes/_layout+/_layout") {
-          return { currentOrganizationUserRoles: ["ADMIN"] };
+          return {
+            currentOrganizationUserRoles: ["ADMIN"],
+            roleAccess: accessFor(["ADMIN"]),
+          };
         }
         return routeLoaderDefaults[routeId];
       });
@@ -381,5 +395,77 @@ describe("WorkspaceScimTokensSection", () => {
 
       expect(screen.queryByText("SCIM token generated")).toBeNull();
     });
+  });
+});
+
+describe("Permissions card", () => {
+  it("says what each restricted role does by default, above its switches", () => {
+    mockUseLoaderData.mockReturnValue(
+      createLoaderData({ type: "TEAM", managersCanEditAssets: false })
+    );
+
+    render(
+      <TooltipProvider>
+        <WorkspaceEditForms
+          name="Test Org"
+          currency="USD"
+          qrIdDisplayPreference={QrIdDisplayPreference.QR_ID}
+          showManagersSwitch
+        />
+      </TooltipProvider>
+    );
+
+    screen.getByText(
+      "By default, Managers run bookings, custody and audits for everyone, but cannot change the catalogue."
+    );
+    screen.getByText(
+      "By default, Self service users book assets and check them out and in for themselves, and see only their own bookings and custody."
+    );
+    screen.getByText(
+      "By default, Base users request assets through bookings that an Administrator or Manager checks out, and see only their own bookings."
+    );
+  });
+});
+
+describe("General card autofocus", () => {
+  afterEach(() => {
+    mockUseLocation.mockReturnValue({
+      pathname: "/settings/general",
+      search: "",
+      hash: "",
+      state: null,
+      key: "default",
+    });
+  });
+
+  /** Waits for the frame `useAutoFocus` defers its focus to. */
+  async function nextFrame() {
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+  }
+
+  it("focuses the workspace name when the page opens", async () => {
+    renderScimSection();
+    await nextFrame();
+
+    expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+  });
+
+  it("leaves focus alone when the page opens at a linked section", async () => {
+    // The browser starts keyboard navigation at the linked card; focusing
+    // the name input would send Tab back to the top of the page.
+    mockUseLocation.mockReturnValue({
+      pathname: "/settings/general",
+      search: "",
+      hash: "#permissions",
+      state: null,
+      key: "default",
+    });
+
+    renderScimSection();
+    await nextFrame();
+
+    expect(document.activeElement).not.toBe(screen.getByLabelText("Name"));
   });
 });

@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   AlreadyIncludedRow,
@@ -22,11 +22,23 @@ import type {
 } from "~/atoms/qr-scanner";
 import {
   assignAlreadyIncludedAtom,
+  assignReservedModelsAtom,
   expectedModelRequestsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import type { AssignSessionInfo } from "./use-booking-assign-session-initialization";
 import { useBookingAssignSessionInitialization } from "./use-booking-assign-session-initialization";
+
+// why: the hook keeps a draft of the scan list, which reads router state and
+// the signed-in user. Neither exists without a mounted router; the draft has
+// its own suite, so here they are held still.
+vi.mock("react-router", () => ({
+  // The draft reads the action's answer to keep a save that got none.
+  useActionData: () => undefined,
+  useNavigation: () => ({ state: "idle" }),
+  useLocation: () => ({ pathname: "/bookings/booking-1/overview/scan-assets" }),
+}));
+vi.mock("~/hooks/use-user-data", () => ({ useUserData: () => undefined }));
 
 function modelRequest(
   overrides: Partial<ExpectedModelRequest> = {}
@@ -82,11 +94,15 @@ describe("useBookingAssignSessionInitialization", () => {
       bookingId: "booking-1",
       session: {
         expectedModelRequests: [modelRequest()],
+        reservedModels: [
+          { assetModelId: "model-1", assetModelName: "Model One" },
+        ],
         alreadyIncluded: [includedRow()],
       },
     });
 
     expect(store.get(expectedModelRequestsAtom)).toHaveLength(1);
+    expect(store.get(assignReservedModelsAtom)).toHaveLength(1);
     expect(store.get(assignAlreadyIncludedAtom)).toHaveLength(1);
     // A prior flow's scans must never surface in this session.
     expect(store.get(scannedItemsAtom)).toEqual({});
@@ -105,6 +121,9 @@ describe("useBookingAssignSessionInitialization", () => {
       bookingId: "booking-1",
       session: {
         expectedModelRequests: [modelRequest({ remaining: 2 })],
+        reservedModels: [
+          { assetModelId: "model-1", assetModelName: "Model One" },
+        ],
         alreadyIncluded: [includedRow({ claimable: true })],
       },
     });
@@ -117,6 +136,9 @@ describe("useBookingAssignSessionInitialization", () => {
       bookingId: "booking-1",
       session: {
         expectedModelRequests: [modelRequest({ remaining: 0 })],
+        reservedModels: [
+          { assetModelId: "model-1", assetModelName: "Model One" },
+        ],
         alreadyIncluded: [includedRow({ claimable: false })],
       },
     });
@@ -131,14 +153,24 @@ describe("useBookingAssignSessionInitialization", () => {
     const store = createStore();
     const { rerender } = renderSession(store, {
       bookingId: "booking-1",
-      session: { expectedModelRequests: [modelRequest()], alreadyIncluded: [] },
+      session: {
+        expectedModelRequests: [modelRequest()],
+        reservedModels: [
+          { assetModelId: "model-1", assetModelName: "Model One" },
+        ],
+        alreadyIncluded: [],
+      },
     });
 
     store.set(scannedItemsAtom, { "qr-1": {} as never });
 
     rerender({
       bookingId: "booking-2",
-      session: { expectedModelRequests: [], alreadyIncluded: [] },
+      session: {
+        expectedModelRequests: [],
+        reservedModels: [],
+        alreadyIncluded: [],
+      },
     });
 
     expect(store.get(scannedItemsAtom)).toEqual({});
@@ -151,6 +183,9 @@ describe("useBookingAssignSessionInitialization", () => {
       bookingId: "booking-1",
       session: {
         expectedModelRequests: [modelRequest()],
+        reservedModels: [
+          { assetModelId: "model-1", assetModelName: "Model One" },
+        ],
         alreadyIncluded: [includedRow()],
       },
     });
@@ -158,15 +193,19 @@ describe("useBookingAssignSessionInitialization", () => {
     rerender({ bookingId: "booking-1", session: null });
 
     expect(store.get(expectedModelRequestsAtom)).toEqual([]);
+    expect(store.get(assignReservedModelsAtom)).toEqual([]);
     expect(store.get(assignAlreadyIncludedAtom)).toEqual([]);
   });
 
-  it("reverses all three atoms on unmount", () => {
+  it("reverses every session atom on unmount", () => {
     const store = createStore();
     const { unmount } = renderSession(store, {
       bookingId: "booking-1",
       session: {
         expectedModelRequests: [modelRequest()],
+        reservedModels: [
+          { assetModelId: "model-1", assetModelName: "Model One" },
+        ],
         alreadyIncluded: [includedRow()],
       },
     });
@@ -175,6 +214,7 @@ describe("useBookingAssignSessionInitialization", () => {
     unmount();
 
     expect(store.get(expectedModelRequestsAtom)).toEqual([]);
+    expect(store.get(assignReservedModelsAtom)).toEqual([]);
     expect(store.get(assignAlreadyIncludedAtom)).toEqual([]);
     expect(store.get(scannedItemsAtom)).toEqual({});
   });

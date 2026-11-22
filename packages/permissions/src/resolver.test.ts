@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { Role2PermissionMap } from "./matrix";
+import type { OrganizationRole } from "./roles";
 import { roleHasPermission } from "./resolver";
 import { PermissionAction, PermissionEntity } from "./vocabulary";
 
@@ -81,6 +82,30 @@ describe("roleHasPermission — ADMIN/OWNER short-circuit", () => {
 });
 
 describe("roleHasPermission — matrix lookup", () => {
+  for (const role of ["BASE", "SELF_SERVICE"] as const) {
+    test(`denies ${role} booking delete and grants booking archive`, () => {
+      // These members keep their list tidy by archiving (and discarding
+      // drafts); deleting would erase workspace booking history that admins
+      // and owners rely on.
+      assert.equal(
+        roleHasPermission({
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.delete,
+        }),
+        false
+      );
+      assert.equal(
+        roleHasPermission({
+          roles: [role],
+          entity: PermissionEntity.booking,
+          action: PermissionAction.archive,
+        }),
+        true
+      );
+    });
+  }
+
   test("denies BASE an asset create and grants an asset read", () => {
     assert.equal(
       roleHasPermission({
@@ -267,6 +292,100 @@ describe("roleHasPermission — reports entity", () => {
           true
         );
       }
+    }
+  });
+});
+
+describe("MANAGER matrix row", () => {
+  // The role holds no allow-all shortcut, so every answer comes from its row.
+  const can = (entity: string, action: string) =>
+    roleHasPermission({
+      roles: ["MANAGER"],
+      entity: entity as PermissionEntity,
+      action: action as PermissionAction,
+    });
+
+  test("runs every booking", () => {
+    for (const action of [
+      "create",
+      "read",
+      "update",
+      "delete",
+      "checkout",
+      "checkin",
+      "archive",
+      "manage-assets",
+      "manage-kits",
+      "cancel",
+      "extend",
+      "export",
+      "approve",
+    ]) {
+      assert.equal(can("booking", action), true, action);
+    }
+  });
+
+  test("decides booking requests; the requesting roles cannot", () => {
+    assert.equal(can("booking", "approve"), true);
+    for (const role of ["SELF_SERVICE", "BASE"]) {
+      assert.equal(
+        roleHasPermission({
+          roles: [role as OrganizationRole],
+          entity: "booking" as PermissionEntity,
+          action: "approve" as PermissionAction,
+        }),
+        false,
+        role
+      );
+    }
+  });
+
+  test("runs every audit, like an Administrator", () => {
+    for (const action of ["create", "read", "update", "delete", "archive"]) {
+      assert.equal(can("audit", action), true, `audit:${action}`);
+    }
+    for (const action of ["create", "read", "update", "delete"]) {
+      assert.equal(can("auditNote", action), true, `auditNote:${action}`);
+    }
+  });
+
+  test("assigns custody but does not edit the catalogue", () => {
+    assert.equal(can("asset", "custody"), true);
+    assert.equal(can("kit", "custody"), true);
+    for (const entity of ["asset", "kit"]) {
+      for (const action of ["create", "update", "delete", "import", "export"]) {
+        assert.equal(can(entity, action), false, `${entity}:${action}`);
+      }
+    }
+    for (const entity of ["category", "tag", "customField", "locationNote"]) {
+      assert.equal(can(entity, "read"), false, entity);
+    }
+    assert.equal(can("location", "read"), true);
+    assert.equal(can("location", "update"), false);
+  });
+
+  test("manages non-registered members but not the team", () => {
+    assert.equal(can("nonRegisteredMember", "create"), true);
+    assert.equal(can("nonRegisteredMember", "update"), true);
+    assert.equal(can("nonRegisteredMember", "delete"), false);
+    assert.equal(can("nonRegisteredMember", "import"), false);
+    assert.equal(can("teamMember", "read"), true);
+    for (const action of ["create", "update", "delete", "change-role"]) {
+      assert.equal(can("teamMember", action), false, action);
+    }
+  });
+
+  test("has no workspace, billing, reports or dashboard access", () => {
+    for (const entity of [
+      "workspace",
+      "generalSettings",
+      "subscription",
+      "emailSettings",
+      "reports",
+      "dashboard",
+      "teamMemberNote",
+    ]) {
+      assert.equal(can(entity, "read"), false, entity);
     }
   });
 });

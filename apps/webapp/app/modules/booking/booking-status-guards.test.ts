@@ -19,7 +19,9 @@
 import { BookingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { isBookingPendingApproval } from "~/utils/bookings";
 import {
+  assertBookingIsApproved,
   assertBookingIsCheckinable,
   assertBookingIsOpen,
   CLOSED_BOOKING_STATUSES,
@@ -118,6 +120,86 @@ describe("assertBookingIsCheckinable", () => {
         assertBookingIsCheckinable({ status, bookingId: BOOKING_ID })
       ).toThrow();
     }
+  });
+});
+
+describe("isBookingPendingApproval", () => {
+  it("is pending only for RESERVED + no approvedAt + org requires approval", () => {
+    expect(
+      isBookingPendingApproval({
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        requireBookingApproval: true,
+      })
+    ).toBe(true);
+  });
+
+  it("is not pending when the org does not require approval", () => {
+    expect(
+      isBookingPendingApproval({
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        requireBookingApproval: false,
+      })
+    ).toBe(false);
+  });
+
+  it("is not pending once approved", () => {
+    expect(
+      isBookingPendingApproval({
+        status: BookingStatus.RESERVED,
+        approvedAt: new Date(),
+        requireBookingApproval: true,
+      })
+    ).toBe(false);
+  });
+
+  it("is not pending in any non-RESERVED status", () => {
+    for (const status of Object.values(BookingStatus)) {
+      if (status === BookingStatus.RESERVED) continue;
+      expect(
+        isBookingPendingApproval({
+          status,
+          approvedAt: null,
+          requireBookingApproval: true,
+        })
+      ).toBe(false);
+    }
+  });
+});
+
+describe("assertBookingIsApproved", () => {
+  it("throws a 400 for a pending reservation request", () => {
+    expect(() =>
+      assertBookingIsApproved({
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        requireBookingApproval: true,
+        bookingId: "b1",
+      })
+    ).toThrowError(/not been approved yet/);
+  });
+
+  it("passes an approved reservation", () => {
+    expect(() =>
+      assertBookingIsApproved({
+        status: BookingStatus.RESERVED,
+        approvedAt: new Date(),
+        requireBookingApproval: true,
+        bookingId: "b1",
+      })
+    ).not.toThrow();
+  });
+
+  it("passes everything when the org does not require approval", () => {
+    expect(() =>
+      assertBookingIsApproved({
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        requireBookingApproval: false,
+        bookingId: "b1",
+      })
+    ).not.toThrow();
   });
 });
 

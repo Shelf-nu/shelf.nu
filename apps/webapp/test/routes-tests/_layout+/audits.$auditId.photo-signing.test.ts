@@ -13,7 +13,9 @@
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.activity.tsx}
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.scan.tsx}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 const { getAuditSessionDetails, requirePermission } = vi.hoisted(() => ({
   getAuditSessionDetails: vi.fn(),
@@ -30,7 +32,7 @@ vi.mock("~/modules/audit/service.server", () => ({
   getAssetsForAuditSession: vi.fn().mockResolvedValue({}),
   getAuditScans: vi.fn().mockResolvedValue([]),
   requireAuditAssignee: vi.fn(),
-  requireAuditAssigneeForBaseSelfService: vi.fn(),
+  requireAuditAssigneeForScopedViewer: vi.fn(),
   updateAuditSession: vi.fn(),
   cancelAuditSession: vi.fn(),
   archiveAuditSession: vi.fn(),
@@ -40,10 +42,16 @@ vi.mock("~/modules/audit/service.server", () => ({
   removeAuditScan: vi.fn(),
 }));
 
-// why: overview reads audit images in the same Promise.all as the session;
-// its result is not under test.
-vi.mock("~/modules/audit/image.service.server", () => ({
-  getAuditImages: vi.fn().mockResolvedValue([]),
+// why: overview reads its first page of findings after the session; its
+// result is not under test.
+vi.mock("~/modules/audit/findings.server", () => ({
+  getAuditFindingsPage: vi.fn().mockResolvedValue({
+    findings: [],
+    page: 1,
+    totalFindings: 0,
+    hasMore: false,
+  }),
+  getAuditWideFindings: vi.fn().mockResolvedValue({ notes: [], images: [] }),
 }));
 
 // why: activity reads notes after the session; its result is not under test.
@@ -84,7 +92,7 @@ beforeEach(() => {
   requirePermission.mockResolvedValue({
     organizationId: "org-1",
     userOrganizations: [],
-    isSelfServiceOrBase: false,
+    access: accessFor([OrganizationRoles.ADMIN]),
   });
   getAuditSessionDetails.mockResolvedValue({
     session: { id: "audit-1", name: "Q3 sweep", status: "ACTIVE" },

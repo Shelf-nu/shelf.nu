@@ -82,6 +82,52 @@ export function createAvailabilityLabels(
  * Predefined label configurations for common asset states
  */
 export const assetLabelPresets = {
+  /**
+   * Archived assets are read-only (issue #382) and still read AVAILABLE, so
+   * without this a scanned archived asset looks like any other row. The
+   * tooltip tells the operator to remove the row, so use it only where the
+   * drawer refuses archived assets; an audit uses {@link archivedInAudit}, and
+   * check-in and custody release use {@link archivedReturning}.
+   */
+  archived: (isArchived: boolean = false): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "Archived assets are read-only. Remove it from the list to continue.",
+    priority: 120,
+  }),
+
+  /**
+   * The audit counterpart of {@link archived}. An archived asset still counts
+   * in an audit (it is physically somewhere), so the badge only says it is out
+   * of service and asks for nothing.
+   */
+  archivedInAudit: (isArchived: boolean = false): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "This asset is archived and out of service, but it still counts in this audit.",
+    priority: 120,
+  }),
+
+  /**
+   * The counterpart of {@link archived} for drawers that bring an asset back:
+   * check-in and custody release. Neither refuses an archived asset, so the
+   * badge only says it is out of service and asks for nothing.
+   */
+  archivedReturning: (
+    isArchived: boolean = false
+  ): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "This asset is archived and out of service. It can still be returned.",
+    priority: 120,
+  }),
+
   inCustody: (isInCustody: boolean = false): AvailabilityLabelConfig => ({
     condition: isInCustody,
     badgeText: "In custody",

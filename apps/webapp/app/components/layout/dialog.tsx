@@ -14,6 +14,7 @@ export const Dialog = ({
   className,
   headerClassName,
   wrapperClassName,
+  ariaLabel,
 }: {
   title: string | ReactNode;
   children: ReactNode;
@@ -22,6 +23,8 @@ export const Dialog = ({
   className?: string;
   headerClassName?: string;
   wrapperClassName?: string;
+  /** Accessible name for the dialog, needed when `title` is not text (an icon). */
+  ariaLabel?: string;
 }) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const onCloseRef = useRef(onClose);
@@ -100,7 +103,12 @@ export const Dialog = ({
       }}
       onKeyDown={handleActivationKeyPress(() => onClose())}
     >
-      <dialog ref={dialogRef} className={tw("dialog", className)} open={open}>
+      <dialog
+        ref={dialogRef}
+        className={tw("dialog", className)}
+        open={open}
+        aria-label={ariaLabel}
+      >
         {/*
          * md:max-h-[calc(100vh-4rem)]: on desktop the dialog is `md:h-auto` and
          * the backdrop centers it without scrolling, so a tall body (e.g. the

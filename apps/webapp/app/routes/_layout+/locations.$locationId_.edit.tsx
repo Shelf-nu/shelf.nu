@@ -192,6 +192,7 @@ export default function LocationEditPage() {
       />
       <div className="items-top flex w-full justify-between md:w-min">
         <LocationForm
+          key={location.id}
           name={location.name}
           description={location.description}
           address={location.address}

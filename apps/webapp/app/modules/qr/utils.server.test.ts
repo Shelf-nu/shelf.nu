@@ -92,6 +92,61 @@ describe("generateQrObj", () => {
     expect(serviceMocks.createQr).toHaveBeenCalled();
   });
 
+  it("looks the existing code up within the caller's workspace", async () => {
+    serviceMocks.getQrByKitId.mockResolvedValue(qrRow);
+
+    await generateQrObj({
+      kitId: "kit-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(serviceMocks.getQrByKitId).toHaveBeenCalledWith({
+      kitId: "kit-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("locks the owning row only within the caller's workspace", async () => {
+    serviceMocks.getQrByAssetId.mockResolvedValue(null);
+    (db.qr.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    await generateQrObj({
+      assetId: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    const [strings, ...values] = (db.$queryRaw as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(String(strings)).toMatch(/"organizationId"/);
+    expect(values).toEqual(["asset-1", "org-1"]);
+    expect(db.qr.findFirst).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        OR: [{ organizationId: null }, { organizationId: "org-1" }],
+      },
+    });
+  });
+
+  it("refuses with 404 and creates nothing when the kit is not in the caller's workspace", async () => {
+    serviceMocks.getQrByKitId.mockResolvedValue(null);
+    // The workspace-scoped lock matches no row.
+    (db.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    await expect(
+      generateQrObj({
+        kitId: "kit-in-other-workspace",
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({ status: 404 });
+
+    expect(db.qr.findFirst).not.toHaveBeenCalled();
+    expect(serviceMocks.createQr).not.toHaveBeenCalled();
+  });
+
   it("uses the code a concurrent caller created instead of making a second", async () => {
     // Nothing existed when the first read ran, but by the time this caller
     // holds the lock another has committed one.

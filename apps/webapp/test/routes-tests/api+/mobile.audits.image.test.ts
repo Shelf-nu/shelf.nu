@@ -139,7 +139,6 @@ describe("POST /api/mobile/audits/image", () => {
     });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: true,
       canUseAudits: true,
     });
@@ -177,6 +176,8 @@ describe("POST /api/mobile/audits/image", () => {
         uploadedById: "user-1",
         auditAssetId: "audit-asset-1",
         returnParsedFormData: true,
+        // The phone route is the only caller whose CAMERA / LIBRARY is kept.
+        uploadedVia: "phone",
       })
     );
 
@@ -277,7 +278,6 @@ describe("POST /api/mobile/audits/image", () => {
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: true,
       canUseAudits: false,
     });

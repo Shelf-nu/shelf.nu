@@ -1,4 +1,7 @@
 import { apiFetch, apiUpload } from "./client";
+import type { PhotoCapture } from "../audit-photo-exif";
+import { appendAuditImageUpload } from "../audit-photo-exif";
+import { mobilePaths } from "./paths";
 import type {
   AuditsResponse,
   AuditDetailResponse,
@@ -24,9 +27,10 @@ export const auditsApi = {
    *   - `page` / `perPage` — pagination knobs.
    *   - `search` — free-text search over name / description.
    *   - `assignedToMe` — when `true`, restricts the result to audits
-   *     the caller is assigned to. For BASE/SELF_SERVICE users this is
-   *     already implicit server-side; for admins/owners it's the
-   *     companion's "Assigned to me" toggle.
+   *     the caller is assigned to. For roles limited to assigned audits
+   *     (`access.audits.seeAll` false) this is already implicit
+   *     server-side; for the others it is the companion's "Assigned to
+   *     me" toggle.
    * @param signal AbortSignal for in-flight cancellation on rapid
    *   filter toggling (the list re-fires on every chip tap; aborting
    *   the previous request stops a slow earlier response from
@@ -61,9 +65,7 @@ export const auditsApi = {
 
   /** Get full audit detail with expected assets and existing scans */
   audit: (auditId: string, orgId: string) =>
-    apiFetch<AuditDetailResponse>(
-      `/api/mobile/audits/${auditId}?orgId=${orgId}`
-    ),
+    apiFetch<AuditDetailResponse>(mobilePaths.audit(auditId, orgId)),
 
   /**
    * Get every note and photo recorded on an audit, for READING.
@@ -94,14 +96,15 @@ export const auditsApi = {
     auditAssetId?: string | null
   ) =>
     apiFetch<AuditEvidenceResponse>(
-      `/api/mobile/audits/${auditId}/evidence?orgId=${orgId}` +
-        (auditAssetId
-          ? `&auditAssetId=${encodeURIComponent(auditAssetId)}`
-          : ""),
+      mobilePaths.auditEvidence(auditId, orgId, auditAssetId),
       { signal }
     ),
 
-  /** Record a scan during an audit (idempotent) */
+  /**
+   * Record a scan during an audit (idempotent). A quantity-tracked asset
+   * carries `foundQuantity`, the units counted; sending it for an asset that
+   * is already scanned replaces the count.
+   */
   recordAuditScan: (
     orgId: string,
     payload: {
@@ -109,6 +112,7 @@ export const auditsApi = {
       qrId: string;
       assetId: string;
       isExpected: boolean;
+      foundQuantity?: number;
     }
   ) =>
     apiFetch<RecordScanResponse>(
@@ -206,6 +210,9 @@ export const auditsApi = {
    * @param imageUri Local file URI from expo-image-picker
    * @param mimeType Image MIME type (defaults to image/jpeg)
    * @param content Optional note text to accompany the image
+   * @param capture How and when the photo was taken, from the picker: the
+   *   source (camera or library) and the EXIF date, which the server uses when
+   *   the file itself no longer carries EXIF
    */
   uploadImage: (
     orgId: string,
@@ -213,19 +220,11 @@ export const auditsApi = {
     auditAssetId: string,
     imageUri: string,
     mimeType: string = "image/jpeg",
-    content?: string
+    content?: string,
+    capture: PhotoCapture | null = null
   ) => {
     const formData = new FormData();
-    // React Native FormData accepts objects with uri/type/name for file uploads
-    formData.append("image", {
-      uri: imageUri,
-      type: mimeType,
-      name: `audit-photo.${mimeType === "image/png" ? "png" : "jpg"}`,
-    } as any);
-
-    if (content) {
-      formData.append("content", content);
-    }
+    appendAuditImageUpload(formData, { imageUri, mimeType, content, capture });
 
     const params = new URLSearchParams({
       orgId,

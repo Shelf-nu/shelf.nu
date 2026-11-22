@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -72,14 +71,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
     );
 
-    // Self-service / base users may only pick models against a booking they
-    // own, so an unowned booking 404s here instead of leaking its models and
-    // reservations. Deliberately the WRITE scope, not the read scope: see the
-    // module docblock.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // A caller who does not write every booking may only pick models against
+    // a booking they hold, so an unowned booking 404s here instead of leaking
+    // its models and reservations. Deliberately the WRITE scope, not the read
+    // scope: see the module docblock.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const booking = await db.booking.findFirst({
       where: {
@@ -99,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
            * is itself an OR — it joins this AND rather than sitting beside it,
            * where the two ORs would collide.
            */
-          ...(isSelfServiceOrBase
+          ...(!access.bookings.writeAll
             ? [
                 custodianScopeClause(
                   await resolveCustodianScope({
@@ -144,9 +140,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       perPage,
     });
 
-    // Trim to a mobile-friendly payload. Drop the web-only `initialAssetModels`
-    // (shaped for the web DynamicSelect seed list) — the app renders its own
-    // list from `assetModels`.
+    // Trim to a mobile-friendly payload: the app renders its own list from
+    // `assetModels` and needs only the availability fields of each model.
     return data({
       // Whether the workspace has any AssetModel at all (hides the picker).
       showModelsTab: modelTabData.showModelsTab,
@@ -156,6 +151,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         name: m.name,
         total: m.total,
         available: m.available,
+        // Units held by name come out of the same pool, so the app needs them
+        // to cap a reservation where the server does.
+        namedNotInCustody: m.namedNotInCustody,
         inCustody: m.inCustody,
         reservedConcrete: m.reservedConcrete,
         reservedViaRequest: m.reservedViaRequest,

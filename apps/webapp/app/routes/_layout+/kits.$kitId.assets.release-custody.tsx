@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useLoaderData, useNavigation } from "react-router";
 
@@ -7,7 +6,7 @@ import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { getKit, releaseCustody } from "~/modules/kit/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -76,15 +75,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { role, organizationId } = await requirePermission({
+    const { access, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.custody,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
-    if (isSelfService) {
+    if (assignsSelfOnly) {
       const custody = await db.kitCustody.findUnique({
         where: { kitId },
         select: {
@@ -145,7 +144,7 @@ export default function ReleaseKitCustody() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
 
   return (
     <>
@@ -157,7 +156,7 @@ export default function ReleaseKitCustody() {
           <h4>Release custody of kit</h4>
           <p>
             Are you sure you want to release{" "}
-            {isSelfService ? (
+            {assignsSelfOnly ? (
               "your"
             ) : (
               <span className="font-medium">

@@ -28,8 +28,21 @@ describe("getLocations", () => {
     await getLocations({ organizationId });
 
     expect(findManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { createdAt: "desc" } })
+      expect.objectContaining({
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      })
     );
+  });
+
+  it("breaks ties on the sort key by id, so pages never overlap", async () => {
+    await getLocations({
+      organizationId,
+      orderBy: "name",
+      orderDirection: "asc",
+    });
+
+    const { orderBy } = findManyMock.mock.calls[0][0]!;
+    expect(Array.isArray(orderBy) && orderBy.at(-1)).toEqual({ id: "asc" });
   });
 
   it("sorts by name ascending when requested", async () => {
@@ -40,7 +53,7 @@ describe("getLocations", () => {
     });
 
     expect(findManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { name: "asc" } })
+      expect.objectContaining({ orderBy: [{ name: "asc" }, { id: "asc" }] })
     );
   });
 
@@ -55,7 +68,7 @@ describe("getLocations", () => {
     // _count-driven sort goes through `assetLocations` (was `assets`).
     expect(findManyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        orderBy: { assetLocations: { _count: "desc" } },
+        orderBy: [{ assetLocations: { _count: "desc" } }, { id: "asc" }],
       })
     );
   });
@@ -68,7 +81,9 @@ describe("getLocations", () => {
     });
 
     expect(findManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { createdAt: "asc" } })
+      expect.objectContaining({
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      })
     );
   });
 
@@ -80,7 +95,9 @@ describe("getLocations", () => {
     });
 
     expect(findManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { createdAt: "asc" } })
+      expect.objectContaining({
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      })
     );
   });
 
@@ -93,7 +110,7 @@ describe("getLocations", () => {
     });
 
     expect(findManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { name: "desc" } })
+      expect.objectContaining({ orderBy: [{ name: "desc" }, { id: "asc" }] })
     );
   });
 

@@ -49,4 +49,21 @@ describe("LinkComponent", () => {
     expect(container.querySelector("a")).toBeNull();
     expect(container.innerHTML).not.toContain("evil.com");
   });
+
+  it.each([
+    ["newline", "/\n/evil.com"],
+    ["tab", "/\t/evil.com"],
+    ["CRLF", "/\r\n/evil.com"],
+    ["backslash", "/\\evil.com"],
+  ])(
+    "emits no href for a target split by a %s into a host",
+    (_label, payload) => {
+      // URL parsing strips tabs and line breaks, so these resolve to
+      // `//evil.com`, and a note attribute can hold these characters.
+      const { container } = renderLink(payload, "click me");
+
+      expect(container.querySelector("a")).toBeNull();
+      expect(container.innerHTML).not.toContain("evil.com");
+    }
+  );
 });

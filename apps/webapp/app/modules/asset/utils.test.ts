@@ -14,6 +14,7 @@ import {
   canDuplicateAsset,
   getPrimaryKit,
   getPrimaryLocation,
+  getRowKitStatus,
   isDirectBookingBlockedByKit,
   isQuantityTracked,
 } from "./utils";
@@ -136,4 +137,24 @@ describe("canDuplicateAsset", () => {
       );
     }
   );
+});
+
+describe("getRowKitStatus", () => {
+  it("reads the kit from a simple-mode row's assetKits", () => {
+    expect(
+      getRowKitStatus({ assetKits: [{ kit: { status: "IN_CUSTODY" } }] })
+    ).toBe("IN_CUSTODY");
+  });
+
+  it("reads the kit from an advanced-mode row's flattened kit", () => {
+    expect(getRowKitStatus({ kit: { status: "CHECKED_OUT" } })).toBe(
+      "CHECKED_OUT"
+    );
+  });
+
+  it("answers null for a row in no kit, in either shape", () => {
+    expect(getRowKitStatus({ assetKits: [] })).toBeNull();
+    expect(getRowKitStatus({ kit: null })).toBeNull();
+    expect(getRowKitStatus(null)).toBeNull();
+  });
 });

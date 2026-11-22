@@ -65,7 +65,12 @@ function actAs(
   { canSeeAllCustody = false }: { canSeeAllCustody?: boolean } = {}
 ) {
   vi.mocked(getMobileUserContext).mockResolvedValue(
-    mobileUserContext({ roles, canSeeAllCustody })
+    mobileUserContext({
+      roles,
+      workspace: canSeeAllCustody
+        ? { selfServiceCanSeeCustody: true, baseUserCanSeeCustody: true }
+        : {},
+    })
   );
 }
 

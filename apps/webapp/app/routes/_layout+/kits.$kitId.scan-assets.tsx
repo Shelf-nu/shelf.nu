@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
@@ -13,8 +13,9 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scanner";
 import AddAssetsToKitDrawer from "~/components/scanner/drawer/uses/add-assets-to-kit-drawer";
 import { db } from "~/database/db.server";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
+import { useScanDraftOnEntry } from "~/hooks/use-scan-draft";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { updateKitAssets } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -27,7 +28,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
+import { scanSaveError } from "~/utils/scan-save-error.server";
+import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export type LoaderData = typeof loader;
 
@@ -82,6 +84,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+/**
+ * Keeps the scanner, and the list on it, on screen when the save request gets
+ * no answer (a gateway timeout, an unreachable server, a dropped connection).
+ * The drawer then tells the operator to check before confirming again,
+ * because a request cut off in transit may still have been saved.
+ */
+export const clientAction = keepScanListOnSubmitFailure;
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
@@ -150,17 +160,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
 
 export default function ScanAssetsForKit() {
+  const { kit } = useLoaderData<typeof loader>();
+  // Keeps the scanned codes through a reload, a closed tab or an error page.
+  useScanDraftOnEntry({ scope: "kit", targetId: kit.id });
+
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -179,7 +195,11 @@ export default function ScanAssetsForKit() {
 
       <AddAssetsToKitDrawer isLoading={isLoading} />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -187,9 +207,6 @@ export default function ScanAssetsForKit() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

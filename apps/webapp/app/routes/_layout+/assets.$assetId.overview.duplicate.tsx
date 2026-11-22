@@ -1,3 +1,4 @@
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -16,6 +17,7 @@ import Icon from "~/components/icons/icon";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import { canDuplicateAsset } from "~/modules/asset/utils";
@@ -185,7 +187,10 @@ export default function DuplicateAsset() {
   /** False for a quantity-tracked asset with no units in stock, which the
    * service refuses; the dialog says so before the user submits. */
   const canDuplicate = canDuplicateAsset(asset);
-  const disabled = isProcessing || !canDuplicate;
+  /** An archived asset is out of service; `duplicateAsset` refuses it too. */
+  const isArchived = Boolean(asset.archivedAt);
+  const canReinstate = useCanArchiveAssets();
+  const disabled = isProcessing || !canDuplicate || isArchived;
 
   return (
     <Form ref={zo.ref} method="post">
@@ -220,6 +225,7 @@ export default function DuplicateAsset() {
                   status={asset.status}
                   availableToBook={asset.availableToBook}
                   asset={asset}
+                  isArchived={isArchived}
                 />
               </div>
             </div>
@@ -242,6 +248,16 @@ export default function DuplicateAsset() {
               )?.amountOfDuplicates?.message
             }
           />
+
+          {isArchived ? (
+            <p
+              id="duplicate-archived"
+              className="w-full rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
+            >
+              <span className="block font-medium">Asset is archived</span>
+              {archivedAssetBlockedReason({ canReinstate })}
+            </p>
+          ) : null}
 
           {canDuplicate ? null : (
             <p
@@ -269,7 +285,13 @@ export default function DuplicateAsset() {
             width="full"
             type="submit"
             disabled={disabled}
-            aria-describedby={canDuplicate ? undefined : "duplicate-no-units"}
+            aria-describedby={
+              isArchived
+                ? "duplicate-archived"
+                : canDuplicate
+                ? undefined
+                : "duplicate-no-units"
+            }
           >
             {isProcessing ? <Spinner /> : "Duplicate"}
           </Button>

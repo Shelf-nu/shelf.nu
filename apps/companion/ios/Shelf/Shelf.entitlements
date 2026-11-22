@@ -12,5 +12,16 @@
     <array>
       <string>applinks:app.shelf.nu</string>
     </array>
+    <!--
+      Remote push (expo-notifications). The config plugin in app.json only
+      writes this key during prebuild, which this project never runs, so it
+      lives here by hand. "development" is the APNs sandbox for local
+      `expo run:ios` builds; Xcode and EAS switch it to "production" when
+      archiving. Without this key the device gets no APNs token and
+      `getExpoPushTokenAsync` fails. A `prebuild:clean` deletes this file;
+      restore it from git before building.
+    -->
+    <key>aps-environment</key>
+    <string>development</string>
   </dict>
 </plist>

@@ -1,4 +1,5 @@
 import { BookingStatus, KitStatus, OrganizationRoles } from "@prisma/client";
+import { kitsWithoutActiveAssetsRefusal } from "@shelf/labels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
@@ -10,6 +11,7 @@ import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
+import { ShelfError } from "~/utils/error";
 import * as rolesServer from "~/utils/roles.server";
 
 // Import the action + loader functions
@@ -18,6 +20,7 @@ import {
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -37,6 +40,8 @@ vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckinData: vi.fn(),
   updateBookingAssets: vi.fn(),
   createKitBookingNote: vi.fn(),
+  buildKitSlicesForBooking: vi.fn(),
+  countArchivedKitMembers: vi.fn(),
   // Loader-only — used by the Models-tab loader tests below.
   getBooking: vi.fn(),
   getKitIdsByBookingSlices: vi.fn(),
@@ -85,6 +90,9 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
     // origin-allowlist sanitization the action now depends on (safeRedirect's
     // own edge cases are unit-tested in http.server.test.ts).
     safeRedirect: actual.safeRedirect,
+    // why: real, so the loader reads the Models tab search and page off the
+    // request URL exactly as it does in production.
+    getCurrentSearchParams: actual.getCurrentSearchParams,
   };
 });
 
@@ -163,14 +171,15 @@ describe("manage-kits route validation", () => {
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      isSelfServiceOrBase: false,
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -199,6 +208,148 @@ describe("manage-kits route validation", () => {
       undefined as any
     );
     vi.mocked(noteService.createNotes).mockResolvedValue({ count: 0 });
+
+    // why: `buildKitSlicesForBooking` reads `AssetKit` rows from the database
+    // and has its own suite (`booking/service.server.test.ts`). This stand-in
+    // resolves the same slices from the kits `db.kit.findMany` is mocked to
+    // return, so each case below states its kits once.
+    vi.mocked(bookingService.buildKitSlicesForBooking).mockImplementation(
+      async ({ kitIds, existingAssetKitIds }) => {
+        const kits = (await db.kit.findMany()) as any[];
+        return kits
+          .filter((kit) => kitIds.includes(kit.id))
+          .flatMap((kit) =>
+            kit.assetKits
+              .filter((ak: any) => !existingAssetKitIds?.has(ak.id))
+              .map((ak: any) => ({
+                assetId: ak.asset.id,
+                assetKitId: ak.id,
+                kitId: kit.id,
+                quantity: ak.quantity,
+              }))
+          );
+      }
+    );
+    // why: a count query over `AssetKit`; no case here has archived members
+    // unless it says so.
+    vi.mocked(bookingService.countArchivedKitMembers).mockResolvedValue(0);
+  });
+
+  describe("archived kit members", () => {
+    it("refuses a joining kit with no active asset and adds nothing", async () => {
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.DRAFT,
+        bookingAssets: [],
+      } as any);
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit-archived"],
+        removedKitIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.kit.findMany).mockResolvedValue([
+        {
+          id: "kit-archived",
+          name: "Archived Kit",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            { id: "ak-archived", quantity: 1, asset: { id: "asset-a" } },
+          ],
+        },
+      ] as any);
+      // why: the shared helper owns the refusal; this is the error it throws
+      // for a kit whose members are all archived.
+      vi.mocked(bookingService.buildKitSlicesForBooking).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          label: "Kit",
+          status: 400,
+          title: "Kit has no active assets",
+          message: kitsWithoutActiveAssetsRefusal({
+            kits: [{ name: "Archived Kit", hasArchivedAssets: true }],
+            action: "booking",
+          }),
+          additionalData: { kitIdsWithoutActiveAssets: ["kit-archived"] },
+          shouldBeCaptured: false,
+        })
+      );
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(400);
+      expect(bookingService.buildKitSlicesForBooking).toHaveBeenCalledWith({
+        kitIds: ["kit-archived"],
+        organizationId: "org123",
+        existingAssetKitIds: new Set(),
+        kitIdsOnBooking: new Set(),
+      });
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    });
+
+    it("exempts kits already on the booking and counts archived members of joining kits only", async () => {
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.DRAFT,
+        bookingAssets: [
+          {
+            asset: { id: "asset1" },
+            assetId: "asset1",
+            quantity: 1,
+            id: "ba1",
+            assetKitId: "ak-on-booking",
+          },
+        ],
+      } as any);
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit-on-booking", "kit-joining"],
+        removedKitIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.kit.findMany).mockResolvedValue([
+        {
+          id: "kit-on-booking",
+          name: "Kit On Booking",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            { id: "ak-on-booking", quantity: 1, asset: { id: "asset1" } },
+          ],
+        },
+        {
+          id: "kit-joining",
+          name: "Kit Joining",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            { id: "ak-joining", quantity: 1, asset: { id: "asset3" } },
+          ],
+        },
+      ] as any);
+
+      await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(bookingService.buildKitSlicesForBooking).toHaveBeenCalledWith({
+        kitIds: ["kit-on-booking", "kit-joining"],
+        organizationId: "org123",
+        existingAssetKitIds: new Set(["ak-on-booking"]),
+        kitIdsOnBooking: new Set(["kit-on-booking"]),
+      });
+      expect(bookingService.countArchivedKitMembers).toHaveBeenCalledWith({
+        kitIds: ["kit-joining"],
+        organizationId: "org123",
+      });
+    });
   });
 
   describe("validation scope - only newly added kits", () => {
@@ -364,6 +515,13 @@ describe("manage-kits route validation", () => {
               quantity: 5,
             },
           ],
+          // `bookings.seeAll` decides whether a pool refusal names other
+          // members' bookings; the hints carry the time zone its day is
+          // written in.
+          access: expect.objectContaining({
+            bookings: expect.objectContaining({ seeAll: true }),
+          }),
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
         })
       );
     });
@@ -875,20 +1033,9 @@ describe("manage-kits route validation", () => {
     }
 
     function mockRole(role: OrganizationRoles) {
-      vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-        organizationId: "org123",
-        isSelfServiceOrBase:
-          role === OrganizationRoles.SELF_SERVICE ||
-          role === OrganizationRoles.BASE,
-        role,
-        organizations: [],
-        currentOrganization: {} as any,
-        userOrganizations: [],
-        canSeeAllBookings: false,
-        canSeeAllCustody: false,
-        canUseBarcodes: false,
-        canUseAudits: false,
-      });
+      vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role], organizationId: "org123" }) as any
+      );
     }
 
     beforeEach(() => {
@@ -1031,6 +1178,10 @@ describe("manage-kits loader — Models tab payload", () => {
     id: "booking123",
     name: "Test Booking",
     status: BookingStatus.DRAFT,
+    // The signed-in caller's own booking, so a restricted role passes the
+    // ownership check and the case stays about what the payload carries.
+    creatorId: "user123",
+    custodianUserId: null,
     from: new Date("2026-01-01"),
     to: new Date("2026-01-02"),
     bookingAssets: [],
@@ -1051,14 +1202,15 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1076,11 +1228,48 @@ describe("manage-kits loader — Models tab payload", () => {
     );
   });
 
+  it("feeds the kit rows every slice still out on an overdue booking, whatever its dates", async () => {
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    });
+
+    await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The availability label judges a kit on its own slices. An overdue kit
+    // has no known return date, so its slice must reach the row even when the
+    // overdue booking's dates no longer overlap this one.
+    const [{ extraInclude }] = vi.mocked(
+      kitService.getPaginatedAndFilterableKits
+    ).mock.calls[0] as any;
+    const sliceWhere =
+      extraInclude.assetKits.select.asset.select.bookingAssets.where;
+    // Kit-driven only: an overdue standalone slice of a member is the asset
+    // rules' business, which stay date-windowed.
+    expect(sliceWhere.OR).toContainEqual({
+      assetKitId: { not: null },
+      checkedOutAt: { not: null },
+      checkedInAt: null,
+      booking: {
+        status: BookingStatus.OVERDUE,
+        id: { not: "booking123" },
+      },
+    });
+  });
+
   it("hides the Models tab when the org has no asset models", async () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1093,25 +1282,26 @@ describe("manage-kits loader — Models tab payload", () => {
     expect(result).toMatchObject({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
     });
   });
 
-  it("wires the helper's Models tab payload through, shipping both crash-guard keys", async () => {
-    // Omitting either `initialAssetModels` or `totalAssetModels` crashes the
-    // Models tab the moment it mounts: `useModelFilters` maps over
-    // `initialData["initialAssetModels"]` / `["totalAssetModels"]`
-    // (`use-model-filters.ts:96-103`), so this test asserts BOTH keys are
-    // present, not just that the tab is shown.
+  it("wires the helper's Models tab payload through, including its paging", async () => {
+    // The Models tab renders its table and pagination straight from these
+    // keys, so every one must reach the component unchanged.
     const mockModelTabData = {
       showModelsTab: true,
       assetModels: [
         {
           id: "model1",
           name: "Dell XPS",
+          image: null,
+          thumbnailImage: null,
+          defaultCategory: null,
           total: 5,
           available: 3,
           reservedConcrete: 1,
@@ -1119,21 +1309,10 @@ describe("manage-kits loader — Models tab payload", () => {
           inCustody: 0,
         },
       ],
-      initialAssetModels: [
-        {
-          id: "model1",
-          name: "Dell XPS",
-          metadata: {
-            total: 5,
-            available: 3,
-            reservedConcrete: 1,
-            reservedViaRequest: 1,
-            inCustody: 0,
-          },
-        },
-      ],
-      totalAssetModels: 1,
+      totalAssetModels: 3,
       matchedAssetModels: 1,
+      modelsPage: 1,
+      modelsPerPage: 50,
       modelRequests: [
         {
           assetModelId: "model1",
@@ -1152,15 +1331,15 @@ describe("manage-kits loader — Models tab payload", () => {
       createLoaderArgs({ context: mockContext, params: mockParams })
     );
 
-    expect(result).toHaveProperty("initialAssetModels");
+    expect(result).toHaveProperty("modelsPage");
     expect(result).toHaveProperty("totalAssetModels");
-    expect((result as any).totalAssetModels).toBe(1);
     expect(result).toMatchObject({
       showModelsTab: true,
       assetModels: mockModelTabData.assetModels,
-      initialAssetModels: mockModelTabData.initialAssetModels,
+      modelsPage: mockModelTabData.modelsPage,
+      modelsPerPage: mockModelTabData.modelsPerPage,
       totalAssetModels: mockModelTabData.totalAssetModels,
-      matchedAssetModels: mockModelTabData.totalAssetModels,
+      matchedAssetModels: mockModelTabData.matchedAssetModels,
       modelRequests: mockModelTabData.modelRequests,
     });
   });
@@ -1174,7 +1353,8 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: true,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 1,
       matchedAssetModels: 1,
       modelRequests: [],
@@ -1187,10 +1367,55 @@ describe("manage-kits loader — Models tab payload", () => {
     expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
       organizationId: "org123",
       booking: mockLoaderBooking,
+      // Models without assets are hidden unless the URL turns them on.
+      showModelsWithoutAssets: false,
+      clampPageToResults: true,
+      pinReservedModels: true,
+    });
+  });
+
+  it("forwards the Models tab search and page from the URL", async () => {
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: true,
+      assetModels: [],
+      totalAssetModels: 1,
+      matchedAssetModels: 0,
+      modelsPage: 2,
+      modelsPerPage: 50,
+      modelRequests: [],
+    });
+
+    await loader(
+      createLoaderArgs({
+        context: mockContext,
+        params: mockParams,
+        request: new Request(
+          "http://localhost:3000/bookings/booking123/overview/manage-kits?s=kit&modelSearch=dell&modelPage=2&showEmptyModels=true"
+        ),
+      })
+    );
+
+    expect(modelRequestService.getBookingModelTabData).toHaveBeenCalledWith({
+      organizationId: "org123",
+      booking: mockLoaderBooking,
+      search: "dell",
+      page: 2,
+      showModelsWithoutAssets: true,
+      clampPageToResults: true,
+      pinReservedModels: true,
     });
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // why: a real SELF_SERVICE membership with every workspace toggle off: it
+    // may manage items on its own DRAFT booking but may not see others' custody.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.SELF_SERVICE],
+      }) as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>
+    );
+
     // why: this fixture stands in for what KITS_INCLUDE_FIELDS actually selects
     // — the full `custody.custodian.user`, `email` included — so the assertion
     // measures redaction rather than the shape of a real query. The picker
@@ -1225,7 +1450,8 @@ describe("manage-kits loader — Models tab payload", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],
@@ -1258,7 +1484,11 @@ describe("manage-kits loader — Models tab payload", () => {
         select: {
           asset: {
             select: {
-              bookingAssets: { where: { booking: { OR: OverlapClause[] } } };
+              // The first branch is the date overlap; the second is the
+              // still-out overdue kit slice, which ignores dates.
+              bookingAssets: {
+                where: { OR: [{ booking: { OR: OverlapClause[] } }, unknown] };
+              };
             };
           };
         };
@@ -1299,7 +1529,8 @@ describe("manage-kits loader — Models tab payload", () => {
       vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
         showModelsTab: false,
         assetModels: [],
-        initialAssetModels: [],
+        modelsPage: 1,
+        modelsPerPage: 50,
         totalAssetModels: 0,
         matchedAssetModels: 0,
         modelRequests: [],
@@ -1319,8 +1550,8 @@ describe("manage-kits loader — Models tab payload", () => {
       // relations are `boolean | args` unions; this names the one shape the
       // loader builds.
       const include = args.extraInclude as unknown as IncludeWithOverlap;
-      return include.assetKits.select.asset.select.bookingAssets.where.booking
-        .OR;
+      return include.assetKits.select.asset.select.bookingAssets.where.OR[0]
+        .booking.OR;
     }
 
     // The booking being filled runs Jan 1 → Jan 2 (`mockLoaderBooking`).
@@ -1406,7 +1637,8 @@ describe("manage-kits loader — Models tab payload", () => {
       vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
         showModelsTab: false,
         assetModels: [],
-        initialAssetModels: [],
+        modelsPage: 1,
+        modelsPerPage: 50,
         totalAssetModels: 0,
         matchedAssetModels: 0,
         modelRequests: [],
@@ -1499,20 +1731,9 @@ describe("manage-kits loader: ownership gate", () => {
   }
 
   function mockRole(role: OrganizationRoles) {
-    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      userOrganizations: [],
-      isSelfServiceOrBase:
-        role === OrganizationRoles.SELF_SERVICE ||
-        role === OrganizationRoles.BASE,
-      role,
-      organizations: [],
-      currentOrganization: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
-      canUseBarcodes: false,
-      canUseAudits: false,
-    });
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({ roles: [role], organizationId: "org123" }) as any
+    );
   }
 
   beforeEach(() => {
@@ -1529,7 +1750,8 @@ describe("manage-kits loader: ownership gate", () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
       assetModels: [],
-      initialAssetModels: [],
+      modelsPage: 1,
+      modelsPerPage: 50,
       totalAssetModels: 0,
       matchedAssetModels: 0,
       modelRequests: [],

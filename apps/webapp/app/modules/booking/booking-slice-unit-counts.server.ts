@@ -17,6 +17,7 @@
  */
 import {
   attributeDispositionsByBookingAsset,
+  BOOKING_DISPOSITION_CATEGORIES,
   checkoutSessionsToLogsByAsset,
   type CheckoutSession,
 } from "./checkout-attribution";
@@ -25,16 +26,9 @@ import {
   type DispositionCategoryBreakdown,
 } from "./service.server";
 
-/**
- * The `ConsumptionLog` categories that account for a booked unit coming off a
- * booking. Callers filter their disposition-log query to these.
- */
-export const BOOKING_DISPOSITION_CATEGORIES = [
-  "RETURN",
-  "CONSUME",
-  "LOSS",
-  "DAMAGE",
-] as const;
+// Defined in the pure attribution module so readers that must not load the
+// booking service (it would close an import cycle) can share it.
+export { BOOKING_DISPOSITION_CATEGORIES } from "./checkout-attribution";
 
 /** One of {@link BOOKING_DISPOSITION_CATEGORIES}. */
 type BookingDispositionCategory =

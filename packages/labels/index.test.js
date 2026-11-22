@@ -20,6 +20,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  AUDIT_PHOTO_FLAG_LABELS,
+  AUDIT_PHOTO_KEY,
+  AUDIT_PHOTO_SOURCE_LABELS,
+  describeAuditPhoto,
   ASSET_BOOKING_PSEUDO_STATUS_LABELS,
   ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
@@ -27,15 +31,38 @@ import {
   AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
+  BOOKING_METHOD,
+  DELETE_CONFIRMATION_FIELD,
+  DELETE_CONSEQUENCE_LABELS,
+  deleteConfirmationMatches,
+  deleteConfirmationTarget,
+  normalizeDeleteConfirmation,
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_ADJECTIVES,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
+  CLIENT_DECLARED_BOOKING_METHODS,
+  EXPLICIT_REQUIREMENT_LABELS,
+  EXPLICIT_REQUIREMENT_ROLE_LABELS,
+  explicitRequirementSwitchDescription,
+  KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
+  KIT_IN_USE_REINSTATE_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
+  auditCountLabel,
   auditDeletedAssetLabel,
   isAuditCompleted,
+  kitMemberCustodyBlockedReason,
+  kitMemberCustodyRefusal,
+  kitMembersCustodyRefusal,
+  archivedAssetBlockedReason,
+  archivedAssetsLeftOut,
+  archivedAssetsRefusal,
+  kitWithoutActiveAssetsReason,
+  kitsWithoutActiveAssetsRefusal,
+  modelReservationsReduced,
+  WITHHELD_CUSTODIAN_NAME,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -242,5 +269,623 @@ test("CONSUMPTION_TYPE maps cover the ConsumptionType enum", () => {
   assertSameKeys(
     CONSUMPTION_TYPE_DESCRIPTIONS,
     Object.keys(CONSUMPTION_TYPE_LABELS)
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Explicit check-in / check-out requirement
+// ---------------------------------------------------------------------------
+
+test("the two explicit-requirement cards say the same thing, verb aside", () => {
+  const { CHECKIN, CHECKOUT } = EXPLICIT_REQUIREMENT_LABELS;
+  // A reader who learned one card must be able to read the other without
+  // re-reading it, so the sentences differ only in "check in" vs "check out".
+  const sameShape = (a, b) =>
+    a.replace(/check-in|check in/gi, "check-X") ===
+    b.replace(/check-out|check out/gi, "check-X");
+  assert.ok(sameShape(CHECKIN.TITLE, CHECKOUT.TITLE));
+  assert.ok(sameShape(CHECKIN.EXEMPTION, CHECKOUT.EXEMPTION));
+  assert.ok(sameShape(CHECKIN.PHONE_HINT, CHECKOUT.PHONE_HINT));
+});
+
+test("the exemption names both roles the switches never apply to", () => {
+  for (const direction of ["CHECKIN", "CHECKOUT"]) {
+    const sentence = EXPLICIT_REQUIREMENT_LABELS[direction].EXEMPTION;
+    assert.match(sentence, /workspace owner is never restricted/);
+    assert.match(sentence, /Base users cannot check (in|out)/);
+  }
+});
+
+test("a switch description names its role and both explicit ways", () => {
+  const admin = explicitRequirementSwitchDescription("CHECKIN", "ADMIN");
+  assert.equal(
+    admin,
+    "Removes the one-click check-in for Admins and Managers. They check items in by scanning them or by selecting them from the list."
+  );
+  const selfService = explicitRequirementSwitchDescription(
+    "CHECKOUT",
+    "SELF_SERVICE"
+  );
+  assert.equal(
+    selfService,
+    "Removes the one-click check-out for Self Service users. They check items out by scanning them or by selecting them from the list."
+  );
+});
+
+test("the switch roles are exactly the two the rule can cover", () => {
+  // OWNER is exempt and BASE holds no check-in or check-out permission, so a
+  // switch for either would be a switch that changes nothing.
+  assertSameKeys(EXPLICIT_REQUIREMENT_ROLE_LABELS, ["ADMIN", "SELF_SERVICE"]);
+});
+
+test("the kit-member custody reasons name the kit and give both ways out", () => {
+  // The single-asset reason, the server refusal and the bulk reason are read
+  // side by side (a disabled menu item, then the 400 from a direct request), so
+  // all three must offer the same two ways out.
+  const waysOut =
+    /Assign custody to the kit, or remove (the asset|them) from the kit first\.$/;
+
+  assert.equal(
+    kitMemberCustodyBlockedReason("Camera Kit"),
+    'This asset is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.'
+  );
+  assert.equal(
+    kitMemberCustodyRefusal({ assetTitle: "Tripod", kitName: "Camera Kit" }),
+    '"Tripod" is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.'
+  );
+  assert.match(kitMemberCustodyBlockedReason("Camera Kit"), waysOut);
+  assert.match(
+    kitMemberCustodyRefusal({ assetTitle: "Tripod", kitName: "Camera Kit" }),
+    waysOut
+  );
+  assert.match(KIT_MEMBERS_CUSTODY_BLOCKED_REASON, waysOut);
+});
+
+test("the multi-member refusal counts the members and names the first three", () => {
+  const member = (assetTitle) => ({ assetTitle, kitName: "Camera Kit" });
+
+  assert.equal(
+    kitMembersCustodyRefusal([member("Tripod")]),
+    kitMemberCustodyRefusal(member("Tripod"))
+  );
+  assert.equal(
+    kitMembersCustodyRefusal([member("Tripod"), member("Gimbal")]),
+    '2 of the selected assets are part of a kit: "Tripod" and "Gimbal". Assign custody to the kit, or remove them from the kit first.'
+  );
+  assert.equal(
+    kitMembersCustodyRefusal(
+      ["Tripod", "Gimbal", "Mic", "Light", "Stand"].map(member)
+    ),
+    '5 of the selected assets are part of a kit: "Tripod", "Gimbal", "Mic" and 2 more. Assign custody to the kit, or remove them from the kit first.'
+  );
+});
+
+test("an archived asset's disabled reason never offers a reinstate the reader lacks", () => {
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true }),
+    "This asset is archived. Reinstate it to make changes."
+  );
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true, action: "book" }),
+    "This asset is archived. Reinstate it to book it."
+  );
+  for (const action of ["change", "book"]) {
+    const reason = archivedAssetBlockedReason({ canReinstate: false, action });
+    assert.equal(
+      reason,
+      "This asset is archived. Ask an admin to reinstate it."
+    );
+    assert.doesNotMatch(reason, /Reinstate it/);
+  }
+  // A reinstate held up by an in-use kit names the way out.
+  assert.match(
+    KIT_IN_USE_REINSTATE_REASON,
+    /Release or check in the kit first/
+  );
+});
+
+test("the archived refusal names the assets and the way out for this reader", () => {
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: true,
+    }),
+    '"Cam A" is archived. Reinstate it to make changes.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Ask an admin to reinstate it.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A", "Cam B"],
+      fix: "remove-from-list",
+      canReinstate: false,
+    }),
+    '"Cam A" and "Cam B" are archived. Remove them from the list and try again.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["A", "B", "C", "D", "E"],
+      fix: "remove-from-booking",
+      canReinstate: true,
+    }),
+    '"A", "B", "C" and 2 more are archived. Remove them from the booking or reinstate them.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "remove-from-booking",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Remove it from the booking or ask an admin to reinstate it.'
+  );
+});
+
+test("left-out counts agree in number", () => {
+  assert.equal(archivedAssetsLeftOut(1), "1 archived asset was left out.");
+  assert.equal(archivedAssetsLeftOut(3), "3 archived assets were left out.");
+});
+
+test("a copied booking names the models it reserved short", () => {
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 10, reserved: 6 },
+    ]),
+    "Only 6 of 10 × Camera could be reserved for the new dates."
+  );
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Tripod", requested: 4, reserved: 0 },
+    ]),
+    "None of the 4 × Tripod could be reserved for the new dates."
+  );
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 10, reserved: 6 },
+      { assetModelName: "Tripod", requested: 4, reserved: 0 },
+    ]),
+    "Fewer units are free for the new dates, so 2 models were reserved short: Camera (6 of 10), Tripod (0 of 4)."
+  );
+  assert.equal(
+    modelReservationsReduced(
+      ["A", "B", "C", "D", "E"].map((assetModelName) => ({
+        assetModelName,
+        requested: 2,
+        reserved: 1,
+      }))
+    ),
+    "Fewer units are free for the new dates, so 5 models were reserved short: A (1 of 2), B (1 of 2), C (1 of 2) and 2 more."
+  );
+});
+
+test("a reservation that failed is worded as an error, not a shortfall", () => {
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 4, reserved: 0, failed: true },
+    ]),
+    "Could not reserve 4 × Camera. Try again from the booking."
+  );
+  assert.equal(
+    modelReservationsReduced([
+      { assetModelName: "Camera", requested: 10, reserved: 6 },
+      { assetModelName: "Tripod", requested: 2, reserved: 0, failed: true },
+      { assetModelName: "Lens", requested: 1, reserved: 0, failed: true },
+    ]),
+    "Only 6 of 10 × Camera could be reserved for the new dates. Could not reserve 2 models (2 × Tripod, 1 × Lens). Try again from the booking."
+  ); // Twenty models from one failed batch still fit in a toast: the first three
+  // are named with their quantities, the rest counted.
+  assert.equal(
+    modelReservationsReduced(
+      ["A", "B", "C", "D", "E"].map((assetModelName) => ({
+        assetModelName,
+        requested: 2,
+        reserved: 0,
+        failed: true,
+      }))
+    ),
+    "Could not reserve 5 models (2 × A, 2 × B, 2 × C and 2 more). Try again from the booking."
+  );
+});
+
+test("a kit with no active asset says whether it is empty or only archived", () => {
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: true }],
+      action: "custody",
+    }),
+    'Kit "Camera Kit" holds only archived assets, so there is nothing to put into custody. Add an active asset to it, or have an admin reinstate one.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: false }],
+      action: "booking",
+    }),
+    'Kit "Camera Kit" has no assets, so there is nothing to book. Add assets to it first.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: ["A", "B", "C", "D"].map((name) => ({
+        name,
+        hasArchivedAssets: true,
+      })),
+      action: "custody",
+    }),
+    '4 kits have no active assets, so there is nothing to put into custody: "A", "B", "C" and 1 more. Add active assets to them first.'
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: true,
+      action: "booking",
+    }),
+    "This kit holds only archived assets. Add an active asset to book this kit."
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: false,
+      action: "custody",
+    }),
+    "This kit has no assets. Add assets to assign custody."
+  );
+});
+
+test("the declarable booking methods are BOOKING_METHOD's values, never quick", () => {
+  // The server validates the request field against the tuple and the app sends
+  // BOOKING_METHOD values, so the two must list the same words.
+  assert.deepEqual(
+    [...CLIENT_DECLARED_BOOKING_METHODS].sort(),
+    Object.values(BOOKING_METHOD).sort()
+  );
+  assert.equal(CLIENT_DECLARED_BOOKING_METHODS.includes("quick"), false);
+});
+
+test("a typed delete confirmation matches its name loosely but never blank", () => {
+  // Case, edge whitespace and doubled spaces do not decide a delete.
+  assert.equal(
+    deleteConfirmationMatches("  camera   kit ", "Camera Kit"),
+    true
+  );
+  // A composed é (NFC) and a decomposed one (NFD, as macOS can type it).
+  assert.equal(deleteConfirmationMatches("Résumé", "Résumé"), true);
+  // Counts are compared as text.
+  assert.equal(deleteConfirmationMatches("12", 12), true);
+  assert.equal(deleteConfirmationMatches(" 12 ", 12), true);
+  // A different name, a prefix or a different count is refused.
+  assert.equal(deleteConfirmationMatches("Camera", "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches("11", 12), false);
+  // Nothing typed never unlocks, whatever the name.
+  assert.equal(deleteConfirmationMatches("", "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches(undefined, "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches("", ""), false);
+  assert.equal(deleteConfirmationMatches("   ", "  "), false);
+});
+
+test("a nameless item is confirmed by typing the word delete", () => {
+  for (const name of ["", "   ", "\u200B"]) {
+    assert.equal(deleteConfirmationMatches("Delete ", name), true);
+    assert.equal(deleteConfirmationMatches("delete", name), true);
+    assert.equal(deleteConfirmationMatches("", name), false);
+    assert.equal(deleteConfirmationMatches("  ", name), false);
+    assert.equal(deleteConfirmationMatches(undefined, name), false);
+  }
+  // An item with a name still asks for the name, not the word.
+  assert.equal(deleteConfirmationMatches("delete", "Camera Kit"), false);
+});
+
+test("what to type is the name or count, or the word delete for a nameless item", () => {
+  assert.equal(deleteConfirmationTarget("Camera Kit"), "Camera Kit");
+  assert.equal(deleteConfirmationTarget(12), "12");
+  for (const name of ["", "   ", "\u200B", "\uFEFF "]) {
+    assert.equal(deleteConfirmationTarget(name), "delete");
+  }
+});
+
+test("an invisible character between a letter and its accent still matches the composed letter", () => {
+  // "Cafe" + zero-width space + combining acute, shown as "Café"
+  assert.equal(
+    deleteConfirmationMatches("Caf\u00E9", "Cafe\u200B\u0301"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Cafe\u0301", "Caf\u00E9"), true);
+});
+
+test("invisible format characters in a stored name need not be typed", () => {
+  // Zero-width space, non-joiner and joiner, and a byte order mark: none can
+  // be seen in the instruction, so none is asked for.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200BKit"), true);
+  assert.equal(deleteConfirmationMatches("Tripod", "Tripod\u200B"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200CKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200DKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\uFEFFKit"), true);
+  assert.equal(
+    deleteConfirmationMatches("Camera Kit", "Camera \u200BKit"),
+    true
+  );
+  // A pasted name that carries the character matches as well.
+  assert.equal(
+    deleteConfirmationMatches("Camera\u200BKit", "Camera\u200BKit"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Camera", "Camera\u200BKit"), false);
+  // Soft hyphen, word joiner and a left-to-right mark are invisible too.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u00ADKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u2060Kit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "\u200ECameraKit"), true);
+});
+
+test("the confirmation field name is the one the bulk endpoints read", () => {
+  assert.equal(DELETE_CONFIRMATION_FIELD, "confirmation");
+  assert.equal(normalizeDeleteConfirmation(null), "");
+});
+
+test("each delete consequence says it is permanent", () => {
+  for (const text of Object.values(DELETE_CONSEQUENCE_LABELS)) {
+    assert.match(text, /permanently deletes/);
+    assert.match(text, /This cannot be undone\.$/);
+    // House rule: no em or en dashes in user-facing strings.
+    assert.doesNotMatch(text, /[\u2013\u2014]/);
+  }
+});
+
+test("a withheld custodian is a name, never the empty answer", () => {
+  // Clients render `null` as "no custodian" and this string as "hidden", so it
+  // must stay a non-empty string a row can carry in the name slot.
+  assert.equal(typeof WITHHELD_CUSTODIAN_NAME, "string");
+  assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
+});
+
+/** Formatters that show which one was used. */
+const format = {
+  dateTime: (value) => `dt(${new Date(value).toISOString().slice(0, 16)})`,
+  // A year-only request returns the year; a tile request returns s(...), with
+  // the year only when the caller asked for one.
+  custom: (value, options) => {
+    const iso = new Date(value).toISOString();
+    if (!options.month) return iso.slice(0, 4);
+    return `s(${iso.slice(options.year ? 0 : 5, 16)})`;
+  },
+};
+const NOW = new Date("2026-10-28T12:00:00Z");
+const describe = (photo) => describeAuditPhoto(photo, { format, now: NOW });
+
+test("a camera photo taken just before upload is quiet: icon, date and time, no flag", () => {
+  const photo = describe({
+    captureSource: "CAMERA",
+    capturedAt: "2026-10-28T10:56:00Z",
+    createdAt: "2026-10-28T10:58:00Z",
+  });
+
+  assert.equal(photo.source, "CAMERA");
+  assert.equal(photo.short, "s(10-28T10:56)");
+  assert.equal(photo.flag, null);
+  assert.equal(
+    photo.detail,
+    "Shelf app camera · dt(2026-10-28T10:56) · 2 min before upload"
+  );
+});
+
+test("a photo taken days before its upload is an old photo", () => {
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: "2026-10-01T06:30:00Z",
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+  assert.equal(photo.flagLabel, "Old photo");
+  assert.equal(
+    photo.detail,
+    "Photo library · file says dt(2026-10-01T06:30) · 27 days before upload"
+  );
+});
+
+test("a photo taken a year before upload is old, whatever the audit knows", () => {
+  // why: the upload is the only reference, so a photo needs nothing but its
+  // own two times to be checked.
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: "2025-10-28T09:00:00Z",
+    createdAt: "2026-10-28T09:00:00Z",
+  });
+
+  assert.equal(photo.flag, "OLD_PHOTO");
+});
+
+test("the gap reads in seconds, hours or days as it grows", () => {
+  const gap = (capturedAt) =>
+    describe({
+      captureSource: "CAMERA",
+      capturedAt,
+      createdAt: "2026-10-28T10:00:00Z",
+    }).detail.split(" · ")[2];
+
+  assert.equal(gap("2026-10-28T09:59:30Z"), "under a minute before upload");
+  assert.equal(gap("2026-10-28T05:00:00Z"), "5 h before upload");
+  assert.equal(gap("2026-10-25T10:00:00Z"), "3 days before upload");
+});
+
+test("an upload from an app version that does not say how is still checked", () => {
+  // why: older app versions send no source and, after their HEIC to JPEG
+  // conversion, no date. The server stores PHONE for them, so they are not
+  // mistaken for photos from before capture times were read.
+  const photo = describe({
+    captureSource: "PHONE",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.sourceLabel, "Phone app");
+  assert.equal(photo.flag, "NO_DATE");
+});
+
+test("a photo taken the evening before its upload is not flagged", () => {
+  assert.equal(
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt: "2026-10-27T20:00:00Z",
+      createdAt: "2026-10-28T10:52:00Z",
+    }).flag,
+    null
+  );
+});
+
+test("a photo is old only once it was taken more than a day before its upload", () => {
+  const flagFor = (capturedAt) =>
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt,
+      createdAt: "2026-10-28T12:00:00Z",
+    }).flag;
+
+  assert.equal(flagFor("2026-10-27T13:00:00Z"), null); // 23 h
+  assert.equal(flagFor("2026-10-27T12:00:00Z"), null); // exactly a day
+  assert.equal(flagFor("2026-10-27T11:00:00Z"), "OLD_PHOTO"); // 25 h
+});
+
+test("the year shows only when the photo is from another year than its upload or today", () => {
+  assert.equal(
+    describe({
+      captureSource: "LIBRARY",
+      capturedAt: "2025-12-30T10:00:00Z",
+      createdAt: "2026-10-28T10:52:00Z",
+    }).short,
+    "s(2025-12-30T10:00)"
+  );
+});
+
+test("a new photo with no date is flagged, and never borrows its upload time", () => {
+  const photo = describe({
+    captureSource: "LIBRARY",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:52:00Z",
+  });
+
+  assert.equal(photo.short, null);
+  assert.equal(photo.flag, "NO_DATE");
+  assert.equal(photo.detail, "Photo library · time taken unknown");
+});
+
+test("a camera photo with no EXIF date shows its upload time, and is flagged", () => {
+  const photo = describe({
+    captureSource: "CAMERA",
+    capturedAt: null,
+    createdAt: "2026-10-28T10:58:00Z",
+  });
+
+  assert.equal(photo.short, "s(10-28T10:58)");
+  // why: the official app sends the camera's date, so a camera claim with no
+  // date is what a modified client would send with an old, stripped picture.
+  assert.equal(photo.flag, "NO_DATE");
+  assert.equal(
+    photo.detail,
+    "Shelf app camera · uploaded dt(2026-10-28T10:58)"
+  );
+});
+
+test("a photo from before capture times were read shows its upload time, unflagged", () => {
+  // why: its date was never looked for. Flagging it would put "No date" on
+  // every photo in every audit taken before this release.
+  const photo = describe({
+    captureSource: null,
+    capturedAt: null,
+    createdAt: "2026-08-19T16:27:00Z",
+  });
+
+  assert.equal(photo.flag, null);
+  assert.equal(photo.short, "s(08-19T16:27)");
+  assert.equal(photo.detail, "Uploaded dt(2026-08-19T16:27)");
+});
+
+test("no age flag without an upload time to measure against", () => {
+  const photo = describeAuditPhoto(
+    { captureSource: "LIBRARY", capturedAt: "2020-01-01T00:00:00Z" },
+    { format, now: NOW }
+  );
+
+  assert.equal(photo.flag, null);
+});
+
+test("audit photo labels carry no dashes", () => {
+  assert.deepEqual(Object.keys(AUDIT_PHOTO_SOURCE_LABELS), [
+    "CAMERA",
+    "LIBRARY",
+    "WEB_UPLOAD",
+    "PHONE",
+  ]);
+  for (const text of [
+    ...Object.values(AUDIT_PHOTO_SOURCE_LABELS),
+    ...Object.values(AUDIT_PHOTO_FLAG_LABELS),
+    AUDIT_PHOTO_KEY,
+  ]) {
+    assert.doesNotMatch(text, /[\u2013\u2014]/);
+  }
+});
+
+test("the printed key names every way a photo can reach Shelf", () => {
+  for (const label of Object.values(AUDIT_PHOTO_SOURCE_LABELS)) {
+    assert.ok(
+      AUDIT_PHOTO_KEY.toLowerCase().includes(label.toLowerCase()),
+      label
+    );
+  }
+});
+
+test("auditCountLabel: individual assets get no label", () => {
+  assert.equal(
+    auditCountLabel({ status: "FOUND", expectedQuantity: null }),
+    null
+  );
+});
+
+test("auditCountLabel: words each state of a quantity row", () => {
+  const row = { expectedQuantity: 14, foundQuantity: 8 };
+  assert.equal(
+    auditCountLabel({ ...row, status: "FOUND" }, "pcs"),
+    "8 of 14 pcs"
+  );
+  assert.equal(
+    auditCountLabel({ ...row, status: "UNEXPECTED" }, "pcs"),
+    "8 pcs counted"
+  );
+  assert.equal(
+    auditCountLabel({
+      status: "FOUND",
+      expectedQuantity: 14,
+      foundQuantity: null,
+    }),
+    "Not counted"
+  );
+  assert.equal(
+    auditCountLabel({ status: "MISSING", expectedQuantity: 14 }, "pcs"),
+    "0 of 14 pcs"
+  );
+  assert.equal(
+    auditCountLabel({ status: "PENDING", expectedQuantity: 14 }),
+    "14 units expected"
+  );
+});
+
+test("auditCountLabel: the default unit literal is no unit, zero is a count", () => {
+  assert.equal(
+    auditCountLabel(
+      { status: "FOUND", expectedQuantity: 14, foundQuantity: 0 },
+      "units"
+    ),
+    "0 of 14"
+  );
+});
+
+test("auditCountLabel: a surplus says how many more than expected", () => {
+  assert.equal(
+    auditCountLabel(
+      { status: "FOUND", expectedQuantity: 14, foundQuantity: 16 },
+      "pcs"
+    ),
+    "16 of 14 pcs (+2)"
   );
 });

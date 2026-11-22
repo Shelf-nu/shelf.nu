@@ -1,45 +1,58 @@
 /**
  * Sentry instrumentation for the companion app.
  *
- * Two jobs:
- *  1. `initSentry()` — wire up crash/error reporting. No-ops in dev and when no
- *     DSN is configured (the DSN is injected from the EAS env var
- *     `EXPO_PUBLIC_SENTRY_DSN` for preview/production builds, so local Metro
- *     runs never report).
+ * Main jobs:
+ *  1. `initSentry()` wires up crash and error reporting. Only real phones on a
+ *     release build report: dev runs, builds without a DSN (the EAS env var
+ *     `EXPO_PUBLIC_SENTRY_DSN`) and simulators or emulators stay silent, and
+ *     preview builds report under their own environment.
  *  2. `reportAuditDurabilityEvent()` — emit the specific signals that tell us,
  *     WITHOUT waiting for a user to notice corrupted audit data, whether the
  *     offline → kill → sync path is failing in the field. These are the four
  *     danger points of the scan-durability machinery (#2580/#2586). They're
  *     tagged uniformly so we can build targeted Sentry alerts on them.
+ *  3. `reportPushRegistrationFailure()` reports a background push
+ *     registration or sign-out unregistration that failed, which the person
+ *     would otherwise only notice as a push that never arrives.
  *
  * @see {@link file://./audit-scan-persistence.ts}
  * @see {@link file://./../hooks/use-scan-queue.ts}
  * @see {@link file://./../hooks/use-audit-init.ts}
  */
 import * as Sentry from "@sentry/react-native";
+import * as Device from "expo-device";
+import * as Updates from "expo-updates";
+import type { PushFailureStage } from "./push/token-record";
+import { resolveSentryEnvironment } from "./sentry-environment";
 import {
   getActiveServer,
+  setIncompleteTeardownReporter,
   subscribeToServerChange,
 } from "./server/active-server";
 
 const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
 
 /**
- * Initialise Sentry. Safe to call unconditionally — it no-ops when there is no
- * DSN (local dev) or in `__DEV__`, so we never pollute the project with errors
- * from Expo Go / Metro sessions.
+ * Initialise Sentry. Safe to call unconditionally: it no-ops without a DSN, in
+ * `__DEV__` (Expo Go / Metro sessions) and on simulators or emulators, so
+ * developer testing never lands among customer errors.
  */
 export function initSentry() {
   if (!dsn || __DEV__) {
     if (__DEV__) console.log("[Sentry] disabled (dev or no DSN)");
     return;
   }
+  // Preview and TestFlight builds report under their own environment so QA
+  // traffic stays out of production telemetry and durability alerts.
+  const environment = resolveSentryEnvironment({
+    isDevice: Device.isDevice,
+    configuredEnvironment: process.env.EXPO_PUBLIC_SENTRY_ENV,
+    channel: Updates.channel,
+  });
+  if (!environment) return;
   Sentry.init({
     dsn,
-    // Distinguish preview/TestFlight builds from real production so QA traffic
-    // doesn't pollute production telemetry and durability alerts stay honest.
-    // Set per-environment as an EAS env var; default to production if unset.
-    environment: process.env.EXPO_PUBLIC_SENTRY_ENV ?? "production",
+    environment,
     // Modest perf sampling — we care about errors + the durability events,
     // not full tracing volume.
     tracesSampleRate: 0.1,
@@ -120,7 +133,14 @@ export function trackServerTag(): () => void {
     }
   };
   apply();
-  return subscribeToServerChange(apply);
+  // A server switch tears the outgoing session down and reports an
+  // incomplete teardown the same way a sign-out does.
+  setIncompleteTeardownReporter(reportSignOutIncomplete);
+  const unsubscribe = subscribeToServerChange(apply);
+  return () => {
+    unsubscribe();
+    setIncompleteTeardownReporter(null);
+  };
 }
 
 /**
@@ -161,7 +181,12 @@ export type AuditDurabilityEvent =
   /** "Resume Previous Session?" was shown — a kill left unsynced scans behind. */
   | "session_recovered"
   /** Audit completion was blocked because scans were still unsynced. */
-  | "completion_blocked_unsynced";
+  | "completion_blocked_unsynced"
+  /**
+   * A draft with no owning account still holds unsynced scans. It is kept
+   * but never offered, because nothing says which account made them.
+   */
+  | "unowned_draft_kept";
 
 /**
  * Report a durability event to Sentry. No-ops when Sentry isn't configured.
@@ -178,7 +203,70 @@ export function reportAuditDurabilityEvent(
   if (!dsn || __DEV__) return;
   Sentry.captureMessage(`audit-durability: ${event}`, {
     level,
+    // One issue per event: the stack this is captured from varies, and
+    // grouping by it splits one report across several issues.
+    fingerprint: ["audit-durability", event],
     tags: { feature: "audit-scan-durability", durability_event: event },
     extra: context,
   });
+}
+
+/**
+ * Reports a sign-out that could not confirm the stored session is gone: a
+ * delete failed, the session was still found after every delete, or the check
+ * timed out. The app still shows the login screen; this makes the case
+ * visible. `blockStored: false` marks the worst case, where the block refusing
+ * that session could not be stored either, so a restart could restore it.
+ *
+ * @param server - The Supabase project URL of the client being signed out
+ * @param details - Whether the block on the session was stored
+ */
+export function reportSignOutIncomplete(
+  server: string | null,
+  { blockStored }: { blockStored: boolean }
+): void {
+  if (__DEV__) {
+    console.warn("[Auth] stored session not confirmed gone after sign-out");
+  }
+  if (!dsn || __DEV__) return;
+  try {
+    Sentry.captureMessage("sign-out: stored session not confirmed deleted", {
+      level: "error",
+      tags: { feature: "auth", block_stored: String(blockStored) },
+      extra: { server },
+    });
+  } catch {
+    // Telemetry must never throw into the sign-out path.
+  }
+}
+
+/**
+ * Reports a failed push registration or unregistration.
+ *
+ * Both run in the background, so a failure is invisible to the person until
+ * a push they expected never arrives, or a signed-out phone keeps receiving
+ * them. It has to reach Sentry rather than only a dev console. Only the stage
+ * and the error message are sent, never the token. The registrar reports
+ * each stage at most once per app session.
+ *
+ * @param stage - Which step failed
+ * @param message - The error message from the OS, Expo or the server
+ */
+export function reportPushRegistrationFailure(
+  stage: PushFailureStage,
+  message: string
+): void {
+  if (__DEV__) console.warn(`[Push] ${stage} failed:`, message);
+  if (!dsn || __DEV__) return;
+  try {
+    Sentry.captureMessage(`push-registration: ${stage}`, {
+      level: "warning",
+      // One issue per stage, whatever stack it is captured from.
+      fingerprint: ["push-registration", stage],
+      tags: { feature: "push", push_stage: stage },
+      extra: { message },
+    });
+  } catch {
+    // Telemetry must never throw into the registration path.
+  }
 }

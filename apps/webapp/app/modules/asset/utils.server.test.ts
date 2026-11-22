@@ -1,12 +1,19 @@
+import type { Prisma } from "@prisma/client";
 import { AssetType, type CustomFieldType } from "@prisma/client";
+import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import {
+  andAssetWhere,
+  applyArchivedFilter,
   compareCustomFieldValues,
   detectPotentialChanges,
   detectCustomFieldChanges,
+  getArchivedFilterFromParams,
+  getAssetsWhereInput,
   getCustomFieldUpdateNoteContent,
   getInitialPlacementNoteContent,
   getKitLocationUpdateNoteContent,
   getLocationUpdateNoteContent,
+  planCustomFieldValueWrites,
 } from "./utils.server";
 
 // @vitest-environment node
@@ -207,6 +214,81 @@ describe("compareCustomFieldValues", () => {
       const result = compareCustomFieldValues(oldValue, newValue, "TEXT");
       expect(result).toBe(true);
     });
+  });
+});
+
+describe("planCustomFieldValueWrites", () => {
+  const stored = [
+    { id: "val-a", customFieldId: "cf-a", value: { raw: "a", valueText: "a" } },
+    { id: "val-b", customFieldId: "cf-b", value: { raw: "b" } },
+  ];
+
+  it("creates a value for a field with no stored row", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-new", value: { raw: "n" } },
+      ])
+    ).toEqual({
+      toCreate: [{ customFieldId: "cf-new", value: { raw: "n" } }],
+      toUpdate: [],
+      toRemoveFieldIds: [],
+    });
+  });
+
+  it("updates a stored row only when its value differs", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-a", value: { valueText: "a", raw: "a" } },
+        { id: "cf-b", value: { raw: "changed" } },
+      ])
+    ).toEqual({
+      toCreate: [],
+      toUpdate: [{ valueId: "val-b", value: { raw: "changed" } }],
+      toRemoveFieldIds: [],
+    });
+  });
+
+  it("updates when only a part other than raw changed", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-a", value: { raw: "a", valueText: "A" } },
+      ]).toUpdate
+    ).toEqual([{ valueId: "val-a", value: { raw: "a", valueText: "A" } }]);
+  });
+
+  it.each([
+    ["first", "old", "new", "val-first"],
+    ["second", "new", "old", "val-second"],
+  ])(
+    "updates a duplicate row that differs when it is the %s one",
+    (_position, firstValue, secondValue, staleRowId) => {
+      expect(
+        planCustomFieldValueWrites(
+          [
+            {
+              id: "val-first",
+              customFieldId: "cf-dup",
+              value: { raw: firstValue },
+            },
+            {
+              id: "val-second",
+              customFieldId: "cf-dup",
+              value: { raw: secondValue },
+            },
+          ],
+          [{ id: "cf-dup", value: { raw: "new" } }]
+        ).toUpdate
+      ).toEqual([{ valueId: staleRowId, value: { raw: "new" } }]);
+    }
+  );
+
+  it("removes a cleared field only when it has a stored row", () => {
+    expect(
+      planCustomFieldValueWrites(stored, [
+        { id: "cf-b", value: null },
+        { id: "cf-never-set", value: null },
+      ])
+    ).toEqual({ toCreate: [], toUpdate: [], toRemoveFieldIds: ["cf-b"] });
   });
 });
 
@@ -476,7 +558,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -492,7 +574,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated **Warranty Status** from **Active** to **Expired**.'
+      '{% link to="/settings/team/users/user-456" text="Jane Smith" /%} updated {% name text="Warranty Status" /%} from {% name text="Active" chips=true /%} to {% name text="Expired" chips=true /%}.'
     );
   });
 
@@ -508,7 +590,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed **Purchase Order** value **PO-2024-001**.'
+      '{% link to="/settings/team/users/user-789" text="Bob Johnson" /%} removed {% name text="Purchase Order" /%} value {% name text="PO-2024-001" chips=true /%}.'
     );
   });
 
@@ -524,7 +606,7 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe(
-      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set **Serial Number** to **SN123456**.'
+      '{% link to="/settings/team/users/user-123" text="John Doe" /%} set {% name text="Serial Number" /%} to {% name text="SN123456" chips=true /%}.'
     );
   });
 
@@ -540,6 +622,25 @@ describe("getCustomFieldUpdateNoteContent", () => {
     });
 
     expect(result).toBe("");
+  });
+
+  it("keeps URL-shaped field names and values inside name tags", () => {
+    const content = getCustomFieldUpdateNoteContent({
+      customFieldName: URL_SHAPED_VALUE,
+      previousValue: URL_SHAPED_VALUE,
+      newValue: "Expired",
+      userId: "user-456",
+      firstName: "Jane",
+      lastName: "Smith",
+      isFirstTimeSet: false,
+    });
+
+    expectValueOnlyInTag(content, URL_SHAPED_VALUE, ["name"]);
+    // The field name never shows chips; the value does.
+    expect(content).toContain(`{% name text="${URL_SHAPED_VALUE}" /%}`);
+    expect(content).toContain(
+      `{% name text="${URL_SHAPED_VALUE}" chips=true /%}`
+    );
   });
 
   it("should handle missing new value for first time set", () => {
@@ -841,6 +942,213 @@ describe("getKitLocationUpdateNoteContent", () => {
   });
 });
 
+/**
+ * Regression guard for the archived-asset default (issue #382).
+ *
+ * Archived visibility is enforced by an EXPLICIT per-query filter that defaults
+ * to "active" (hide archived) at the list/index chokepoints — deliberately NOT
+ * a global Prisma extension. These tests lock that default so a future refactor
+ * can't silently flip the chokepoints to leak archived assets into active lists.
+ */
+describe("getArchivedFilterFromParams", () => {
+  it("defaults to 'active' when the archived param is absent", () => {
+    expect(getArchivedFilterFromParams(new URLSearchParams())).toBe("active");
+  });
+
+  it("defaults to 'active' for an unrecognized archived value", () => {
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=bogus"))
+    ).toBe("active");
+  });
+
+  it("returns 'archived' / 'all' only when explicitly requested", () => {
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=archived"))
+    ).toBe("archived");
+    expect(
+      getArchivedFilterFromParams(new URLSearchParams("archived=all"))
+    ).toBe("all");
+  });
+});
+
+describe("applyArchivedFilter", () => {
+  it("hides archived assets for the 'active' default (archivedAt: null)", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "active");
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("shows only archived assets for 'archived' (archivedAt: { not: null })", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "archived");
+    expect(where.archivedAt).toEqual({ not: null });
+  });
+
+  it("leaves the archived dimension unconstrained for 'all'", () => {
+    const where: Prisma.AssetWhereInput = {};
+    applyArchivedFilter(where, "all");
+    expect(where.archivedAt).toBeUndefined();
+  });
+});
+
+describe("getAssetsWhereInput archived default", () => {
+  it("hides archived assets when there are no search params at all", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("hides archived assets when params exist but 'archived' is unset", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "category=cat-1",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.archivedAt).toBeNull();
+  });
+
+  it("includes archived assets only when explicitly asked (archived=all)", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "archived=all",
+      allowedTeamMemberIds: "all",
+      honorArchivedView: true,
+    });
+    expect(where.archivedAt).toBeUndefined();
+  });
+
+  it("ignores the archived param unless the caller opts in", () => {
+    // `?archived=` is raw URL input. A select-all caller that has not proven
+    // the member may see archived assets must act on active ones only, or it
+    // would touch rows the member was never shown.
+    for (const view of ["archived", "all"]) {
+      const where = getAssetsWhereInput({
+        organizationId: "org-1",
+        currentSearchParams: `archived=${view}`,
+        allowedTeamMemberIds: "all",
+      });
+      expect(where.archivedAt).toBeNull();
+    }
+  });
+});
+
+describe("getAssetsWhereInput status filter", () => {
+  it("filters by a real asset status", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=IN_CUSTODY",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.status).toBe("IN_CUSTODY");
+  });
+
+  it("ignores advanced-mode syntax instead of handing it to Prisma", () => {
+    // A stale advanced-mode URL reaching a simple-mode select-all.
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=is:AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.status).toBeUndefined();
+    expect(JSON.stringify(where)).not.toContain("is:AVAILABLE");
+  });
+});
+
+describe("getAssetsWhereInput filter groups", () => {
+  it("ANDs uncategorized, untagged and without-location instead of ORing them", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams:
+        "category=uncategorized&tag=untagged&location=without-location",
+      allowedTeamMemberIds: "all",
+    });
+
+    // One group per filter, each holding its own options.
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [{ categoryId: { in: ["uncategorized"] } }, { categoryId: null }],
+      },
+      {
+        OR: [
+          { tags: { some: { id: { in: ["untagged"] } } } },
+          { tags: { none: {} } },
+        ],
+      },
+      {
+        OR: [
+          {
+            assetLocations: {
+              some: { locationId: { in: ["without-location"] } },
+            },
+          },
+          { assetLocations: { none: {} } },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps the custodian filter a group of its own next to the tag filter", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "tag=untagged&teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.OR).toBeUndefined();
+    const groups = where.AND as Prisma.AssetWhereInput[];
+    expect(groups).toHaveLength(2);
+    expect(groups[1].OR).toContainEqual({
+      custody: { some: { teamMemberId: { in: ["tm-1"] } } },
+    });
+  });
+
+  it("counts a booking custodian only while the booking is out", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    const [custodianGroup] = where.AND as Prisma.AssetWhereInput[];
+    const bookingBranches = (custodianGroup.OR ?? []).filter(
+      (clause) => clause.bookingAssets
+    );
+    expect(bookingBranches).toHaveLength(2);
+    for (const branch of bookingBranches) {
+      expect(branch.bookingAssets?.some?.booking?.status).toEqual({
+        in: ["ONGOING", "OVERDUE"],
+      });
+    }
+  });
+});
+
+describe("andAssetWhere", () => {
+  const clause: Prisma.AssetWhereInput = { categoryId: null };
+
+  it("starts an AND list when there is none", () => {
+    const where: Prisma.AssetWhereInput = { organizationId: "org-1" };
+    andAssetWhere(where, clause);
+    expect(where).toEqual({ organizationId: "org-1", AND: [clause] });
+  });
+
+  it("appends to an existing AND list", () => {
+    const first: Prisma.AssetWhereInput = { tags: { none: {} } };
+    const where: Prisma.AssetWhereInput = { AND: [first] };
+    andAssetWhere(where, clause);
+    expect(where.AND).toEqual([first, clause]);
+  });
+
+  it("keeps a single AND object when it adds to it", () => {
+    const first: Prisma.AssetWhereInput = { tags: { none: {} } };
+    const where: Prisma.AssetWhereInput = { AND: first };
+    andAssetWhere(where, clause);
+    expect(where.AND).toEqual([first, clause]);
+  });
+});
+
 describe("getInitialPlacementNoteContent", () => {
   /** The name-bearing subset both create routes pass through from `asset.user`. */
   const user = {
@@ -919,5 +1227,48 @@ describe("getInitialPlacementNoteContent", () => {
 
     expect(result).toContain('text="Dr. Smith"');
     expect(result).not.toContain("Alex Doe");
+  });
+});
+
+describe("getAssetsWhereInput: lowStockOnly", () => {
+  it("narrows simple-mode select-all to assets at or below their minimum, beside other filters", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "lowStockOnly=true&status=AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.organizationId).toBe("org-1");
+    expect(where.AND).toEqual([
+      {
+        type: "QUANTITY_TRACKED",
+        minQuantity: { not: null },
+        quantity: { lte: expect.anything() },
+      },
+      // The status filter still applies alongside it.
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
+  });
+
+  it("adds nothing without the param", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
   });
 });

@@ -10,10 +10,13 @@
  * @see {@link file://../../../app/routes/_layout+/reports.export.$fileName[.csv].tsx}
  * @see {@link file://../../../app/utils/csv-utf8.ts}
  */
+import { HARDCODED_DEFAULT_PREFS } from "@shelf/datetime";
+import { parse } from "csv-parse/sync";
 import type { LoaderFunctionArgs } from "react-router";
 import type { Mock } from "vitest";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import {
   assetActivityReport,
   assetDistributionReport,
@@ -29,6 +32,7 @@ import {
 } from "~/modules/reports/helpers.server";
 import type {
   AssetDistributionRow,
+  AuditCompletionRow,
   MonthlyBookingTrendRow,
   ReportPayload,
   ResolvedTimeframe,
@@ -37,11 +41,19 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: verifying export encoding without executing real permission checks
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
+}));
+
+// why: same as the helpers mock below. The audit report builder queries
+// Prisma, and importing it for real loads `~/database/db.server`, whose
+// module-level `$connect()` rejects (unhandled) with no database around.
+vi.mock("~/modules/reports/audit-completion.server", () => ({
+  auditCompletionReport: vi.fn(),
 }));
 
 // why: the report builders query Prisma; the loader only needs their shape
@@ -62,7 +74,44 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   assetInventoryReport: vi.fn(),
   assetUtilizationReport: vi.fn(),
   assetActivityReport: vi.fn(),
+  // A tiny ceiling, so the ceiling case needs no 200,000-row file.
+  ACTIVITY_EXPORT_MAX_ROWS: 2,
   monthlyBookingTrendsReport: vi.fn(),
+}));
+
+// why: the real resolver verifies filter ids against the database; the
+// loader's contract is only that it hands the resolved filters on. The fake
+// parses the query string with the real pure grammar and echoes the parsed
+// params inside the predicate, so each case can assert what reached the
+// report function.
+vi.mock("~/modules/reports/filters.server", async () => {
+  const { parseReportFilterParams } = await import(
+    "~/modules/reports/filter-params"
+  );
+  return {
+    resolveReportFilters: vi.fn(
+      ({ searchParams }: { searchParams: URLSearchParams }) => {
+        const params = parseReportFilterParams(searchParams);
+        return Promise.resolve({
+          params,
+          assetFilter: { where: { parsed: params }, sql: [], isEmpty: false },
+          bookingStatuses: params.statuses,
+          teamMemberId: params.teamMemberId,
+          assetId: params.assetId,
+          active: [],
+        });
+      }
+    ),
+  };
+});
+
+// why: the workspace's plan is its owner's tier, read from the database. These
+// cases are about the file, so the workspace is on a plan with reports; the
+// plan gate itself is covered in reports-plan-gate.test.ts
+vi.mock("~/modules/tier/service.server", () => ({
+  getOrganizationTierLimit: vi.fn(() =>
+    Promise.resolve({ canUseReports: true })
+  ),
 }));
 
 // why: format prefs are resolved from the database for the acting user
@@ -125,6 +174,15 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         totalValue: 40000,
       },
     ],
+    byAssetModel: [
+      {
+        id: "model-1",
+        groupName: "كاميرا",
+        assetCount: 5,
+        percentage: 25,
+        totalValue: 10000,
+      },
+    ],
   };
 
   beforeEach(() => {
@@ -134,6 +192,8 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       // The loader threads the workspace currency into the money-KPI-bearing
       // report functions, so the permission result must carry it.
       currentOrganization: { currency: "USD" },
+      // The audit report reads the caller's audit reach to scope its rows.
+      access: { audits: { seeAll: true } },
     } as any);
     assetDistributionReportMock.mockResolvedValue({
       distributionBreakdown: arabicBreakdown,
@@ -179,6 +239,31 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     );
     expect(rows[1]).toBe("Category,حاسوب محمول,12,60.0%,24000");
     expect(rows[2]).toBe("Location,مستودع الرياض,8,40.0%,16000");
+  });
+
+  it("writes a formula-leading group as text and leaves a negative total as a number", async () => {
+    assetDistributionReportMock.mockResolvedValue({
+      distributionBreakdown: {
+        ...arabicBreakdown,
+        byCategory: [
+          {
+            id: "cat-evil",
+            groupName: "=HYPERLINK(1)",
+            assetCount: 1,
+            percentage: 100,
+            totalValue: -500,
+          },
+        ],
+      },
+    } as any);
+
+    const response = (await runLoader()) as unknown as Response;
+    const rows = (await response.text())
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .split("\n");
+
+    expect(rows[1]).toBe("Category,'=HYPERLINK(1),1,100.0%,-500");
   });
 
   /**
@@ -230,6 +315,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       pageSize: 10000,
     });
 
+    /**
+     * Matcher for the predicate the fake resolver builds: it echoes the parsed
+     * params, so asserting on them proves the route forwarded the resolved
+     * filters rather than re-reading the query string itself.
+     */
+    const filterCarrying = (parsed: Record<string, unknown>) =>
+      expect.objectContaining({
+        where: { parsed: expect.objectContaining(parsed) },
+      });
+
     type PassthroughCase = {
       /** `reportId` param, matching a case in the loader's switch. */
       reportId: string;
@@ -255,15 +350,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(custodySnapshotReport),
         expected: {
           teamMemberId: "tm-1",
-          locationId: "loc-1",
+          assetFilter: filterCarrying({ locationIds: ["loc-1"] }),
           currency: "USD",
         },
       },
       {
         reportId: "overdue-items",
-        query: "custodian=cust-1",
+        // Legacy spelling of the custodian filter must still reach the report.
+        query: "custodian=tm-1",
         mock: vi.mocked(overdueItemsReport),
-        expected: { custodianId: "cust-1", currency: "USD" },
+        expected: { custodianTeamMemberId: "tm-1", currency: "USD" },
       },
       {
         reportId: "idle-assets",
@@ -271,35 +367,54 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(idleAssetsReport),
         expected: {
           idleThresholdDays: 60,
-          categoryId: "cat-1",
-          locationId: "loc-1",
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            locationIds: ["loc-1"],
+          }),
           currency: "USD",
         },
       },
       {
         reportId: "top-booked-assets",
-        query: "category=cat-1&location=loc-1",
+        query: "category=cat-1&assetModel=model-1&cf=field-1:yes",
         mock: vi.mocked(topBookedAssetsReport),
-        expected: { categoryId: "cat-1", locationId: "loc-1" },
+        expected: {
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            assetModelIds: ["model-1"],
+            customFieldValues: [{ customFieldId: "field-1", value: "yes" }],
+          }),
+        },
+      },
+      {
+        reportId: "monthly-booking-trends",
+        query: "category=cat-1",
+        mock: vi.mocked(monthlyBookingTrendsReport),
+        expected: { assetFilter: filterCarrying({ categoryIds: ["cat-1"] }) },
       },
       {
         reportId: "top-booked-kits",
-        // No filter controls on this page, so the only contract is that the
-        // export stays org-scoped. Listed rather than omitted: a row here is
-        // how the next person knows the case was considered.
-        query: "",
+        // Category and Location match the kit itself, so they travel as a
+        // kit filter rather than the asset predicate.
+        query: "category=cat-1&location=loc-1",
         mock: vi.mocked(topBookedKitsReport),
-        expected: { organizationId: "org-1" },
+        expected: {
+          organizationId: "org-1",
+          kitFilter: { categoryIds: ["cat-1"], locationIds: ["loc-1"] },
+        },
       },
       {
         reportId: "asset-inventory",
+        // Legacy comma-joined spellings must still reach the report.
         query:
           "categories=cat-1,cat-2&locations=loc-1&statuses=AVAILABLE,IN_CUSTODY",
         mock: vi.mocked(assetInventoryReport),
         expected: {
-          categoryIds: ["cat-1", "cat-2"],
-          locationIds: ["loc-1"],
-          statuses: ["AVAILABLE", "IN_CUSTODY"],
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1", "cat-2"],
+            locationIds: ["loc-1"],
+            statuses: ["AVAILABLE", "IN_CUSTODY"],
+          }),
           currency: "USD",
         },
       },
@@ -307,19 +422,42 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         reportId: "asset-utilization",
         query: "category=cat-1&location=loc-1",
         mock: vi.mocked(assetUtilizationReport),
-        expected: { categoryId: "cat-1", locationId: "loc-1" },
+        expected: {
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            locationIds: ["loc-1"],
+          }),
+        },
       },
       {
         reportId: "asset-activity",
         query: "asset=asset-1&category=cat-1",
         mock: vi.mocked(assetActivityReport),
-        expected: { assetId: "asset-1", categoryId: "cat-1" },
+        expected: {
+          allRows: true,
+          assetId: "asset-1",
+          assetFilter: filterCarrying({ categoryIds: ["cat-1"] }),
+        },
       },
       {
         reportId: "distribution",
-        query: "",
+        query: "assetModel=model-1",
         mock: vi.mocked(assetDistributionReport),
-        expected: { organizationId: "org-1", currency: "USD" },
+        expected: {
+          organizationId: "org-1",
+          currency: "USD",
+          assetFilter: filterCarrying({ assetModelIds: ["model-1"] }),
+        },
+      },
+      {
+        reportId: "audit-completion",
+        query: "",
+        mock: vi.mocked(auditCompletionReport),
+        expected: {
+          organizationId: "org-1",
+          userId: "user-123",
+          assignedOnly: false,
+        },
       },
     ];
 
@@ -397,6 +535,291 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       const args = vi.mocked(monthlyBookingTrendsReport).mock.calls[0][0];
       expect(args).not.toHaveProperty("categoryId");
       expect(args).not.toHaveProperty("locationId");
+    });
+  });
+
+  describe("audit-completion", () => {
+    const runAuditExport = () =>
+      loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/audit-completion-2026-08-28.csv?reportId=audit-completion"
+          ),
+          params: { fileName: "audit-completion-2026-08-28" },
+          context,
+        })
+      );
+
+    const auditRow = (
+      overrides: Partial<AuditCompletionRow> = {}
+    ): AuditCompletionRow => ({
+      id: "audit-1",
+      name: "Q3 Warehouse",
+      status: "COMPLETED",
+      expectedAssetCount: 10,
+      foundAssetCount: 8,
+      missingAssetCount: 2,
+      unexpectedAssetCount: 1,
+      isCancelled: false,
+      accuracy: 80,
+      createdByName: "Jane Doe",
+      startedAt: null,
+      dueDate: null,
+      completedAt: null,
+      ...overrides,
+    });
+
+    const payloadWith = (rows: AuditCompletionRow[]) => ({
+      report: {
+        id: "audit-completion",
+        title: "Audit Completion",
+        description: "",
+      },
+      filters: {
+        timeframe: {
+          preset: "last_30d" as const,
+          from: new Date("2026-07-25T00:00:00.000Z"),
+          to: new Date("2026-08-24T00:00:00.000Z"),
+          label: "Last 30 days",
+        },
+        filters: [],
+      },
+      kpis: [],
+      rows,
+      computedMs: 0,
+      totalRows: rows.length,
+      page: 1,
+      pageSize: 10000,
+    });
+
+    it("limits the export to assigned audits when the caller cannot see every audit", async () => {
+      requirePermissionMock.mockResolvedValue({
+        organizationId: "org-1",
+        currentOrganization: { currency: "USD" },
+        access: { audits: { seeAll: false } },
+      } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+      vi.mocked(auditCompletionReport).mockResolvedValue(payloadWith([]));
+
+      await runAuditExport();
+
+      expect(auditCompletionReport).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: "user-123", assignedOnly: true })
+      );
+    });
+
+    it("writes one row per session, leaving unfinished values empty", async () => {
+      vi.mocked(auditCompletionReport).mockResolvedValue(
+        payloadWith([
+          auditRow(),
+          auditRow({
+            id: "audit-2",
+            name: "Q4 Office",
+            status: "ACTIVE",
+            missingAssetCount: null,
+            accuracy: null,
+          }),
+        ])
+      );
+
+      const response = (await runAuditExport()) as unknown as Response;
+      const rows = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      expect(rows[0]).toBe(
+        "Audit ID,Name,Status,Expected,Found,Missing,Unexpected,Accuracy,Created By,Started,Due Date,Completed"
+      );
+      expect(rows[1]).toBe(
+        "audit-1,Q3 Warehouse,Completed,10,8,2,1,80%,Jane Doe,,,"
+      );
+      expect(rows[2]).toBe("audit-2,Q4 Office,Active,10,8,,1,,Jane Doe,,,");
+    });
+  });
+
+  describe("asset-activity archive rows", () => {
+    it("names archive and reinstate events in the Activity Type column", async () => {
+      vi.mocked(assetActivityReport).mockResolvedValue({
+        rows: ["ARCHIVED", "REINSTATED"].map((activityType) => ({
+          // Dates are covered elsewhere; this test is about the type cell.
+          occurredAt: null,
+          assetId: "classet1",
+          assetName: "Pallet 17",
+          activityType,
+          description: activityType === "ARCHIVED" ? "Archived" : "Reinstated",
+          performedBy: "Sam Operative",
+        })),
+        totalRows: 2,
+      } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
+          ),
+          params: { fileName: "asset-activity" },
+          context,
+        })
+      )) as unknown as Response;
+      const lines = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      // Read the cell by its header, so added columns leave this check alone.
+      const typeColumn = lines[0].split(",").indexOf("Activity Type");
+      expect(lines.slice(1).map((line) => line.split(",")[typeColumn])).toEqual(
+        ["Archived", "Reinstated"]
+      );
+    });
+  });
+
+  describe("asset-inventory", () => {
+    it("writes the URL each QR code encodes next to its id", async () => {
+      vi.mocked(assetInventoryReport).mockResolvedValue({
+        rows: [
+          {
+            assetId: "SAM-0001",
+            assetName: "Camera",
+            category: "Cameras",
+            location: "Studio",
+            status: "AVAILABLE",
+            custodian: null,
+            quantity: null,
+            valuation: null,
+            // Dates are covered elsewhere; this test is about the QR columns.
+            createdAt: null,
+            qrId: "cm4abc123",
+          },
+          {
+            assetId: "SAM-0002",
+            assetName: "Tripod",
+            category: null,
+            location: null,
+            status: "AVAILABLE",
+            custodian: null,
+            quantity: null,
+            valuation: null,
+            createdAt: null,
+            qrId: null,
+          },
+        ],
+      } as unknown as Awaited<ReturnType<typeof assetInventoryReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-inventory.csv?reportId=asset-inventory"
+          ),
+          params: { fileName: "asset-inventory" },
+          context,
+        })
+      )) as unknown as Response;
+      const rows = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      expect(rows[0].endsWith(",QR Code ID,QR Code URL")).toBe(true);
+      // No shortener in the test environment: codes encode this server's /qr.
+      expect(
+        rows[1].endsWith(",cm4abc123,http://localhost:3000/qr/cm4abc123")
+      ).toBe(true);
+      // An asset without a code leaves both cells empty.
+      expect(rows[2].endsWith(",,")).toBe(true);
+    });
+  });
+  describe("asset-activity", () => {
+    /** Runs the activity export over `rows` and returns the file's lines. */
+    const exportLines = async (rows: object[], totalRows = rows.length) => {
+      // The file-wide prefs mock carries placeholder formats; these cases
+      // print dates, so they use the real default preferences.
+      vi.mocked(resolveUserFormatPrefsById).mockResolvedValueOnce(
+        HARDCODED_DEFAULT_PREFS
+      );
+      vi.mocked(assetActivityReport).mockResolvedValue({
+        rows,
+        totalRows,
+      } as unknown as Awaited<ReturnType<typeof assetActivityReport>>);
+
+      const response = (await loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/asset-activity.csv?reportId=asset-activity"
+          ),
+          params: { fileName: "asset-activity" },
+          context,
+        })
+      )) as unknown as Response;
+      return (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+    };
+
+    const moveRow = {
+      occurredAt: new Date("2026-08-20T09:30:00.000Z"),
+      assetId: "classet1",
+      samId: "SAM-0042",
+      qrId: "cm4qr42",
+      assetName: "Pallet 17",
+      activityType: "LOCATION_CHANGED",
+      description: "Location changed: Leeds unit → Hull depot",
+      changedFrom: "Leeds unit",
+      changedTo: "Hull depot",
+      performedBy: "Sam Operative",
+    };
+
+    it("writes readable references and the names on both sides of a change", async () => {
+      const lines = await exportLines([
+        moveRow,
+        {
+          occurredAt: new Date("2026-08-19T08:00:00.000Z"),
+          assetId: "classet2",
+          samId: null,
+          qrId: null,
+          assetName: "Pallet 18",
+          activityType: "CREATED",
+          description: "Asset created",
+          changedFrom: null,
+          changedTo: null,
+          performedBy: null,
+        },
+      ]);
+
+      expect(lines[0]).toBe(
+        "Date,Asset ID,SAM ID,QR Code ID,Asset Name,Activity Type,Description,From,To,Performed By"
+      );
+      expect(lines[1]).toBe(
+        '"08/20/2026, 9:30 AM",classet1,SAM-0042,cm4qr42,Pallet 17,Location changed,Location changed: Leeds unit → Hull depot,Leeds unit,Hull depot,Sam Operative'
+      );
+      // No change, no references: those cells stay empty.
+      expect(lines[2]).toBe(
+        '"08/19/2026, 8:00 AM",classet2,,,Pallet 18,Asset created,Asset created,,,System'
+      );
+      expect(lines).toHaveLength(3);
+    });
+
+    it("ends a file cut at the ceiling with a line saying so", async () => {
+      const lines = await exportLines([moveRow, moveRow], 250_000);
+
+      // Full width, sentence under Description: strict parsers keep the file.
+      expect(lines.at(-1)).toBe(
+        ',,,,,,"Export stopped at 2 of 250,000 rows. Narrow the date range to export the rest.",,,'
+      );
+      // A strict parser (no ragged rows) reads the whole file.
+      const records = parse(lines.join("\n"), {
+        relax_column_count: false,
+      }) as string[][];
+      expect(records.at(-1)).toHaveLength(10);
+    });
+
+    it("says so when a file below the ceiling holds a different number of rows than counted", async () => {
+      const lines = await exportLines([moveRow], 3);
+
+      expect(lines.at(-1)).toBe(
+        ",,,,,,Rows in this file: 1. Rows counted when the export started: 3. Assets changed while it ran; export again for a matching file.,,,"
+      );
     });
   });
 });

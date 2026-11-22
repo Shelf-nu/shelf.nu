@@ -1,22 +1,21 @@
 /**
- * Phase 6 — Audit sessions with scan trails.
+ * Phase 6: Audit sessions with scan trails.
  *
  * Generates 80 `AuditSession` rows spread across 12 months, each with:
- * - 15–30 expected `AuditAsset` rows.
- * - 0–5 unexpected `AuditAsset` rows (items "found" that weren't on the list).
+ * - 15-30 expected `AuditAsset` rows.
+ * - 0-5 unexpected `AuditAsset` rows (items "found" that weren't on the list).
  * - Matching `AuditScan` rows for everything flagged FOUND / UNEXPECTED.
  *
  * Outcome mix (roughly):
- *   ~75% COMPLETED — full lifecycle, with counters populated.
- *   ~10% ACTIVE — in progress now; partial scans, no completion event.
- *   ~5%  CANCELLED — created + maybe some scans, then cancelled.
- *   ~5%  ARCHIVED — completed then archived.
- *   ~5%  PENDING — just created, never started.
+ *   ~75% COMPLETED: full lifecycle, with counters populated.
+ *   ~10% ACTIVE: in progress now; partial scans, no completion event.
+ *   ~5%  CANCELLED: created + maybe some scans, then cancelled.
+ *   ~5%  ARCHIVED: completed then archived.
+ *   ~5%  PENDING: just created, never started.
  *
  * Events per audit depend on the outcome (see `runAudit` below for the
- * full mapping). The most valuable read-side event is `AUDIT_COMPLETED`
- * which carries the full counter set in `meta` — directly consumed by
- * the `auditCompletionStats` report helper.
+ * full mapping). The most valuable read-side event is `AUDIT_COMPLETED`,
+ * which carries the full counter set in `meta`.
  */
 
 import { faker } from "@faker-js/faker";

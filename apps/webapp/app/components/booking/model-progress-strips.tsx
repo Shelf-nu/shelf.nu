@@ -11,7 +11,7 @@
  */
 
 import { useState } from "react";
-import type { JSX } from "react";
+import type { JSX, MouseEvent } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { Progress } from "~/components/shared/progress";
 import { tw } from "~/utils/tw";
@@ -31,6 +31,16 @@ type ModelProgressStripsProps = {
    */
   idPrefix: string;
 };
+
+/**
+ * Stops a mouse press from moving focus onto the element, leaving it wherever
+ * it was (the scanner's code field). The click still fires.
+ *
+ * @param event - The `mousedown` on the fold control
+ */
+function keepFocusWhereItIs(event: MouseEvent<HTMLButtonElement>) {
+  event.preventDefault();
+}
 
 /**
  * Foldable per-model progress strips, keyed by reserved `AssetModel`.
@@ -77,6 +87,11 @@ export function ModelProgressStrips({
           readable when the per-model strips are hidden. */}
       <button
         type="button"
+        // A mouse click must not take focus from the scan field. A hardware
+        // scanner types into whatever has focus and ends every code with
+        // Enter, so a focused toggle would swallow the next code and fold
+        // the list on it. Keyboard users still reach it with Tab.
+        onMouseDown={keepFocusWhereItIs}
         onClick={() => setShowModels((prev) => !prev)}
         aria-expanded={showModels}
         // Only reference the list while it exists: folding unmounts it.

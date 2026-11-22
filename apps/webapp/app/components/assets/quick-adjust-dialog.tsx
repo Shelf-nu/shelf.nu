@@ -8,6 +8,11 @@
  * Designed to be triggered from the QuantityOverviewCard on the asset detail
  * page. Supports an optional `autoOpen` prop for QR-scan-triggered flows.
  *
+ * For a pool placed at two or more locations an "At location" field says where the
+ * units arrived or were lost, pre-selected with the source that has the most
+ * units left. The location's placement moves with the total. Every other
+ * asset gets the dialog without it.
+ *
  * @see {@link file://../../routes/api+/assets.adjust-quantity.ts} - API endpoint
  * @see {@link file://./quantity-overview-card.tsx} - Trigger location
  */
@@ -29,7 +34,11 @@ import {
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
+import { defaultSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
+import { CustodySourceSelect } from "./custody-source-select";
 
 /** Props for the QuickAdjustDialog component */
 export interface QuickAdjustDialogProps {
@@ -45,6 +54,11 @@ export interface QuickAdjustDialogProps {
   open?: boolean;
   /** Callback when the dialog open state changes (controlled mode) */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * The pool's sources, from the asset detail loader. The "At location"
+   * field renders only when `multiSource` is true.
+   */
+  sources?: CustodySourceSummary | null;
 }
 
 /**
@@ -69,6 +83,7 @@ export function QuickAdjustDialog({
   availableQuantity,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  sources,
 }: QuickAdjustDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -85,7 +100,7 @@ export function QuickAdjustDialog({
   );
   /** Client-side validation error for the quantity field */
   const [quantityError, setQuantityError] = useState<string | null>(null);
-  const fetcher = useFetcher({ key: "adjust-quantity" });
+  const fetcher = useFetcher({ key: `adjust-quantity-${assetId}` });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
   // Replaces `autoFocus` to satisfy jsx-a11y/no-autofocus. The hook
@@ -98,20 +113,44 @@ export function QuickAdjustDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
-  /** Server-side error message from the action response */
-  const serverError =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  /**
+   * The "At location" choice: the operator's pick, else the source with the
+   * most units left (also when a revalidation removed the picked one).
+   */
+  const locationOptions = sources?.multiSource ? sources.options : [];
+  const showLocation = locationOptions.length > 0;
+  const [pickedLocation, setPickedLocation] = useState<string | null>(null);
+  const locationValue =
+    pickedLocation !== null &&
+    locationOptions.some((option) => option.value === pickedLocation)
+      ? pickedLocation
+      : defaultSourceOption(locationOptions)?.value ?? "";
 
-  /** Close the dialog and reset the form after a successful submission */
+  /**
+   * What the server has said during THIS opening. The fetcher is keyed, so it
+   * keeps handing back its last response after the dialog closes: read
+   * directly, an old refusal reappears and an old success closes the dialog
+   * the moment it opens.
+   */
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
+  const serverError = outcome.message;
+
+  // The client-side complaint belongs to one opening too: the operator fixing
+  // the number tomorrow should not be met with yesterday's objection to it.
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
+    if (open) {
+      setQuantityError(null);
+    }
+  }, [open]);
+
+  /** Close once this opening's adjustment has been accepted. */
+  useEffect(() => {
+    if (outcome.status === "accepted") {
       setOpen(false);
       setQuantityError(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data, setOpen]);
+  }, [outcome.status, setOpen]);
 
   /**
    * Submits the adjustment form with the given direction and category.
@@ -151,7 +190,15 @@ export function QuickAdjustDialog({
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        // Each open starts from the pre-selected location. The header menu
+        // mounts this dialog only while open, which resets it the same way.
+        if (next) setPickedLocation(null);
+        setOpen(next);
+      }}
+    >
       {trigger ? (
         <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       ) : null}
@@ -186,6 +233,18 @@ export function QuickAdjustDialog({
               error={quantityError || serverError || undefined}
               onChange={() => setQuantityError(null)}
             />
+
+            {showLocation ? (
+              <CustodySourceSelect
+                id={`adjust-quantity-location-${assetId}`}
+                label="At location"
+                options={locationOptions}
+                value={locationValue}
+                onChange={setPickedLocation}
+                unitLabel={unitLabel}
+                disabled={disabled}
+              />
+            ) : null}
 
             <Input
               name="note"

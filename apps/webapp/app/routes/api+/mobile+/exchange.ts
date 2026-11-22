@@ -3,12 +3,13 @@
  *
  * Back-channel of the native-app SSO login: the companion app posts the
  * single-use authorization code it received via the `shelf://auth-callback`
- * deeplink and receives a fresh, independent Supabase session in the JSON body
- * (tokens never travel in a URL). Deliberately NOT behind `requireMobileAuth` —
- * the caller has no session yet; the single-use code IS the credential.
+ * deeplink and receives the SSO session the web sign-in produced, refreshed, in
+ * the JSON body (tokens never travel in a URL). Deliberately NOT behind
+ * `requireMobileAuth`: the caller has no session yet, and the single-use code
+ * IS the credential.
  *
- * @see apps/webapp/app/modules/auth/mobile-sso.server.ts — redeem + mint
- * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx — issues the code
+ * @see apps/webapp/app/modules/auth/mobile-sso.server.ts (redeem)
+ * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx (issues the code)
  */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -16,6 +17,7 @@ import {
   deleteExpiredMobileAuthCodes,
   redeemMobileAuthCode,
 } from "~/modules/auth/mobile-sso.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { getActionMethod, logException } from "~/utils/http.server";
 
@@ -64,7 +66,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const authSession = await redeemMobileAuthCode(
       parsed.data.code,
-      parsed.data.codeVerifier
+      parsed.data.codeVerifier,
+      { clientIp: getClientIpFromHeaders(request.headers) }
     );
 
     // Opportunistic cleanup of expired codes (no app-level cron in this repo).
@@ -79,7 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const reason = makeShelfError(cause);
     // why: this resource route returns failures as JSON (the companion app
     // parses `{ error }`) and never re-throws, so without an explicit log a
-    // genuine 5xx (Supabase mint outage, broken auth contract, DB fault) would
+    // genuine 5xx (Supabase outage, broken auth contract, DB fault) would
     // never reach Sentry. `logException` mirrors `error()`'s logging (5xx →
     // Sentry, handled 4xx → low-severity trail, client aborts skipped). NOTE:
     // every route under `api+/mobile+/` swallows 5xx this same way and none log

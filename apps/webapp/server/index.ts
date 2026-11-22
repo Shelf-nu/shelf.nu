@@ -7,23 +7,30 @@ import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
-import { initEnv } from "~/utils/env";
+import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
+import { initEnv, warnAboutLegacySupabaseKey } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { runWithTabId } from "~/utils/tab-id.server";
 
+import { BUILD_VERSION_PATH, buildVersion } from "./build-version";
 import { logger } from "./logger";
 import {
+  applyForwardedProto,
   ensureHostHeaders,
   protect,
   refreshSession,
   urlShortener,
 } from "./middleware";
+import { BUILD_ASSETS_PATH, missingBuildAsset } from "./missing-build-asset";
 import {
-  appLoaderRateLimit,
-  calendarFeedRateLimit,
-  mobileIpRateLimit,
-} from "./rate-limit";
+  calendarFeedGuard,
+  contactOwnerGuard,
+  mobileApiGuard,
+  sentryTunnelGuard,
+} from "./path-guards";
+import { appLoaderRateLimit, CONTACT_OWNER_LIMITED_KEY } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
+import { normalizeRequestPath } from "./request-path";
 import { securityHeaders } from "./security-headers";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
@@ -35,6 +42,7 @@ type ServerEnv = {
 
 // Server will not start if the env is not valid
 initEnv();
+warnAboutLegacySupabaseKey(process.env);
 
 export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
   c,
@@ -72,6 +80,7 @@ export const getLoadContext: HonoServerOptions<ServerEnv>["getLoadContext"] = (
       session.unset(authSessionKey);
     },
     errorMessage: session.get("errorMessage") || null,
+    contactOwnerRateLimited: c.get(CONTACT_OWNER_LIMITED_KEY) === true,
   } satisfies AppLoadContext;
 };
 
@@ -95,6 +104,13 @@ export default createHonoServer<ServerEnv>({
     // Measure total request duration (dev/staging only, skipped in production).
     // Registered first so it captures time spent in all downstream middleware.
     server.use("*", serverTiming());
+
+    /**
+     * Give the request URL the scheme the browser used (X-Forwarded-Proto), so
+     * React Router's action CSRF check matches the browser's https Origin
+     * behind the TLS-terminating proxy. Must run before React Router.
+     */
+    server.use("*", applyForwardedProto());
 
     /**
      * Ensure host headers are present for React Router CSRF protection
@@ -126,24 +142,66 @@ export default createHonoServer<ServerEnv>({
     });
 
     /**
+     * Build id for open tabs checking whether a newer build is live. Before
+     * logger() so frequent polls stay out of the logs, and before
+     * session()/protect() since it needs neither a session nor the database.
+     * It answers without calling next(), so nothing after it runs.
+     */
+    server.get(BUILD_VERSION_PATH, buildVersion());
+
+    /**
      * Add logger middleware
      */
     server.use("*", logger());
 
     /**
-     * Mobile API rate limit. Path-scoped so webapp routes are unaffected.
-     * Runs after logger() so 429s appear in logs, and before session() since
-     * the mobile prefix is in publicPaths anyway — short-circuit early.
+     * Existing build files were already served before `configure`; whatever
+     * reaches here under the assets prefix is missing and must 404. After
+     * logger() so the miss is logged, before session()/protect() so it is not
+     * redirected to /login.
      */
-    server.use("/api/mobile/*", mobileIpRateLimit());
+    server.use(BUILD_ASSETS_PATH, missingBuildAsset());
 
     /**
-     * Calendar iCal feed rate limit. Scoped to the feed route; the feed is
-     * public (secret-token auth, in publicPaths) and runs an unpaginated
-     * windowed query, so cap each feed (keyed by its token path) before the
-     * handler runs.
+     * Path-scoped guards. React Router matches routes case-insensitively and
+     * ignores a trailing slash, while Hono patterns do neither, so these match
+     * on a normalised path (see `./path-guards`) to cover every spelling that
+     * reaches the same route.
+     *
+     * Mobile API rate limit. Runs after logger() so 429s appear in logs, and
+     * before session() since the mobile prefix is in publicPaths anyway, so
+     * an over-limit request is refused early.
      */
-    server.use("/api/calendar/feed/*", calendarFeedRateLimit());
+    server.use("*", mobileApiGuard());
+
+    /**
+     * Calendar iCal feed rate limit. The feed is public (secret-token auth, in
+     * publicPaths) and runs an unpaginated windowed query, so cap each feed
+     * (keyed by its token path) before the handler runs.
+     */
+    server.use("*", calendarFeedGuard());
+
+    /**
+     * Sentry tunnel bounds. The tunnel is public (below), so it is an anonymous
+     * relay into our own Sentry project, bounded by body size and rate before
+     * the handler runs and before `session()`, so an over-limit caller never
+     * costs a session lookup it will not use.
+     *
+     * Applied to every method that reaches the route's action. GET, HEAD and
+     * CORS preflights carry no envelope and are left out, so cheap requests
+     * cannot spend an address's budget and get real reports refused.
+     */
+    server.use("*", sentryTunnelGuard());
+
+    /**
+     * QR "contact owner" bounds. The form is public (below) and every
+     * submission sends Shelf email to an address the caller chooses, so it is
+     * counted per address and per (address, QR) before `session()`. An
+     * over-limit submission is marked for the route's action, which refuses it
+     * with a 429 the form shows inline (see `contactOwnerRateLimited` on the
+     * load context). GET is left out so opening the form costs nothing.
+     */
+    server.use("*", contactOwnerGuard());
 
     /**
      * Add session middleware
@@ -188,7 +246,7 @@ export default createHonoServer<ServerEnv>({
      */
     const appLoaderLimiter = appLoaderRateLimit();
     server.use("*", async (c, next) => {
-      const p = c.req.path;
+      const p = normalizeRequestPath(c.req.path);
       if (!p.endsWith(".data") || p.startsWith("/__")) return next();
       // `appLoaderLimiter` is typed with hono's default `Env`; our server uses a
       // custom `ServerEnv`. Cast to bridge the generic — the runtime context is
@@ -245,6 +303,14 @@ export default createHonoServer<ServerEnv>({
           // route only — cookie-authed routes like /api/calendar-subscription
           // stay OUT of this prefix.
           "/api/calendar/feed/*path",
+          // why: auth-bypassed. An error worth reporting often happens before
+          // anyone has signed in, and the auth redirect answers those reports
+          // with a 302 to /login that the browser silently discards, so they
+          // are lost rather than delayed. Safe to expose because the tunnel
+          // chooses nothing: its destination is pinned to the server's own
+          // configured Sentry project and it never follows redirects. Bounded
+          // per IP by `sentryTunnelRateLimit` above.
+          SENTRY_TUNNEL_PATH,
         ],
       })
     );
@@ -290,5 +356,11 @@ declare module "react-router" {
      * The flash error message related to session
      */
     errorMessage: string | null;
+    /**
+     * Whether this submission to a QR's public "contact owner" form is over
+     * one of its rate limits. Set by `contactOwnerGuard`; the route's action
+     * refuses the submission with a 429 when it is true.
+     */
+    readonly contactOwnerRateLimited: boolean;
   }
 }

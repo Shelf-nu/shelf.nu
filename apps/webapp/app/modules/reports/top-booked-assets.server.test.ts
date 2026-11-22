@@ -27,6 +27,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
+import { buildReportAssetFilter } from "./asset-filter";
 import { topBookedAssetsReport } from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
@@ -103,6 +104,8 @@ describe("topBookedAssetsReport", () => {
       expect(where.to).toEqual({ gte: TIMEFRAME.from });
       expect(where.OR).toBeUndefined();
       expect(where.status).toEqual({ notIn: ["DRAFT", "CANCELLED"] });
+      // A booking archived before any check-out was never used.
+      expect(where.archivedWithoutCheckin).toBe(false);
     }
   });
 
@@ -179,7 +182,7 @@ describe("topBookedAssetsReport", () => {
     await topBookedAssetsReport({
       organizationId: "org-1",
       timeframe: TIMEFRAME,
-      categoryId: "cat-1",
+      assetFilter: buildReportAssetFilter({ categoryIds: ["cat-1"] }),
     });
 
     // The KPI query is the second booking scan (rows fetch runs first).
@@ -188,12 +191,13 @@ describe("topBookedAssetsReport", () => {
     // it holds at least one asset matching the report's asset filters, so
     // assetless bookings (and, under category/location filters, bookings
     // with only non-matching assets) stay out of "Total Bookings".
+    const assetWhere = {
+      AND: [{ organizationId: "org-1" }, { categoryId: { in: ["cat-1"] } }],
+    };
     expect(kpiArgs.where.bookingAssets).toEqual({
-      some: { asset: { organizationId: "org-1", categoryId: "cat-1" } },
+      some: { asset: assetWhere },
     });
     // The nested per-booking pivot filter applies the same asset predicate.
-    expect(kpiArgs.select.bookingAssets.where).toEqual({
-      asset: { organizationId: "org-1", categoryId: "cat-1" },
-    });
+    expect(kpiArgs.select.bookingAssets.where).toEqual({ asset: assetWhere });
   });
 });

@@ -5,7 +5,7 @@
  * filtered assets carrying it, and how those assets break down by status.
  *
  * Counts are FILTERED counts. A model with twenty assets shows three when the
- * active filters match three of them — that is what makes the view answer
+ * active filters match three of them, which is what makes the view answer
  * "what do I have here", and the list header states it so the number is never
  * read as a workspace total.
  *
@@ -34,18 +34,17 @@ import { CategoryBadge } from "../category-badge";
 const NO_MODEL_LABEL = "No model";
 
 /**
- * Renders the status split so a reader can see the pool at a glance.
- *
- * `available + checkedOut + inCustody` is the whole `AssetStatus` partition —
- * `notBookable` is an independent `availableToBook` flag that overlaps all
- * three, so it renders as its own chip and is never folded into a total.
- */
-/**
  * Where this model's matching assets currently are.
  *
  * A count of asset STATUS, not of what a booking could take. The three values
  * partition the row (`in + out + in custody === assets`), so all three render
  * even at zero: a reader can add them up and get the row's own total.
+ *
+ * One count per line, unconditionally. The cell sits in a `table-auto` column
+ * whose width is decided by the content of every row at once, so a count that
+ * shares a line with its neighbour when there is room shares it in some rows
+ * and not others, and the eye cannot compare two rows any more. A vertical
+ * stack is the same shape whatever width the column is given.
  *
  * Deliberately avoids the word "available". Booking availability is a
  * different number over a booking window, computed as fleet minus custody
@@ -60,7 +59,7 @@ const NO_MODEL_LABEL = "No model";
  */
 function StatusSplit({ item }: { item: AssetModelRollupRow }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+    <div className="flex flex-col items-start gap-1 text-sm">
       <span className="font-medium text-gray-900">{item.available} in</span>
       <span className="text-gray-500">{item.checkedOut} out</span>
       <span className="text-gray-500">{item.inCustody} in custody</span>
@@ -87,7 +86,7 @@ function StatusSplit({ item }: { item: AssetModelRollupRow }) {
  * rows whose data has not changed.
  *
  * @param item - The rollup row. `assetModelId === null` is the "No model"
- *   bucket, rendered muted — the query sorts it last.
+ *   bucket, rendered muted. The query sorts it last.
  * @param extraProps.locale - Locale for currency formatting.
  * @param extraProps.currency - Workspace currency code.
  * @param bulkActions - The list's bulk-action toolbar, passed by `List`. Read

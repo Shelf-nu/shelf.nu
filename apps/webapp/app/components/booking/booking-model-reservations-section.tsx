@@ -90,6 +90,17 @@ type BookingModelReservationsSectionProps = {
    * ever render live bookings.
    */
   canAssign?: boolean;
+  /**
+   * Reservations the booking's dates can no longer fill (see
+   * `findModelRequestShortfallsForBooking`), e.g. after a unit was archived
+   * with "Archive anyway". Each is flagged on its row, and the header says
+   * what happens if nothing changes. Omitted by surfaces that do not measure.
+   */
+  shortfalls?: Array<{
+    assetModelId: string;
+    available: number;
+    short: number;
+  }>;
   /** Extra classes for the outer wrapper (surface-specific spacing). */
   className?: string;
 };
@@ -152,6 +163,7 @@ export function BookingModelReservationsSection({
   renderAction,
   headerAction,
   canAssign = true,
+  shortfalls,
   className,
 }: BookingModelReservationsSectionProps) {
   const [page, setPage] = useState(1);
@@ -164,6 +176,9 @@ export function BookingModelReservationsSection({
 
   const units = countUnassignedModelUnits(modelRequests);
   const reserved = countReservedModelUnits(modelRequests);
+  const shortfallByModelId = new Map(
+    (canAssign ? shortfalls ?? [] : []).map((s) => [s.assetModelId, s])
+  );
 
   const totalPages = Math.max(
     1,
@@ -196,6 +211,12 @@ export function BookingModelReservationsSection({
             {canAssign ? "still to assign" : "never assigned"}, across{" "}
             {outstanding.length} {outstanding.length === 1 ? "model" : "models"}
           </p>
+          {shortfallByModelId.size > 0 ? (
+            <p className="mt-1 text-sm font-medium text-error-600">
+              Not enough units are free for this booking&apos;s dates. Reduce
+              the reservation to what can be assigned.
+            </p>
+          ) : null}
         </div>
         {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
@@ -234,6 +255,9 @@ export function BookingModelReservationsSection({
                     >
                       {describeOutstanding(request, canAssign)}
                     </span>
+                    <ShortfallChip
+                      shortfall={shortfallByModelId.get(request.assetModelId)}
+                    />
                   </div>
                 </div>
               </td>
@@ -287,5 +311,30 @@ export function BookingModelReservationsSection({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Says how far a reservation is short, beside its "still to assign" chip, so
+ * the row that cannot be filled is the one that looks wrong.
+ */
+function ShortfallChip({
+  shortfall,
+}: {
+  shortfall: { available: number; short: number } | undefined;
+}) {
+  if (!shortfall) return null;
+  return (
+    <span
+      className="ml-2 mt-1 inline-flex items-center rounded-2xl px-2 py-[2px] text-xs font-medium"
+      style={{
+        backgroundColor: BADGE_COLORS.red.bg,
+        color: BADGE_COLORS.red.text,
+      }}
+    >
+      {shortfall.available > 0
+        ? `${shortfall.short} short: only ${shortfall.available} free`
+        : `${shortfall.short} short: none free`}
+    </span>
   );
 }

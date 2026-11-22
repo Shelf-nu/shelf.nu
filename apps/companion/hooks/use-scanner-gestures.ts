@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
-import { Animated, PanResponder, Platform, Dimensions } from "react-native";
+import {
+  Animated,
+  PanResponder,
+  Platform,
+  useWindowDimensions,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { useReducedMotion } from "@/lib/a11y";
 import { nextScannerActionIndex } from "@/lib/scanner-swipe";
-
-const SCREEN_WIDTH = Dimensions.get("window").width;
 
 type ScannerAction =
   | "view"
@@ -46,6 +49,14 @@ export function useScannerGestures({
   scannedItemsCount,
 }: UseScannerGesturesParams) {
   const reduceMotion = useReducedMotion();
+
+  // Read from the live window, not a value captured at import: a tablet
+  // rotates and an iPad window resizes, and the slide distance follows.
+  const { width: windowWidth } = useWindowDimensions();
+  const windowWidthRef = useRef(windowWidth);
+  useEffect(() => {
+    windowWidthRef.current = windowWidth;
+  }, [windowWidth]);
 
   // Animated values for slide transition
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
@@ -118,7 +129,7 @@ export function useScannerGestures({
       // Smooth 2-phase slide: out -> change -> in
       Animated.parallel([
         Animated.timing(swipeTranslateX, {
-          toValue: direction * SCREEN_WIDTH * 0.3,
+          toValue: direction * windowWidthRef.current * 0.3,
           duration: 150,
           useNativeDriver: Platform.OS !== "web",
         }),
@@ -132,7 +143,7 @@ export function useScannerGestures({
         handleActionChange(nextAction);
 
         // Position text on opposite side, then slide in
-        swipeTranslateX.setValue(-direction * SCREEN_WIDTH * 0.3);
+        swipeTranslateX.setValue(-direction * windowWidthRef.current * 0.3);
 
         Animated.parallel([
           Animated.timing(swipeTranslateX, {

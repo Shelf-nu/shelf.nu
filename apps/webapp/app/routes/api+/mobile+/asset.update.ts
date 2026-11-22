@@ -41,6 +41,7 @@ import {
 import { updateAsset } from "~/modules/asset/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
+import { assetDescriptionSchema } from "~/utils/asset-description";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { makeShelfError } from "~/utils/error";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
@@ -104,7 +105,7 @@ export async function action({ request }: ActionFunctionArgs) {
           .string()
           .min(2, "Title must be at least 2 characters")
           .optional(),
-        description: z.string().optional(),
+        description: assetDescriptionSchema.optional(),
         categoryId: z.string().optional(),
         newLocationId: z.string().optional(),
         currentLocationId: z.string().optional(),
@@ -145,6 +146,7 @@ export async function action({ request }: ActionFunctionArgs) {
         categoryId === UNCATEGORIZED_SENTINEL ? null : categoryId ?? null;
       if (categoryId === undefined) {
         const existing = await db.asset.findUnique({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: category lookup ahead of updateAsset, whose archive guard must see the row to refuse with the archived message
           where: { id: assetId, organizationId },
           select: { categoryId: true },
         });

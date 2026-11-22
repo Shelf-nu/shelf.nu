@@ -91,8 +91,13 @@ export default function KitOverview() {
   // Multiplies per-unit `valuation` by `AssetKit.quantity` — units of
   // this asset *in this kit*, not workspace stock. A QT asset stocked
   // at 100 with 5 in this kit contributes `valuation × 5`, not × 100.
+  // Archived members are out of service and add nothing, matching the
+  // companion's kit screen.
   const totalValue = kit.assetKits.reduce(
-    (total, ak) => total + (ak.asset.valuation ?? 0) * (ak.quantity ?? 1),
+    (total, ak) =>
+      ak.asset.archivedAt
+        ? total
+        : total + (ak.asset.valuation ?? 0) * (ak.quantity ?? 1),
     0
   );
 

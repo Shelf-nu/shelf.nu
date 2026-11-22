@@ -77,13 +77,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * live, never drop below the units already assigned, and are reduced
      * rather than cancelled once units are on the booking.
      */
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        request,
-        userId,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     /**
      * `booking:update` is granted to SELF_SERVICE / BASE roles in
@@ -93,9 +92,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * users' model reservations (cross-user IDOR within the org).
      *
      * Mirrors the guard pattern used on the page-level booking routes
-     * (see `bookings.$bookingId.overview.tsx` and the calendar export).
+     * (see `bookings.$bookingId.overview.tsx` and the calendar export). The
+     * lookup stays conditional so callers who write every booking skip it.
      */
-    if (isSelfServiceOrBase) {
+    if (!access.bookings.writeAll) {
       const booking = await db.booking.findFirst({
         where: { id: bookingId, organizationId },
         select: { creatorId: true, custodianUserId: true },
@@ -115,7 +115,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       validateBookingOwnership({
         booking,
         userId,
-        role,
+        access,
         action: "manage model reservations on",
       });
     }

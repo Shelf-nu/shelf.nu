@@ -27,6 +27,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -35,6 +36,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { openAppStore } from "@/lib/app-update";
 import { resolveServerForDomain, type ServerConfig } from "@/lib/server";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 /**
  * The sheet's state machine: idle → connecting → (closed | error).
@@ -129,7 +131,8 @@ export default function ConnectServerSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const inputRef = useRef<TextInput>(null);
+  const sheetColumn = useSheetColumnStyle();
+  const inputRef = useRef<TextInputInstance>(null);
 
   const [{ domain, isConnecting, error, updateRequired }, dispatch] =
     useReducer(reducer, INITIAL_STATE);
@@ -204,7 +207,10 @@ export default function ConnectServerSheet({
       // autoFocus prop fires before the modal animation and misses the keyboard.
       onShow={() => inputRef.current?.focus()}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Connect to a server</Text>
           <TouchableOpacity

@@ -23,7 +23,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: PermissionAction.export,
     });
 

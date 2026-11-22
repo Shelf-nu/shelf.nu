@@ -1,6 +1,18 @@
+/**
+ * Import Users Table
+ *
+ * Lists the rows of an uploaded users CSV (email and role) in the import
+ * dialog. A role the file spells in a way no role matches shows as typed, so
+ * the operator can spot the bad row.
+ *
+ * @see {@link file://./import-users-dialog.tsx}
+ */
 import type { CSSProperties } from "react";
 import type { z } from "zod";
-import { organizationRolesMap } from "~/utils/organization-roles";
+import {
+  ROLE_LABELS,
+  isOrganizationRole,
+} from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import type { InviteUserFormSchema } from "../invite-user-dialog";
 
@@ -11,6 +23,12 @@ type ImportUsersTableProps = {
   users: z.infer<typeof InviteUserFormSchema>[];
 };
 
+/**
+ * Renders the imported users with each role's label.
+ *
+ * @param props.title - Heading above the table
+ * @param props.users - Parsed CSV rows
+ */
 export default function ImportUsersTable({
   className,
   style,
@@ -42,7 +60,11 @@ export default function ImportUsersTable({
           {users.map((user) => (
             <tr key={user.email}>
               <td className="px-6 py-4">{user.email}</td>
-              <td className="px-6 py-4">{organizationRolesMap[user.role]}</td>
+              <td className="px-6 py-4">
+                {isOrganizationRole(user.role)
+                  ? ROLE_LABELS[user.role]
+                  : user.role}
+              </td>
             </tr>
           ))}
         </tbody>

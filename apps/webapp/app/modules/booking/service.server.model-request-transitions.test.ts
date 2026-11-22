@@ -77,6 +77,9 @@ vitest.mock("~/database/db.server", () => ({
         .mockImplementation((args: { where?: { id?: { in?: string[] } } }) =>
           Promise.resolve((args?.where?.id?.in ?? []).map((id) => ({ id })))
         ),
+      // why: reserve and checkout refuse archived assets (issue #382) with a
+      // count; none of these fixtures are archived.
+      count: vitest.fn().mockResolvedValue(0),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: kit attribution resolves memberships through the pivot. No fixture
@@ -270,13 +273,13 @@ const reserveParams = {
   id: BOOKING_ID,
   name: "Reserved Booking",
   organizationId: ORG_ID,
-  custodianUserId: "user-1",
   custodianTeamMemberId: "team-1",
   from,
   to,
   description: "Reserved booking description",
   hints: hints as never,
-  isSelfServiceOrBase: false,
+  alertsOrgOnReservation: false,
+  actorApprovalSetting: "none" as const,
   tags: [],
 };
 
@@ -426,6 +429,38 @@ describe("checkoutBooking", () => {
     expect(tx.booking.update).toHaveBeenCalled();
     expect(firstCallOrder(assertOutstandingModelRequestsFit)).toBeLessThan(
       firstCallOrder(tx.booking.update)
+    );
+  });
+
+  it("formats a refusal for the caller and keeps other bookings unnamed by default", async () => {
+    expect.assertions(1);
+    const tx = openTx();
+    tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
+
+    await checkoutBooking(checkoutParams);
+
+    expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints,
+        userId: "user-1",
+        revealOtherBookings: false,
+      })
+    );
+  });
+
+  it("names other bookings in a refusal for a caller who sees every booking", async () => {
+    expect.assertions(1);
+    const tx = openTx();
+    tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
+
+    await checkoutBooking({ ...checkoutParams, seesAllBookings: true });
+
+    expect(assertOutstandingModelRequestsFit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hints,
+        userId: "user-1",
+        revealOtherBookings: true,
+      })
     );
   });
 

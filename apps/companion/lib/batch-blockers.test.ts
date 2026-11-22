@@ -16,6 +16,7 @@ import { test } from "node:test";
 
 import {
   blockerKeysFor,
+  kitBlockerFacts,
   computeBlockers,
   type BlockableItem,
   type BookingBlockerContext,
@@ -73,6 +74,8 @@ test("booking_fulfil keeps the rules that are not about kit membership", () => {
 
 /** Ids in display order, pinned so a new blocker needs a new case. */
 const EXPECTED_ASSIGN_IDS = [
+  "asset-archived",
+  "kit-only-archived",
   "qty-nothing-free",
   "asset-in-custody",
   "asset-checked-out",
@@ -83,6 +86,7 @@ const EXPECTED_ASSIGN_IDS = [
 ];
 
 const EXPECTED_RELEASE_IDS = [
+  "asset-archived",
   "qty-held-via-kit",
   "qty-nothing-held",
   "qty-several-holders",
@@ -174,6 +178,8 @@ test("healthy rows raise no custody blocker", () => {
 
 /** One row in the state that raises each assign id. */
 const ASSIGN_CASES: Record<string, BlockableItem> = {
+  "asset-archived": asset({ archived: true }),
+  "kit-only-archived": kit({ assetCount: 0, archivedAssetCount: 2 }),
   "qty-nothing-free": quantityRow({
     quantityFacts: quantityFacts({ assignable: 0 }),
   }),
@@ -187,6 +193,7 @@ const ASSIGN_CASES: Record<string, BlockableItem> = {
 
 /** One row in the state that raises each release id. */
 const RELEASE_CASES: Record<string, BlockableItem> = {
+  "asset-archived": asset({ archived: true }),
   "qty-held-via-kit": quantityRow({
     quantityFacts: quantityFacts({ holders: [], hasKitHeldUnits: true }),
   }),
@@ -277,5 +284,268 @@ test("each blocker removes only the rows it names", () => {
   assert.equal(
     groups[0].message,
     "1 asset has no units available. Every unit is in custody, in a kit, or out on a booking."
+  );
+});
+
+// ── Archived assets ───────────────────────────────────
+//
+// An archived asset is read-only and cannot be booked, in every batch mode.
+// It raises its own blocker and nothing else, so the operator reads one reason
+// for it rather than a list of side effects.
+
+test("update location can raise only the archived blocker", () => {
+  assert.deepEqual(blockerKeysFor("update_location"), ["asset-archived"]);
+});
+
+test("the booking modes raise the archived blocker first", () => {
+  assert.equal(blockerKeysFor("booking_add", ctx)[0], "asset-archived");
+  assert.equal(blockerKeysFor("booking_fulfil", ctx)[0], "asset-archived");
+});
+
+test("the booking modes block an archived row before the booking has loaded", () => {
+  const archived = asset({ archived: true });
+  assert.deepEqual(blockerKeysFor("booking_add"), [
+    "asset-archived",
+    "kit-only-archived",
+  ]);
+  assert.deepEqual(blockerKeysFor("booking_fulfil"), ["asset-archived"]);
+  for (const action of ["booking_add", "booking_fulfil"] as const) {
+    assert.deepEqual(
+      computeBlockers(action, [archived]).map((g) => [g.key, g.qrIds]),
+      [["asset-archived", ["qr-a"]]],
+      action
+    );
+  }
+});
+
+test("an archived row is flagged in every batch mode, with the consequence named", () => {
+  const archived = asset({ archived: true, title: "Old camera" });
+  const messages = {
+    assign_custody: "1 asset is archived and can't be put in custody.",
+    release_custody: "1 asset is archived, so there is nothing to release.",
+    update_location: "1 asset is archived and can't be moved.",
+    booking_add: "1 asset is archived and can't be booked.",
+    booking_fulfil: "1 asset is archived and can't be booked.",
+  } as const;
+  for (const [action, message] of Object.entries(messages)) {
+    const groups = computeBlockers(
+      action as keyof typeof messages,
+      [archived],
+      ctx
+    );
+    assert.deepEqual(
+      groups.map((g) => [g.key, g.qrIds, g.message]),
+      [["asset-archived", ["qr-a"], message]],
+      action
+    );
+  }
+});
+
+test("an archived row raises no other blocker, whatever else is true of it", () => {
+  // Not in custody and part of a kit: on a live row these raise two blockers.
+  const archived = asset({ archived: true, kitId: "kit-9" });
+  assert.deepEqual(idsFor("release_custody", [archived]), ["asset-archived"]);
+  assert.deepEqual(idsFor("assign_custody", [archived]), ["asset-archived"]);
+  assert.deepEqual(
+    computeBlockers(
+      "booking_add",
+      [{ ...archived, availableToBook: false }],
+      ctx
+    ).map((g) => g.key),
+    ["asset-archived"]
+  );
+});
+
+test("only the archived rows are flagged; the active ones stay clean", () => {
+  const archived = asset({
+    qrId: "qr-old",
+    targetId: "asset-old",
+    archived: true,
+  });
+  const active = asset({ qrId: "qr-new", targetId: "asset-new" });
+  const groups = computeBlockers("update_location", [archived, active]);
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.qrIds, g.message]),
+    [["asset-archived", ["qr-old"], "1 asset is archived and can't be moved."]]
+  );
+});
+
+test("a row from a server that predates archiving reads as active", () => {
+  assert.deepEqual(
+    idsFor("assign_custody", [asset({ archived: undefined })]),
+    []
+  );
+  assert.deepEqual(computeBlockers("update_location", [asset()]), []);
+});
+
+// ── Kits holding only archived assets ─────────────────
+//
+// Kit custody and kit bookings leave archived members out, so a kit whose
+// every member is archived has nothing in it to hand over or book. The scanned
+// kit payload lists active members only and counts the archived ones.
+
+const onlyArchivedKit = kit({ assetCount: 0, archivedAssetCount: 2 });
+
+test("a kit holding only archived assets is flagged when assigning custody and adding to a booking", () => {
+  assert.deepEqual(
+    computeBlockers("assign_custody", [onlyArchivedKit]).map((g) => [
+      g.key,
+      g.qrIds,
+      g.message,
+    ]),
+    [
+      [
+        "kit-only-archived",
+        ["qr-k"],
+        "1 kit holds only archived assets. There is nothing in it to put into custody.",
+      ],
+    ]
+  );
+  // Flagged while the booking loads too: the rule reads nothing from it.
+  for (const bookingCtx of [ctx, undefined]) {
+    assert.deepEqual(
+      computeBlockers("booking_add", [onlyArchivedKit], bookingCtx).map((g) => [
+        g.key,
+        g.message,
+      ]),
+      [
+        [
+          "kit-only-archived",
+          "1 kit holds only archived assets. There is nothing in it to book.",
+        ],
+      ]
+    );
+  }
+});
+
+test("several such kits are counted in one line", () => {
+  const second = kit({
+    qrId: "qr-k2",
+    targetId: "kit-k2",
+    assetCount: 0,
+    archivedAssetCount: 1,
+  });
+  assert.deepEqual(
+    computeBlockers("assign_custody", [onlyArchivedKit, second]).map((g) => [
+      g.qrIds,
+      g.message,
+    ]),
+    [
+      [
+        ["qr-k", "qr-k2"],
+        "2 kits hold only archived assets. There is nothing in them to put into custody.",
+      ],
+    ]
+  );
+});
+
+test("a kit with an active member is not flagged, however many are archived", () => {
+  const mixed = kit({ assetCount: 1, archivedAssetCount: 5 });
+  assert.deepEqual(idsFor("assign_custody", [mixed]), []);
+  assert.deepEqual(computeBlockers("booking_add", [mixed], ctx), []);
+});
+
+test("an empty kit, or one from a server that sends no counts, is not flagged", () => {
+  // As on the web, this blocker is about archived members only.
+  const empty = kit({ assetCount: 0, archivedAssetCount: 0 });
+  const unknown = kit({ assetCount: undefined, archivedAssetCount: undefined });
+  for (const row of [empty, unknown]) {
+    assert.deepEqual(idsFor("assign_custody", [row]), []);
+    assert.deepEqual(computeBlockers("booking_add", [row], ctx), []);
+  }
+});
+
+test("releasing, moving or fulfilling does not flag a kit holding only archived assets", () => {
+  // Release takes the kit back and a move keeps its members together; fulfil
+  // matches concrete units, as the web fulfil drawer does.
+  assert.deepEqual(
+    computeBlockers("release_custody", [
+      { ...onlyArchivedKit, status: "IN_CUSTODY" },
+    ]),
+    []
+  );
+  assert.deepEqual(computeBlockers("update_location", [onlyArchivedKit]), []);
+  assert.deepEqual(
+    computeBlockers("booking_fulfil", [onlyArchivedKit], ctx),
+    []
+  );
+});
+
+test("a scanned kit's row carries the counts and flags the kit blockers read", () => {
+  // The QR and barcode resolvers send active members in `assets` and
+  // `_count`, and the archived ones as a count only.
+  const facts = kitBlockerFacts({
+    id: "kit-k",
+    name: "Camera kit",
+    status: "AVAILABLE",
+    image: null,
+    _count: { assets: 0 },
+    archivedAssetCount: 2,
+    assets: [],
+  });
+  assert.deepEqual(facts, {
+    assetCount: 0,
+    archivedAssetCount: 2,
+    hasAssetsInCustody: false,
+    hasUnavailableAssets: false,
+  });
+  // Spread into a row, it raises the blocker end to end.
+  assert.deepEqual(idsFor("assign_custody", [kit(facts)]), [
+    "kit-only-archived",
+  ]);
+});
+
+test("a scanned kit's active members decide its custody and availability flags", () => {
+  const facts = kitBlockerFacts({
+    id: "kit-k",
+    name: "Camera kit",
+    status: "AVAILABLE",
+    image: null,
+    _count: { assets: 2 },
+    assets: [
+      { id: "a1", status: "IN_CUSTODY", availableToBook: true },
+      { id: "a2", status: "AVAILABLE", availableToBook: false },
+    ],
+  });
+  assert.equal(facts.hasAssetsInCustody, true);
+  assert.equal(facts.hasUnavailableAssets, true);
+  assert.equal(facts.archivedAssetCount, undefined);
+});
+
+test("booking_add lets a quantity-tracked asset the booking holds through", () => {
+  // Re-scanning it sets the booking's new total for the asset; the server
+  // resizes the held slice rather than inserting a second one.
+  const held = quantityRow({ targetId: "asset-q" });
+  const booked: BookingBlockerContext = {
+    ...ctx,
+    bookedAssetIds: new Set(["asset-q"]),
+  };
+  assert.deepEqual(computeBlockers("booking_add", [held], booked), []);
+});
+
+test("booking_add still blocks an individual asset the booking holds", () => {
+  const held = asset({ targetId: "asset-a" });
+  const booked: BookingBlockerContext = {
+    ...ctx,
+    bookedAssetIds: new Set(["asset-a"]),
+  };
+  assert.deepEqual(
+    computeBlockers("booking_add", [held], booked).map((g) => g.key),
+    ["asset-already-in-booking"]
+  );
+});
+
+test("booking_fulfil still blocks a quantity-tracked asset the booking holds", () => {
+  // Fulfil assigns scanned units to reservations and sends no quantity, so a
+  // held asset is not a resize there.
+  const held = quantityRow({ targetId: "asset-q" });
+  const booked: BookingBlockerContext = {
+    ...ctx,
+    bookedAssetIds: new Set(["asset-q"]),
+  };
+  assert.ok(
+    computeBlockers("booking_fulfil", [held], booked).some(
+      (g) => g.key === "asset-already-in-booking"
+    )
   );
 });

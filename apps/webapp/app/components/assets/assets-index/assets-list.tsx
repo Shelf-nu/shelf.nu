@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { m } from "framer-motion";
 import { useSetAtom } from "jotai";
 import { Package } from "lucide-react";
@@ -28,13 +29,18 @@ import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
+import {
+  type ListContextLinkState,
+  useListContextLinkState,
+} from "~/hooks/use-list-context";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { formatCustodyList } from "~/modules/custody/utils";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -57,10 +63,10 @@ import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import BookSelectedModelsDropdown from "./model-booking/book-selected-models-dropdown";
 import { getUnselectableModelRows } from "./model-booking/unselectable-model-rows";
-import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
+import { useAssetAvailabilityData } from "./use-asset-availability-data";
+import { LazyAvailabilityCalendar } from "../../availability-calendar/availability-calendar.lazy";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
-import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
 /**
  * The model view's bulk-action toolbar, built once.
@@ -82,16 +88,40 @@ const MODEL_BULK_ACTIONS = <BookSelectedModelsDropdown />;
 const ASSET_MODEL_EXPLAINER =
   "A model is a make and specification that several assets share, so a booking can ask for any unit of it.";
 
+/**
+ * The fill every header cell of the model view carries.
+ *
+ * `Th` draws no background of its own, so each cell in the group has to ask for
+ * this one by name. A cell that leaves it out renders transparent next to its
+ * tinted neighbours, which reads as a block of colour sitting over a single
+ * column rather than as a header row.
+ */
+const MODEL_HEADER_FILL = "bg-gray-25";
+
 export const AssetsList = ({
   customEmptyStateContent,
   disableTeamMemberFilter,
   disableBulkActions,
   wrapperClassName,
+  titleContent,
+  withListContext = false,
 }: {
   customEmptyStateContent?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
   wrapperClassName?: string;
+  /**
+   * Replaces the title of the asset list (not the model view). The asset index
+   * passes its Active / Archived / All menu here; leave it out on pages whose
+   * loader ignores `?archived=`, where that menu would change nothing.
+   */
+  titleContent?: ListProps["titleContent"];
+  /**
+   * Rows carry this list's search in history state, so the asset page they
+   * open can step through the list with its previous/next arrows. Only the
+   * asset index sets it: the neighbours lookup replays the index's own query.
+   */
+  withListContext?: boolean;
 }) => {
   const {
     items,
@@ -100,6 +130,7 @@ export const AssetsList = ({
     totalModels,
     totalAssetModels,
     locale,
+    perPage,
   } = useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
   const {
@@ -111,10 +142,29 @@ export const AssetsList = ({
   const columns = useAssetIndexColumns();
   // Memoize so the object reference stays stable across re-renders,
   // allowing React.memo on AdvancedAssetRow to work effectively.
-  const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
+  const listContextLinkState = useListContextLinkState("asset", perPage);
+  const linkState = withListContext ? listContextLinkState : undefined;
+  const advancedExtraProps = useMemo(
+    () => ({ columns, linkState }),
+    [columns, linkState]
+  );
+  const simpleExtraProps = useMemo(
+    () => (linkState ? { linkState } : undefined),
+    [linkState]
+  );
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
-  const { isBase, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  /** The bulk menu holds custody, edit and delete actions; any one opens it. */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
@@ -190,15 +240,20 @@ export const AssetsList = ({
           label="Name"
           columnName="name"
           className={tw(
-            "!border-b-0 border-r border-r-transparent bg-gray-25",
+            "!border-b-0 border-r border-r-transparent",
+            MODEL_HEADER_FILL,
             canBookSelectedModels ? "!pl-0" : ""
           )}
         />
         {/* "Default category", not "Category": the cell shows the model's
             DEFAULT, which applies at creation only, so its assets may sit in
             other categories. */}
-        <Th>Default category</Th>
-        <AssetModelSortHeader sortKey="assets" label="Assets" />
+        <Th className={MODEL_HEADER_FILL}>Default category</Th>
+        <AssetModelSortHeader
+          sortKey="assets"
+          label="Assets"
+          className={MODEL_HEADER_FILL}
+        />
         {/* "Status", not "Availability": the cell counts asset status, which is
             not what a booking can take. See `StatusSplit`. The cell carries
             three counts and the rollup can order by the first of them, so the
@@ -208,8 +263,13 @@ export const AssetsList = ({
           sortKey="available"
           label="Status"
           sortsBy="assets in"
+          className={MODEL_HEADER_FILL}
         />
-        <AssetModelSortHeader sortKey="value" label="Total value" />
+        <AssetModelSortHeader
+          sortKey="value"
+          label="Total value"
+          className={MODEL_HEADER_FILL}
+        />
       </>
     ),
     [canBookSelectedModels]
@@ -254,7 +314,9 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
-      <Th>Quantity</Th>
+      <Th className="whitespace-nowrap">
+        {ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
+      </Th>
       <Th>Actions</Th>
     </>
   ) : (
@@ -424,7 +486,7 @@ export const AssetsList = ({
             </>
           ) : isAvailabilityView && shouldShowAvailabilityView ? (
             <>
-              <AvailabilityCalendar
+              <LazyAvailabilityCalendar
                 resources={resources}
                 events={events}
                 resourceLabelContent={({ resource }) => {
@@ -474,6 +536,7 @@ export const AssetsList = ({
                           />
                           <CategoryBadge
                             category={resource.extendedProps?.category}
+                            linkToAssets
                           />
                           {displayCode ? (
                             <AssetCodeBadge {...displayCode} />
@@ -492,16 +555,17 @@ export const AssetsList = ({
               ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
               customPagination={<AssetIndexPagination />}
               bulkActions={
-                disableBulkActions || isBase ? undefined : (
+                disableBulkActions || !canBulkAct ? undefined : (
                   <BulkActionsDropdown />
                 )
               }
               customEmptyStateContent={
                 customEmptyStateContent ? customEmptyStateContent : undefined
               }
+              titleContent={titleContent}
               headerChildren={headerChildren}
               extraItemComponentProps={
-                modeIsSimple ? undefined : advancedExtraProps
+                modeIsSimple ? simpleExtraProps : advancedExtraProps
               }
             />
           )}
@@ -515,10 +579,13 @@ export const ListAssetContent = ({
   item,
   bulkActions,
   isUserPage,
+  extraProps,
 }: {
   item: AssetsFromViewItem;
   bulkActions?: ReactNode;
   isUserPage?: boolean;
+  /** History state for the title link, so the asset page can step through this list. */
+  extraProps?: { linkState?: ListContextLinkState };
 }) => {
   const { category, tags, custody: custodyArray } = item;
   // Render only the single primary-location badge in the list column —
@@ -582,7 +649,8 @@ export const ListAssetContent = ({
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block ">
                 <Button
-                  to={`/assets/${item.id}`}
+                  to={LIST_DETAIL_PATH.asset(item.id)}
+                  state={extraProps?.linkState}
                   variant="link"
                   className="text-left font-medium text-gray-900 hover:text-gray-700"
                 >
@@ -602,6 +670,7 @@ export const ListAssetContent = ({
                   status={item.status}
                   availableToBook={item.availableToBook}
                   asset={item}
+                  isArchived={!!item.archivedAt}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
@@ -612,12 +681,12 @@ export const ListAssetContent = ({
 
       {/* Category */}
       <Td>
-        <CategoryBadge category={category} />
+        <CategoryBadge category={category} linkToAssets />
       </Td>
 
       {/* Tags */}
       <Td className="text-left">
-        <ListItemTagsColumn tags={tags} />
+        <ListItemTagsColumn tags={tags} linkToAssets />
       </Td>
 
       {/* Custodian */}

@@ -39,6 +39,7 @@ declare global {
       NODE_ENV: "development" | "production" | "test";
       SUPABASE_URL: string;
       SUPABASE_SERVICE_ROLE: string;
+      SUPABASE_SECRET_KEY: string;
       SERVER_URL: string;
       URL_SHORTENER: string;
       SUPABASE_ANON_PUBLIC: string;
@@ -67,6 +68,7 @@ declare global {
       /** Auto-injected on Fly machines; used as a fallback for SENTRY_RELEASE. */
       FLY_RELEASE_VERSION: string;
       ADMIN_EMAIL: string;
+      FEEDBACK_EMAIL: string;
       CHROME_EXECUTABLE_PATH: string;
       FINGERPRINT: string;
       FREE_TRIAL_DAYS: string;
@@ -80,6 +82,8 @@ declare global {
       COMPANION_SERVERS: string;
       INSTANCE_NAME: string;
       MIN_COMPANION_VERSION: string;
+      LATEST_COMPANION_VERSION: string;
+      EXPO_ACCESS_TOKEN: string;
     }
   }
 }
@@ -138,6 +142,166 @@ export const env = (
   isBrowser ? PublicEnvSchema.parse(window.env) : EnvSchema.parse(process.env)
 ) as Env;
 
+/**
+ * Secret values printed in this repo's `.env.example`, docs and test setup.
+ * Anyone can read them, so a production server must never sign with one.
+ */
+export const PUBLISHED_PLACEHOLDER_SECRETS: readonly string[] = [
+  "super-duper-s3cret",
+  "another-super-duper-s3cret",
+  "your-super-secret-session-key",
+  "your-local-session-secret",
+  "test-session-secret",
+  "secret-test-invite",
+  "your-invite-token-secret",
+  "generate-with-openssl-rand-hex-32",
+];
+
+/** The signing secrets checked before a production server starts. */
+type SigningSecrets = {
+  SESSION_SECRET?: string;
+  INVITE_TOKEN_SECRET?: string;
+};
+
+/**
+ * Lists what is wrong with the signing secrets a server is about to use.
+ * Outside production nothing is checked, so local development and tests keep
+ * working with the example values.
+ *
+ * - `SESSION_SECRET` signs the session cookie: it must not be a published
+ *   placeholder.
+ * - `INVITE_TOKEN_SECRET` signs invite links: it must not be a published
+ *   placeholder.
+ *
+ * The messages name the variable, never its value.
+ *
+ * @param source - The environment to read (usually `process.env`)
+ * @param nodeEnv - The NODE_ENV the server runs under
+ * @returns One message per problem; empty when the secrets are acceptable
+ */
+export function findWeakSigningSecrets(
+  source: SigningSecrets,
+  nodeEnv: string | undefined
+): string[] {
+  if (nodeEnv !== "production") return [];
+
+  const problems: string[] = [];
+  const sessionSecret = source.SESSION_SECRET?.trim() ?? "";
+  const inviteSecret = source.INVITE_TOKEN_SECRET?.trim() ?? "";
+
+  if (PUBLISHED_PLACEHOLDER_SECRETS.includes(sessionSecret)) {
+    problems.push("SESSION_SECRET is a published example value");
+  }
+
+  if (PUBLISHED_PLACEHOLDER_SECRETS.includes(inviteSecret)) {
+    problems.push("INVITE_TOKEN_SECRET is a published example value");
+  }
+
+  return problems;
+}
+
+/**
+ * Prints a loud error at boot when a production server signs with a
+ * published placeholder secret. The server still starts, so an upgrade never
+ * takes a self-hosted instance offline. Generate real secrets with
+ * `openssl rand -hex 32`.
+ *
+ * @param source - The environment to read (usually `process.env`)
+ * @param nodeEnv - The NODE_ENV the server runs under
+ * @param log - Where the error is written (`console.error` by default)
+ * @returns The problems found; empty when the secrets are acceptable
+ */
+export function warnAboutWeakSigningSecrets(
+  source: SigningSecrets,
+  nodeEnv: string | undefined,
+  // why: the Logger module reads env, so it cannot be imported here
+  // eslint-disable-next-line no-console
+  log: (message: string) => void = console.error
+): string[] {
+  const problems = findWeakSigningSecrets(source, nodeEnv);
+  if (problems.length === 0) return problems;
+
+  const banner = "!".repeat(72);
+  log(
+    [
+      banner,
+      `INSECURE CONFIGURATION: ${problems.join("; ")}.`,
+      "Anyone who knows that value can forge signed cookies and invite links.",
+      "Generate a new value with `openssl rand -hex 32`, set it and restart.",
+      banner,
+    ].join("\n")
+  );
+  return problems;
+}
+
+/**
+ * Whether a value is an unfilled template placeholder such as `{SECRET_KEY}`,
+ * as `.env.example` ships them.
+ *
+ * @param value - An environment value
+ */
+export function isPlaceholderValue(value: string): boolean {
+  return /^\{[^{}]*\}$/.test(value.trim());
+}
+
+/**
+ * The secret key when one is really configured: set, and not the
+ * `.env.example` placeholder.
+ *
+ * @param value - The raw `SUPABASE_SECRET_KEY` value
+ */
+function usableSecretKey(value: string | undefined): string | undefined {
+  return value && !isPlaceholderValue(value) ? value : undefined;
+}
+
+/**
+ * The last day a release accepts `SUPABASE_SERVICE_ROLE` without
+ * `SUPABASE_SECRET_KEY`. Releases after it require the secret key.
+ */
+export const SUPABASE_SERVICE_ROLE_SUPPORT_ENDS = "2027-02-18";
+
+/**
+ * Logs a startup warning when the server authenticates to Supabase with the
+ * legacy `service_role` key instead of a secret key (`sb_secret_...`).
+ *
+ * With the legacy key, Supabase Auth ignores the visitor IP the server sends,
+ * so its per-IP sign-in limits count the server instead of each visitor.
+ * Supabase is also retiring the legacy keys.
+ *
+ * Called once at server start (`server/index.ts`), not when this module loads,
+ * so builds and scripts stay quiet.
+ *
+ * @param source - The environment to read (usually `process.env`)
+ * @param log - Where the warning is written (`console.warn` by default)
+ * @returns True when the warning was logged
+ */
+export function warnAboutLegacySupabaseKey(
+  source: { SUPABASE_SECRET_KEY?: string; SUPABASE_SERVICE_ROLE?: string },
+  // why: the Logger module reads env, so it cannot be imported here
+  // eslint-disable-next-line no-console
+  log: (message: string) => void = console.warn
+): boolean {
+  if (usableSecretKey(source.SUPABASE_SECRET_KEY)) return false;
+  // Neither key set: getEnv refuses to start the server with its own error.
+  if (!source.SUPABASE_SERVICE_ROLE) return false;
+
+  log(
+    [
+      "DEPRECATED CONFIGURATION: SUPABASE_SERVICE_ROLE is set without SUPABASE_SECRET_KEY.",
+      "Create a secret key (sb_secret_...) in Supabase under Project Settings > API Keys",
+      "and set it as SUPABASE_SECRET_KEY. Until then, sign-in rate limits count this server",
+      "instead of each visitor.",
+      `Releases after ${SUPABASE_SERVICE_ROLE_SUPPORT_ENDS} require SUPABASE_SECRET_KEY.`,
+      "Upgrade guide: https://docs.shelf.nu/upgrading/supabase-api-keys",
+    ].join("\n")
+  );
+  return true;
+}
+
+if (!isBrowser) {
+  warnAboutWeakSigningSecrets(process.env, process.env.NODE_ENV);
+}
+
 export function initEnv() {
   return env;
 }
@@ -146,7 +310,23 @@ export function initEnv() {
  * Server env
  */
 export const SERVER_URL = getEnv("SERVER_URL").replace(/\/+$/, "");
-export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
+/**
+ * Supabase secret key (`sb_secret_...`), the server's admin credential. When
+ * set, the server also forwards each visitor's IP to Supabase Auth so its
+ * sign-in rate limits apply per visitor. Takes precedence over
+ * {@link SUPABASE_SERVICE_ROLE}.
+ */
+export const SUPABASE_SECRET_KEY: string | undefined = usableSecretKey(
+  getEnv("SUPABASE_SECRET_KEY", { isRequired: false })
+);
+/**
+ * Legacy `service_role` key. Deprecated: required only while
+ * {@link SUPABASE_SECRET_KEY} is not set (see
+ * {@link SUPABASE_SERVICE_ROLE_SUPPORT_ENDS}).
+ */
+export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE", {
+  isRequired: !SUPABASE_SECRET_KEY,
+});
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
 });
@@ -219,6 +399,19 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
 });
 
 /**
+ * Internal inbox(es) that receive in-app feedback: issues, ideas and error
+ * reports. Accepts a comma separated list so more than one person gets
+ * notified (e.g. the support inbox plus whoever triages product feedback).
+ * Optional: when it is unset the feedback email goes to SUPPORT_EMAIL alone.
+ *
+ * Server side only, and deliberately absent from `getBrowserEnv()`: unlike
+ * SUPPORT_EMAIL it is never shown to users, it only routes internal mail.
+ */
+export const FEEDBACK_EMAIL = getEnv("FEEDBACK_EMAIL", {
+  isRequired: false,
+});
+
+/**
  * A comma separated list of customerIds that have custom install of shelf.
  * We need this in order to make our webhook work properly.
  */
@@ -285,6 +478,35 @@ export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
  */
 export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
   isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Newest companion-app version in the app stores, e.g. "1.6.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a dismissible
+ * "new version available" banner with a store link. Unlike
+ * `MIN_COMPANION_VERSION` it blocks nothing. Leave unset (the default) to show
+ * no banner. Set it only once that version is live in BOTH stores: an earlier
+ * value sends people to a store page with nothing new to install.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const LATEST_COMPANION_VERSION = getEnv("LATEST_COMPANION_VERSION", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Access token for the Expo push service, which delivers companion-app push
+ * notifications. Needed only once "enhanced push security" is switched on for
+ * the Expo project; until then the push sender works without it. Server side
+ * only, and deliberately absent from `getBrowserEnv()`.
+ *
+ * @see {@link file://./../modules/push/expo.server.ts}
+ */
+export const EXPO_ACCESS_TOKEN = getEnv("EXPO_ACCESS_TOKEN", {
+  isSecret: true,
   isRequired: false,
 });
 

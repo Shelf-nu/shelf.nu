@@ -28,7 +28,15 @@ import { withPrismaRetry } from "@shelf/database";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { CUSTODY_AGG_JOIN, generateWhereClause } from "../asset/query.server";
+import type { BookableListScope } from "../asset/list-scope.server";
+import {
+  CUSTODY_AGG_JOIN,
+  generateWhereClause,
+  POOL_AGGREGATE_JOIN,
+  POOL_COLUMN_NAMES,
+} from "../asset/query.server";
+import type { CustodySearchScope } from "../asset/search-union.server";
+import type { ArchivedFilter } from "../asset/types";
 
 /** Sort keys the model view offers. Deliberately separate from the asset
  * index's `sortBy`, whose keys name asset columns a model row does not have. */
@@ -94,13 +102,25 @@ type AssetModelRollupQueryRow = AssetModelRollupRow & {
  * rather than a wrong result. Added only when such a filter is present: the
  * aggregation runs per asset row and is pure cost when nothing reads it.
  *
+ * Free now, Reserved and Stock status filters test the `pool` LATERAL's
+ * figures the same way, so they get that join on the same terms. The filter
+ * popover stays mounted in the model view, so they can arrive here.
+ *
  * @param filters - Parsed filters for this request.
- * @returns The join fragment, or `Prisma.empty` when no custody filter applies.
+ * @returns The join fragments, or `Prisma.empty` when no such filter applies.
  */
 function buildRollupFilterJoins(filters: Filter[]): Prisma.Sql {
-  const hasCustodyFilter = filters.some((filter) => filter.name === "custody");
+  const poolNames: readonly string[] = POOL_COLUMN_NAMES;
+  const joins = [
+    filters.some((filter) => filter.name === "custody")
+      ? CUSTODY_AGG_JOIN
+      : null,
+    filters.some((filter) => poolNames.includes(filter.name))
+      ? POOL_AGGREGATE_JOIN
+      : null,
+  ].filter((join): join is Prisma.Sql => join !== null);
 
-  return hasCustodyFilter ? CUSTODY_AGG_JOIN : Prisma.empty;
+  return joins.length > 0 ? Prisma.join(joins, " ") : Prisma.empty;
 }
 
 /** Sort expression per key. A whitelist, not interpolation: the key comes
@@ -251,6 +271,10 @@ export type GetAssetModelRollupArgs = {
   organizationId: string;
   /** Free-text search, already extracted from the request params. */
   search: string | null;
+  /** Whose custody the search may match by custodian name (see
+   * `custodySearchScopeFor`). Required so the counts never include assets
+   * matched through custody the viewer may not see. */
+  custodySearchScope: CustodySearchScope;
   /** Parsed advanced filters — pass the loader's `parsedFilters` so the
    * hierarchy expansion is not redone. */
   filters: Filter[];
@@ -262,10 +286,14 @@ export type GetAssetModelRollupArgs = {
    * returns at most 100 rows rather than erroring, so a caller comparing the
    * row count against the requested `perPage` should expect the clamp. */
   perPage: number;
-  /** Restricts the rollup to assets the viewer may reserve. Mirrors the asset
-   * list's own scoping, so a role that sees a narrowed list does not also see
-   * counts computed over the wider set. */
-  availableToBookOnly?: boolean;
+  /** The viewer's list scope. Mirrors the asset list's own scoping, so a role
+   * that sees a narrowed list does not also see counts computed over the wider
+   * set. `null` or omitted counts every asset. */
+  bookableScope?: BookableListScope | null;
+  /** The index's Active / Archived / All view (issue #382), so a model's
+   * counts describe the same assets the list beside it shows. Defaults to
+   * `"active"`, matching every other asset list. */
+  archivedFilter?: ArchivedFilter;
   sortBy?: AssetModelRollupSortKey;
   sortDirection?: "asc" | "desc";
 };
@@ -280,11 +308,13 @@ export type GetAssetModelRollupArgs = {
 export async function getAssetModelRollup({
   organizationId,
   search,
+  custodySearchScope,
   filters,
   timeZone = "UTC",
   page,
   perPage,
-  availableToBookOnly = false,
+  bookableScope = null,
+  archivedFilter = "active",
   sortBy = "name",
   sortDirection = "asc",
 }: GetAssetModelRollupArgs): Promise<{
@@ -300,11 +330,13 @@ export async function getAssetModelRollup({
 
   const whereClause = generateWhereClause(
     organizationId,
-    search,
+    search ? { text: search, custodySearchScope } : null,
     filters,
     undefined,
-    availableToBookOnly,
-    timeZone
+    bookableScope,
+    timeZone,
+    false,
+    archivedFilter
   );
 
   // Checked against the tuple, not a nullish-coalesce on the lookup: an

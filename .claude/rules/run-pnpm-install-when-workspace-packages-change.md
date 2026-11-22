@@ -1,11 +1,9 @@
 ---
 description: A missing packages/* symlink surfaces as repeated "Failed to resolve import @shelf/<pkg>" Vite errors that look like a config bug — the real cause is a checkout installed before that package existed. Run pnpm install
-globs:
-  [
-    "apps/webapp/vite.config.ts",
-    "packages/**/package.json",
-    "pnpm-workspace.yaml",
-  ]
+paths:
+  - "apps/webapp/vite.config.ts"
+  - "packages/**/package.json"
+  - "pnpm-workspace.yaml"
 ---
 
 # `@shelf/*` Resolution Failures Mean a Stale `pnpm install`

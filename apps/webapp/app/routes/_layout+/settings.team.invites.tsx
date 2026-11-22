@@ -13,6 +13,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
+import { ROLES_HELP_URL } from "~/components/settings/roles-help-link";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import {
@@ -36,6 +37,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { ROLE_POLICIES } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -44,17 +46,23 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // Listing pending invites is part of inviting people.
     const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
-      action: PermissionAction.read,
+      action: PermissionAction.create,
     });
 
-    /** Get the organization */
+    /** Only the organization fields the page and its layout read. */
     const organization = await db.organization.findFirst({
       where: { id: organizationId },
-      include: { owner: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        owner: { select: { email: true } },
+      },
     });
 
     if (!organization) {
@@ -115,14 +123,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId, role);
+    return await resolveUserAction(request, organizationId, userId, access);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -158,11 +166,7 @@ export default function UserInvitesSetting() {
       <p className="mb-6 text-xs text-gray-600">
         Users by default have a mail registered in shelf and can get reminders,
         log in or perform other actions. Read more about our{" "}
-        <Link
-          to="https://www.shelf.nu/knowledge-base/user-roles-and-their-permissions"
-          target="_blank"
-          className="underline"
-        >
+        <Link to={ROLES_HELP_URL} target="_blank" className="underline">
           permissions here
         </Link>
         .
@@ -223,7 +227,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {item.role !== "Owner" ? (
+        {!ROLE_POLICIES[item.roleEnum].membership.ownsWorkspace ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}
@@ -232,6 +236,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             isSSO={item.sso || false}
             role={item.role}
             roleEnum={item.roleEnum}
+            roles={item.roles}
           />
         ) : null}
       </Td>

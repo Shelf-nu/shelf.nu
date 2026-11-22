@@ -21,6 +21,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { act, render, screen } from "@testing-library/react";
 import { createStore, Provider } from "jotai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
 import { VALIDATION_ERROR } from "~/utils/error";
@@ -114,12 +115,11 @@ vi.mock("~/hooks/use-format-prefs", () => ({
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    isBaseOrSelfService: false,
-    isAdministratorOrOwner: true,
-    roles: [OrganizationRoles.ADMIN],
-  }),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => [OrganizationRoles.ADMIN],
+}));
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => accessFor([OrganizationRoles.ADMIN]),
 }));
 
 // why: the date and custodian pickers reach for a calendar, a working-hours

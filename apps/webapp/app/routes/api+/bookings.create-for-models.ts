@@ -27,11 +27,13 @@
 import { data, redirect, type ActionFunctionArgs } from "react-router";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { CreateBookingForModelsSchema } from "~/modules/asset-model/model-reservations-schema";
+import { DRAFT_CREATED_MESSAGE } from "~/modules/booking/constants";
 import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -59,7 +61,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
@@ -129,8 +131,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         action: "new",
         workingHours,
         bookingSettings,
-        // ADMIN/OWNER are not held to the buffer-start and max-length limits.
-        isAdminOrOwner: !isSelfServiceOrBase,
+        // Roles whose policy bypasses them skip the buffer-start and
+        // max-length limits.
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }),
       {
         // Working-hours and buffer messages are expected user-input feedback.
@@ -154,8 +157,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    // BASE and SELF_SERVICE users book for themselves only.
-    if (isSelfServiceOrBase && custodianFromDb.userId !== userId) {
+    // Members whose custodian picker is fixed to themselves book for
+    // themselves only.
+    if (bookingCustodianIsSelf(access) && custodianFromDb.userId !== userId) {
       throw new ShelfError({
         cause: null,
         message: "Self user can assign booking to themselves only.",
@@ -185,7 +189,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         from,
         to,
         custodianTeamMemberId: custodian.id,
-        custodianUserId: custodianFromDb.userId ?? null,
         name,
         description: description ?? null,
         organizationId,
@@ -199,8 +202,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     sendNotification({
-      title: "Booking saved",
-      message: "Your booking has been saved successfully",
+      title: "Draft created",
+      message: DRAFT_CREATED_MESSAGE,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

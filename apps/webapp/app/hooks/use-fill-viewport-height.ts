@@ -19,6 +19,8 @@
 import type { RefObject } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { observeChromeAbove } from "~/utils/observe-chrome-above";
+
 import { useViewportHeight } from "./use-viewport-height";
 
 /**
@@ -37,6 +39,11 @@ export type ResolveFillHeightArgs = {
   containerHeight: number;
   /** The pane's distance from the top of that container's content. */
   elementOffsetTop: number;
+  /**
+   * The container's own bottom padding. It sits below the pane inside the
+   * scroll area, so ignoring it makes the container scroll by that much.
+   */
+  containerPaddingBottom?: number;
   /** Smallest height worth rendering, so a mismeasurement can't collapse it. */
   minHeight?: number;
 };
@@ -50,9 +57,13 @@ export type ResolveFillHeightArgs = {
 export function resolveFillHeight({
   containerHeight,
   elementOffsetTop,
+  containerPaddingBottom = 0,
   minHeight = 0,
 }: ResolveFillHeightArgs): number {
-  return Math.max(containerHeight - elementOffsetTop, minHeight);
+  return Math.max(
+    containerHeight - elementOffsetTop - containerPaddingBottom,
+    minHeight
+  );
 }
 
 /**
@@ -99,6 +110,8 @@ export function useFillViewportHeight<T extends HTMLElement>({
       const next = resolveFillHeight({
         containerHeight: container.clientHeight,
         elementOffsetTop,
+        containerPaddingBottom:
+          parseFloat(getComputedStyle(container).paddingBottom) || 0,
         minHeight,
       });
 
@@ -110,47 +123,10 @@ export function useFillViewportHeight<T extends HTMLElement>({
     measure();
 
     // Chrome above the pane changes height without the viewport ever changing
-    // size: an account banner's one line of text wraps to two as the container
-    // narrows, and its inline button swaps to a longer label mid-submit.
-    // `useViewportHeight` writes the same `vh` and the same `isMd` through all
-    // of that, so React bails out and no dependency here changes.
-    const observer = new ResizeObserver(measure);
-
-    // Watching the container alone is not enough. It is `h-dvh`, so chrome that
-    // grows taller overflows it instead of resizing it, and the observer stays
-    // silent — the chrome itself has to be watched. The container still earns
-    // its place for viewport and sidebar-width changes.
-    //
-    // Observation stops at the pane. This effect writes the pane's height, so
-    // watching the pane — or any ancestor of it — would feed that write back in
-    // as a resize; and chrome below the pane cannot move its top anyway.
-    const subscribe = () => {
-      observer.disconnect();
-      observer.observe(container);
-
-      for (const child of Array.from(container.children)) {
-        if (child.contains(element)) {
-          break;
-        }
-        observer.observe(child);
-      }
-    };
-
-    subscribe();
-
-    // A banner mounting or unmounting adds or removes chrome above the pane
-    // without resizing anything already being watched, and changes which
-    // elements are worth watching.
-    const chromeListObserver = new MutationObserver(() => {
-      subscribe();
-      measure();
-    });
-    chromeListObserver.observe(container, { childList: true });
-
-    return () => {
-      observer.disconnect();
-      chromeListObserver.disconnect();
-    };
+    // size, so `vh`/`isMd` stay the same and no dependency here re-runs: the
+    // chrome itself is watched instead. Observation stops at the pane, because
+    // this effect writes the pane's height and must not hear it back.
+    return observeChromeAbove(element, measure);
     // `vh`/`isMd` are not read here — they are the signal that the viewport
     // changed and the offset is worth measuring again.
   }, [vh, isMd, minHeight]);

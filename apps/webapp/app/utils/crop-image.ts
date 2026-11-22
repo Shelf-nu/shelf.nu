@@ -8,6 +8,7 @@
  * @see {@link file://./storage.server.ts} `uploadFile`, its caller
  */
 import type { ResizeOptions } from "sharp";
+import { createFileFromAsyncIterable } from "./create-buffer-from-async-iterable";
 import { isLikeShelfError, ShelfError } from "./error";
 import { detectImageFormat } from "./image-format.server";
 
@@ -36,23 +37,20 @@ export function isUnreadableImageError(cause: unknown): boolean {
 /**
  * Reads an uploaded image and returns it resized and encoded as WebP.
  *
- * @param data - The upload as it streams in
+ * @param data - The upload as it streams in, or already read into memory
  * @param options - Resize options; defaults to a 150px square thumbnail
  * @returns The processed image
  * @throws {ShelfError} 400 when the file is not a supported image or cannot be
  *   decoded; 500 for any other failure
  */
 export const cropImage = async (
-  data: AsyncIterable<Uint8Array>,
+  data: AsyncIterable<Uint8Array> | Buffer,
   options?: ResizeOptions
 ) => {
   try {
-    const chunks = [];
-    for await (const chunk of data) {
-      chunks.push(chunk);
-    }
-
-    const buffer = Buffer.concat(chunks);
+    const buffer = Buffer.isBuffer(data)
+      ? data
+      : await createFileFromAsyncIterable(data);
     const detectedFormat = detectImageFormat(buffer);
 
     if (!detectedFormat) {

@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  escapeCsvValue,
   formatUnrecognizedColumnLabel,
   splitCsvRecords,
   validateCsvClientSide,
@@ -154,5 +155,16 @@ describe("validateCsvClientSide — row count with multi-line descriptions", () 
     expect(result.headerCount).toBe(3);
     expect(result.idColumnFound).toBe("ID");
     expect(result.valid).toBe(true);
+  });
+});
+
+describe("escapeCsvValue", () => {
+  it("neutralises every value a spreadsheet would run, inside a quoted cell", () => {
+    expect(escapeCsvValue("=1+1")).toBe(`"'=1+1"`);
+    expect(escapeCsvValue("\t=1+1")).toBe(`"'\t=1+1"`);
+  });
+
+  it("leaves a plain value unquoted", () => {
+    expect(escapeCsvValue("Camera")).toBe("Camera");
   });
 });

@@ -1,5 +1,6 @@
 import type { BookingStatus } from "@prisma/client";
 import { atom } from "jotai";
+import type { Getter, Setter } from "jotai";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
@@ -14,6 +15,14 @@ export type ScanListItem =
   | {
       data?: KitFromQr | AssetFromQr;
       error?: string;
+      /**
+       * The code is still owed a lookup that answers: it was put back from a
+       * scan draft, or its last lookup got no answer (no connection, a gateway
+       * page). Nothing is known to be wrong with it, so a scan draft keeps it
+       * until a lookup succeeds or the server refuses the code. Such an entry
+       * has no `type` and no `data`, like a code that has just been scanned.
+       */
+      pendingLookup?: boolean;
       type?: "asset" | "kit";
       codeType?: "qr" | "barcode" | "samId"; // Track whether this came from QR, barcode, or SAM ID
     }
@@ -40,6 +49,67 @@ export const scannedItemsAtom = atom<ScanListItems>({});
  *   atoms below so removing an item also drops its qty entry.
  */
 export const scannedAssetQuantitiesAtom = atom<Record<string, number>>({});
+
+/**
+ * The "From location" a scanned pool's units come from, keyed by `assetId`:
+ * a location id or `"unplaced"`. Set only when the operator picks one; the
+ * assign drawer falls back to the pre-selected location (the one with the
+ * most units left) for rows without an entry. Every remove and clear path
+ * drops an asset's entry together with its quantity, so a rescan starts from
+ * the pre-selection again.
+ */
+export const scannedAssetSourcesAtom = atom<Record<string, string>>({});
+
+/**
+ * Drops the per-asset entries (quantity and picked source) of assets that
+ * left the scan list. Both maps are keyed by `assetId`, not by `qrId`.
+ */
+function dropScannedAssetEntries(get: Getter, set: Setter, assetIds: string[]) {
+  if (assetIds.length === 0) return;
+  const quantities = { ...get(scannedAssetQuantitiesAtom) };
+  const sources = { ...get(scannedAssetSourcesAtom) };
+  for (const id of assetIds) {
+    delete quantities[id];
+    delete sources[id];
+  }
+  set(scannedAssetQuantitiesAtom, quantities);
+  set(scannedAssetSourcesAtom, sources);
+}
+
+/**
+ * Writer for {@link scannedAssetSourcesAtom}: one asset's picked source.
+ * Pass `maxQuantity`, the new source's cap, to lower an entered quantity
+ * that no longer fits in the same update. A cap below 1 leaves the quantity
+ * alone: the row then shows no input, and the bulk route's up-front check
+ * names the location.
+ */
+export const setScannedAssetSourceAtom = atom(
+  null,
+  (
+    get,
+    set,
+    payload: { assetId: string; source: string; maxQuantity?: number }
+  ) => {
+    const { assetId, source, maxQuantity } = payload;
+    set(scannedAssetSourcesAtom, {
+      ...get(scannedAssetSourcesAtom),
+      [assetId]: source,
+    });
+    const quantities = get(scannedAssetQuantitiesAtom);
+    const entered = quantities[assetId];
+    if (
+      maxQuantity !== undefined &&
+      maxQuantity >= 1 &&
+      entered !== undefined &&
+      entered > maxQuantity
+    ) {
+      set(scannedAssetQuantitiesAtom, {
+        ...quantities,
+        [assetId]: maxQuantity,
+      });
+    }
+  }
+);
 
 /**
  * Writer atom that updates a single asset's scanned quantity. Drawer
@@ -176,6 +246,15 @@ export const updateScannedItemAtom = atom(
           ...currentItems,
           [qrId]: duplicateItem,
         });
+        // Signal it like a same-code duplicate, pointing at the listed row:
+        // the audit scanner reopens a counted asset's count from it.
+        if (item.type === "asset") {
+          set(lastDuplicateScanAtom, {
+            qrId: existingDuplicateKey[0],
+            assetTitle: (item.data as AssetFromQr).title || "Unknown",
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
     }
@@ -192,16 +271,12 @@ export const updateScannedItemAtom = atom(
 // Remove item based on key
 export const removeScannedItemAtom = atom(null, (get, set, qrId: string) => {
   const currentItems = get(scannedItemsAtom);
-  // Drop the matching scanned-item entry plus any qty entry for the
-  // removed asset (qty map is keyed by assetId, not qrId).
+  // Drop the matching scanned-item entry plus the removed asset's qty and
+  // source entries (both keyed by assetId, not qrId).
   const removedAssetId = currentItems[qrId]?.data?.id;
   const { [qrId]: _, ...rest } = currentItems;
   set(scannedItemsAtom, rest);
-  if (removedAssetId) {
-    const currentQty = get(scannedAssetQuantitiesAtom);
-    const { [removedAssetId]: __, ...qtyRest } = currentQty;
-    set(scannedAssetQuantitiesAtom, qtyRest);
-  }
+  if (removedAssetId) dropScannedAssetEntries(get, set, [removedAssetId]);
 });
 
 // Remove multiple items based on key array
@@ -217,14 +292,7 @@ export const removeMultipleScannedItemsAtom = atom(
       delete updatedItems[qrId];
     });
     set(scannedItemsAtom, updatedItems);
-    if (removedAssetIds.length > 0) {
-      const currentQty = get(scannedAssetQuantitiesAtom);
-      const qtyRest = { ...currentQty };
-      removedAssetIds.forEach((id) => {
-        delete qtyRest[id];
-      });
-      set(scannedAssetQuantitiesAtom, qtyRest);
-    }
+    dropScannedAssetEntries(get, set, removedAssetIds);
   }
 );
 
@@ -240,12 +308,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
       }
     });
     set(scannedItemsAtom, updatedItems);
-    const currentQty = get(scannedAssetQuantitiesAtom);
-    const qtyRest = { ...currentQty };
-    ids.forEach((id) => {
-      delete qtyRest[id];
-    });
-    set(scannedAssetQuantitiesAtom, qtyRest);
+    dropScannedAssetEntries(get, set, ids);
   }
 );
 
@@ -253,6 +316,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
 export const clearScannedItemsAtom = atom(null, (_get, set) => {
   set(scannedItemsAtom, {}); // Resets the atom to an empty object
   set(scannedAssetQuantitiesAtom, {}); // Drop any qty entries too.
+  set(scannedAssetSourcesAtom, {}); // And any picked source locations.
 });
 
 /*******************************/
@@ -274,6 +338,11 @@ export type AuditSessionInfo = {
 export type AuditAssetStatus = "found" | "missing" | "unexpected";
 
 export type AuditScannedItem = {
+  /**
+   * The audit row's stored status (`AuditAsset.status`), for expected rows the
+   * loader sends. A finished audit stores MISSING for a row never scanned.
+   */
+  rowStatus?: string;
   id: string;
   name: string;
   type: "asset" | "kit";
@@ -286,7 +355,95 @@ export type AuditScannedItem = {
   auditImagesCount?: number;
   mainImage?: string | null;
   thumbnailImage?: string | null;
+  /** Units expected on this row; null for an individual asset. */
+  expectedQuantity?: number | null;
+  /** Units counted so far; null until counted. */
+  foundQuantity?: number | null;
+  unitOfMeasure?: string | null;
 };
+
+/**
+ * The unit count of one quantity-tracked asset in the running audit, keyed by
+ * assetId in {@link auditCountsAtom}. Individual assets have no entry.
+ */
+export type AuditCount = {
+  expectedQuantity: number;
+  /** Null until the auditor counts it. */
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+  /**
+   * True from the moment the auditor enters a count until the server has
+   * saved it. Only an unsaved count outranks the loader's; once saved, the
+   * loader's value wins, so a count another auditor stored is not hidden.
+   */
+  unsaved?: boolean;
+};
+
+/**
+ * Counts of the audit's quantity-tracked assets, keyed by assetId. Seeded from
+ * the loader (expected rows and restored scans) and updated by the count
+ * dialog. The scan persistence hook sends `foundQuantity` from here, and does
+ * not send a quantity-tracked scan until it has one.
+ */
+export const auditCountsAtom = atom<Record<string, AuditCount>>({});
+
+/** Merges count entries into {@link auditCountsAtom}. */
+export const mergeAuditCountsAtom = atom(
+  null,
+  (get, set, entries: Record<string, AuditCount>) => {
+    set(auditCountsAtom, { ...get(auditCountsAtom), ...entries });
+  }
+);
+
+/**
+ * The count the dialog is asking for: a quantity-tracked asset just scanned
+ * (`mode: "first"`) or scanned again to correct its count (`"recount"`).
+ * Null while the dialog is closed.
+ */
+export type AuditCountPrompt = {
+  assetId: string;
+  /** Scanned-list key of the row, so cancelling a first count can drop it. */
+  qrId: string;
+  assetTitle: string;
+  expectedQuantity: number;
+  foundQuantity: number | null;
+  unitOfMeasure: string | null;
+  /**
+   * Whether the asset is on the audit's list. Only then is `expectedQuantity`
+   * an expectation the auditor can confirm with "All here".
+   */
+  isExpected: boolean;
+  mode: "first" | "recount";
+};
+
+/** The open count prompt, or null while the dialog is closed. See {@link AuditCountPrompt}. */
+export const auditCountPromptAtom = atom<AuditCountPrompt | null>(null);
+
+/**
+ * Count entries for the quantity rows of a list of audit items; rows without
+ * an `expectedQuantity` are individual assets and are skipped.
+ */
+export function auditCountsFromItems(
+  items: ReadonlyArray<{
+    id: string;
+    expectedQuantity?: number | null;
+    foundQuantity?: number | null;
+    unitOfMeasure?: string | null;
+  }>
+): Record<string, AuditCount> {
+  const counts: Record<string, AuditCount> = {};
+  for (const item of items) {
+    if (item.expectedQuantity === null || item.expectedQuantity === undefined) {
+      continue;
+    }
+    counts[item.id] = {
+      expectedQuantity: item.expectedQuantity,
+      foundQuantity: item.foundQuantity ?? null,
+      unitOfMeasure: item.unitOfMeasure ?? null,
+    };
+  }
+  return counts;
+}
 
 export type AuditAssetMeta = {
   notesCount?: number;
@@ -352,8 +509,17 @@ export const auditResultsAtom = atom((get) => {
 // Action atom to set expected assets for audit
 export const setAuditExpectedAssetsAtom = atom(
   null,
-  (_get, set, assets: AuditScannedItem[]) => {
+  (get, set, assets: AuditScannedItem[]) => {
     set(auditExpectedAssetsAtom, assets);
+    // The loader's counts win, except a count entered here that the server
+    // has not saved yet.
+    const current = get(auditCountsAtom);
+    const fromLoader = auditCountsFromItems(assets);
+    const merged: Record<string, AuditCount> = { ...current };
+    for (const [assetId, entry] of Object.entries(fromLoader)) {
+      merged[assetId] = current[assetId]?.unsaved ? current[assetId] : entry;
+    }
+    set(auditCountsAtom, merged);
     // Seed meta counts from loader data so UI starts with server values.
     set(
       auditAssetMetaAtom,
@@ -408,6 +574,8 @@ export const startAuditSessionAtom = atom(
     // Clear any existing scanned items when starting a new audit
     set(scannedItemsAtom, {});
     set(auditAssetMetaAtom, {});
+    set(auditCountsAtom, {});
+    set(auditCountPromptAtom, null);
   }
 );
 
@@ -417,6 +585,8 @@ export const endAuditSessionAtom = atom(null, (_get, set) => {
   set(auditExpectedAssetsAtom, []);
   set(scannedItemsAtom, {});
   set(auditAssetMetaAtom, {});
+  set(auditCountsAtom, {});
+  set(auditCountPromptAtom, null);
 });
 
 /*******************************/
@@ -769,6 +939,12 @@ export type FulfilSessionInfo = {
   /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
   bookingFrom: string;
   /**
+   * ISO string, or null for a booking with no end yet. With `bookingStatus`
+   * it drives the expired-reservation prompt (`isReservationExpired`) in the
+   * submit path.
+   */
+  bookingTo: string | null;
+  /**
    * Booking status when the scanner opened. Only a RESERVED booking's first
    * check-out can move its start date, so only then is the operator asked.
    */
@@ -847,3 +1023,21 @@ export const endFulfilSessionAtom = atom(null, (_get, set) => {
  * `useBookingAssignSessionInitialization`.
  */
 export const assignAlreadyIncludedAtom = atom<AlreadyIncludedRow[]>([]);
+
+/**
+ * One model the booking reserves, whether or not its units are all filled.
+ */
+export type ReservedModel = { assetModelId: string; assetModelName: string };
+
+/**
+ * Every model the booking reserves in the current Scan to Assign session,
+ * fully filled ones included.
+ *
+ * Kept apart from `expectedModelRequestsAtom`, which lists only reservations
+ * still owed and drives matching and progress. This one answers a different
+ * question: whether an extra scan's model is reserved at all, so a scan of a
+ * model whose units are all filled reads as over the reserved count rather
+ * than as an unreserved model. Seeded and cleared by
+ * `useBookingAssignSessionInitialization`.
+ */
+export const assignReservedModelsAtom = atom<ReservedModel[]>([]);

@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getEnv } from "./env";
+import {
+  findWeakSigningSecrets,
+  getEnv,
+  isPlaceholderValue,
+  SUPABASE_SERVICE_ROLE_SUPPORT_ENDS,
+  warnAboutLegacySupabaseKey,
+  warnAboutWeakSigningSecrets,
+} from "./env";
 import { ShelfError } from "./error";
 
 // why: Mock isBrowser to ensure we're testing server-side behavior
@@ -192,4 +199,150 @@ describe("getEnv", () => {
       }).toThrow(ShelfError);
     });
   });
+});
+
+describe("signing secrets in production", () => {
+  /** A secret shaped like the output of `openssl rand -hex 32`. */
+  const STRONG = "9f".repeat(32);
+
+  it.each([
+    "super-duper-s3cret",
+    "your-super-secret-session-key",
+    "your-local-session-secret",
+    "test-session-secret",
+    "generate-with-openssl-rand-hex-32",
+  ])("refuses the example SESSION_SECRET %s", (value) => {
+    expect(
+      findWeakSigningSecrets(
+        { SESSION_SECRET: value, INVITE_TOKEN_SECRET: STRONG },
+        "production"
+      )
+    ).toEqual(["SESSION_SECRET is a published example value"]);
+  });
+
+  it.each([
+    "another-super-duper-s3cret",
+    "secret-test-invite",
+    "your-invite-token-secret",
+  ])("refuses the example INVITE_TOKEN_SECRET %s", (value) => {
+    expect(
+      findWeakSigningSecrets(
+        { SESSION_SECRET: STRONG, INVITE_TOKEN_SECRET: value },
+        "production"
+      )
+    ).toEqual(["INVITE_TOKEN_SECRET is a published example value"]);
+  });
+
+  it("accepts generated secrets", () => {
+    expect(
+      findWeakSigningSecrets(
+        { SESSION_SECRET: STRONG, INVITE_TOKEN_SECRET: STRONG },
+        "production"
+      )
+    ).toEqual([]);
+  });
+
+  it.each(["development", "test"])(
+    "does not check the secrets under NODE_ENV=%s",
+    (nodeEnv) => {
+      expect(
+        findWeakSigningSecrets(
+          {
+            SESSION_SECRET: "super-duper-s3cret",
+            INVITE_TOKEN_SECRET: "secret-test-invite",
+          },
+          nodeEnv
+        )
+      ).toEqual([]);
+    }
+  );
+
+  it("logs a loud error without stopping the server or printing the value", () => {
+    const log = vi.fn();
+
+    const problems = warnAboutWeakSigningSecrets(
+      {
+        SESSION_SECRET: "super-duper-s3cret",
+        INVITE_TOKEN_SECRET: "secret-test-invite",
+      },
+      "production",
+      log
+    );
+
+    expect(problems).toHaveLength(2);
+    expect(log).toHaveBeenCalledTimes(1);
+    const message = log.mock.calls[0][0] as string;
+    expect(message).toMatch(/INSECURE CONFIGURATION/);
+    expect(message).toMatch(/SESSION_SECRET.*INVITE_TOKEN_SECRET/);
+    expect(message).not.toMatch(/super-duper-s3cret|secret-test-invite/);
+  });
+
+  it("stays quiet when the secrets are generated", () => {
+    const log = vi.fn();
+
+    warnAboutWeakSigningSecrets(
+      { SESSION_SECRET: STRONG, INVITE_TOKEN_SECRET: STRONG },
+      "production",
+      log
+    );
+
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
+describe("warnAboutLegacySupabaseKey", () => {
+  it("warns, with the end date, when only the legacy service_role key is set", () => {
+    const log = vi.fn();
+
+    expect(
+      warnAboutLegacySupabaseKey({ SUPABASE_SERVICE_ROLE: "legacy" }, log)
+    ).toBe(true);
+
+    const message = log.mock.calls[0][0] as string;
+    expect(message).toMatch(/SUPABASE_SECRET_KEY/);
+    expect(message).toContain(SUPABASE_SERVICE_ROLE_SUPPORT_ENDS);
+  });
+
+  it("treats the .env.example placeholder as no secret key", () => {
+    const log = vi.fn();
+
+    expect(
+      warnAboutLegacySupabaseKey(
+        {
+          SUPABASE_SECRET_KEY: "{SECRET_KEY}",
+          SUPABASE_SERVICE_ROLE: "legacy",
+        },
+        log
+      )
+    ).toBe(true);
+  });
+
+  it("stays quiet when neither key is set, since the server refuses to start", () => {
+    const log = vi.fn();
+
+    expect(warnAboutLegacySupabaseKey({}, log)).toBe(false);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when a secret key is set", () => {
+    const log = vi.fn();
+
+    expect(
+      warnAboutLegacySupabaseKey({ SUPABASE_SECRET_KEY: "sb_secret_x" }, log)
+    ).toBe(false);
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
+describe("isPlaceholderValue", () => {
+  it.each(["{SECRET_KEY}", " {SERVICE_ROLE} ", "{}"])("flags %j", (value) => {
+    expect(isPlaceholderValue(value)).toBe(true);
+  });
+
+  it.each(["sb_secret_abc", "https://{YOUR_INSTANCE_NAME}.supabase.co", ""])(
+    "accepts %j",
+    (value) => {
+      expect(isPlaceholderValue(value)).toBe(false);
+    }
+  );
 });

@@ -90,7 +90,7 @@ describe("KitImage", () => {
     });
 
     expect(submit).toHaveBeenCalledWith(
-      { kitId: "kit_1", image: STORED_URL },
+      { kitId: "kit_1" },
       { method: "post", action: "/api/kit/refresh-image" }
     );
   });

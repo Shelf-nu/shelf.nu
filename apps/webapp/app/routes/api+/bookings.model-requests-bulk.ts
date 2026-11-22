@@ -44,13 +44,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     const formData = await request.formData();
     const { bookingId, models } = parseData(
@@ -77,17 +76,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    // `booking:update` reaches SELF_SERVICE and BASE for every booking in the
-    // workspace, so org scoping alone would still let them reserve units on a
-    // colleague's booking.
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "manage model reservations on",
-      });
-    }
+    // `booking:update` reaches every role for every booking in the
+    // workspace, so org scoping alone would still let a restricted member
+    // reserve units on a colleague's booking. No-op for a caller whose access
+    // writes every booking.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage model reservations on",
+    });
 
     /**
      * Forwarded exactly as submitted.

@@ -1,31 +1,34 @@
 import type {
   Category,
   Location,
-  Note,
   Qr,
   Asset,
   User,
   Tag,
   Organization,
   TeamMember,
-  Booking,
   Kit,
   AssetIndexSettings,
   UserOrganization,
   BarcodeType,
+  ConsumptionType,
+  Currency,
 } from "@prisma/client";
 import {
   AssetStatus,
   AssetType,
   BookingStatus,
   ConsumptionCategory,
-  ConsumptionType,
   ErrorCorrection,
-  OrganizationRoles,
+  KitStatus,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
 import { withPrismaRetry } from "@shelf/database";
+import {
+  archivedAssetsRefusal,
+  KIT_IN_USE_REINSTATE_REASON,
+} from "@shelf/labels";
 import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
@@ -36,6 +39,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // Imported from the dependency-free leaf (NOT `availability.server`) so that
 // importing asset/service.server does NOT drag in the heavy
@@ -47,6 +51,28 @@ import {
   assertAssetQuantityNotBelowReservations,
   computeCustodyAvailability,
 } from "~/modules/asset/availability-primitives.server";
+import type { ReleaseLine } from "~/modules/asset/custody-source";
+import {
+  UNPLACED_SOURCE,
+  bookedOutFromSource,
+  custodyFromSource,
+  custodySourceKey,
+  hasMultipleSources,
+  isUnplacedSource,
+  placedAtSource,
+  planDrainRelease,
+  resolveCustodySource,
+  sourceShortfall,
+  unitsLeftAtSource,
+  unplacedUnits,
+} from "~/modules/asset/custody-source";
+import {
+  createCustodyRehomeNote,
+  createCustodySourceLocationNote,
+  loadCustodySources,
+  rehomeCustodyForPlacementChange,
+} from "~/modules/asset/custody-source.server";
+import type { BookableListScope } from "~/modules/asset/list-scope.server";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
@@ -57,25 +83,34 @@ import {
   getPrimaryLocation,
   isQuantityTracked,
 } from "~/modules/asset/utils";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import {
+  applyAssetModelDefaultsToAssets,
+  getAssetModelDefaults,
+  getAssetModelsDefaults,
+} from "~/modules/asset-model/defaults.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
+  releaseUnattachedBarcodes,
   importDataHasBarcodes,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
-import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
+import {
+  assertNoKitDerivedCustody,
+  assertNotKitMembers,
+} from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
   getActiveCustomFields,
-  upsertCustomField,
 } from "~/modules/custom-field/service.server";
-import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
   createLocationChangeNote,
@@ -90,11 +125,7 @@ import {
   scopeCustodianFilterIds,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
-import {
-  assetQtyMeta,
-  formatUnitCount,
-  sanitizeUnitOfMeasureLabel,
-} from "~/utils/asset-quantity";
+import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { getLocale } from "~/utils/client-hints";
 import {
@@ -109,12 +140,15 @@ import {
 } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
-  extractCustomFieldValuesFromPayload,
   formatInvalidNumericCustomFieldMessage,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
-import type { ErrorLabel } from "~/utils/error";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
+import type { AdditionalData, ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
@@ -131,18 +165,18 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
-  wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
   wrapLinkForNote,
+  wrapNameForNote,
 } from "~/utils/markdoc-wrappers";
 import { isValidImageUrl } from "~/utils/misc";
 import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
@@ -150,7 +184,9 @@ import {
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
+  userCanReinstateAssets,
 } from "~/utils/org-validation.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
   createSignedUrl,
   parseFileFormData,
@@ -159,17 +195,26 @@ import {
   removeFilesByPrefix,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
-import { custodiesForRestore } from "./backup-custody";
-import {
-  placementsForRestore,
-  readLegacyBackupLocation,
-  type BackupLocationDetails,
-} from "./backup-placements";
+import { lockAssetsForArchiveGuard } from "./archive-lock.server";
+import { formatModelShortfallMessage } from "./archive-shortfall";
+import type { ModelReservationShortfall } from "./archive-shortfall";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
+import { removeImageFilesOfDeletedAssets } from "./image-files.server";
 import { validateContentImportRows } from "./import-preflight.server";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+} from "./last-audit-date-access";
+import type { LastAuditDateAccess } from "./last-audit-date-access";
+import {
+  buildAssetListWhere,
+  resolveAssetListFilters,
+} from "./list-where.server";
+import type { AssetListFilters } from "./list-where.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -183,13 +228,12 @@ import {
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
-import { resolveAssetSearchIds } from "./search-ids.server";
-import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
+import { custodySearchScopeFor } from "./search-union.server";
+import type { CustodySearchScope } from "./search-union.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
   AdvancedIndexQueryResult,
-  CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
@@ -200,9 +244,13 @@ import {
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
   detectCustomFieldChanges,
+  planCustomFieldValueWrites,
   type CustomFieldChangeInfo,
+  getArchivedFilterFromParams,
+  type ArchivedFilter,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type { FieldChangeEventInput } from "../activity-event/types";
 import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
@@ -210,13 +258,30 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
-import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
+import { createSystemBookingNotes } from "../booking-note/service.server";
+import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
+import {
+  checkAndNotifyLowStock,
+  syncLowStockMarkers,
+} from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
+import { emptyStockState } from "../consumption-log/stock-ledger";
+import {
+  readStockState,
+  recordStockChanges,
+} from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
-import { createSystemLocationNote } from "../location-note/service.server";
+import type { AssetLocationMove } from "../location-note/service.server";
+import {
+  createAssetLocationMoveNotes,
+  createSystemLocationNote,
+  firstPlacementMove,
+  placementChangeMoves,
+} from "../location-note/service.server";
 import {
   buildAssetModelChangeNote,
+  buildAvailableToBookChangeNote,
   resolveUserLink,
 } from "../note/helpers.server";
 import {
@@ -231,6 +296,7 @@ import {
   createTagChangeNoteIfNeeded,
   type TagSummary,
 } from "../note/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -283,6 +349,7 @@ async function fetchAssetBeforeUpdate({
   }
 
   return db.asset.findUnique({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id before-state snapshot for updateAsset, which refuses archived assets via assertAssetsAreNotArchived
     where: { id, organizationId },
     select: ASSET_BEFORE_UPDATE_SELECT,
   });
@@ -377,8 +444,12 @@ export async function setKitCustodyAfterAssetImport({
  * - Assets with custody being imported into kits that exist but are not in custody,
  * - Existing kits with different custodians,
  * - Multiple custodians assigned to the same kit within the same import.
+ *
+ * @param args.data - Import rows; only rows with both a kit and a custodian matter
+ * @param args.organizationId - Workspace whose kits are checked
+ * @throws {ShelfError} 400 when a kit would end up with conflicting custodians
  */
-async function validateKitCustodyConflicts({
+export async function validateKitCustodyConflicts({
   data,
   organizationId,
 }: {
@@ -504,7 +575,8 @@ async function validateKitCustodyConflicts({
   if (conflicts.length > 0) {
     throw new ShelfError({
       cause: null,
-      message: `We found custody conflicts with existing kits. Assets with custody cannot be imported into existing kits that are not in custody.`,
+      message:
+        "Some rows have conflicting kit custody assignments. See the issue on each row.",
       additionalData: {
         kitCustodyConflicts: conflicts,
       },
@@ -538,6 +610,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
     );
 
     const asset = await db.asset.findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: serves the asset detail page and its sub-pages, which archived assets keep
       where: {
         OR: [
           { id, organizationId },
@@ -612,344 +685,34 @@ const unavailableBookingStatuses = [
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
  */
-export async function getAssets(params: {
-  organizationId: Organization["id"];
-  page: number;
-  orderBy: SortingOptions;
-  orderDirection: SortingDirection;
-  perPage?: number;
-  search?: string | null;
-  categoriesIds?: Category["id"][] | null;
-  locationIds?: Location["id"][] | null;
-  tagsIds?: Tag["id"][] | null;
-  status?: Asset["status"] | null;
-  hideUnavailable?: Asset["availableToBook"];
-  bookingFrom?: Booking["from"];
-  bookingTo?: Booking["to"];
-  unhideAssetsBookigIds?: Booking["id"][];
-  teamMemberIds?: TeamMember["id"][] | null;
-  extraInclude?: Prisma.AssetInclude;
-  /**
-   * Hide all assets that cannot currently be added to kit.
-   * This includes:
-   * - assets in custody
-   * - assets that are checkedout
-   * */
-  hideUnavailableToAddToKit?: boolean;
-  assetKitFilter?: string | null;
-  availableToBookOnly?: boolean;
-}) {
-  let {
-    organizationId,
+export async function getAssets(
+  params: AssetListFilters & {
+    page: number;
+    orderBy: SortingOptions;
+    orderDirection: SortingDirection;
+    perPage?: number;
+    extraInclude?: Prisma.AssetInclude;
+  }
+) {
+  const {
     orderBy,
     orderDirection,
     page = 1,
     perPage = 8,
-    search,
-    categoriesIds,
-    locationIds,
-    tagsIds,
-    status,
     bookingFrom,
     bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds,
-    teamMemberIds,
     extraInclude,
-    assetKitFilter,
-    availableToBookOnly,
   } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20;
 
-    const where: Prisma.AssetWhereInput = { organizationId };
-
-    if (availableToBookOnly) {
-      where.availableToBook = true;
-    }
-
-    if (search) {
-      const searchTerms = splitAssetSearchTerms(search);
-
-      if (searchTerms.length === 0) {
-        // Typed input that yields zero terms (whitespace / bare commas)
-        // matches NOTHING — a debounced type-ahead sending a single space
-        // must not return the full list. Mirrors the mobile composer.
-        where.id = { in: [] };
-      } else {
-        // Resolve the search to a set of matching asset ids via the shared
-        // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
-        // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
-        // cross-org seq scans. The helper is retry-wrapped (to claim the read
-        // semantics the client extension cannot infer) and guards the id set
-        // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
-        // rather than letting an extreme org + very broad term hard-fail.
-        // Setting where.OR here — BEFORE the category/tag/location/team-member
-        // filters below — preserves the historical OR-entanglement: those
-        // filters append to where.OR, so search OR-combines with them exactly
-        // as the previous Prisma OR clause did. The UNION always
-        // searches all 10 sources (the old id-shaped fast path searched a
-        // subset and fell back on zero rows); id-shaped searches therefore now
-        // return the full result set — a superset of before, the more-correct
-        // answer.
-        const ids = await resolveAssetSearchIds({
-          organizationId,
-          terms: searchTerms,
-        });
-        where.OR = [{ id: { in: ids } }];
-      }
-    }
-
-    if (status) {
-      // why: Asset.status flips to IN_CUSTODY/CHECKED_OUT for QUANTITY_TRACKED
-      // assets as soon as ANY unit is allocated, even if other units remain
-      // available. Filtering with `where.status = AVAILABLE` would incorrectly
-      // exclude qty-tracked rows that still have free stock. Treat AVAILABLE
-      // as inclusive of all qty-tracked rows; row.status keeps the existing
-      // strict semantic for IN_CUSTODY / CHECKED_OUT (which are already
-      // truthful for qty-tracked — the row enters those states whenever ANY
-      // unit does).
-      if (status === AssetStatus.AVAILABLE) {
-        // QT-aware fragment shared with getAssetsWhereInput and the mobile
-        // assets endpoint — see buildAssetStatusWhere for the rationale.
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          buildAssetStatusWhere(status),
-        ];
-      } else {
-        where.status = status;
-      }
-    }
-
-    if (categoriesIds?.length) {
-      if (categoriesIds.includes("uncategorized")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { categoryId: { in: categoriesIds } },
-          { categoryId: null },
-        ];
-      } else {
-        where.categoryId = { in: categoriesIds };
-      }
-    }
-
-    if (hideUnavailable) {
-      //not disabled for booking
-      where.availableToBook = true;
-      /**
-       * For INDIVIDUAL assets, exclude those with active custody.
-       * For QUANTITY_TRACKED assets, always show them — partial availability
-       * is checked at booking time based on available quantity.
-       */
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        {
-          OR: [{ type: "QUANTITY_TRACKED" }, { custody: { none: {} } }],
-        },
-      ];
-      if (bookingFrom && bookingTo) {
-        /**
-         * Booking overlap filters only apply to INDIVIDUAL assets.
-         * QUANTITY_TRACKED assets can have multiple overlapping bookings
-         * as long as total reserved doesn't exceed available quantity.
-         * Availability is validated at booking time, not at filter time.
-         */
-        where.AND = [
-          ...(Array.isArray(where.AND)
-            ? where.AND
-            : where.AND
-            ? [where.AND]
-            : []),
-          // Rule 1: Exclude INDIVIDUAL assets from RESERVED bookings
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: BookingStatus.RESERVED,
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
-                    },
-                  },
-                },
-              },
-            ],
-          },
-          // Rule 2: For ONGOING/OVERDUE bookings, only exclude CHECKED_OUT INDIVIDUAL assets
-          {
-            OR: [
-              { type: "QUANTITY_TRACKED" },
-              // Either asset is AVAILABLE (checked in from partial check-in)
-              { status: AssetStatus.AVAILABLE },
-              // Or asset has no conflicting ONGOING/OVERDUE bookings
-              {
-                bookingAssets: {
-                  none: {
-                    booking: {
-                      ...(unhideAssetsBookigIds?.length && {
-                        id: { notIn: unhideAssetsBookigIds },
-                      }),
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                      OR: [
-                        { from: { lte: bookingTo }, to: { gte: bookingFrom } },
-                        { from: { gte: bookingFrom }, to: { lte: bookingTo } },
-                      ],
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        ];
-      }
-    }
-    if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-      throw new ShelfError({
-        cause: null,
-        message: "booking dates are needed to hide unavailable assets",
-        additionalData: {
-          hideUnavailable,
-          bookingFrom,
-          bookingTo,
-        },
-        label,
-      });
-    }
-    if (bookingFrom && bookingTo) {
-      where.availableToBook = true;
-    }
-
-    if (tagsIds && tagsIds.length) {
-      // Check if 'untagged' is part of the selected tag IDs
-      if (tagsIds.includes("untagged")) {
-        // Remove 'untagged' from the list of tags
-        tagsIds = tagsIds.filter((id) => id !== "untagged");
-
-        // Filter for assets that are untagged only
-        where.OR = [
-          ...(where.OR || []), // Preserve existing AND conditions if any
-          { tags: { none: {} } }, // Include assets with no tags
-        ];
-      }
-
-      // If there are other tags specified, apply AND condition
-      if (tagsIds.length > 0) {
-        where.OR = [
-          ...(where.OR || []), // Preserve existing AND conditions if any
-          { tags: { some: { id: { in: tagsIds } } } }, // Filter by remaining tags
-        ];
-      }
-    }
-
-    if (locationIds && locationIds.length > 0) {
-      if (locationIds.includes("without-location")) {
-        where.OR = [
-          ...(where.OR ?? []),
-          { assetLocations: { some: { locationId: { in: locationIds } } } },
-          { assetLocations: { none: {} } },
-        ];
-      } else {
-        where.assetLocations = {
-          some: { locationId: { in: locationIds } },
-        };
-      }
-    }
-
-    /**
-     * `hideUnavailable` filters INDIVIDUAL assets that are in any kit out
-     * of the picker (those are managed via the kit, not picked directly).
-     * QUANTITY_TRACKED assets bypass this filter: a partial-kit allocation
-     * is a slice, not whole-asset exclusion — the free pool stays bookable
-     * as a standalone slice. Picker's availability math subtracts the
-     * kit-committed sum downstream so the displayed "Available" count is
-     * already correct.
-     */
-    if (hideUnavailable === true) {
-      where.AND = [
-        ...(Array.isArray(where.AND)
-          ? where.AND
-          : where.AND
-          ? [where.AND]
-          : []),
-        {
-          OR: [{ type: "QUANTITY_TRACKED" }, { assetKits: { none: {} } }],
-        },
-      ];
-    }
-
-    if (teamMemberIds && teamMemberIds.length) {
-      where.OR = [
-        ...(where.OR ?? []),
-        {
-          custody: { some: { teamMemberId: { in: teamMemberIds } } },
-        },
-        {
-          custody: {
-            some: { custodian: { userId: { in: teamMemberIds } } },
-          },
-        },
-        {
-          bookingAssets: {
-            some: {
-              booking: {
-                custodianTeamMemberId: { in: teamMemberIds },
-                /** We only get them if the booking is ongoing */
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
-          },
-        },
-        {
-          bookingAssets: {
-            some: {
-              booking: {
-                custodianUserId: { in: teamMemberIds },
-                /** We only get them if the booking is ongoing */
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: { none: {} } }]
-          : []),
-      ];
-    }
-
-    if (assetKitFilter === "NOT_IN_KIT") {
-      where.assetKits = { none: {} };
-    } else if (assetKitFilter === "IN_OTHER_KITS") {
-      where.assetKits = { some: {} };
-    }
+    const where = await buildAssetListWhere(params);
 
     /**
      * Runs the paginated asset query and its total count for a given `where`
-     * clause. Extracted so the ID-shaped-search fallback can re-run the same
-     * query shape with a different `where.OR` without duplicating the include
-     * and ordering config.
+     * clause, with the list's include and ordering config.
      *
      * @param assetWhere - The Prisma where clause to fetch and count against
      * @returns A tuple of `[assets, totalAssets]`
@@ -1020,19 +783,31 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   assetIds,
   getBookings = false,
   canUseBarcodes = false,
-  availableToBookOnly = false,
+  bookableScope = null,
   preParsedFilters,
   timeZone = "UTC",
+  honorArchivedView = false,
+  archivedFilter,
+  lastAuditDateAccess = "hidden",
+  includeHiddenColumns = false,
+  custodySearchScope,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   settings: AssetIndexSettings;
+  /**
+   * Whose custody the search may match by custodian name (see
+   * `custodySearchScopeFor`). Required so every caller states the viewer's
+   * custody visibility.
+   */
+  custodySearchScope: CustodySearchScope;
   filters?: string;
   takeAll?: boolean;
   assetIds?: string[];
   getBookings?: boolean;
   canUseBarcodes?: boolean;
-  availableToBookOnly?: boolean;
+  /** The caller's list scope; `null` or omitted lists every asset. */
+  bookableScope?: BookableListScope | null;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
   /**
@@ -1042,6 +817,31 @@ export async function getAdvancedPaginatedAndFilterableAssets({
    * for callers that don't resolve the acting user's prefs.
    */
   timeZone?: string;
+  /**
+   * Honour the `?archived=` view param (issue #382). Off by default, so every
+   * list shows active assets unless its caller opts in: the asset index and
+   * export pass it for members holding `asset: archive`. A picker, or a
+   * member without the grant, gets active assets whatever the URL says.
+   */
+  honorArchivedView?: boolean;
+  /**
+   * Explicit Active/Archived/All dimension, winning over `honorArchivedView`.
+   * For a request that names its own `assetIds`: the ids are the user's pick,
+   * archived rows included, whatever view the request came from.
+   */
+  archivedFilter?: ArchivedFilter;
+  /**
+   * How the last audit date column is exposed to the caller. Anything other
+   * than `available` never reaches the database: its filter and sort are
+   * dropped. Defaults to `hidden`.
+   */
+  lastAuditDateAccess?: LastAuditDateAccess;
+  /**
+   * Compute the last audit date even when the column is hidden in the
+   * caller's settings (exports include every column). Still requires
+   * `available` access.
+   */
+  includeHiddenColumns?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1072,26 +872,46 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     // advertises pages that come back empty.
     const take = Math.min(Math.max(perPage, 1), 100);
     const skip = page > 1 ? (page - 1) * take : 0;
-    const parsedFilters =
+    const canQueryAuditDate = canQueryLastAuditDate(lastAuditDateAccess);
+    const allParsedFilters =
       preParsedFilters ??
       (await parseFiltersWithHierarchy(
         filters,
         settingColumns,
         organizationId
       ));
+    // Without queryable access the audit date filter must not reach SQL.
+    const parsedFilters = canQueryAuditDate
+      ? allParsedFilters
+      : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
     const whereClause = generateWhereClause(
       organizationId,
-      search,
+      search ? { text: search, custodySearchScope } : null,
       parsedFilters,
       assetIds,
-      availableToBookOnly,
+      bookableScope,
       timeZone,
-      lowStockOnly
+      lowStockOnly,
+      // Active/Archived/All dimension, which keeps the advanced (raw-SQL)
+      // index in sync with the simple index's default-hide-archived behavior.
+      archivedFilter ??
+        (honorArchivedView
+          ? getArchivedFilterFromParams(searchParams)
+          : "active")
     );
-    const sortByValues = searchParams.getAll("sortBy");
+    // Without queryable access the audit date sort must not reach SQL either.
+    const sortByValues = searchParams
+      .getAll("sortBy")
+      .filter(
+        (spec) =>
+          canQueryAuditDate || spec.split(":")[0] !== LAST_AUDIT_DATE_COLUMN
+      );
     const { orderByInner, customFieldSortings } =
       parseSortingOptions(sortByValues);
+    const isLastAuditDateColumnVisible = settingColumns?.some(
+      (col) => col.name === LAST_AUDIT_DATE_COLUMN && col.visible
+    );
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
       ? Prisma.empty
@@ -1106,8 +926,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       customFieldSortings,
       sortBy: sortByValues,
       parsedFilters,
+      lowStockOnly,
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
+      withLastAuditDate:
+        canQueryAuditDate &&
+        (Boolean(isLastAuditDateColumnVisible) || includeHiddenColumns),
       paginationClause,
     });
 
@@ -1139,6 +963,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       cookie,
     };
   } catch (cause) {
+    // A deliberate client error (an unknown filter value, the search
+    // bind-param ceiling) keeps its own status and message.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Failed to fetch paginated and filterable assets",
@@ -1149,6 +976,41 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       label,
     });
   }
+}
+
+/** A just-created asset, as `createAsset` returns it. */
+type CreatedAssetWithPlacement = {
+  id: string;
+  title: string;
+  type: AssetType;
+  unitOfMeasure: string | null;
+  assetLocations?: {
+    quantity: number;
+    location: { id: string; name: string } | null;
+  }[];
+  user?: (UserNameFields & { id: string }) | null;
+};
+
+/**
+ * The location Activity lines for assets just created at a location: one move
+ * each, from no location to where the asset was placed, named after the user
+ * who created them. Passing every asset of a batch in one call lets
+ * `createAssetLocationMoveNotes` group them into one line per location.
+ *
+ * @param assets - Assets as `createAsset` returns them
+ * @returns The helper's arguments, or `null` when no asset was placed
+ */
+function firstPlacementNotes(
+  assets: CreatedAssetWithPlacement[]
+): Parameters<typeof createAssetLocationMoveNotes>[0] | null {
+  const moves = assets.flatMap((asset): AssetLocationMove[] => {
+    const placement = asset.assetLocations?.[0];
+    if (!placement?.location) return [];
+    return [firstPlacementMove(asset, placement.location, placement.quantity)];
+  });
+  // Every asset of a batch is created by the same user.
+  const actor = assets.find((asset) => asset.user)?.user;
+  return moves.length > 0 && actor ? { moves, actor } : null;
 }
 
 /**
@@ -1217,6 +1079,7 @@ export async function createAsset({
   consumptionType,
   unitOfMeasure,
   assetModelId,
+  writeLocationNote = true,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -1248,6 +1111,12 @@ export async function createAsset({
   consumptionType?: Asset["consumptionType"];
   unitOfMeasure?: Asset["unitOfMeasure"];
   assetModelId?: string;
+  /**
+   * Whether to add the new asset to its location's Activity tab. Callers that
+   * create many assets pass `false` and write one grouped line for all of
+   * them with {@link firstPlacementNotes}.
+   */
+  writeLocationNote?: boolean;
 }) {
   // Server-side validation for quantity-tracked assets
   if (isQuantityTracked(type)) {
@@ -1449,7 +1318,13 @@ export async function createAsset({
       }
 
       /** If a custodian is passed, create a Custody relation with that asset
-       * `custodian` represents the id of a {@link TeamMember}. */
+       * `custodian` represents the id of a {@link TeamMember}.
+       *
+       * A quantity-tracked asset created at a location is placed there in
+       * full (see the placement below), so that location is where the
+       * custody's units come from, the same source `checkOutQuantity` fills
+       * in for a pool at one location. `locationId` is org-verified in the
+       * create transaction below, before this nested create runs. */
       if (custodian) {
         Object.assign(data, {
           custody: {
@@ -1459,6 +1334,9 @@ export async function createAsset({
                   id: custodian,
                 },
               },
+              ...(type === AssetType.QUANTITY_TRACKED && locationId
+                ? { location: { connect: { id: locationId } } }
+                : {}),
             },
           },
           status: AssetStatus.IN_CUSTODY,
@@ -1508,6 +1386,13 @@ export async function createAsset({
        */
       const reusedBarcodeIdsByType = new Map<BarcodeType, string[]>();
 
+      /**
+       * Barcodes this create writes as new rows. Their values are freed from
+       * unattached rows inside the create transaction, so a value left behind
+       * by a deleted asset or kit can be used again.
+       */
+      const newBarcodes: { type: BarcodeType; value: string }[] = [];
+
       /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
       if (barcodes && barcodes.length > 0) {
         const barcodesToAdd = barcodes.filter(
@@ -1527,13 +1412,13 @@ export async function createAsset({
             id: b.existingId!,
           }));
 
-          const barcodesToCreate = barcodesToAdd
-            .filter((b) => !b.existingId)
-            .map(({ type, value }) => ({
-              type,
-              value: normalizeBarcodeValue(type, value),
-              organizationId,
-            }));
+          newBarcodes.push(...barcodesToAdd.filter((b) => !b.existingId));
+
+          const barcodesToCreate = newBarcodes.map(({ type, value }) => ({
+            type,
+            value: normalizeBarcodeValue(type, value),
+            organizationId,
+          }));
 
           // Build barcodes relation data
           const barcodeRelationData: any = {};
@@ -1582,6 +1467,25 @@ export async function createAsset({
           );
         }
 
+        // SECURITY (cross-org IDOR): the locationId is written into the
+        // placement below and, for a quantity-tracked asset with a
+        // custodian, connected as the custody's source. Prove it belongs to
+        // this org before either write.
+        if (locationId) {
+          await assertLocationBelongsToOrg({ locationId, organizationId }, tx);
+        }
+
+        // SECURITY (cross-org IDOR): the tag ids come from form/CSV input and
+        // are connected by the nested create above with no org scoping of
+        // their own. Prove they belong to this org before the write, so every
+        // caller of createAsset is covered, not only the ones that check first.
+        if (tags?.set?.length) {
+          await assertTagsBelongToOrg(
+            { tagIds: tags.set.map((tag) => tag.id), organizationId },
+            tx
+          );
+        }
+
         // The value already matches (that is how the orphan was found), so
         // only the type needs to follow the import. Org-scoped: the ids come
         // from an org-scoped lookup, and this keeps the write that way too.
@@ -1589,6 +1493,17 @@ export async function createAsset({
           await tx.barcode.updateMany({
             where: { id: { in: ids }, organizationId },
             data: { type },
+          });
+        }
+
+        if (newBarcodes.length > 0) {
+          await releaseUnattachedBarcodes(tx, {
+            barcodes: newBarcodes,
+            organizationId,
+            // The release matches values ignoring case, so a new value can
+            // match a reused row (ExternalQR `zz-code` vs `ZZ-CODE`). The
+            // create connects those rows by id, so they must survive.
+            keepIds: [...reusedBarcodeIdsByType.values()].flat(),
           });
         }
 
@@ -1616,6 +1531,21 @@ export async function createAsset({
           });
         }
 
+        // The stock the pool starts with, where it landed.
+        if (type === AssetType.QUANTITY_TRACKED && quantity) {
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: created.id,
+                before: emptyStockState(),
+                events: [{ category: "INITIAL", change: quantity, locationId }],
+              },
+            ],
+          });
+        }
+
         // Activity event must be inside transaction for atomicity
         await recordEvent(
           {
@@ -1629,11 +1559,36 @@ export async function createAsset({
           tx
         );
 
+        // The first placement, in the same shape as a move from nowhere, so
+        // the Activity Summary shows where the asset arrived.
+        if (locationId) {
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED",
+              entityType: "ASSET",
+              entityId: created.id,
+              assetId: created.id,
+              locationId,
+              field: "locationId",
+              fromValue: null,
+              toValue: locationId,
+              // Qty-tracked: the units placed. No-op for INDIVIDUAL.
+              meta: assetQtyMeta(
+                { type: type ?? AssetType.INDIVIDUAL },
+                quantity
+              ),
+            },
+            tx
+          );
+        }
+
         // Re-read so the returned shape has the pivot we just created
         // (the initial create's include came back empty for it).
         return locationId
           ? tx.asset.findUniqueOrThrow({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row; why: re-read of the row just created in this transaction
               where: { id: created.id },
               include: {
                 assetLocations: { include: { location: true } },
@@ -1642,11 +1597,24 @@ export async function createAsset({
               },
             })
           : created;
-      });
+      }, LONG_TRANSACTION_OPTIONS);
+
+      // The first placement on the location's Activity tab, written after the
+      // commit.
+      const locationNotes = writeLocationNote
+        ? firstPlacementNotes([asset])
+        : null;
+      if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
 
       // Successfully created asset, exit the retry loop
       return asset;
     } catch (cause) {
+      // A deliberate client error from a guard inside the transaction (a tag,
+      // category, kit or location outside this workspace) carries its own
+      // actionable message. The constraint wrapper below would replace it with
+      // a generic one, so pass it straight through.
+      rethrowIfClientError(cause);
+
       // Check for sequential ID unique constraint violation and retry
       if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
         const prismaError = cause as any;
@@ -1917,6 +1885,9 @@ export async function bulkCreateAssetsFromModel({
     await assertLocationBelongsToOrg({ locationId, organizationId });
   }
 
+  // createAsset proves tags again inside each create transaction. This check
+  // still runs first so a foreign tag refuses the whole batch with a thrown
+  // 400 before any asset is written, rather than as a failure at index 0.
   if (tags?.set && tags.set.length > 0) {
     await assertTagsBelongToOrg({
       tagIds: tags.set.map((t) => t.id),
@@ -1939,11 +1910,20 @@ export async function bulkCreateAssetsFromModel({
   // Nesting under an outer tx would break that retry; instead we accept
   // partial-success semantics and surface `failedAt` on mid-loop failure.
 
+  const created: CreatedAssetWithPlacement[] = [];
   const createdAssetIds: Asset["id"][] = [];
+  /**
+   * One grouped line on the location's Activity tab for every asset saved,
+   * including those saved before a failure part-way through.
+   */
+  const writeLocationNotes = async () => {
+    const locationNotes = firstPlacementNotes(created);
+    if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
+  };
   for (let i = 0; i < titles.length; i++) {
     const title = titles[i];
     try {
-      const created = await createAsset({
+      const asset = await createAsset({
         title,
         description: description ?? null,
         userId,
@@ -1959,8 +1939,10 @@ export async function bulkCreateAssetsFromModel({
         mainImageExpiration,
         availableToBook: availableToBook ?? true,
         type: AssetType.INDIVIDUAL,
+        writeLocationNote: false,
       });
-      createdAssetIds.push(created.id);
+      created.push(asset);
+      createdAssetIds.push(asset.id);
     } catch (cause) {
       const error = isLikeShelfError(cause)
         ? (cause as ShelfError)
@@ -1976,10 +1958,12 @@ export async function bulkCreateAssetsFromModel({
               failedAtIndex: i,
             },
           });
+      await writeLocationNotes();
       return { createdAssetIds, failedAt: i, error };
     }
   }
 
+  await writeLocationNotes();
   return { createdAssetIds };
 }
 
@@ -2028,6 +2012,24 @@ export async function updateAsset({
   unitOfMeasure,
 }: UpdateAssetPayload) {
   try {
+    /**
+     * Archived assets are frozen: reinstate or permanently delete, nothing
+     * else (issue #382). The guard lives HERE rather than on each route
+     * because `updateAsset` is the single write chokepoint every surface goes
+     * through — web routes, the CSV import-update, and all of the companion
+     * app's asset writes. A guard on each route would have to be repeated on
+     * every one of them, mobile included.
+     *
+     * There is no carve-out. Re-signing an expired image URL writes the
+     * column directly (`api+/asset.refresh-main-image`, the mobile refresh)
+     * and never comes through here, so every caller is a user edit.
+     */
+    await assertAssetsAreNotArchived({
+      assetIds: [id],
+      organizationId,
+      actorUserId: userId,
+    });
+
     const isChangingLocation = newLocationId !== currentLocationId;
     /**
      * The asset-overview "Update location" dialog surfaces a per-asset
@@ -2051,6 +2053,7 @@ export async function updateAsset({
     } | null = null;
     if (shouldUpdatePlacement) {
       const assetWithKit = await db.asset.findUnique({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
         where: { id, organizationId },
         select: {
           type: true,
@@ -2224,6 +2227,7 @@ export async function updateAsset({
       // Reads `type` directly off the asset row — sub-millisecond
       // org-scoped index lookup, only on the link branch.
       const currentAsset = await db.asset.findUnique({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id type check after assertAssetsAreNotArchived already refused archived assets
         where: { id, organizationId },
         select: { type: true },
       });
@@ -2249,6 +2253,12 @@ export async function updateAsset({
       });
     }
 
+    /**
+     * The destination as the org-scoped check below read it, reused for the
+     * location activity log so the log needs no lookup of its own.
+     */
+    let newLocationRow: { id: string; name: string } | null = null;
+
     /** Connect the new location id */
     if (newLocationId) {
       // why: same IDOR concern as category — verify the location is in this
@@ -2256,7 +2266,7 @@ export async function updateAsset({
       // paginated assets and is too heavy here.
       const orgLocation = await db.location.findFirst({
         where: { id: newLocationId, organizationId },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       if (!orgLocation) {
         throw new ShelfError({
@@ -2270,6 +2280,7 @@ export async function updateAsset({
           shouldBeCaptured: false,
         });
       }
+      newLocationRow = orgLocation;
       // We can't inline a `connect` on `data` for location anymore — the
       // AssetLocation pivot write happens in the $transaction below
       // alongside the asset update.
@@ -2278,7 +2289,10 @@ export async function updateAsset({
     /** disconnecting location relation if a user clears locations */
     // (no-op here too; the pivot deleteMany happens in the tx below.)
 
-    /** If a tags is passed, link the category to the asset. */
+    /**
+     * If tags are passed, replace the asset's tags with them. Their org
+     * ownership is asserted at the top of the write transaction below.
+     */
     if (isTagUpdate) {
       Object.assign(data, {
         tags,
@@ -2318,10 +2332,6 @@ export async function updateAsset({
         (cf) => !!cf.value
       );
 
-      const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
-        (cf) => !cf.value
-      );
-
       // SECURITY (cross-org IDOR): the create/updateMany writes below connect
       // values to a CustomField by an id sourced from form input. Prove every
       // referenced custom field belongs to this org before writing. (Removals
@@ -2335,65 +2345,42 @@ export async function updateAsset({
       });
 
       /**
-       * Split the writes into create vs update ourselves instead of using a
-       * nested `upsert`. Prisma emulates each nested upsert with a
-       * SELECT-then-write round-trip per field, which is the N+1 reported in
-       * Sentry SHELF-WEBAPP-1KY / SHELF-WEBAPP-1MF. We already loaded the
-       * existing values above (`currentCustomFieldsValuesWithFields`), so we
-       * know which fields exist without asking the database again. Each
-       * custom field has at most one value row per asset, so keying by
-       * `customFieldId` is unambiguous.
+       * Write only what changed. Every nested `updateMany` entry and the
+       * nested `deleteMany` each cost Prisma a lookup query before the write,
+       * and the form submits every field, so unchanged fields and fields that
+       * were already empty are left out. Creates and updates are split here
+       * rather than using a nested `upsert`, which Prisma emulates with a
+       * lookup per field.
        */
-      const existingValueIdByFieldId = new Map(
-        currentCustomFieldsValuesWithFields.map((ccfv) => [
-          ccfv.customFieldId,
-          ccfv.id,
-        ])
-      );
-
-      const customFieldsToCreate = customFieldValuesToAdd
-        .filter(({ id }) => !existingValueIdByFieldId.has(id))
-        .map(({ id, value }) => ({ value, customFieldId: id }));
-
-      /**
-       * Existing values are written with `updateMany` (one entry per row),
-       * NOT a nested `update`. `update` would throw P2025 and abort the whole
-       * asset save if a concurrent edit deleted the value row in the window
-       * between the `findMany` above and this write; `updateMany` matches zero
-       * rows instead of throwing. The concurrent delete then wins (the row
-       * stays gone) rather than 500-ing the user — an acceptable
-       * last-write-wins outcome for this rare interleaving, and it keeps the
-       * per-field existence SELECT eliminated.
-       */
-      const customFieldsToUpdate = customFieldValuesToAdd
-        .filter(({ id }) => existingValueIdByFieldId.has(id))
-        .map(({ id, value }) => ({
-          where: { id: existingValueIdByFieldId.get(id) as string },
-          data: { value },
-        }));
+      const { toCreate, toUpdate, toRemoveFieldIds } =
+        planCustomFieldValueWrites(
+          currentCustomFieldsValuesWithFields,
+          customFieldsValuesFromForm
+        );
 
       Object.assign(data, {
         customFields: {
-          ...(customFieldsToCreate.length > 0
-            ? { create: customFieldsToCreate }
-            : {}),
-          ...(customFieldsToUpdate.length > 0
-            ? { updateMany: customFieldsToUpdate }
-            : {}),
-          ...(customFieldValuesToRemove.length > 0
+          ...(toCreate.length > 0 ? { create: toCreate } : {}),
+          /**
+           * `updateMany`, not a nested `update`: if a concurrent edit deleted
+           * the row after the `findMany` above, `update` throws P2025 and
+           * fails the whole save, while `updateMany` matches zero rows and
+           * the delete wins.
+           */
+          ...(toUpdate.length > 0
             ? {
-                // Collapse N per-field deleteMany filters into ONE `IN`
-                // clause so Prisma issues a single SELECT pre-flight +
-                // single DELETE, not 2N round trips (Sentry N+1
-                // SHELF-WEBAPP-1NZ, 1P0). Prisma's nested `deleteMany`
-                // accepts EITHER a single where OR an array of wheres —
-                // the array form fans out into per-entry queries.
-                deleteMany: {
-                  customFieldId: {
-                    in: customFieldValuesToRemove.map((cf) => cf.id),
-                  },
-                },
+                updateMany: toUpdate.map(({ valueId, value }) => ({
+                  where: { id: valueId },
+                  data: { value },
+                })),
               }
+            : {}),
+          /**
+           * One `deleteMany` with an `IN` filter: the array form of
+           * `deleteMany` runs a lookup and a delete per entry.
+           */
+          ...(toRemoveFieldIds.length > 0
+            ? { deleteMany: { customFieldId: { in: toRemoveFieldIds } } }
             : {}),
         },
       });
@@ -2517,6 +2504,24 @@ export async function updateAsset({
     // captured `assetLocations`). Captured inside the tx so the removal qty
     // survives the deleteMany below. `null` for INDIVIDUAL via the helpers.
     let locationChangeQuantity: number | null = null;
+    /**
+     * The manual placements as they stood before a placement rewrite, read
+     * inside the transaction, so the location activity log can say what left
+     * each location.
+     */
+    let manualPlacementsBefore: Array<{
+      location: { id: string; name: string };
+      quantity: number;
+    }> = [];
+    /**
+     * The manual placement the rewrite wrote, with the unit count exactly as
+     * written, so the location activity log never shows a guessed count.
+     * `null` when the rewrite clears the location.
+     */
+    let writtenPlacement: {
+      location: { id: string; name: string };
+      quantity: number;
+    } | null = null;
 
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
@@ -2529,7 +2534,27 @@ export async function updateAsset({
     // actually part of this patch.
     let quantityBeforeUpdate: number | null = null;
     let lockedAssetType: AssetType | null = null;
+    /** Where custody went when this patch collapsed the placements. */
+    let placementRehome: Awaited<
+      ReturnType<typeof rehomeCustodyForPlacementChange>
+    > | null = null;
     const asset = await db.$transaction(async (tx) => {
+      // SECURITY (cross-org IDOR): the tag ids come from form input and the
+      // `tags.set` in the update below connects them with no org scoping of
+      // its own. Prove they belong to this org inside the write transaction.
+      if (isTagUpdate) {
+        await assertTagsBelongToOrg(
+          { tagIds: (tags?.set ?? []).map((tag) => tag.id), organizationId },
+          tx
+        );
+      }
+
+      /** Custody sources before a placement rewrite, for the re-home. */
+      let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
+        null;
+      /** The pool's stock under the lock, before this patch writes. */
+      let stockBefore: Awaited<ReturnType<typeof readStockState>> = null;
+
       // Block lowering a QUANTITY_TRACKED asset's total below the units
       // already committed to custody, kits, or overlapping bookings. Lock the
       // asset row first so the read-then-write is race-safe (mirrors
@@ -2545,9 +2570,24 @@ export async function updateAsset({
       // against the multi-asset lockers in the booking paths.
       if (quantity != null || shouldUpdatePlacement) {
         const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        if (locked.type === AssetType.QUANTITY_TRACKED) {
+          stockBefore = await readStockState(tx, {
+            assetId: id,
+            organizationId,
+          });
+        }
         if (quantity != null) {
           quantityBeforeUpdate = locked.quantity ?? 0;
           lockedAssetType = locked.type;
+        }
+        if (
+          shouldUpdatePlacement &&
+          locked.type === AssetType.QUANTITY_TRACKED
+        ) {
+          custodyBefore = await loadCustodySources(tx, {
+            assetId: id,
+            total: locked.quantity ?? 0,
+          });
         }
 
         /**
@@ -2636,7 +2676,17 @@ export async function updateAsset({
       }
 
       const updated = await tx.asset.update({
-        where: { id, organizationId },
+        where: {
+          id,
+          organizationId,
+          // The `assertAssetsAreNotArchived` call at the top of this function
+          // is a read; an archive committed between it and this write would
+          // otherwise still mutate a frozen row. Riding the predicate on the
+          // UPDATE itself closes that window — no match becomes P2025, which
+          // the catch below reports as the archived conflict it almost always
+          // is.
+          archivedAt: null,
+        },
         data,
         include: {
           assetLocations: { include: { location: true } },
@@ -2650,33 +2700,21 @@ export async function updateAsset({
         },
       });
 
-      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
-      // through the asset-edit form. The form has no consumption-category
-      // input, so a manual total correction is an `ADJUSTMENT` (schema
-      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
-      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
-      // IN this tx (not via `adjustQuantity`, which opens its own tx and
-      // re-locks the row we already hold). Skipped for a no-op edit
-      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
-      if (
-        quantity != null &&
-        lockedAssetType === AssetType.QUANTITY_TRACKED &&
-        quantityBeforeUpdate != null
-      ) {
-        const delta = Math.abs(quantity - quantityBeforeUpdate);
-        if (delta > 0) {
-          await createConsumptionLog({
-            assetId: id,
-            category: ConsumptionCategory.ADJUSTMENT,
-            quantity: delta,
-            userId,
-            note: "Quantity adjusted via asset edit",
-            tx,
-          });
-        }
-      }
-
       if (shouldUpdatePlacement) {
+        // `updated.assetLocations` is the pre-delete snapshot.
+        // Oldest first, as the mobile route reads them, so both surfaces pair
+        // the same moves.
+        manualPlacementsBefore = updated.assetLocations
+          .filter((al) => al.assetKitId == null)
+          .sort(
+            (a, b) =>
+              a.createdAt.getTime() - b.createdAt.getTime() ||
+              a.id.localeCompare(b.id)
+          )
+          .map((al) => ({
+            location: { id: al.location.id, name: al.location.name },
+            quantity: al.quantity,
+          }));
         if (newLocationId) {
           locationChangeQuantity = resolveNewLocationQuantity(
             updated,
@@ -2704,23 +2742,80 @@ export async function updateAsset({
           where: { assetId: id, assetKitId: null },
         });
         if (newLocationId) {
+          const writtenQuantity = resolveNewLocationQuantity(
+            updated,
+            newLocationQuantity
+          );
           await tx.assetLocation.create({
             data: {
               assetId: id,
               locationId: newLocationId,
               organizationId,
-              quantity: resolveNewLocationQuantity(
-                updated,
-                newLocationQuantity
-              ),
+              quantity: writtenQuantity,
             },
+          });
+          if (newLocationRow) {
+            writtenPlacement = {
+              location: newLocationRow,
+              quantity: writtenQuantity,
+            };
+          }
+        }
+
+        /**
+         * The rewrite collapses every manual placement into at most one.
+         * Custody from a dropped location follows the units to the new
+         * location (as far as it holds them), and becomes unplaced when the
+         * location is cleared. Never refused.
+         */
+        if (custodyBefore) {
+          placementRehome = await rehomeCustodyForPlacementChange(tx, {
+            assetId: id,
+            total: updated.quantity ?? 0,
+            before: custodyBefore,
+            destinationLocationId: newLocationId ?? null,
           });
         }
       }
 
+      /**
+       * Ledger rows for the patch: a total typed into the edit form is an
+       * `ADJUSTMENT` (the form has no category input), and units the
+       * placement rewrite moved are `MOVE`s. Written IN this tx (not via
+       * `adjustQuantity`, which opens its own tx and re-locks the row held
+       * here).
+       */
+      const totalChange =
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+          ? quantity - quantityBeforeUpdate
+          : 0;
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [
+          {
+            assetId: id,
+            before: stockBefore,
+            events:
+              totalChange !== 0
+                ? [
+                    {
+                      category: ConsumptionCategory.ADJUSTMENT,
+                      change: totalChange,
+                      note: ASSET_EDIT_ADJUSTMENT_NOTE,
+                    },
+                  ]
+                : [],
+          },
+        ],
+      });
+
       // Re-read so the returned `assetLocations` reflects the pivot ops.
       return shouldUpdatePlacement
         ? tx.asset.findUniqueOrThrow({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id re-read of the row this transaction just updated
             where: { id, organizationId },
             include: {
               assetLocations: { include: { location: true } },
@@ -2777,6 +2872,7 @@ export async function updateAsset({
       // write — that would misattribute someone else's change to this actor.
       const wroteOrAudited = await db.$transaction(async (tx) => {
         const current = await tx.asset.findUniqueOrThrow({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
           where: { id, organizationId },
           select: { preferredBarcodeId: true },
         });
@@ -2837,6 +2933,19 @@ export async function updateAsset({
       }
     }
 
+    if (placementRehome) {
+      await createCustodyRehomeNote({
+        result: placementRehome,
+        asset: {
+          id,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId,
+        organizationId,
+      });
+    }
+
     /** If the location id was passed, we create a note for the move */
     if (isChangingLocation) {
       /**
@@ -2844,122 +2953,131 @@ export async function updateAsset({
        * Here we actually need to query the locations so we can print their names
        * */
 
-      const user = await loadUserForNotes();
+      /**
+       * The edit is already saved, so a failed lookup or write here is
+       * logged and never turns the saved edit into an error response.
+       */
+      try {
+        const user = await loadUserForNotes();
 
-      // why: cross-org safety for the location IDs is already enforced
-      // *before* the write — `newLocationId` is hard-validated at the
-      // org-scoped findFirst guard above (it throws 404 before connecting),
-      // and `currentLocationId` only drives a `disconnect` (value unused by
-      // Prisma) plus the org-scoped name lookups below (a foreign id resolves
-      // to null, never leaks). A post-write assert here previously threw a
-      // 404 *after* db.asset.update had already committed — removed.
-      const currentLocation = currentLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: currentLocationId,
-              organizationId,
-            },
-          })
-        : null;
+        // why: cross-org safety for the location IDs is enforced *before* the
+        // write: `newLocationId` is hard-validated at the org-scoped findFirst
+        // guard above (it throws 404 before connecting), and `currentLocationId`
+        // only drives a `disconnect` (value unused by Prisma) plus the
+        // org-scoped name lookups below (a foreign id resolves to null, never
+        // leaks). The edit is already committed here, so this block must never
+        // throw an org check of its own.
+        const currentLocation = currentLocationId
+          ? await db.location.findFirst({
+              where: {
+                id: currentLocationId,
+                organizationId,
+              },
+            })
+          : null;
 
-      const newLocation = newLocationId
-        ? await db.location.findFirst({
-            where: {
-              id: newLocationId,
-              organizationId,
-            },
-          })
-        : null;
+        const newLocation = newLocationId
+          ? await db.location.findFirst({
+              where: {
+                id: newLocationId,
+                organizationId,
+              },
+            })
+          : null;
 
-      await createLocationChangeNote({
-        currentLocation,
-        newLocation,
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        displayName: user.displayName,
-        assetId: asset.id,
-        userId,
-        organizationId,
-        isRemoving: newLocationId === null,
-        // Qty-tracked: name the units placed / moved / removed at this
-        // location (sourced from the affected pivot row). INDIVIDUAL keeps
-        // the original phrasing via `formatUnitCount`.
-        type: asset.type,
-        unitOfMeasure: asset.unitOfMeasure,
-        quantity: locationChangeQuantity,
-      });
-
-      // Activity event for the asset-level location change.
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "ASSET_LOCATION_CHANGED",
-        entityType: "ASSET",
-        entityId: asset.id,
-        assetId: asset.id,
-        locationId: newLocation?.id ?? undefined,
-        field: "locationId",
-        fromValue: currentLocation?.id ?? null,
-        toValue: newLocation?.id ?? null,
-        // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
-        // INDIVIDUAL.
-        meta: assetQtyMeta(asset, locationChangeQuantity),
-      });
-
-      // Create location activity notes
-      const userLink = wrapUserLinkForNote({ ...user, id: userId });
-      // Single-asset location-timeline note. `wrapAssetWithCountForNote`
-      // prefixes the qty-tracked unit count ("50 units of {asset}");
-      // INDIVIDUAL renders the bare link, so phrasing is unchanged.
-      const assetForCount = {
-        id: asset.id,
-        title: asset.title,
-        type: asset.type,
-        unitOfMeasure: asset.unitOfMeasure,
-      };
-
-      if (newLocation) {
-        const newLocLink = wrapLinkForNote(
-          `/locations/${newLocation.id}`,
-          newLocation.name
-        );
-        const assetMarkup = wrapAssetWithCountForNote(
-          assetForCount,
-          locationChangeQuantity
-        );
-        const movedFrom = currentLocation
-          ? ` Moved from ${wrapLinkForNote(
-              `/locations/${currentLocation.id}`,
-              currentLocation.name
-            )}.`
-          : "";
-        await createSystemLocationNote({
-          locationId: newLocation.id,
-          content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFrom}`,
+        await createLocationChangeNote({
+          currentLocation,
+          newLocation,
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          displayName: user.displayName,
+          assetId: asset.id,
           userId,
+          organizationId,
+          isRemoving: newLocationId === null,
+          // Qty-tracked: name the units placed / moved / removed at this
+          // location (sourced from the affected pivot row). INDIVIDUAL keeps
+          // the original phrasing via `formatUnitCount`.
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+          quantity: locationChangeQuantity,
         });
+
+        // Activity event for the asset-level location change.
+        await recordEvent({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          locationId: newLocation?.id ?? undefined,
+          field: "locationId",
+          fromValue: currentLocation?.id ?? null,
+          toValue: newLocation?.id ?? null,
+          // Qty-tracked: per-row AssetLocation.quantity affected. No-op for
+          // INDIVIDUAL.
+          meta: assetQtyMeta(asset, locationChangeQuantity),
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to record the location change note and event",
+            additionalData: {
+              assetId: asset.id,
+              newLocationId,
+              currentLocationId,
+            },
+            label,
+          })
+        );
       }
+    }
 
-      if (currentLocation && currentLocation.id !== newLocation?.id) {
-        const prevLocLink = wrapLinkForNote(
-          `/locations/${currentLocation.id}`,
-          currentLocation.name
-        );
-        const assetMarkup = wrapAssetWithCountForNote(
-          assetForCount,
-          locationChangeQuantity
-        );
-        const movedTo = newLocation
-          ? ` Moved to ${wrapLinkForNote(
-              `/locations/${newLocation.id}`,
-              newLocation.name
-            )}.`
-          : "";
-        await createSystemLocationNote({
-          locationId: currentLocation.id,
-          content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedTo}`,
-          userId,
+    if (shouldUpdatePlacement) {
+      /**
+       * The rewrite collapses every manual placement into at most one, so the
+       * location log reads each location's amount before and after, the same
+       * way the mobile route does. This covers a move, a cleared location and
+       * a new quantity at the same location. The edit is already saved, so a
+       * failure here is logged and never fails the request.
+       */
+      try {
+        if (newLocationId && !writtenPlacement) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "A placement was written without its location, so the location activity log was skipped",
+            additionalData: { assetId: asset.id, newLocationId },
+            label,
+          });
+        }
+        const user = await loadUserForNotes();
+        await createAssetLocationMoveNotes({
+          moves: placementChangeMoves({
+            asset: {
+              id: asset.id,
+              title: asset.title,
+              type: asset.type,
+              unitOfMeasure: asset.unitOfMeasure,
+            },
+            before: manualPlacementsBefore,
+            after: writtenPlacement ? [writtenPlacement] : [],
+          }),
+          actor: { ...user, id: userId },
         });
+      } catch (cause) {
+        Logger.error(
+          cause instanceof ShelfError
+            ? cause
+            : new ShelfError({
+                cause,
+                message: "Failed to write the location activity log",
+                additionalData: { assetId: asset.id },
+                label,
+              })
+        );
       }
     }
 
@@ -3325,10 +3443,102 @@ export async function updateAsset({
       throw cause;
     }
 
+    const archivedMidWrite = await archivedMidWriteError(
+      cause,
+      { id, organizationId },
+      { userId, id, organizationId }
+    );
+    if (archivedMidWrite) {
+      throw archivedMidWrite;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
   }
+}
+
+/**
+ * Refuses a single asset delete unless the user typed its title, as the delete
+ * dialog asks. An asset that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The asset to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertAssetDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.asset
+        .findFirst({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an archived asset can be deleted too, and needs the same typed confirm
+          where: { id, organizationId },
+          select: { title: true },
+        })
+        .then((asset) => asset?.title ?? null),
+    label,
+  });
+}
+
+/**
+ * Maps a write that lost its row to an archive into the archived conflict.
+ *
+ * Single-asset writes carry `archivedAt: null` in their WHERE, so an archive
+ * that commits after the caller's pre-check makes the row vanish from the
+ * predicate and Prisma raises P2025. A P2025 can also mean something else
+ * (a nested relation the write could not find), so the asset is re-read and
+ * the conflict reported only when it really is archived now. Shared so every
+ * such write tells the user the same thing (issue #382).
+ *
+ * @param cause - The error the write threw
+ * @param asset - The asset the write targeted
+ * @param additionalData - Context for logs
+ * @returns The archived ShelfError when the asset is archived, or `null` to
+ *   let the caller handle `cause` as it would have
+ */
+async function archivedMidWriteError(
+  cause: unknown,
+  asset: { id: string; organizationId: string },
+  additionalData: AdditionalData
+): Promise<ShelfError | null> {
+  if (!isNotFoundError(cause)) {
+    return null;
+  }
+
+  // A read of the archive state itself, so it must reach archived rows.
+  const current = await db.asset.findFirst({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: reads the archive state itself, so it must reach archived rows
+    where: { id: asset.id, organizationId: asset.organizationId },
+    select: { archivedAt: true },
+  });
+  if (!current?.archivedAt) {
+    return null;
+  }
+
+  return new ShelfError({
+    // why: cause deliberately null — ShelfError and makeShelfError turn any
+    // P2025 in the cause chain into a 404, which would report this conflict as
+    // "not found" instead of the 400 below.
+    cause: null,
+    title: "Asset is archived",
+    message:
+      "This asset was archived while you were editing it. Reinstate it to make changes.",
+    additionalData,
+    label: "Assets",
+    status: 400,
+    shouldBeCaptured: false,
+  });
 }
 
 export async function deleteAsset({
@@ -3347,7 +3557,15 @@ export async function deleteAsset({
         where: { id, organizationId },
         select: {
           reminders: {
-            select: { alertDateTime: true, activeSchedulerReference: true },
+            select: {
+              alertDateTime: true,
+              activeSchedulerReference: true,
+              // why: cancelAssetReminderScheduler skips its already-fired
+              // early-return for recurring rows (they can hold a queued job
+              // while alertDateTime is briefly past)
+              recurrenceUnit: true,
+              recurrenceInterval: true,
+            },
           },
         },
       });
@@ -3368,6 +3586,9 @@ export async function deleteAsset({
       return deleted;
     });
 
+    // Not awaited: it reads storage and the workspace's assets, never rejects.
+    void removeImageFilesOfDeletedAssets({ assetIds: [id], organizationId });
+
     // Cancel reminders outside transaction (cleanup operation, not critical for atomicity)
     await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
@@ -3375,6 +3596,962 @@ export async function deleteAsset({
       cause,
       message: "Something went wrong while deleting asset",
       additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * The note link naming who archived or reinstated, or "System" without one.
+ *
+ * Read once, before the archive or reinstate transaction opens, and handed to
+ * the note writers: `getUserByID` reads through the global client, so calling
+ * it inside the transaction would hold the transaction's connection idle while
+ * a second one answers.
+ *
+ * @param actorUserId - Who did it, when a user did
+ * @returns A Markdoc user link, or `**System**`
+ */
+async function resolveArchiveActorLink(actorUserId?: string): Promise<string> {
+  if (!actorUserId) return "**System**";
+  const actor = await getUserByID(actorUserId, {
+    select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
+  });
+  return wrapUserLinkForNote({ ...actor, id: actor.id });
+}
+
+/**
+ * The Activity-tab note for an archive or a reinstate, one per asset.
+ *
+ * The ASSET_ARCHIVED / ASSET_UNARCHIVED events feed reports; the note is what a
+ * person reads on the asset's Activity tab to learn who archived it and when.
+ * Written through the caller's transaction so the note commits with the state
+ * change, and is rolled back with it (e.g. by an unconfirmed model shortfall).
+ *
+ * @param tx - The archive or reinstate transaction
+ * @param args.assetIds - The assets this call actually changed
+ * @param args.actorUserId - Who did it, stored as the note's author
+ * @param args.actorLink - That user's note link, from {@link resolveArchiveActorLink}
+ * @param args.verb - "archived" or "reinstated"
+ */
+async function writeArchiveStateNotes(
+  tx: {
+    note: {
+      createMany: (args: {
+        data: Prisma.NoteUncheckedCreateInput[];
+      }) => Promise<{ count: number }>;
+    };
+  },
+  {
+    assetIds,
+    actorUserId,
+    actorLink,
+    verb,
+  }: {
+    assetIds: string[];
+    actorUserId?: string;
+    actorLink: string;
+    verb: "archived" | "reinstated";
+  }
+): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  await tx.note.createMany({
+    data: assetIds.map((assetId) => ({
+      content: `${actorLink} ${verb} the asset.`,
+      type: "UPDATE" as const,
+      userId: actorUserId ?? null,
+      assetId,
+    })),
+  });
+}
+
+/**
+ * The draft bookings that hold any of the given assets.
+ *
+ * Archiving is allowed while an asset sits in a DRAFT booking (a draft has
+ * promised nothing), but that draft is then refused at Reserve until the asset
+ * is removed or reinstated. The archive success message names them so the
+ * archiver knows, instead of the draft's owner finding out at Reserve.
+ *
+ * Runs inside the archive transaction, so a failed lookup rolls the archive
+ * back rather than reporting an error for an archive that committed.
+ *
+ * @param tx - The archive transaction
+ * @param args.assetIds - The assets just archived
+ * @param args.organizationId - The caller's workspace
+ * @returns Each draft once, by name
+ */
+async function findDraftBookingsHoldingAssets(
+  tx: { booking: Pick<typeof db.booking, "findMany"> },
+  {
+    assetIds,
+    organizationId,
+  }: {
+    assetIds: string[];
+    organizationId: string;
+  }
+): Promise<Array<{ id: string; name: string }>> {
+  if (assetIds.length === 0) return [];
+  return tx.booking.findMany({
+    where: {
+      organizationId,
+      status: BookingStatus.DRAFT,
+      bookingAssets: { some: { assetId: { in: assetIds } } },
+    },
+    select: { id: true, name: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+/**
+ * Booking states that stop an asset from being archived: the booking has
+ * committed to the asset (RESERVED) or the asset is out on it (ONGOING,
+ * OVERDUE). The AVAILABLE status check does not cover RESERVED, because an
+ * asset in a reserved booking still reads AVAILABLE.
+ *
+ * DRAFT is not here: a draft has promised nothing yet. An archived asset left
+ * in a draft is refused when the draft is reserved or checked out, so the
+ * booking cannot take it out of the archive.
+ *
+ * Used by {@link archiveAsset} / {@link bulkArchiveAssets} (issue #382).
+ */
+const ARCHIVE_BLOCKING_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * Archives a single asset (soft "out of view").
+ *
+ * Archiving is orthogonal to `status`: it sets `archivedAt` so the asset drops
+ * out of default lists and can no longer be booked or assigned custody, while
+ * its live `status`, history and SAM-ID stay intact. It is fully reversible via
+ * {@link unarchiveAsset}.
+ *
+ * Guards (mirroring the agreed conditions in issue #382):
+ * - 404 if the asset doesn't exist in the caller's workspace.
+ * - 409 if it is already archived.
+ * - 400 for QUANTITY_TRACKED assets. Their `status` reads AVAILABLE even when
+ *   some units are out, so the status guard below can't be trusted for them,
+ *   and consumable-archiving semantics (stock across locations, consumption
+ *   history) are an open product decision. v1 archives INDIVIDUAL assets only.
+ * - 400 if the asset is IN_CUSTODY or CHECKED_OUT (actively held).
+ *
+ * The write is an atomic `updateMany` whose WHERE re-asserts every precondition,
+ * so a concurrent checkout/custody-assign cannot race an active asset into the
+ * archive.
+ *
+ * @param args.id - The asset to archive.
+ * @param args.organizationId - The caller's workspace (org-scopes the write).
+ * @param args.actorUserId - Optional user the ASSET_ARCHIVED event is attributed to.
+ * @returns The archived asset id, the archive timestamp, and the draft
+ *   bookings that still hold it (they can't be reserved until it is removed).
+ * @throws {ShelfError} On a failed guard or a database error.
+ */
+/**
+ * Refuses an archive that would leave a model reservation short, unless the
+ * user has confirmed it (issue #382).
+ *
+ * Runs inside the archive transaction AFTER the archive write, so the pool it
+ * measures already excludes the assets being archived; throwing rolls the
+ * archive back. The 409 carries the warning text from
+ * `formatModelShortfallMessage`, which the UI recognises and turns into an
+ * "Archive anyway" prompt rather than a plain failure.
+ *
+ * @param args.assetModelIds - Models of the assets just archived
+ * @param args.organizationId - The caller's workspace
+ * @param args.confirmed - The user already chose to archive anyway
+ * @param args.tx - The archive transaction
+ * @returns The bookings left short once confirmed (empty when none are), so
+ *   the caller can tell their owners on the booking itself
+ * @throws {ShelfError} 409 naming every booking left short, when unconfirmed
+ */
+async function assertNoModelShortfallUnlessConfirmed({
+  assetModelIds,
+  organizationId,
+  confirmed,
+  tx,
+}: {
+  assetModelIds: string[];
+  organizationId: string;
+  confirmed: boolean;
+  tx: Parameters<typeof findModelReservationsShortAfterArchive>[0]["tx"];
+}): Promise<ModelReservationShortfall[]> {
+  if (assetModelIds.length === 0) return [];
+
+  const shortfalls = await findModelReservationsShortAfterArchive({
+    assetModelIds,
+    organizationId,
+    tx,
+  });
+  if (shortfalls.length === 0 || confirmed) return shortfalls;
+
+  throw new ShelfError({
+    cause: null,
+    title: "Model reservations affected",
+    message: formatModelShortfallMessage(shortfalls),
+    additionalData: { organizationId, shortfalls },
+    label,
+    status: 409,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Tells each booking an "Archive anyway" left short, on the booking itself.
+ *
+ * The booking's owner is often not the admin who archived, and the booking
+ * page only shows the shortfall while someone looks at it. A note in the
+ * booking's activity names who archived what and what the booking now lacks.
+ * Written through the archive transaction, so it commits with the archive.
+ *
+ * @param tx - The archive transaction
+ * @param args.shortfalls - Bookings left short (from the confirmed archive)
+ * @param args.archivedTitles - Titles of the assets this call archived
+ * @param args.actorLink - Who archived, from {@link resolveArchiveActorLink}
+ * @param args.organizationId - The caller's workspace
+ */
+async function noteModelShortfallsOnBookings(
+  tx: Parameters<typeof createSystemBookingNotes>[1],
+  {
+    shortfalls,
+    archivedTitles,
+    actorLink,
+    organizationId,
+  }: {
+    shortfalls: ModelReservationShortfall[];
+    archivedTitles: string[];
+    actorLink: string;
+    organizationId: string;
+  }
+): Promise<void> {
+  if (shortfalls.length === 0) return;
+
+  const what =
+    archivedTitles.length === 1
+      ? wrapNameForNote(archivedTitles[0])
+      : `${archivedTitles.length} assets`;
+
+  await createSystemBookingNotes(
+    {
+      notes: shortfalls.map((shortfall) => ({
+        bookingId: shortfall.bookingId,
+        content: `${actorLink} archived ${what}. This booking's reservation of ${wrapNameForNote(
+          shortfall.modelName
+        )} is now ${shortfall.short} ${
+          shortfall.short === 1 ? "unit" : "units"
+        } short for its dates. Reduce it to what can be assigned.`,
+      })),
+      organizationId,
+    },
+    tx
+  );
+}
+
+export async function archiveAsset({
+  id,
+  organizationId,
+  actorUserId,
+  confirmModelShortfall = false,
+}: Pick<Asset, "id"> & {
+  organizationId: Organization["id"];
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+  /**
+   * The user has seen the model-reservation warning and archives anyway. See
+   * {@link assertNoModelShortfallUnlessConfirmed}.
+   */
+  confirmModelShortfall?: boolean;
+}) {
+  try {
+    const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archive service reads archivedAt to answer 409 already archived
+      where: { id, organizationId },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        status: true,
+        archivedAt: true,
+        assetModelId: true,
+      },
+    });
+
+    if (!asset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset not found",
+        message:
+          "This asset does not exist or does not belong to your workspace.",
+        status: 404,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.archivedAt) {
+      throw new ShelfError({
+        cause: null,
+        title: "Already archived",
+        message: "This asset is already archived.",
+        status: 409,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.type !== AssetType.INDIVIDUAL) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "Only individual assets can be archived. Quantity-tracked assets aren't supported yet.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.status !== AssetStatus.AVAILABLE) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "Assets that are checked out or in custody can't be archived. Check the asset back in first, then archive it.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const activeBookingCount = await db.bookingAsset.count({
+      where: {
+        assetId: id,
+        booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+      },
+    });
+
+    if (activeBookingCount > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Can't archive this asset",
+        message:
+          "This asset is in a reserved or checked-out booking. Remove it from that booking, then archive it.",
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const archivedAt = new Date();
+    const actorLink = await resolveArchiveActorLink(actorUserId);
+
+    const draftBookings = await db.$transaction(async (tx) => {
+      // Serialize against concurrent booking writes. The booking services take
+      // this same lock before their archived check, so an archive and a
+      // booking-add can no longer both pass their own read and then commit.
+      await lockAssetsForArchiveGuard(tx, [id], organizationId);
+
+      // Atomic guard: the WHERE re-asserts every precondition so a concurrent
+      // checkout/custody-assign can't slip an active asset into the archive.
+      const { count } = await tx.asset.updateMany({
+        where: {
+          id,
+          organizationId,
+          type: AssetType.INDIVIDUAL,
+          status: AssetStatus.AVAILABLE,
+          archivedAt: null,
+          // The booking check above is a read, so a booking created between it
+          // and this write would slip through. Re-asserting it here makes the
+          // WHERE the authoritative guard: a raced booking lands in the
+          // count === 0 branch instead of archiving a booked asset.
+          bookingAssets: {
+            none: {
+              booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+            },
+          },
+        },
+        data: { archivedAt },
+      });
+
+      if (count === 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Can't archive this asset",
+          message:
+            "The asset's status changed before it could be archived. Please refresh and try again.",
+          status: 409,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      const shortfalls = await assertNoModelShortfallUnlessConfirmed({
+        assetModelIds: asset.assetModelId ? [asset.assetModelId] : [],
+        organizationId,
+        confirmed: confirmModelShortfall,
+        tx,
+      });
+      await noteModelShortfallsOnBookings(tx, {
+        shortfalls,
+        archivedTitles: [asset.title],
+        actorLink,
+        organizationId,
+      });
+
+      // Activity event inside the tx for atomicity (wires the dormant action).
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_ARCHIVED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+        },
+        tx
+      );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: [id],
+        actorUserId,
+        actorLink,
+        verb: "archived",
+      });
+
+      return findDraftBookingsHoldingAssets(tx, {
+        assetIds: [id],
+        organizationId,
+      });
+    });
+
+    return { id, archivedAt, draftBookings };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while archiving the asset.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Reinstating is refused while the asset's kit is in use (issue #382).
+ *
+ * An archived kit member is left out when its kit goes into custody or out on
+ * a booking, so it holds no kit custody row and sits on none of the kit's
+ * bookings. Reinstating it then would leave an active member that its own
+ * in-use kit does not account for. Mirrors `archiveAsset`, which refuses while
+ * the asset is in use: release or check in the kit first.
+ */
+const NOT_IN_AN_IN_USE_KIT = {
+  assetKits: { none: { kit: { status: { not: KitStatus.AVAILABLE } } } },
+} satisfies Prisma.AssetWhereInput;
+
+/**
+ * Reinstates (un-archives) a single asset, clearing `archivedAt`.
+ *
+ * Because archiving is only allowed from the AVAILABLE state, the asset's
+ * `status` is never changed, so reinstating simply makes it visible,
+ * bookable and custody-able again with no status restoration needed.
+ *
+ * @param args.id - The asset to reinstate.
+ * @param args.organizationId - The caller's workspace (org-scopes the write).
+ * @param args.actorUserId - Optional user the ASSET_UNARCHIVED event and note are attributed to.
+ * @returns The reinstated asset id and whether it is marked available to book.
+ * @throws {ShelfError} If the asset is missing, not archived, or on a DB error.
+ */
+export async function unarchiveAsset({
+  id,
+  organizationId,
+  actorUserId,
+}: Pick<Asset, "id"> & {
+  organizationId: Organization["id"];
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+}) {
+  try {
+    const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: reinstate service must find archived assets and 409 on active ones
+      where: { id, organizationId },
+      select: {
+        id: true,
+        archivedAt: true,
+        // Archiving leaves this untouched, so the reinstate message can say
+        // whether the asset is bookable again.
+        availableToBook: true,
+        assetKits: { select: { kit: { select: { status: true } } } },
+      },
+    });
+
+    if (!asset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset not found",
+        message:
+          "This asset does not exist or does not belong to your workspace.",
+        status: 404,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (!asset.archivedAt) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not archived",
+        message: "This asset is not archived.",
+        status: 409,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (asset.assetKits.some((ak) => ak.kit.status !== KitStatus.AVAILABLE)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Kit in use",
+        message: KIT_IN_USE_REINSTATE_REASON,
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const actorLink = await resolveArchiveActorLink(actorUserId);
+
+    await db.$transaction(async (tx) => {
+      // The kit check above is a read; the WHERE re-asserts it, so a kit that
+      // goes into use in between still blocks the reinstate.
+      const { count } = await tx.asset.updateMany({
+        where: {
+          id,
+          organizationId,
+          archivedAt: { not: null },
+          ...NOT_IN_AN_IN_USE_KIT,
+        },
+        data: { archivedAt: null },
+      });
+
+      if (count === 0) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not reinstated",
+          message:
+            "This asset could not be reinstated: it is no longer archived, or its kit went into custody or out on a booking. Refresh and try again.",
+          status: 409,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_UNARCHIVED",
+          entityType: "ASSET",
+          entityId: id,
+          assetId: id,
+        },
+        tx
+      );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: [id],
+        actorUserId,
+        actorLink,
+        verb: "reinstated",
+      });
+    });
+
+    return { id, availableToBook: asset.availableToBook };
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reinstating the asset.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Bulk-archives assets (works for both simple and advanced index modes, plus
+ * "select all" via {@link resolveAssetIdsForBulkOperation}).
+ *
+ * Only INDIVIDUAL + AVAILABLE + not-already-archived assets are archived; any
+ * checked-out, in-custody, quantity-tracked or already-archived selections are
+ * silently skipped and reported via `skippedCount` (the same guard as
+ * {@link archiveAsset}). Emits one ASSET_ARCHIVED event per asset actually
+ * archived (bulk-event parity).
+ *
+ * @returns Counts of assets archived and skipped, for the success message.
+ * @throws {ShelfError} On a database error.
+ */
+export async function bulkArchiveAssets({
+  organizationId,
+  assetIds,
+  currentSearchParams,
+  settings,
+  lastAuditDateAccess,
+  bookableScope,
+  actorUserId,
+  timeZone = "UTC",
+  confirmModelShortfall = false,
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
+  /**
+   * The user has seen the model-reservation warning and archives anyway. See
+   * {@link assertNoModelShortfallUnlessConfirmed}.
+   */
+  confirmModelShortfall?: boolean;
+}): Promise<{
+  archivedCount: number;
+  skippedCount: number;
+  /** Draft bookings that still hold an archived asset; see the helper. */
+  draftBookings: Array<{ id: string; name: string }>;
+}> {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with the asset `archive` permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
+      timeZone,
+      // Acts ON archived assets in the view the user selected from; reached
+      // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
+      honorArchivedView: true,
+      lastAuditDateAccess,
+      bookableScope,
+    });
+
+    // Fetch the eligible subset first so we can emit one event per asset
+    // actually archived and report how many were skipped.
+    const eligible = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        type: AssetType.INDIVIDUAL,
+        status: AssetStatus.AVAILABLE,
+        archivedAt: null,
+        // Same rule the single-asset path enforces: an asset in a reserved or
+        // checked-out booking is spoken for, and AVAILABLE alone does not say
+        // so (a RESERVED booking leaves the status untouched).
+        // Skipped rather than thrown — bulk reports counts, it doesn't fail
+        // the batch on one ineligible row.
+        bookingAssets: {
+          none: {
+            booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    const eligibleIds = eligible.map((a) => a.id);
+
+    if (eligibleIds.length === 0) {
+      return {
+        archivedCount: 0,
+        skippedCount: resolvedIds.length,
+        draftBookings: [],
+      };
+    }
+
+    const archivedAt = new Date();
+
+    /**
+     * Ids this call actually wrote. The eligibility query above is a read, so
+     * between it and the write an asset can be checked out, taken into custody,
+     * booked, or archived by another request. Emitting one event per *eligible*
+     * id would then write ASSET_ARCHIVED for assets this call never touched and
+     * report them as archived. The WHERE re-asserts every precondition and the
+     * ids are read back by this call's own `archivedAt` stamp, so both the
+     * events and the counts describe rows that really changed.
+     */
+    let archivedIds: string[] = [];
+    const actorLink = await resolveArchiveActorLink(actorUserId);
+
+    const draftBookings = await db.$transaction(async (tx) => {
+      // Same lock the single-asset path and the booking services take, so a
+      // booking-add cannot land between this batch's eligibility read and its
+      // write. Sorted inside the helper, so overlapping batches can't deadlock.
+      await lockAssetsForArchiveGuard(tx, eligibleIds, organizationId);
+
+      await tx.asset.updateMany({
+        where: {
+          id: { in: eligibleIds },
+          organizationId,
+          type: AssetType.INDIVIDUAL,
+          status: AssetStatus.AVAILABLE,
+          archivedAt: null,
+          bookingAssets: {
+            none: {
+              booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+            },
+          },
+        },
+        data: { archivedAt },
+      });
+
+      const written = await tx.asset.findMany({
+        where: { id: { in: eligibleIds }, organizationId, archivedAt },
+        select: { id: true, title: true, assetModelId: true },
+      });
+      archivedIds = written.map((a) => a.id);
+
+      if (archivedIds.length === 0) return [];
+
+      // The whole batch is refused (and rolled back) on an unconfirmed
+      // shortfall, so the warning names every booking it would affect at once.
+      const shortfalls = await assertNoModelShortfallUnlessConfirmed({
+        assetModelIds: written.flatMap((a) =>
+          a.assetModelId ? [a.assetModelId] : []
+        ),
+        organizationId,
+        confirmed: confirmModelShortfall,
+        tx,
+      });
+      await noteModelShortfallsOnBookings(tx, {
+        shortfalls,
+        archivedTitles: written.map((a) => a.title),
+        actorLink,
+        organizationId,
+      });
+
+      await recordEvents(
+        archivedIds.map((assetId) => ({
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_ARCHIVED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+        })),
+        tx
+      );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: archivedIds,
+        actorUserId,
+        actorLink,
+        verb: "archived",
+      });
+
+      return findDraftBookingsHoldingAssets(tx, {
+        assetIds: archivedIds,
+        organizationId,
+      });
+    });
+
+    return {
+      archivedCount: archivedIds.length,
+      skippedCount: resolvedIds.length - archivedIds.length,
+      draftBookings,
+    };
+  } catch (cause) {
+    // Keep an upstream error's own message (e.g. an invalid advanced filter);
+    // wrapping it would replace it with the generic text below.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while archiving the selected assets.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Bulk-reinstates (un-archives) assets. Mirrors {@link bulkArchiveAssets}:
+ * only currently-archived selections are reinstated; the rest are skipped,
+ * including members of a kit that is in custody or checked out
+ * ({@link NOT_IN_AN_IN_USE_KIT}).
+ * Emits one ASSET_UNARCHIVED event per asset actually reinstated.
+ *
+ * @returns Counts of assets reinstated and skipped, for the success message.
+ * @throws {ShelfError} On a database error.
+ */
+export async function bulkUnarchiveAssets({
+  organizationId,
+  assetIds,
+  currentSearchParams,
+  settings,
+  lastAuditDateAccess,
+  bookableScope,
+  actorUserId,
+  timeZone = "UTC",
+}: {
+  organizationId: Asset["organizationId"];
+  assetIds: Asset["id"][];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
+  /** Optional — caller-supplied userId for the activity event actor. */
+  actorUserId?: string;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
+}): Promise<{ unarchivedCount: number; skippedCount: number }> {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with the asset `archive` permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
+      timeZone,
+      // Acts ON archived assets in the view the user selected from; reached
+      // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
+      honorArchivedView: true,
+      lastAuditDateAccess,
+      bookableScope,
+    });
+
+    const eligible = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        archivedAt: { not: null },
+        ...NOT_IN_AN_IN_USE_KIT,
+      },
+      select: { id: true },
+    });
+    const eligibleIds = eligible.map((a) => a.id);
+
+    if (eligibleIds.length === 0) {
+      return { unarchivedCount: 0, skippedCount: resolvedIds.length };
+    }
+
+    /**
+     * The ids this call actually reinstates. The read above ran outside the
+     * transaction, so a concurrent reinstate may already have cleared some of
+     * them; emitting for every eligible id would then record reinstatements
+     * this call never made. Unlike archiving, the write leaves no stamp to read
+     * back (it sets `archivedAt` to null), so the rows are locked and re-read
+     * instead: a reinstate that committed first drops out of the re-read, and
+     * one that starts later waits on the lock.
+     */
+    let unarchivedIds: string[] = [];
+    const actorLink = await resolveArchiveActorLink(actorUserId);
+
+    await db.$transaction(async (tx) => {
+      // Same lock the archive paths take, sorted inside the helper, so this
+      // cannot deadlock against a concurrent bulk archive.
+      await lockAssetsForArchiveGuard(tx, eligibleIds, organizationId);
+
+      const stillArchived = await tx.asset.findMany({
+        where: {
+          id: { in: eligibleIds },
+          organizationId,
+          archivedAt: { not: null },
+          ...NOT_IN_AN_IN_USE_KIT,
+        },
+        select: { id: true },
+      });
+      unarchivedIds = stillArchived.map((a) => a.id);
+
+      if (unarchivedIds.length === 0) return;
+
+      await tx.asset.updateMany({
+        where: {
+          id: { in: unarchivedIds },
+          organizationId,
+          archivedAt: { not: null },
+          ...NOT_IN_AN_IN_USE_KIT,
+        },
+        data: { archivedAt: null },
+      });
+
+      await recordEvents(
+        unarchivedIds.map((assetId) => ({
+          organizationId,
+          actorUserId: actorUserId ?? null,
+          action: "ASSET_UNARCHIVED" as const,
+          entityType: "ASSET" as const,
+          entityId: assetId,
+          assetId,
+        })),
+        tx
+      );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: unarchivedIds,
+        actorUserId,
+        actorLink,
+        verb: "reinstated",
+      });
+    });
+
+    return {
+      unarchivedCount: unarchivedIds.length,
+      skippedCount: resolvedIds.length - unarchivedIds.length,
+    };
+  } catch (cause) {
+    // Keep an upstream error's own message (e.g. an invalid advanced filter);
+    // wrapping it would replace it with the generic text below.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while reinstating the selected assets.",
+      additionalData: { organizationId },
       label,
     });
   }
@@ -3437,7 +4614,18 @@ export async function replaceAssetPlacements({
     //    so a fully-placed asset can still be added to a kit — counting both
     //    axes here would refuse placement edits on an asset the database
     //    considers perfectly valid.
+    //
+    // Archived assets are frozen (issue #382). Only quantity-tracked assets
+    // reach this today, and those cannot be archived, so this is a backstop
+    // for the day one can.
+    await assertAssetsAreNotArchived({
+      assetIds: [assetId],
+      organizationId,
+      actorUserId: userId,
+    });
+
     const asset = await db.asset.findUniqueOrThrow({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -3576,6 +4764,10 @@ export async function replaceAssetPlacements({
     let toUpdate: Array<{ locationId: string; quantity: number }> = [];
     let toDelete: ManualRow[] = [];
     let manualByLocation = new Map<string, ManualRow>();
+    /** What happened to custody sources, for the note after the commit. */
+    let rehome: Awaited<
+      ReturnType<typeof rehomeCustodyForPlacementChange>
+    > | null = null;
 
     // 8. Apply the diff in one tx. The DEFERRED sum-within-total
     //    trigger re-checks at COMMIT — covers any race where another
@@ -3597,15 +4789,10 @@ export async function replaceAssetPlacements({
        * first actually committed.
        *
        * Mirrors `moveAssetLocationUnits` step 2, which locks for the same
-       * reason. `updateAsset`'s placement path and the mobile
-       * `asset.update-location` route now lock too.
-       *
-       * KNOWN GAP: `updateLocationAssets` (the location page's "manage
-       * assets" flow) writes manual rows for many assets at once and does NOT
-       * lock, so the race above survives through it. Adding a per-asset lock
-       * there needs a deterministic acquisition order to avoid deadlocking
-       * against the multi-asset lockers in the booking check-in paths, which
-       * is why it is not done here.
+       * reason. `updateAsset`'s placement path, the mobile
+       * `asset.update-location` route and `updateLocationAssets` lock too
+       * (the last one several assets at once, in sorted id order like the
+       * booking paths, so they cannot deadlock).
        */
       const locked = await lockAssetForQuantityUpdate(
         tx,
@@ -3655,12 +4842,29 @@ export async function replaceAssetPlacements({
        */
       const lockedManual = await tx.assetLocation.findMany({
         where: { assetId, assetKitId: null },
+        // Oldest first, so the location log pairs moves the same way each time.
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           locationId: true,
           quantity: true,
           location: { select: { id: true, name: true } },
         },
       });
+
+      /** The pool's stock before the diff, for the ledger's MOVE rows. */
+      const stockBefore =
+        locked.type === AssetType.QUANTITY_TRACKED
+          ? await readStockState(tx, { assetId, organizationId })
+          : null;
+
+      /** Custody sources before the diff, for the re-home below. */
+      const custodyBefore =
+        locked.type === AssetType.QUANTITY_TRACKED
+          ? await loadCustodySources(tx, {
+              assetId,
+              total: locked.quantity ?? 0,
+            })
+          : null;
 
       const currentByLocation = new Map(
         lockedManual.map((al) => [al.locationId, al])
@@ -3715,9 +4919,20 @@ export async function replaceAssetPlacements({
         });
       }
 
+      /**
+       * The editor never changes the total, so every unit it shifts is a
+       * move: between locations, or to and from the unplaced units.
+       */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
+
       // Activity events — one ASSET_LOCATION_CHANGED per net add /
       // remove. Qty-only edits don't emit an event today (deliberate
-      // gap). Mirrors the `updateLocationAssets` event pattern.
+      // gap; the stock ledger above records them). Mirrors the
+      // `updateLocationAssets` event pattern.
       // `meta.quantity` carries the per-row placement qty (this is the
       // QUANTITY_TRACKED multi-placement editor, so the count is
       // always meaningful here); `assetQtyMeta` no-ops for INDIVIDUAL.
@@ -3751,7 +4966,33 @@ export async function replaceAssetPlacements({
       if (events.length > 0) {
         await recordEvents(events, tx);
       }
+
+      /**
+       * A location shrunk or removed below what is in custody from it: that
+       * excess custody becomes unplaced (the editor names no single
+       * destination). Never refused.
+       */
+      if (custodyBefore) {
+        rehome = await rehomeCustodyForPlacementChange(tx, {
+          assetId,
+          total: locked.quantity ?? 0,
+          before: custodyBefore,
+        });
+      }
     });
+
+    if (rehome) {
+      await createCustodyRehomeNote({
+        result: rehome,
+        asset: {
+          id: assetId,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId,
+        organizationId,
+      });
+    }
 
     // Per-row notes emitted AFTER the tx commits. Following the same
     // pattern as `updateLocationAssets`: notes capture intent and don't
@@ -3844,6 +5085,19 @@ export async function replaceAssetPlacements({
           })
         ),
         ...qtyChangeNoteCalls,
+        createAssetLocationMoveNotes({
+          // Each location's amount before and after the save, so units that
+          // left one location for another read as one move.
+          moves: placementChangeMoves({
+            asset,
+            before: [...manualByLocation.values()],
+            after: placements.flatMap((p) => {
+              const location = submittedLocations.get(p.locationId);
+              return location ? [{ location, quantity: p.quantity }] : [];
+            }),
+          }),
+          actor: { ...user, id: userId },
+        }),
       ]);
     }
 
@@ -3883,6 +5137,18 @@ export async function updateAssetMainImage({
   isNewAsset?: boolean;
 }): Promise<boolean> {
   try {
+    // Archived assets are frozen (issue #382). Refused before the upload, not
+    // after: the file would otherwise land in storage, and the old images be
+    // deleted, before `updateAsset` turned the change down. A new asset cannot
+    // be archived yet, so it skips the read.
+    if (!isNewAsset) {
+      await assertAssetsAreNotArchived({
+        assetIds: [assetId],
+        organizationId,
+        actorUserId: userId,
+      });
+    }
+
     const fileData = await parseFileFormData({
       request,
       bucketName: "assets",
@@ -4253,6 +5519,20 @@ function extractMainImageName(path: string): string | null {
   }
 }
 
+/**
+ * Removes the images an asset's new photo replaces: every file in the
+ * uploader's folder `<userId>/<assetId>/` except the current photo and its
+ * thumbnail. Best effort, never rejects.
+ *
+ * Only for a replaced photo. A deleted asset's files go through
+ * {@link removeImageFilesOfDeletedAssets}, which covers every uploader's
+ * folder and keeps files another asset of the workspace still shows.
+ *
+ * @param params.userId - The user who uploaded the current photo, which names
+ *   the folder that is cleaned
+ * @param params.assetId - The asset whose photo was replaced
+ * @param params.data.path - Storage path of the current photo
+ */
 export async function deleteOtherImages({
   userId,
   assetId,
@@ -4311,8 +5591,9 @@ export async function deleteOtherImages({
       )
     );
   } catch (cause) {
-    // Image cleanup is non-critical — the asset duplication still succeeds.
-    // Transient Supabase storage errors (e.g., 502) should not pollute Sentry.
+    // Best effort: the new photo is already stored, so a failed cleanup only
+    // leaves a stale file behind. Transient Supabase storage errors (e.g.,
+    // 502) should not pollute Sentry.
     Logger.error(
       new ShelfError({
         cause,
@@ -4396,30 +5677,6 @@ export async function uploadDuplicateAssetMainImage(
   }
 }
 
-export function createCustomFieldsPayloadFromAsset(
-  asset: Prisma.AssetGetPayload<{
-    include: {
-      custody: { include: { custodian: true } };
-      tags: true;
-      customFields: true;
-    };
-  }>
-) {
-  if (!asset?.customFields || asset?.customFields?.length === 0) {
-    return {};
-  }
-
-  return (
-    asset.customFields?.reduce(
-      (obj, { customFieldId, value }) => {
-        const rawValue = (value as { raw: string })?.raw ?? value ?? "";
-        return { ...obj, [`cf-${customFieldId}`]: rawValue };
-      },
-      {} as Record<string, any>
-    ) || {}
-  );
-}
-
 /**
  * Deletes the copies `duplicateAsset` created before a later copy failed, so a
  * duplicate request never leaves part of its copies behind.
@@ -4485,8 +5742,9 @@ async function deleteDuplicatesAfterFailure({
  * @param params.organizationId - The caller's validated organization ID; all
  *   duplicates and copied tags are constrained to this org
  * @returns The list of created duplicate assets
- * @throws {ShelfError} 400 "No units to copy" for a quantity-tracked asset with
- *   no units in stock (see `canDuplicateAsset`), 4xx from `createAsset` as
+ * @throws {ShelfError} 400 for an archived asset, 400 "No units to copy" for a
+ *   quantity-tracked asset with no units in stock (see `canDuplicateAsset`),
+ *   4xx from `createAsset` as
  *   written, and a wrapped error if duplication otherwise fails
  */
 export async function duplicateAsset({
@@ -4525,6 +5783,32 @@ export async function duplicateAsset({
     });
 
     const isPool = isQuantityTracked(asset);
+
+    // An archived asset is out of service. A copy would put an active twin of
+    // it back into circulation, so it is refused like every other change.
+    if (asset.archivedAt) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: archivedAssetsRefusal({
+          titles: [asset.title],
+          fix: "reinstate",
+          canReinstate: await userCanReinstateAssets({
+            userId,
+            organizationId,
+          }),
+        }),
+        additionalData: {
+          assetId: asset.id,
+          organizationId,
+          archivedAssetIds: [asset.id],
+          archivedAssetTitles: [asset.title],
+        },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     if (!canDuplicateAsset(asset)) {
       throw new ShelfError({
@@ -4566,13 +5850,20 @@ export async function duplicateAsset({
       }),
     };
 
-    const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
-
-    const extractedCustomFieldValues = extractCustomFieldValuesFromPayload({
-      payload: { ...payload, ...customFieldValues },
-      customFieldDef: customFields,
-      isDuplicate: true,
-    });
+    // A copy carries each active field's stored value exactly as it is.
+    // Rebuilding it from `raw` would hold old values to today's rules, so a
+    // value saved before its field became a Link field would block the copy.
+    const activeFieldIds = new Set(customFields.map((field) => field.id));
+    const copiedCustomFieldValues = asset.customFields
+      .filter(({ customFieldId }) => activeFieldIds.has(customFieldId))
+      .map(
+        ({ customFieldId, value }) =>
+          ({
+            id: customFieldId,
+            // Stored values were built by `buildCustomFieldValue`.
+            value: value as unknown as ShelfAssetCustomFieldValueType["value"],
+          }) as ShelfAssetCustomFieldValueType
+      );
 
     // All copies are created or none are. Each `createAsset` commits its own
     // transaction and retries on a sequential-id collision, which an
@@ -4586,7 +5877,8 @@ export async function duplicateAsset({
             title: `${asset.title} (copy${
               amountOfDuplicates > 1 ? ` ${i + 1}` : ""
             })`,
-            customFieldsValues: extractedCustomFieldValues,
+            customFieldsValues: copiedCustomFieldValues,
+            writeLocationNote: false,
           })
         );
       }
@@ -4599,6 +5891,10 @@ export async function duplicateAsset({
       });
       throw cause;
     }
+
+    // One grouped line on the location's Activity tab, once every copy exists.
+    const locationNotes = firstPlacementNotes(duplicatedAssets);
+    if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
 
     // Images are uploaded once every copy exists, so a failed create never
     // leaves an uploaded file behind. An image is best-effort: a copy without
@@ -4730,6 +6026,17 @@ export async function getAllEntriesForCreateAndEdit({
   }
 }
 
+/**
+ * One page of assets for a simple-mode list, plus the data its filter
+ * dropdowns need.
+ *
+ * Reads the filters from `filters` when given, otherwise from the request
+ * URL. `locationIdsOverride` replaces only the location ids the asset query
+ * matches; the dropdown seeds keep reading the URL.
+ *
+ * @returns The page of assets, paging info, and the category, tag, location
+ *   and asset model seeds for the filter dropdowns
+ */
 export async function getPaginatedAndFilterableAssets({
   request,
   organizationId,
@@ -4738,29 +6045,65 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeLocationQuery = false,
   filters = "",
-  isSelfService,
+  bookableScope,
   canSeeAllCustody,
   userId,
+  custodySearchScope,
+  locationIdsOverride,
+  honorArchivedView = false,
+  honorLowStockFilter = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   // `AssetKit` pivot. Callers still pass a plain `kitId` string here
   // for filtering; the where-builder will map it onto `assetKits.some`.
   kitId?: string | null;
+  /**
+   * Location ids the ASSET QUERY matches, in place of the URL's `location`
+   * values. Omitted, the URL's own values are matched exactly.
+   *
+   * The Locations filter seed still reads the URL, so widening what the list
+   * matches (ticked locations plus their child locations) never changes which
+   * options read as ticked.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: Location["id"][];
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
   excludeLocationQuery?: boolean;
   filters?: string;
 
-  isSelfService?: boolean;
+  /** The caller's list scope (see `resolveBookableListScope`); `null` or omitted lists every asset. */
+  bookableScope?: BookableListScope | null;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required so
-   * the custodian filter seed is scoped by the rule rather than by a role
-   * check — `isSelfService` is false for BASE, which left the seed unscoped.
+   * the custodian filter seed is scoped by the custody rule for every
+   * restricted role, never by a role check.
    */
   canSeeAllCustody: boolean;
   userId?: string;
+  /**
+   * Whose custody the search may match by custodian name, from
+   * `custodySearchScopeFor` with the viewer's real custody visibility.
+   * Separate from `canSeeAllCustody`, which pickers set to `false` only to
+   * skip the custodian roster they never render.
+   */
+  custodySearchScope: CustodySearchScope;
+  /**
+   * Honour the `?archived=` view param (issue #382). Off by default, so every
+   * list shows active assets unless its caller opts in: the asset index and
+   * export pass it for members holding `asset: archive`. A picker, or a
+   * member without the grant, gets active assets whatever the URL says.
+   */
+  honorArchivedView?: boolean;
+  /**
+   * Honour the `?lowStockOnly=true` param. Off by default: only the asset
+   * index renders the toggle that clears it, so a picker or another list
+   * never narrows to low-stock items on a param it cannot show.
+   */
+  honorLowStockFilter?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -4768,11 +6111,9 @@ export async function getPaginatedAndFilterableAssets({
     : getCurrentSearchParams(request);
 
   const paramsValues = getParamsValues(searchParams);
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
   const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+  // Paging, ordering and the dropdown seeds only. The filters the asset query
+  // applies come from resolveAssetListFilters below.
   const {
     page,
     perPageParam,
@@ -4781,13 +6122,8 @@ export async function getPaginatedAndFilterableAssets({
     search,
     categoriesIds,
     tagsIds,
-    bookingFrom,
-    bookingTo,
-    hideUnavailable,
-    unhideAssetsBookigIds,
     locationIds,
     teamMemberIds,
-    assetKitFilter,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -4840,32 +6176,28 @@ export async function getPaginatedAndFilterableAssets({
         // unscoped id here would fetch that person's row back.
         selectedTeamMembers: scopedTeamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
-        // A read FILTER, so the resolved custody rule governs — NOT the role.
-        // `isSelfService` was false for BASE, which left this seed unscoped
-        // and shipped the whole roster to a BASE user with
-        // `baseUserCanSeeCustody` off. Same shape as the /scanner seed.
+        // A read FILTER, so the resolved custody rule governs, never the role:
+        // a member who may not see others' custody gets only their own row.
+        // Same shape as the /scanner seed.
         filterByUserId: !canSeeAllCustody,
         userId,
       }),
       getAssets({
-        organizationId,
+        ...resolveAssetListFilters({
+          organizationId,
+          searchParams,
+          teamMemberIds: scopedTeamMemberIds,
+          custodySearchScope,
+          bookableScope,
+          locationIdsOverride,
+          honorArchivedView,
+          honorLowStockFilter,
+        }),
         page,
         perPage,
         orderBy,
         orderDirection,
-        search,
-        categoriesIds,
-        tagsIds,
-        status,
-        bookingFrom: bookingFrom ?? undefined,
-        bookingTo: bookingTo ?? undefined,
-        hideUnavailable,
-        unhideAssetsBookigIds,
-        locationIds,
-        teamMemberIds: scopedTeamMemberIds,
         extraInclude,
-        assetKitFilter,
-        availableToBookOnly: isSelfService,
       }),
     ]);
 
@@ -4989,51 +6321,6 @@ export async function createCustomFieldChangeNote({
   }
 }
 
-/** Fetches assets with the data needed for exporting to CSV */
-export async function fetchAssetsForExport({
-  organizationId,
-}: {
-  organizationId: Organization["id"];
-}) {
-  try {
-    return await db.asset.findMany({
-      where: {
-        organizationId,
-      },
-      include: {
-        category: true,
-        assetLocations: { include: { location: true } },
-        // Phase A5: include the model so backup-export can emit
-        // assetModel.name (round-trippable across orgs). Without it,
-        // re-import would only get the opaque assetModelId.
-        assetModel: { select: { name: true } },
-        notes: true,
-        custody: {
-          // Ordered so `getPrimaryCustody` picks the same row every time — the
-          // custodian it returns is written into the exported file.
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-          include: {
-            custodian: true,
-          },
-        },
-        tags: true,
-        customFields: {
-          include: {
-            customField: true,
-          },
-        },
-      },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while fetching assets for export",
-      additionalData: { organizationId },
-      label,
-    });
-  }
-}
-
 /**
  * Parsed shape of the quantity-tracked + AssetModel columns for a single
  * CSV import row. All fields are optional: a row with none of these
@@ -5112,7 +6399,7 @@ export async function createAssetsFromContentImport({
     // conflict it goes on to reject.
     const existingCustomFields = await db.customField.findMany({
       where: { organizationId, deletedAt: null },
-      select: { name: true, type: true },
+      select: { name: true, type: true, format: true },
     });
 
     const { errors: rowErrors, totalErrors } = validateContentImportRows({
@@ -5234,6 +6521,16 @@ export async function createAssetsFromContentImport({
         organizationId,
       }),
     ]);
+
+    /**
+     * Defaults of every model the file names, read once. A row joining a
+     * model gets them in its empty cells, the same rule as every other way an
+     * asset joins a model.
+     */
+    const modelDefaults = await getAssetModelsDefaults({
+      assetModelIds: [...new Set(Object.values(assetModels ?? {}))],
+      organizationId,
+    });
 
     // Process assets sequentially to handle image uploads
     for (const asset of data) {
@@ -5462,6 +6759,32 @@ export async function createAssetsFromContentImport({
       // so neither can fail here. `createAsset` keeps its own guards for the
       // callers that do not come through the importer.
 
+      let categoryId = asset.category ? categories?.[asset.category] : null;
+      let valuation: number | null = asset.valuation ? +asset.valuation : null;
+      const joinedModel = assetModelId
+        ? modelDefaults.get(assetModelId)
+        : undefined;
+      if (joinedModel) {
+        const fill = planModelDefaultFill({
+          model: joinedModel,
+          current: {
+            categoryId: categoryId ?? null,
+            valuation,
+            customFieldIdsWithValue: new Set(
+              customFieldsValues.map((value) => value.id)
+            ),
+          },
+        });
+        categoryId = fill.categoryId ?? categoryId;
+        valuation = fill.valuation ?? valuation;
+        for (const fieldDefault of fill.customFields) {
+          customFieldsValues.push({
+            id: fieldDefault.customFieldId,
+            value: fieldDefault.value,
+          } as ShelfAssetCustomFieldValueType);
+        }
+      }
+
       await createAsset({
         id: assetId, // Pass the pre-generated ID
         qrId: qrCodesPerAsset.find((item) => item?.key === asset.key)?.qrId,
@@ -5470,7 +6793,7 @@ export async function createAssetsFromContentImport({
         description: asset.description || "",
         userId,
         kitId,
-        categoryId: asset.category ? categories?.[asset.category] : null,
+        categoryId,
         locationId: asset.location ? locations?.[asset.location] : undefined,
         // Kit rows: custody belongs to the kit (assigned + inherited to members
         // in setKitCustodyAfterAssetImport). Don't also create a direct operator
@@ -5485,7 +6808,7 @@ export async function createAssetsFromContentImport({
                   .map((t) => ({ id: tags[t] })),
               }
             : undefined,
-        valuation: asset.valuation ? +asset.valuation : null,
+        valuation,
         customFieldsValues,
         availableToBook: asset?.bookable !== "no",
         mainImage: mainImage || null,
@@ -5563,464 +6886,133 @@ export async function createAssetsFromContentImport({
 }
 
 /**
- * Finds a workspace's locations by name for a backup restore, creating the
- * ones that are missing. Names match regardless of case, the same way the
- * database's unique index on location names compares them.
+ * The `ASSET_AVAILABLE_TO_BOOK_CHANGED` event for one asset, shared by the
+ * single and bulk writers so both leave the same trail.
  *
- * @param args.names - Location names from the backup file, repeats allowed.
- * @returns Location ids keyed by lower-cased name.
+ * The switch is a boolean and callers emit only for assets whose value really
+ * changes, so the previous value is always the opposite of the new one.
+ *
+ * @param args.organizationId - The workspace the asset belongs to
+ * @param args.userId - The acting user
+ * @param args.assetId - The asset whose switch changed
+ * @param args.availableToBook - The value the switch was set to
+ * @returns The event input for `recordEvent` / `recordEvents`
  */
-async function findOrCreateLocationsByName({
-  names,
-  details,
-  userId,
+function buildAvailableToBookChangeEvent({
   organizationId,
+  userId,
+  assetId,
+  availableToBook,
 }: {
-  names: string[];
-  /** Details to create a missing location with, keyed by lower-cased name. */
-  details: Map<string, BackupLocationDetails>;
+  organizationId: Asset["organizationId"];
   userId: User["id"];
-  organizationId: Organization["id"];
-}) {
-  /** Lower-cased name -> the first spelling the file uses for it. */
-  const spellings = new Map<string, string>();
-  for (const name of names) {
-    const key = name.toLowerCase();
-    if (!spellings.has(key)) spellings.set(key, name);
-  }
-
-  const locationIds = new Map<string, Location["id"]>();
-  if (spellings.size === 0) return locationIds;
-
-  // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
-  // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
-  // location name act as wildcards.
-  const existing = await db.location.findMany({
-    where: {
-      organizationId,
-      name: { in: [...spellings.values()], mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-  for (const location of existing) {
-    locationIds.set(location.name.toLowerCase(), location.id);
-  }
-
-  for (const [key, name] of spellings) {
-    if (locationIds.has(key)) continue;
-    const created = await db.location.create({
-      data: { ...details.get(key), name, organizationId, userId },
-      select: { id: true },
-    });
-    locationIds.set(key, created.id);
-  }
-
-  return locationIds;
+  assetId: Asset["id"];
+  availableToBook: boolean;
+}): FieldChangeEventInput {
+  return {
+    organizationId,
+    actorUserId: userId,
+    action: "ASSET_AVAILABLE_TO_BOOK_CHANGED",
+    entityType: "ASSET",
+    entityId: assetId,
+    assetId,
+    field: "availableToBook",
+    fromValue: !availableToBook,
+    toValue: availableToBook,
+  };
 }
 
 /**
- * Restores the assets of a workspace backup into a workspace.
+ * Turns an asset's "Available for bookings" switch on or off.
  *
- * Relations travel by name, because ids only resolve in the workspace the
- * backup came from. Locations, categories, tags, asset models, custodians and
- * custom fields are matched regardless of case and created when missing.
+ * When the value actually changes, the write, an UPDATE note on the asset and
+ * one `ASSET_AVAILABLE_TO_BOOK_CHANGED` event commit together. Setting the
+ * value the asset already has writes no note and no event, so re-submitting
+ * the switch does not fill the activity log.
  *
- * The restore is not atomic. Locations are resolved before any asset is
- * created, and each asset is then created with its other relations one row at
- * a time, so a failure part-way leaves everything already written in place.
- * Running the file again reuses those relations by name, but creates the
- * already-restored assets a second time. One transaction does not fit: a
- * workspace-sized restore runs far past Prisma's interactive-transaction
- * timeout.
- *
- * @param args.data - Rows parsed by `extractCSVDataFromBackupImport`.
- * @param args.userId - The admin running the restore; owns what it creates.
- * @param args.organizationId - The workspace restored into.
- * @throws {ShelfError} Wrapping the first row that fails.
+ * @param params.id - The asset to change
+ * @param params.availableToBook - The value to set
+ * @param params.organizationId - The caller's validated workspace
+ * @param params.userId - The acting user, named in the note and the event
+ * @returns The updated asset
+ * @throws {ShelfError} 400 when the asset is archived, including one archived
+ *   while this write was in flight
  */
-export async function createAssetsFromBackupImport({
-  data,
-  userId,
-  organizationId,
-}: {
-  data: CreateAssetFromBackupImportPayload[];
-  userId: User["id"];
-  organizationId: Organization["id"];
-}) {
-  try {
-    // Placements travel by location name. Every name is resolved once, here,
-    // before any asset is created, so a location shared by many assets is
-    // looked up in one query rather than once per asset.
-    const placementsPerRow = data.map((asset) =>
-      placementsForRestore({
-        type: asset.type,
-        quantity: asset.quantity,
-        assetLocations: asset.assetLocations,
-        location: asset.location,
-      })
-    );
-    // A backup written before placements existed describes the location
-    // itself; a location created from it keeps that description.
-    const legacyLocationDetails = new Map<string, BackupLocationDetails>();
-    for (const asset of data) {
-      const legacy = readLegacyBackupLocation(asset.location);
-      if (legacy && !legacyLocationDetails.has(legacy.name.toLowerCase())) {
-        legacyLocationDetails.set(legacy.name.toLowerCase(), legacy.details);
-      }
-    }
-    const locationIds = await findOrCreateLocationsByName({
-      names: placementsPerRow.flat().map((placement) => placement.location),
-      details: legacyLocationDetails,
-      userId,
-      organizationId,
-    });
-
-    // One asset at a time. Each row finds or creates its category, tags,
-    // model, custodian and custom fields by name, and those names are unique
-    // per workspace: two rows creating the same new name at once would
-    // collide on the unique index, or leave duplicates where there is none.
-    for (const [rowIndex, asset] of data.entries()) {
-      /** Quantity-tracked + assetModel fields — passed through from
-       * the backup payload. Backup export emits these as raw string
-       * values (per-Asset scalar columns); on restore we read them
-       * back so round-trip preserves the qty-tracked semantics. The
-       * content-import path validates these aggressively; for backup
-       * import we trust the source (it came from our own exporter)
-       * but still coerce types defensively. */
-      const backupType =
-        typeof asset.type === "string" &&
-        (asset.type === AssetType.INDIVIDUAL ||
-          asset.type === AssetType.QUANTITY_TRACKED)
-          ? (asset.type as AssetType)
-          : undefined;
-      const backupQuantity =
-        typeof asset.quantity === "string" && asset.quantity.trim() !== ""
-          ? Number(asset.quantity)
-          : typeof asset.quantity === "number"
-          ? asset.quantity
-          : undefined;
-      const backupMinQuantity =
-        typeof asset.minQuantity === "string" && asset.minQuantity.trim() !== ""
-          ? Number(asset.minQuantity)
-          : typeof asset.minQuantity === "number"
-          ? asset.minQuantity
-          : undefined;
-      const backupUnit =
-        typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
-          ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
-          : undefined;
-      const backupCt =
-        typeof asset.consumptionType === "string" &&
-        (asset.consumptionType === ConsumptionType.ONE_WAY ||
-          asset.consumptionType === ConsumptionType.TWO_WAY)
-          ? (asset.consumptionType as ConsumptionType)
-          : undefined;
-
-      /** Base data from asset */
-      const d = {
-        data: {
-          title: asset.title,
-          description: asset.description || null,
-          mainImage: asset.mainImage || null,
-          mainImageExpiration: threeDaysFromNow(),
-          userId,
-          organizationId,
-          status: asset.status,
-          createdAt: new Date(asset.createdAt),
-          updatedAt: new Date(asset.updatedAt),
-          qrCodes: {
-            create: [
-              {
-                id: id(),
-                version: 0,
-                errorCorrection: ErrorCorrection["L"],
-                userId,
-                organizationId,
-              },
-            ],
-          },
-          valuation: asset.valuation ? +asset.valuation : null,
-          ...(backupType !== undefined ? { type: backupType } : {}),
-          ...(backupQuantity !== undefined ? { quantity: backupQuantity } : {}),
-          ...(backupMinQuantity !== undefined
-            ? { minQuantity: backupMinQuantity }
-            : {}),
-          ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
-          ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
-        },
-      };
-
-      /** AssetModel by name — mirrors the category block below.
-       * Skip linkage entirely when the row is QUANTITY_TRACKED:
-       * models are INDIVIDUAL-only by design. Importing a backup that
-       * predates this rule should not block (we just drop the model
-       * connect) — the user can clean up the export upstream or
-       * re-import the model link manually after fixing the type. */
-      if (
-        asset.assetModel &&
-        typeof asset.assetModel === "object" &&
-        (asset.assetModel as any).name &&
-        backupType !== AssetType.QUANTITY_TRACKED
-      ) {
-        const modelPayload = asset.assetModel as { name: string };
-        const existingModel = await db.assetModel.findFirst({
-          where: {
-            organizationId,
-            name: {
-              equals: modelPayload.name.trim(),
-              mode: "insensitive",
-            },
-          },
-        });
-        if (existingModel) {
-          Object.assign(d.data, { assetModelId: existingModel.id });
-        } else {
-          const newModel = await db.assetModel.create({
-            data: {
-              name: modelPayload.name.trim(),
-              createdBy: { connect: { id: userId } },
-              organization: { connect: { id: organizationId } },
-            },
-          });
-          Object.assign(d.data, { assetModelId: newModel.id });
-        }
-      }
-
-      /** Category */
-      if (asset.category && Object.keys(asset?.category).length > 0) {
-        const category = asset.category as Category;
-
-        // Matched like the unique index on category names, regardless of
-        // case. `in` keeps it an exact match: see `findOrCreateLocationsByName`.
-        const existingCat = await db.category.findFirst({
-          where: {
-            organizationId,
-            name: { in: [category.name], mode: "insensitive" },
-          },
-        });
-
-        /** If it doesn't exist, create a new one */
-        if (!existingCat) {
-          const newCat = await db.category.create({
-            data: {
-              organizationId,
-              name: category.name,
-              description: category.description || "",
-              color: category.color,
-              userId,
-              createdAt: new Date(category.createdAt),
-              updatedAt: new Date(category.updatedAt),
-            },
-          });
-          /** Add it to the data for creating the asset */
-          Object.assign(d.data, {
-            categoryId: newCat.id,
-          });
-        } else {
-          /** Add it to the data for creating the asset */
-          Object.assign(d.data, {
-            categoryId: existingCat.id,
-          });
-        }
-      }
-
-      /** Placements. They are created with the asset, in one write, so the
-       * database checks them together: a pool's placed units may not
-       * exceed its quantity. Names that differ only in case resolve to one
-       * location, so their units are added up. */
-      const unitsByLocationId = new Map<string, number>();
-      for (const { location, quantity } of placementsPerRow[rowIndex]) {
-        const locationId = locationIds.get(location.toLowerCase())!;
-        unitsByLocationId.set(
-          locationId,
-          (unitsByLocationId.get(locationId) ?? 0) + quantity
-        );
-      }
-      if (unitsByLocationId.size > 0) {
-        const placements: Prisma.AssetLocationUncheckedCreateWithoutAssetInput[] =
-          [...unitsByLocationId].map(([locationId, quantity]) => ({
-            locationId,
-            organizationId,
-            quantity,
-          }));
-        Object.assign(d.data, { assetLocations: { create: placements } });
-      }
-
-      /** Custody. Custodians travel by name, matched regardless of case like
-       * the other restored relations; one missing from the workspace is
-       * created as a team member without an account. */
-      const custodies = custodiesForRestore({
-        type: asset.type,
-        custody: asset.custody,
-      });
-      if (custodies.length > 0) {
-        /** Team member id -> units held. Names that differ only in case
-         * resolve to one team member, and the custody unique index allows
-         * one operator row per (asset, team member), so their units add up. */
-        const unitsByTeamMemberId = new Map<string, number>();
-        for (const custody of custodies) {
-          // `in` keeps it an exact match: see `findOrCreateLocationsByName`.
-          // Team member names are not unique, so the oldest match wins.
-          const existingCustodian = await db.teamMember.findFirst({
-            where: {
-              deletedAt: null,
-              organizationId,
-              name: { in: [custody.custodianName], mode: "insensitive" },
-            },
-            orderBy: { createdAt: "asc" },
-            select: { id: true },
-          });
-          const custodian =
-            existingCustodian ??
-            (await db.teamMember.create({
-              data: {
-                name: custody.custodianName,
-                organizationId,
-                createdAt: custody.createdAt,
-                updatedAt: custody.updatedAt,
-              },
-              select: { id: true },
-            }));
-          unitsByTeamMemberId.set(
-            custodian.id,
-            (unitsByTeamMemberId.get(custodian.id) ?? 0) + custody.quantity
-          );
-        }
-        const custodyCreates: Prisma.CustodyUncheckedCreateWithoutAssetInput[] =
-          [...unitsByTeamMemberId].map(([teamMemberId, quantity]) => ({
-            teamMemberId,
-            quantity,
-          }));
-        Object.assign(d.data, { custody: { create: custodyCreates } });
-      }
-
-      /** Tags */
-      if (asset.tags && asset.tags.length > 0) {
-        const tagsNames = asset.tags.map((t) => t.name);
-        // now we loop through the categories and check if they exist
-        const tags: Record<string, string> = {};
-        for (const tag of tagsNames) {
-          // Matched like the unique index on tag names, regardless of case.
-          const existingTag = await db.tag.findFirst({
-            where: {
-              name: { in: [tag], mode: "insensitive" },
-              organizationId,
-            },
-          });
-
-          if (!existingTag) {
-            // if the tag doesn't exist, we create a new one
-            const newTag = await db.tag.create({
-              data: {
-                name: tag as string,
-                user: {
-                  connect: {
-                    id: userId,
-                  },
-                },
-                organization: {
-                  connect: {
-                    id: organizationId,
-                  },
-                },
-              },
-            });
-            tags[tag] = newTag.id;
-          } else {
-            // if the tag exists, we just update the id
-            tags[tag] = existingTag.id;
-          }
-        }
-
-        Object.assign(d.data, {
-          tags:
-            asset.tags.length > 0
-              ? {
-                  connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-                }
-              : undefined,
-        });
-      }
-
-      /** Custom fields */
-      if (asset.customFields && asset.customFields.length > 0) {
-        const customFieldDef = asset.customFields.reduce(
-          (res, { value, customField }) => {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { id, createdAt, updatedAt, ...rest } = customField;
-            const options = value?.valueOption?.length
-              ? [value?.valueOption]
-              : undefined;
-            res.push({ ...rest, options, userId, organizationId });
-            return res;
-          },
-          [] as Array<CustomFieldDraftPayload>
-        );
-
-        const { customFields: customFieldsByName } =
-          await upsertCustomField(customFieldDef);
-
-        Object.assign(d.data, {
-          customFields: {
-            create: asset.customFields.map((cf) => ({
-              value: cf.value,
-              customFieldId: customFieldsByName[cf.customField.name].id,
-            })),
-          },
-        });
-      }
-
-      /** Create the Asset */
-      const { id: assetId } = await db.asset.create(d);
-
-      // Activity event: ASSET_CREATED at the moment of creation.
-      // The per-note createMany below restores HISTORICAL notes with
-      // their original timestamps — those are not events.
-      await recordEvent({
-        organizationId,
-        actorUserId: userId,
-        action: "ASSET_CREATED",
-        entityType: "ASSET",
-        entityId: assetId,
-        assetId,
-        meta: { source: "backup_import" },
-      });
-
-      /** Create notes */
-      if (asset?.notes?.length > 0) {
-        await db.note.createMany({
-          data: asset.notes.map((note: Note) => ({
-            content: note.content,
-            type: note.type,
-            assetId,
-            userId,
-            createdAt: new Date(note.createdAt),
-            updatedAt: new Date(note.updatedAt),
-          })),
-        });
-      }
-    }
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while creating assets from backup import",
-      additionalData: { userId, organizationId },
-      label,
-    });
-  }
-}
-
 export async function updateAssetBookingAvailability({
   id,
   availableToBook,
   organizationId,
-}: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
+  userId,
+}: Pick<Asset, "id" | "availableToBook" | "organizationId"> & {
+  userId: User["id"];
+}) {
   try {
-    return await db.asset.update({
-      where: { id, organizationId },
-      data: { availableToBook },
+    // Archived assets are frozen (issue #382): availability can't be toggled.
+    // The pre-check gives the clear error; `archivedAt: null` in the WHERE
+    // closes the window where an archive commits between it and the write.
+    await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+
+    // Resolved before the transaction: it reads the user table, not the asset.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
+    });
+
+    return await db.$transaction(async (tx) => {
+      // The row lock makes the before-read and the write one step, so two
+      // toggles racing each other cannot both record the same change.
+      await lockAssetsForArchiveGuard(tx, [id], organizationId);
+      const before = await tx.asset.findUnique({
+        where: { id, organizationId, archivedAt: null },
+        select: { availableToBook: true },
+      });
+
+      const asset = await tx.asset.update({
+        where: { id, organizationId, archivedAt: null },
+        data: { availableToBook },
+      });
+
+      if (before && before.availableToBook !== availableToBook) {
+        await createNote(
+          {
+            content: buildAvailableToBookChangeNote({
+              userLink,
+              availableToBook,
+            }),
+            type: "UPDATE",
+            userId,
+            assetId: id,
+            organizationId,
+          },
+          tx
+        );
+        await recordEvent(
+          buildAvailableToBookChangeEvent({
+            organizationId,
+            userId,
+            assetId: id,
+            availableToBook,
+          }),
+          tx
+        );
+      }
+
+      return asset;
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    const archivedMidWrite = await archivedMidWriteError(
+      cause,
+      { id, organizationId },
+      { id, organizationId }
+    );
+    if (archivedMidWrite) {
+      throw archivedMidWrite;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { id },
     });
@@ -6534,6 +7526,9 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
+  confirmation,
   timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
@@ -6541,6 +7536,23 @@ export async function bulkDeleteAssets({
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * assets this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -6558,21 +7570,38 @@ export async function bulkDeleteAssets({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
+      // Acts ON archived assets in the view the user selected from; reached
+      // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
+      honorArchivedView: true,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
-     * We have to remove the images of assets so we have to make this query first.
-     * `title` is also selected so we can attach it as `meta.title` on the
-     * `ASSET_DELETED` activity events emitted post-delete (useful for
-     * activity feeds where the asset row no longer exists to JOIN against).
+     * Read before the delete: the ids also feed the image file cleanup that
+     * runs once the rows are gone. `title` is also selected so we can attach
+     * it as `meta.title` on the `ASSET_DELETED` activity events emitted
+     * post-delete (useful for activity feeds where the asset row no longer
+     * exists to JOIN against).
      */
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: permanent delete is allowed on archived assets, and their images must be cleaned up
       where: {
         id: { in: resolvedIds },
         organizationId,
       },
-      select: { id: true, mainImage: true, title: true },
+      select: { id: true, title: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: assetIds,
+      confirmation,
+      matchedCount: assets.length,
+      noun: { one: "asset", many: "assets" },
+      label,
     });
 
     try {
@@ -6611,17 +7640,11 @@ export async function bulkDeleteAssets({
         { timeout: 15000 }
       );
 
-      /** Deleting images of the assets (if any) */
-      const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
-      await Promise.all(
-        assetsWithImages.map((asset) =>
-          deleteOtherImages({
-            userId,
-            assetId: asset.id,
-            data: { path: `main-image-${asset.id}.jpg` },
-          })
-        )
-      );
+      // Not awaited: it reads storage and the workspace's assets, never rejects.
+      void removeImageFilesOfDeletedAssets({
+        assetIds: assets.map((asset) => asset.id),
+        organizationId,
+      });
     } catch (cause) {
       throw new ShelfError({
         cause,
@@ -6631,6 +7654,9 @@ export async function bulkDeleteAssets({
       });
     }
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     const message =
       cause instanceof ShelfError
         ? cause.message
@@ -6650,7 +7676,8 @@ export async function bulkDeleteAssets({
  *
  * Sets each asset's status to IN_CUSTODY, creates custody records linking
  * them to the custodian, and logs activity notes. Only AVAILABLE assets
- * can be assigned — throws if any selected asset is unavailable.
+ * can be assigned, and never an individually tracked kit member (custody of
+ * that comes from its kit). Throws if any selected asset is either.
  *
  * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
  * (via `currentSearchParams` + `settings`).
@@ -6660,35 +7687,49 @@ export async function bulkDeleteAssets({
  *   is written
  * @param params.organizationId - The caller's validated organization ID
  * @throws {ShelfError} If the custodian does not belong to `organizationId`,
- *   or if any selected asset is not AVAILABLE
+ *   if any selected asset is not AVAILABLE, or 400 if any selected
+ *   individually tracked asset belongs to a kit
  */
 export async function bulkCheckOutAssets({
   userId,
-  role,
+  custodyAssign,
   assetIds,
   custodianId,
   custodianName,
   organizationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  custodySearchScope,
 }: {
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route. When
-   * `SELF_SERVICE` the service rejects assignments to anyone other than the
-   * calling user — symmetric counterpart on the release side lives in the
-   * route today (see `routes/api+/assets.bulk-release-custody.ts`).
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -6702,6 +7743,12 @@ export async function bulkCheckOutAssets({
    * exactly that person's assets.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Whose custody a "select all" search matches by custodian name, from
+   * `custodySearchScopeFor`. Required for the same reason as
+   * `allowedTeamMemberIds`.
+   */
+  custodySearchScope: CustodySearchScope;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6711,7 +7758,10 @@ export async function bulkCheckOutAssets({
       currentSearchParams,
       settings,
       allowedTeamMemberIds,
+      custodySearchScope,
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -6722,6 +7772,7 @@ export async function bulkCheckOutAssets({
         where: {
           id: { in: resolvedIds },
           organizationId,
+          archivedAt: null,
         },
         select: { id: true, title: true, status: true, type: true },
       }),
@@ -6754,15 +7805,10 @@ export async function bulkCheckOutAssets({
     ]);
 
     /**
-     * SELF_SERVICE guard: a self-service user can only assign custody to
-     * themselves. Centralised in the service so every caller (web + mobile)
-     * is covered — previously this lived only in the web route and the mobile
-     * routes bypassed it. Both routes just pass `role` through.
+     * A caller whose scope is `self` may assign only to themselves. Enforced
+     * here so every caller, web and mobile, gets it.
      */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      custodianTeamMember?.user?.id !== userId
-    ) {
+    if (custodyAssign === "self" && custodianTeamMember?.user?.id !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -6773,6 +7819,15 @@ export async function bulkCheckOutAssets({
         shouldBeCaptured: false,
       });
     }
+
+    // Archived assets are out of service and take no custody. Checked after
+    // the scope rule, so a caller who may not make this assignment at all is
+    // told that, rather than to remove a row and be refused again.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     /**
      * Filter out QUANTITY_TRACKED assets — they require per-asset
@@ -6822,6 +7877,14 @@ export async function bulkCheckOutAssets({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still be modified. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: resolvedIds, organizationId, actorUserId: userId },
+        tx
+      );
       // why: hard cross-org guard inside the tx. Mirrors the org-scoped
       // validation pattern used by `updateBookingAssets`. This throws before
       // any custody row is written if `custodianId` belongs to another
@@ -6830,6 +7893,11 @@ export async function bulkCheckOutAssets({
         { teamMemberId: custodianId, organizationId },
         tx
       );
+
+      // Custody of an individually tracked kit member comes from its kit.
+      // This one call covers every caller: the web assets index bulk action,
+      // the mobile bulk route and the mobile single-asset route.
+      await assertNotKitMembers(tx, assetIdsToCustody, organizationId);
 
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous
@@ -6904,8 +7972,8 @@ export async function bulkCheckOutAssets({
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : // Free-form fallback name, rendered as literal bold text.
-          `**${stripMarkdocDelimiters(custodianName)}**`;
+        : // Free-form fallback name, inside a `name` tag like every typed value.
+          wrapNameForNote(custodianName);
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -6965,26 +8033,40 @@ export async function bulkCheckOutAssets({
  */
 export async function bulkCheckInAssets({
   userId,
-  role,
+  custodyAssign,
   assetIds,
   organizationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  custodySearchScope,
 }: {
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route — when
-   * `SELF_SERVICE` the service rejects release of custody assigned to anyone
-   * other than the calling user.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -6997,6 +8079,12 @@ export async function bulkCheckInAssets({
    * with the SELF_SERVICE `asset: custody` permission.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Whose custody a "select all" search matches by custodian name, from
+   * `custodySearchScopeFor`. Required for the same reason as
+   * `allowedTeamMemberIds`.
+   */
+  custodySearchScope: CustodySearchScope;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -7006,7 +8094,10 @@ export async function bulkCheckInAssets({
       currentSearchParams,
       settings,
       allowedTeamMemberIds,
+      custodySearchScope,
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     /**
@@ -7014,6 +8105,7 @@ export async function bulkCheckInAssets({
      */
     const [allAssets, user] = await Promise.all([
       db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: unchanged behaviour; archived assets never hold custody, so they hit the existing without-custody error rather than being silently dropped
         where: {
           id: { in: resolvedIds },
           organizationId,
@@ -7075,13 +8167,12 @@ export async function bulkCheckInAssets({
       });
     }
 
-    // Self-service users may only release custody of assets assigned to them.
-    // `Asset.custody` is a `Custody[]` post Phase 2 widening (multi-custodian
-    // for QUANTITY_TRACKED). For INDIVIDUAL there's exactly one row; for
-    // qty-tracked we'd reject if ANY row belongs to someone else — but
-    // qty-tracked rows are filtered out above anyway.
+    // A caller whose scope is `self` may release only custody assigned to
+    // them. `Asset.custody` is a `Custody[]` (several custodians for
+    // QUANTITY_TRACKED); the check rejects if ANY row belongs to someone else,
+    // though quantity-tracked assets are filtered out above.
     if (
-      role === OrganizationRoles.SELF_SERVICE &&
+      custodyAssign === "self" &&
       assets.some((asset) =>
         (asset.custody ?? []).some((c) => c.custodian?.userId !== userId)
       )
@@ -7152,20 +8243,21 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
-          // Actor name, custodian name and asset title are all user-supplied
-          // and render as literal text in this Markdoc note.
-          const actorName = stripMarkdocDelimiters(
+          // Actor name, custodian name and asset title are all user-supplied,
+          // so each goes inside a `name` tag. The note is on the asset's own
+          // page, so its title is not a link.
+          const actorName = wrapNameForNote(
             `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
           );
-          const custodianName = stripMarkdocDelimiters(
+          const custodianName = wrapNameForNote(
             primaryCustody
               ? resolveTeamMemberName(primaryCustody.custodian)
               : "Unknown Custodian"
           );
           return {
-            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
-              asset.title ?? ""
-            )}**`,
+            content: `${actorName} has released ${custodianName}'s custody over ${wrapNameForNote(
+              asset.title
+            )}`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -7219,6 +8311,8 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: User["id"];
@@ -7227,6 +8321,18 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7244,7 +8350,17 @@ export async function bulkUpdateAssetLocation({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
+    });
+
+    // Archived assets are frozen (issue #382): can't be edited in bulk either.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
     });
 
     /** We have to create notes for all the assets so we have make this query */
@@ -7253,6 +8369,7 @@ export async function bulkUpdateAssetLocation({
         where: {
           id: { in: resolvedIds },
           organizationId,
+          archivedAt: null,
         },
         select: {
           id: true,
@@ -7361,6 +8478,14 @@ export async function bulkUpdateAssetLocation({
     );
 
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still be modified. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: resolvedIds, organizationId, actorUserId: userId },
+        tx
+      );
       if (assetsToUpdate.length > 0) {
         // Per-asset MANUAL pivot replace. Drop the asset's existing
         // manual rows (kit-driven rows survive — they're owned by the
@@ -7441,78 +8566,19 @@ export async function bulkUpdateAssetLocation({
       }
     });
 
-    // Create location activity notes
-    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     /**
-     * The rows the transaction above actually wrote — quantity-tracked assets
-     * are filtered out of this path entirely, and an asset already at the
-     * target moves nowhere. A location's timeline must not claim either of
-     * them arrived, so these notes read the set the transaction wrote rather
-     * than re-deriving one from every selected asset.
+     * Location activity reads the rows the transaction above actually wrote:
+     * quantity-tracked assets are filtered out of this path, and an asset
+     * already at the target moves nowhere.
      */
-    const assetData = assetsToUpdate.map((a) => ({
-      id: a.id,
-      title: a.title,
-    }));
-
-    // Group assets by their previous (primary) location
-    const byPrevLocation = new Map<
-      string,
-      { name: string; assets: typeof assetData }
-    >();
-    for (const asset of assetsToUpdate) {
-      const prev = getPrimaryLocation(asset);
-      if (!prev) continue;
-      const existing = byPrevLocation.get(prev.id);
-      if (existing) {
-        existing.assets.push({ id: asset.id, title: asset.title });
-      } else {
-        byPrevLocation.set(prev.id, {
-          name: prev.name,
-          assets: [{ id: asset.id, title: asset.title }],
-        });
-      }
-    }
-
-    // Note on the new location
-    if (newLocation && assetData.length > 0) {
-      const newLocLink = wrapLinkForNote(
-        `/locations/${newLocation.id}`,
-        newLocation.name
-      );
-      const assetMarkup = wrapAssetsWithDataForNote(assetData, "added");
-
-      const prevLocLinks = [...byPrevLocation.entries()].map(([id, { name }]) =>
-        wrapLinkForNote(`/locations/${id}`, name)
-      );
-      const movedFromSuffix =
-        prevLocLinks.length > 0
-          ? ` Moved from ${prevLocLinks.join(", ")}.`
-          : "";
-
-      await createSystemLocationNote({
-        locationId: newLocation.id,
-        content: `${userLink} added ${assetMarkup} to ${newLocLink}.${movedFromSuffix}`,
-        userId,
-      });
-    }
-
-    // Removal notes on previous locations
-    for (const [locId, { name, assets: locAssets }] of byPrevLocation) {
-      const prevLocLink = wrapLinkForNote(`/locations/${locId}`, name);
-      const assetMarkup = wrapAssetsWithDataForNote(locAssets, "removed");
-      const movedToSuffix = newLocation
-        ? ` Moved to ${wrapLinkForNote(
-            `/locations/${newLocation.id}`,
-            newLocation.name
-          )}.`
-        : "";
-      await createSystemLocationNote({
-        locationId: locId,
-        content: `${userLink} removed ${assetMarkup} from ${prevLocLink}.${movedToSuffix}`,
-        userId,
-      });
-    }
+    await createAssetLocationMoveNotes({
+      moves: assetsToUpdate.map((asset) => ({
+        asset,
+        from: getPrimaryLocation(asset),
+        to: newLocation,
+      })),
+      actor: { ...user, id: userId },
+    });
 
     return true;
   } catch (cause) {
@@ -7529,6 +8595,161 @@ export async function bulkUpdateAssetLocation({
   }
 }
 
+/**
+ * Sets (or clears) the low-stock reorder point on many assets at once.
+ *
+ * Exists because `minQuantity` is the input the whole Stock status column
+ * depends on, and almost nobody has set it: measured on a live workspace, 2 of
+ * 12 quantity assets had one, and 0 of 10 in dev. Nothing in the product ever
+ * asks for it, it is optional in the create form and in the CSV importer. A
+ * column that tells a customer "no reorder point" on most of their catalogue,
+ * with only a one-at-a-time cure, diagnoses a problem it cannot treat.
+ *
+ * INDIVIDUAL assets are skipped, not rejected. `minQuantity` is meaningless for
+ * a single tracked object, and a mixed selection is the normal case in a
+ * workspace that has both kinds, failing the whole batch because a camera came
+ * along for the ride would make the action unusable on exactly the lists people
+ * select from.
+ *
+ * @param args.assetIds - Selected ids, or the sentinel for "all matching".
+ * @param args.minQuantity - The new reorder point, or `null` to clear it.
+ * @param args.currentSearchParams - Live filters, used to resolve "select all".
+ * @returns How many assets actually changed. The caller needs this to report
+ *   honestly: a selection can be entirely individually-tracked assets, or
+ *   already hold the threshold being applied, in which case nothing happened and
+ *   saying "reorder point set" would be a lie.
+ * @throws {ShelfError} If the write fails.
+ */
+export async function bulkUpdateAssetMinQuantity({
+  userId,
+  assetIds,
+  organizationId,
+  minQuantity,
+  currentSearchParams,
+  settings,
+  lastAuditDateAccess,
+  bookableScope,
+  timeZone = "UTC",
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  minQuantity: number | null;
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * Select-all drops a last audit date filter the caller may not query.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
+  /** Acting user's IANA timezone, for select-all date-filter truncation. */
+  timeZone?: string;
+}) {
+  try {
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
+      lastAuditDateAccess,
+      bookableScope,
+      timeZone,
+    });
+
+    if (resolvedIds.length === 0) {
+      return 0;
+    }
+
+    // Archived assets are frozen (issue #382): can't change their min quantity.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
+
+    // Org-scoped read, so every id below is already proven to belong here.
+    // Quantity assets only, see the note on skipping INDIVIDUAL above.
+    const assetsBeforeUpdate = await db.asset.findMany({
+      where: {
+        id: { in: resolvedIds },
+        organizationId,
+        archivedAt: null,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+      select: { id: true, minQuantity: true },
+    });
+
+    // Only rows that actually change, so the activity feed does not fill with
+    // no-op entries when someone re-applies the same threshold.
+    const assetsThatChange = assetsBeforeUpdate.filter(
+      (asset) => (asset.minQuantity ?? null) !== minQuantity
+    );
+
+    if (assetsThatChange.length === 0) {
+      return 0;
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.asset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange derives from assetsBeforeUpdate, fetched above with where { id in resolvedIds, organizationId }
+        where: { id: { in: assetsThatChange.map((a) => a.id) } },
+        data: { minQuantity },
+      });
+
+      // One event per asset that changed. ASSET_MIN_QUANTITY_CHANGED already
+      // exists and is what the singular edit path emits, so the bulk action
+      // keeps reporting parity with it.
+      await recordEvents(
+        assetsThatChange.map((asset) => ({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED" as const,
+          entityType: "ASSET" as const,
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: asset.minQuantity ?? null,
+          toValue: minQuantity,
+        })),
+        tx
+      );
+    });
+
+    // Changing a threshold moves assets into or out of the low-stock band, so
+    // the `lowStockNotifiedAt` marker has to be brought up to date or the very
+    // next stock movement fires an alert for an episode that is already known.
+    // Silent and in one pass: the user just made this change deliberately and
+    // can see the result, so no asset is worth an email. Best-effort, never
+    // fails the committed threshold write.
+    await syncLowStockMarkers({
+      assetIds: assetsThatChange.map((asset) => asset.id),
+      organizationId,
+    });
+
+    return assetsThatChange.length;
+  } catch (cause) {
+    // Keep a deliberate refusal's status and message (archived assets in the
+    // selection, a last audit date filter the caller may not use).
+    if (isLikeShelfError(cause)) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating the min quantity.",
+      additionalData: { userId, assetIds, organizationId },
+      label,
+    });
+  }
+}
+
 export async function bulkUpdateAssetCategory({
   userId,
   assetIds,
@@ -7536,6 +8757,8 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -7544,6 +8767,18 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -7561,12 +8796,22 @@ export async function bulkUpdateAssetCategory({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     if (resolvedIds.length === 0) {
       return true;
     }
+
+    // Archived assets are frozen (issue #382): can't change their category.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     // Fetch before-state so we can emit per-asset events and notes only for
     // assets whose category actually changes.
@@ -7575,6 +8820,7 @@ export async function bulkUpdateAssetCategory({
       where: {
         id: { in: resolvedIds },
         organizationId,
+        archivedAt: null,
       },
       select: {
         id: true,
@@ -7614,6 +8860,14 @@ export async function bulkUpdateAssetCategory({
     }
 
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still be modified. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: resolvedIds, organizationId, actorUserId: userId },
+        tx
+      );
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange is derived from assetsBeforeUpdate fetched on lines 4322-4326 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assetsThatChange.map((a) => a.id) } },
@@ -7655,6 +8909,7 @@ export async function bulkUpdateAssetCategory({
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating category.",
@@ -7686,6 +8941,8 @@ export type BulkUpdateAssetModelResult = {
   skippedQuantityTracked: number;
   /** Name of the target model, or `null` when the action removed the link. */
   modelName: string | null;
+  /** Of `updated`, how many had empty fields the model's defaults filled. */
+  filled: number;
 };
 
 /**
@@ -7702,10 +8959,10 @@ export type BulkUpdateAssetModelResult = {
  *   link. A mixed selection is normal in a real library, so the batch applies
  *   to the individually-tracked assets and reports the skip. Only a selection
  *   with nothing eligible in it is an error.
- * - The model's `defaultCategoryId` / `defaultValuation` are **not** applied.
- *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
- *   retro-applying them here would silently overwrite curated data on assets
- *   that already exist.
+ * - The model's defaults (category, valuation, custom field values) fill
+ *   the EMPTY fields of the assets that join it, in the same transaction, and
+ *   never overwrite a value an asset already has. See
+ *   `applyAssetModelDefaultsToAssets`.
  * - One `ASSET_MODEL_CHANGED` event and one note per asset that actually
  *   changed, matching what the singular `updateAsset` path emits, as
  *   `.claude/rules/bulk-event-parity.md` requires. Both are written inside the
@@ -7737,13 +8994,33 @@ export async function bulkUpdateAssetModel({
   assetModelId,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  locale,
+  currency,
+  bookableScope,
 }: {
   userId: string;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   assetModelId: Asset["assetModelId"];
+  /** Request locale, for the valuation in the defaults-fill notes. */
+  locale: string;
+  /** Organization currency, for the valuation in the defaults-fill notes. */
+  currency: Currency;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
 }): Promise<BulkUpdateAssetModelResult> {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -7755,6 +9032,16 @@ export async function bulkUpdateAssetModel({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
+      lastAuditDateAccess,
+      bookableScope,
+    });
+
+    // Archived assets are frozen (issue #382): can't be edited in bulk either.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
     });
 
     /** An empty `assetModelId` is the "remove from asset model" request. */
@@ -7769,6 +9056,7 @@ export async function bulkUpdateAssetModel({
         moved: 0,
         skippedQuantityTracked: 0,
         modelName: null,
+        filled: 0,
       };
     }
 
@@ -7793,7 +9081,7 @@ export async function bulkUpdateAssetModel({
      * checked them against this organization yet.
      */
     const assetsBeforeUpdate = await db.asset.findMany({
-      where: { id: { in: resolvedIds }, organizationId },
+      where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
       select: {
         id: true,
         type: true,
@@ -7848,6 +9136,9 @@ export async function bulkUpdateAssetModel({
      */
     let updated = assetsThatChange.length;
 
+    /** Assets whose empty fields the target model's defaults filled. */
+    let filled = 0;
+
     if (assetsThatChange.length > 0) {
       // Resolved once, outside the transaction: it can hit the user table, and
       // every note in this batch is written by the same person.
@@ -7868,6 +9159,14 @@ export async function bulkUpdateAssetModel({
       // `bulkDeleteAssets`.
       await db.$transaction(
         async (tx) => {
+          // The archived check above is a read; an archive committing before this
+          // write would still be modified. Re-checked under the row lock the
+          // archive paths take, so the two serialize (issue #382).
+          await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+          await assertAssetsAreNotArchived(
+            { assetIds: resolvedIds, organizationId, actorUserId: userId },
+            tx
+          );
           /**
            * Re-read under the transaction. The rows above were read before it
            * opened, so a concurrent change would be overwritten here while the
@@ -7878,6 +9177,7 @@ export async function bulkUpdateAssetModel({
             where: {
               id: { in: assetsThatChange.map((asset) => asset.id) },
               organizationId,
+              archivedAt: null,
             },
             select: {
               id: true,
@@ -7966,6 +9266,30 @@ export async function bulkUpdateAssetModel({
               tx
             );
           }
+
+          // Joining a model fills the assets' empty fields from its defaults,
+          // read in this transaction so the fill uses the defaults as they
+          // are when the assets join.
+          const modelDefaults = newAssetModelId
+            ? await getAssetModelDefaults(
+                { assetModelId: newAssetModelId, organizationId },
+                tx
+              )
+            : null;
+          if (modelDefaults) {
+            ({ assetsFilled: filled } = await applyAssetModelDefaultsToAssets(
+              tx,
+              {
+                organizationId,
+                userId,
+                userLink,
+                model: modelDefaults,
+                assetIds: changing.map((asset) => asset.id),
+                currency,
+                locale,
+              }
+            ));
+          }
         },
         { timeout: 15000 }
       );
@@ -7989,6 +9313,7 @@ export async function bulkUpdateAssetModel({
        */
       skippedQuantityTracked: linked ? skippedQuantityTracked : 0,
       modelName,
+      filled,
     };
   } catch (cause) {
     // why: the eligibility 400 and the cross-org 404 are the two errors the
@@ -8015,6 +9340,8 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
   userId: string;
@@ -8024,6 +9351,18 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8041,12 +9380,22 @@ export async function bulkAssignAssetTags({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
     if (resolvedIds.length === 0) {
       return true;
     }
+
+    // Archived assets are frozen (issue #382): can't add/remove their tags.
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     // Validate that every tag id belongs to this organization before
     // wiring it into the `connect`/`disconnect` payload. Prisma's nested
@@ -8078,6 +9427,7 @@ export async function bulkAssignAssetTags({
         where: {
           id: { in: resolvedIds },
           organizationId,
+          archivedAt: null,
         },
         select: {
           id: true,
@@ -8102,6 +9452,14 @@ export async function bulkAssignAssetTags({
     // P2028 (Sentry SHELF-WEBAPP-1MH). Bump the ceiling to 15s.
     const updatedAssets = await db.$transaction(
       async (tx) => {
+        // The archived check above is a read; an archive committing before this
+        // write would still be modified. Re-checked under the row lock the
+        // archive paths take, so the two serialize (issue #382).
+        await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+        await assertAssetsAreNotArchived(
+          { assetIds: resolvedIds, organizationId, actorUserId: userId },
+          tx
+        );
         const results = await Promise.all(
           resolvedIds.map((id) =>
             tx.asset.update({
@@ -8186,19 +9544,51 @@ export async function bulkAssignAssetTags({
   }
 }
 
+/**
+ * Turns the "Available for bookings" switch on or off for many assets,
+ * including a cross-page "select all".
+ *
+ * Leaves the same trail as {@link updateAssetBookingAvailability}: one UPDATE
+ * note and one `ASSET_AVAILABLE_TO_BOOK_CHANGED` event per asset whose value
+ * actually changes, written in the transaction that makes the change. Assets
+ * already at the target value are skipped, as are assets archived after the
+ * archived check.
+ *
+ * @param params.userId - The acting user, named in every note and event
+ * @param params.type - The value to set
+ * @returns `true` once the change is committed
+ * @throws {ShelfError} 400 when the selection holds an archived asset, or a
+ *   select-all filter the caller may not use
+ */
 export async function bulkMarkAvailability({
+  userId,
   organizationId,
   assetIds,
   type,
   currentSearchParams,
   settings,
+  lastAuditDateAccess,
+  bookableScope,
   timeZone = "UTC",
 }: {
+  userId: User["id"];
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * How the caller may use the last audit date, from `lastAuditDateAccessFor`.
+   * A select-all `lastAuditDate` filter without `available` access refuses the
+   * whole selection.
+   */
+  lastAuditDateAccess: LastAuditDateAccess;
+  /**
+   * The caller's list scope, from `resolveBookableListScope`; `null` for a
+   * member who sees every asset. "Select all" expands to the assets the
+   * caller's list showed, never past it.
+   */
+  bookableScope: BookableListScope | null;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -8216,25 +9606,96 @@ export async function bulkMarkAvailability({
       // Reachable only with an asset write permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
       timeZone,
+      lastAuditDateAccess,
+      bookableScope,
     });
 
-    // Simple, consistent where clause
-    await db.asset.updateMany({
-      where: {
-        id: { in: resolvedIds },
-        organizationId,
-        availableToBook: type === "unavailable",
-      },
-      data: { availableToBook: type === "available" },
+    // Archived assets are frozen (issue #382): can't change availability.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+
+    if (resolvedIds.length === 0) {
+      return true;
+    }
+
+    const availableToBook = type === "available";
+
+    // Resolved once, outside the transaction: it reads the user table, and
+    // every note in this batch is written by the same person.
+    const userLink = await resolveUserLink({
+      userId,
+      loadUserForNotes: createLoadUserForNotes(userId),
     });
+
+    // The write, its events and its notes run in here over a selection that
+    // "select all" can make large, so the ceiling matches the other bulk
+    // writers rather than Prisma's 5s default.
+    await db.$transaction(
+      async (tx) => {
+        // The row lock makes the before-read and the write one step, so a
+        // concurrent toggle cannot slip between them and be recorded twice.
+        await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+
+        // Org-scoped, so every id below is proven to belong here. An asset
+        // archived after the check above drops out and stays frozen.
+        const assetsBeforeUpdate = await tx.asset.findMany({
+          where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
+          select: { id: true, availableToBook: true },
+        });
+
+        // Only rows that actually change, so the activity log does not fill
+        // with no-op entries when the selection already holds the value.
+        const changingIds = assetsBeforeUpdate
+          .filter((asset) => asset.availableToBook !== availableToBook)
+          .map((asset) => asset.id);
+
+        if (changingIds.length === 0) {
+          return;
+        }
+
+        await tx.asset.updateMany({
+          where: { id: { in: changingIds }, organizationId, archivedAt: null },
+          data: { availableToBook },
+        });
+
+        await recordEvents(
+          changingIds.map((assetId) =>
+            buildAvailableToBookChangeEvent({
+              organizationId,
+              userId,
+              assetId,
+              availableToBook,
+            })
+          ),
+          tx
+        );
+
+        // Every changed asset gets the same sentence, so one `createMany`.
+        await createNotes(
+          {
+            content: buildAvailableToBookChangeNote({
+              userLink,
+              availableToBook,
+            }),
+            type: "UPDATE",
+            userId,
+            assetIds: changingIds,
+            organizationId,
+          },
+          tx
+        );
+      },
+      { timeout: 15000 }
+    );
 
     return true;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while marking assets as available.",
-      additionalData: { assetIds, organizationId },
+      additionalData: { userId, assetIds, organizationId },
       label,
     });
   }
@@ -8255,6 +9716,16 @@ export async function relinkAssetQrCode({
   assetId: Asset["id"];
   organizationId: Organization["id"];
 }) {
+  // Archived assets are frozen (issue #382). Guarded here, at the one service
+  // every relink goes through (the asset page, the QR "link" page and the
+  // companion), rather than on each route. Org-scoped, so an asset that is
+  // not the caller's passes through to the 404 below.
+  await assertAssetsAreNotArchived({
+    assetIds: [assetId],
+    organizationId,
+    actorUserId: userId,
+  });
+
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),
     getUserByID(userId, {
@@ -8266,6 +9737,7 @@ export async function relinkAssetQrCode({
       } satisfies Prisma.UserSelect,
     }),
     db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
       where: { id: assetId, organizationId },
       select: { qrCodes: { select: { id: true } } },
     }),
@@ -8471,6 +9943,10 @@ export async function getUserAssetsTabLoaderData({
       // principal, refused it, and rendered both tabs empty for every role.
       canSeeAllCustody,
       userId: viewerId,
+      custodySearchScope: custodySearchScopeFor({
+        canSeeAllCustody,
+        userId: viewerId,
+      }),
       filters: filtersSearchParams.toString(),
     });
 
@@ -8685,6 +10161,7 @@ export async function getActiveCustomFieldsForAsset({
   organizationId: string;
 }) {
   const asset = await db.asset.findUnique({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership lookup for the asset overview, which archived assets keep
     where: { id, organizationId },
     select: { categoryId: true },
   });
@@ -8815,16 +10292,43 @@ type CheckOutQuantityArgs = {
   /** The organization owning the asset (used for validation) */
   organizationId: string;
   /**
-   * The acting user's role in this organization.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the caller may only assign custody to themselves.
    *
-   * Required, not optional: a SELF_SERVICE caller may only assign custody to
-   * themselves, and a missing role would silently fall open. Making the
-   * compiler demand it is what stops a new call site from reaching the write
-   * without the policy being considered.
+   * Required, not optional: a missing scope would silently fall open, so the
+   * compiler makes every call site consider it.
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   /** Optional note explaining the checkout */
   note?: string;
+  /**
+   * Where the units come from. A location id names one of the asset's manual
+   * placements; `null`, `""` or `"unplaced"` names the unplaced units (see
+   * `isUnplacedSource`). Leave it undefined
+   * when the caller did not ask (an older phone app): the service fills in
+   * the only placement of a pool at one location and otherwise records no
+   * source. See `resolveCustodySource`.
+   */
+  locationId?: string | null;
+};
+
+/** Where an assignment's units were recorded as coming from. */
+export type CustodySourceOutcome = {
+  /** The recorded source, NULL for the unplaced units or none recorded. */
+  locationId: string | null;
+  /**
+   * Whether the caller named the source. A NULL source the caller did not
+   * name (an older phone app on a pool with several sources) is "not
+   * recorded", not "unplaced".
+   */
+  explicit: boolean;
+  /** Name of that location, for the audit note. */
+  locationName: string | null;
+  /**
+   * Whether the pool was placed at two or more locations. Notes only mention the source
+   * then, so a pool at one location reads exactly as it always has.
+   */
+  multiSource: boolean;
 };
 
 /**
@@ -8834,13 +10338,22 @@ type CheckOutQuantityArgs = {
  * concurrent modifications. Validates that the asset is QUANTITY_TRACKED,
  * belongs to the given organization, and that enough units are available.
  *
- * Creates or increments a Custody record for the asset-teamMember pair
- * and logs an immutable CHECKOUT consumption log entry.
+ * Records where the units come from on the custody row (`locationId`), see
+ * {@link CheckOutQuantityArgs.locationId}. A named source must be a manual
+ * placement of this asset in this workspace (or the unplaced units, when
+ * there are any), and the quantity is capped by what that source has left:
+ * placed there minus already in custody from there. The pool-level cap
+ * applies too. Custody never changes a placement's count.
+ *
+ * Creates or increments the operator Custody row for the
+ * (asset, team member, source) triple and logs an immutable CHECKOUT
+ * consumption log entry.
  *
  * @param args - The checkout details
- * @returns The updated Asset record
+ * @returns The updated Asset record and the recorded source
  * @throws {ShelfError} If the asset is not QUANTITY_TRACKED, does not belong
- *   to the organization, or there are insufficient available units
+ *   to the organization, the source is not one of its placements, or there
+ *   are insufficient available units (pool-wide or at the source)
  */
 export async function checkOutQuantity({
   assetId,
@@ -8848,9 +10361,13 @@ export async function checkOutQuantity({
   quantity,
   userId,
   organizationId,
-  role,
+  custodyAssign,
   note,
-}: CheckOutQuantityArgs) {
+  locationId,
+}: CheckOutQuantityArgs): Promise<{
+  asset: Asset;
+  source: CustodySourceOutcome;
+}> {
   try {
     if (quantity <= 0) {
       throw new ShelfError({
@@ -8861,7 +10378,7 @@ export async function checkOutQuantity({
       });
     }
 
-    return await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
       const asset = await lockAssetForQuantityUpdate(
         tx,
@@ -8923,10 +10440,7 @@ export async function checkOutQuantity({
         });
       }
 
-      if (
-        role === OrganizationRoles.SELF_SERVICE &&
-        custodianTeamMember.user?.id !== userId
-      ) {
+      if (custodyAssign === "self" && custodianTeamMember.user?.id !== userId) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",
@@ -8983,16 +10497,112 @@ export async function checkOutQuantity({
       }
 
       /**
+       * Step 6a: Decide where the units come from, read under the lock.
+       *
+       * A named source is validated here, inside the locked transaction:
+       * a location must be a MANUAL placement of this asset in this
+       * workspace (the org-scoped lookup doubles as the cross-org guard),
+       * and "unplaced" only exists while the pool has unplaced units.
+       *
+       * The per-source cap (placed there minus already in custody from
+       * there) applies to a named source only. A caller that names nothing
+       * is an older client that cannot ask, and it must never be refused for
+       * that: the pool-level check above still bounds it.
+       */
+      const sources = await loadCustodySources(tx, {
+        assetId,
+        total: totalQuantity,
+      });
+      const source = resolveCustodySource({
+        submitted: locationId,
+        state: sources.state,
+      });
+      const multiSource = hasMultipleSources(sources.state);
+      let sourceName: string | null = null;
+
+      if (source.locationId !== null) {
+        const placement = await tx.assetLocation.findFirst({
+          where: {
+            assetId,
+            locationId: source.locationId,
+            assetKitId: null,
+            organizationId,
+          },
+          select: { location: { select: { name: true } } },
+        });
+
+        if (!placement) {
+          throw new ShelfError({
+            cause: null,
+            title: "Location not found",
+            message:
+              "The selected location has no units of this asset. Choose one of the locations it is placed at.",
+            label,
+            status: 400,
+            additionalData: { assetId, locationId: source.locationId },
+            shouldBeCaptured: false,
+          });
+        }
+
+        sourceName = placement.location.name;
+      } else if (source.explicit && unplacedUnits(sources.state) <= 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This asset has no unplaced units. Choose one of the locations it is placed at.",
+          label,
+          status: 400,
+          additionalData: { assetId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (source.explicit) {
+        const left = unitsLeftAtSource(sources.state, source.locationId);
+        if (quantity > left) {
+          const placedCount =
+            formatUnitCount(
+              asset,
+              placedAtSource(sources.state, source.locationId)
+            ) ?? "0 units";
+          throw new ShelfError({
+            cause: null,
+            ...sourceShortfall({
+              sourceName,
+              placedCount,
+              inCustody: custodyFromSource(sources.state, source.locationId),
+              onBooking: bookedOutFromSource(sources.state, source.locationId),
+            }),
+            label,
+            status: 400,
+            additionalData: {
+              assetId,
+              locationId: source.locationId,
+              quantity,
+              left,
+            },
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      /**
        * Step 7: Upsert the OPERATOR-allocated custody row (kitCustodyId
-       * IS NULL). Find-then-branch instead of `prisma.upsert` because
-       * the composite (assetId, teamMemberId) uniqueness is now split
-       * into two partial uniques (operator + kit-allocated) — Prisma's
-       * `upsert` needs a single declared unique. The operator partial
-       * still guarantees at most one matching row, so the find +
+       * IS NULL) for this (asset, team member, source). Find-then-branch
+       * instead of `prisma.upsert` because the uniqueness is a partial
+       * index in raw SQL, which Prisma cannot target.
+       * `Custody_operator_unique` (NULLS NOT DISTINCT) still guarantees at
+       * most one matching row, NULL source included, so the find +
        * create/update sequence is safe inside this tx.
        */
       const existingOperatorCustody = await tx.custody.findFirst({
-        where: { assetId, teamMemberId, kitCustodyId: null },
+        where: {
+          assetId,
+          teamMemberId,
+          kitCustodyId: null,
+          locationId: source.locationId,
+          sourceUnknown: source.sourceUnknown,
+        },
         select: { id: true },
       });
       if (existingOperatorCustody) {
@@ -9002,7 +10612,13 @@ export async function checkOutQuantity({
         });
       } else {
         await tx.custody.create({
-          data: { assetId, teamMemberId, quantity },
+          data: {
+            assetId,
+            teamMemberId,
+            quantity,
+            locationId: source.locationId,
+            sourceUnknown: source.sourceUnknown,
+          },
         });
       }
 
@@ -9049,6 +10665,7 @@ export async function checkOutQuantity({
         quantity,
         userId,
         custodianId: teamMemberId,
+        locationId: source.locationId,
         note,
         tx,
       });
@@ -9057,7 +10674,7 @@ export async function checkOutQuantity({
        * Step 9: Activity event. Emit `CUSTODY_ASSIGNED` inside the tx so
        * it commits atomically with the custody upsert. The `viaQuantity`
        * meta flag distinguishes qty-tracked custody slices from
-       * INDIVIDUAL-asset custody assignments.
+       * INDIVIDUAL-asset custody assignments; `locationId` is the source.
        */
       await recordEvent(
         {
@@ -9069,17 +10686,47 @@ export async function checkOutQuantity({
           assetId,
           teamMemberId,
           targetUserId: custodianTeamMember.user?.id ?? undefined,
+          locationId: source.locationId ?? undefined,
           meta: { quantity, viaQuantity: true },
         },
         tx
       );
 
-      /** Step 10: Return the refreshed asset */
-      return tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+      /** Step 10: Return the refreshed asset and the recorded source */
+      const refreshed = await tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function; why: re-read of the row this transaction just updated
         where: { id: assetId },
       });
+
+      return {
+        asset: refreshed,
+        source: {
+          locationId: source.locationId,
+          explicit: source.explicit,
+          locationName: sourceName,
+          multiSource,
+        },
+      };
     });
+
+    /**
+     * Step 11: The source location's timeline says units went out from it,
+     * for pools placed at two or more locations only. Written after the commit
+     * (the location-note helper uses the global client), like the move
+     * notes. The holder's name stays out of it.
+     */
+    if (result.source.multiSource && result.source.locationId) {
+      await createCustodySourceLocationNote({
+        userId,
+        asset: result.asset,
+        locationId: result.source.locationId,
+        locationName: result.source.locationName,
+        quantity,
+        verb: "assigned",
+      });
+    }
+
+    return result;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -9095,61 +10742,104 @@ export async function checkOutQuantity({
   }
 }
 
+/** One source line of an explicit per-location release. */
+export type ReleaseSourceLine = {
+  /**
+   * The custody row's source: a location id, null or `UNPLACED_SOURCE` for
+   * the unplaced units, or `UNRECORDED_SOURCE` for a source never recorded.
+   */
+  locationId: string | null;
+  /** Units leaving the holder from this source. */
+  quantity: number;
+  /**
+   * How many of those were used up. Omit to derive it from the asset's
+   * `consumptionType`, like the single-line form.
+   */
+  consumed?: number;
+};
+
 /** Arguments for ending a custodian's hold on N units of a QT asset. */
 type ReleaseQuantityArgs = {
   /** The asset to release units for */
   assetId: string;
   /** The team member releasing custody */
   teamMemberId: string;
-  /** Number of units to release (must be positive integer) */
+  /**
+   * Number of units to release (must be positive integer). With `sources`,
+   * it must equal the sum of the lines.
+   */
   quantity: number;
   /** The user performing the release */
   userId: string;
   /** The organization owning the asset (used for validation) */
   organizationId: string;
   /**
-   * The acting user's role in this organization.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the caller may only release custody they hold themselves.
    *
-   * Required, not optional: a SELF_SERVICE caller may only release custody
-   * they hold themselves, and a missing role would silently fall open. The
+   * Required, not optional: a missing scope would silently fall open. The
    * bulk route deliberately does NOT judge quantity-tracked rows in its own
    * guard: they are released per asset, so refusing the whole selection over
    * one would reject work nobody asked for, which leaves this the only place
    * the restriction can be applied to them.
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   /** Optional note explaining the release */
   note?: string;
   /**
    * How many of the released units were used up rather than handed back.
    * Omit to let the server derive it from the asset's `consumptionType`
    * (consume everything for a one-way consumable, nothing for a returnable).
-   * Only a consumable accepts a non-zero value.
+   * Only a consumable accepts a non-zero value. Ignored when `sources` is
+   * given (each line carries its own).
    */
   consumed?: number;
+  /**
+   * Release only the units taken from this source: a location id, the
+   * unplaced units (`isUnplacedSource`), or `UNRECORDED_SOURCE`. Undefined
+   * when the caller does not say (an older phone app, the bulk scanner): the
+   * holder's rows are then drawn in `orderRowsForDrain` order.
+   */
+  locationId?: string | null;
+  /**
+   * One line per source when the holder took units from several locations
+   * and the operator released them per location.
+   */
+  sources?: ReleaseSourceLine[];
+};
+
+/** One source line of a release, as applied. */
+export type AppliedReleaseLine = {
+  locationId: string | null;
+  /** Location name for the audit note; null for the unplaced units. */
+  locationName: string | null;
+  quantity: number;
+  consumed: number;
+  returned: number;
 };
 
 /**
  * Ends a custodian's hold on N units of a QUANTITY_TRACKED asset.
  *
  * Runs inside an interactive transaction with a row-level lock to prevent
- * concurrent modifications. Validates that a custody record exists for the
- * asset-teamMember pair and that the release quantity does not exceed what
- * the custodian currently holds.
- *
- * If releasing the full custodied amount, the Custody record is deleted.
- * Otherwise, the quantity is decremented.
+ * concurrent modifications. The holder's operator custody may sit in several
+ * rows, one per source location; which rows are drawn from is decided by
+ * `sources`, `locationId`, or (when neither is given) the drain order.
+ * Each row is deleted when fully released and decremented otherwise.
  *
  * **What happens to the units depends on `Asset.consumptionType`, and on an
  * optional explicit split:**
  *
- * - `TWO_WAY` / legacy `null` — the units return to the available pool. A
+ * - `TWO_WAY` / legacy `null`: the units return to the available pool. A
  *   `RETURN` consumption log is written and `Asset.quantity` is untouched.
- *   These assets reject a non-zero `consumed`.
- * - `ONE_WAY` — the units default to consumed and are gone for good: a
+ *   These assets reject a non-zero `consumed`. Placements never change: the
+ *   units were never taken off their location.
+ * - `ONE_WAY`: the units default to consumed and are gone for good: a
  *   `CONSUME` log is written and `Asset.quantity` decremented, matching what
  *   booking check-in already does for a consumable. An explicit `consumed`
- *   splits the release, so unused units can still be handed back.
+ *   splits the release, so unused units can still be handed back. Consumed
+ *   units come off the row's recorded source location; units with no
+ *   recorded source are absorbed by the unplaced remainder first.
  *
  * The default is taken here rather than in a sibling `consumeQuantity` service
  * so it is always derived from the asset row itself: both the web and mobile
@@ -9157,10 +10847,11 @@ type ReleaseQuantityArgs = {
  * wrong outcome for a consumable.
  *
  * @param args - The release details
- * @returns The updated Asset record plus the `consumed` / `returned` split
- * @throws {ShelfError} If no custody record exists, the release quantity
- *   exceeds the custodied amount, `consumed` is out of range, or a returnable
- *   asset was asked to consume
+ * @returns The updated Asset record, the `consumed` / `returned` split, the
+ *   per-source lines and whether the pool is placed at two or more locations
+ * @throws {ShelfError} If no custody record exists (for that source), the
+ *   release quantity exceeds what is held, `consumed` is out of range, or a
+ *   returnable asset was asked to consume
  */
 export async function releaseQuantity({
   assetId,
@@ -9168,9 +10859,11 @@ export async function releaseQuantity({
   quantity,
   userId,
   organizationId,
-  role,
+  custodyAssign,
   note,
   consumed,
+  locationId,
+  sources: sourceLines,
 }: ReleaseQuantityArgs) {
   try {
     if (quantity <= 0) {
@@ -9182,7 +10875,7 @@ export async function releaseQuantity({
       });
     }
 
-    return await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
       const asset = await lockAssetForQuantityUpdate(
         tx,
@@ -9222,7 +10915,7 @@ export async function releaseQuantity({
        * are taken off them. The lookup is org-scoped, so a team member from
        * another workspace is refused here rather than written into a log.
        */
-      if (role === OrganizationRoles.SELF_SERVICE) {
+      if (custodyAssign === "self") {
         const holder = await tx.teamMember.findFirst({
           where: { id: teamMemberId, organizationId },
           select: { user: { select: { id: true } } },
@@ -9243,69 +10936,62 @@ export async function releaseQuantity({
       }
 
       /**
-       * Step 3b: Resolve how many units were used up vs. handed back.
-       *
-       * The DEFAULT comes from the LOCKED asset row — never from the caller
-       * alone — so a stale client can't return a consumable's units to the
-       * pool. `lockAssetForQuantityUpdate` does `SELECT *`, so
-       * `consumptionType` is already on hand.
+       * Step 3b: The default split comes from the LOCKED asset row, never
+       * from the caller alone, so a stale client can't return a
+       * consumable's units to the pool. `lockAssetForQuantityUpdate` does
+       * `SELECT *`, so `consumptionType` is already on hand.
        *
        * An explicit `consumed` lets an operator record a partial use: 40
-       * gloves come back, 10 of them actually used. Without it the only
-       * available action would destroy all 40, which is the same split
-       * booking check-in already offers for consumables. It can only ever
-       * narrow a consumable's outcome — a returnable asset rejects it below.
+       * gloves come back, 10 of them actually used. It can only ever narrow
+       * a consumable's outcome; a returnable asset rejects it below.
        */
       const canConsume = releaseCategory(asset.consumptionType) === "CONSUME";
-      const consumedUnits = consumed ?? (canConsume ? quantity : 0);
-      const returnedUnits = quantity - consumedUnits;
 
-      if (
-        !Number.isInteger(consumedUnits) ||
-        consumedUnits < 0 ||
-        consumedUnits > quantity
-      ) {
-        throw new ShelfError({
-          cause: null,
-          message: `Cannot mark ${consumedUnits} of ${quantity} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
-          label,
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: { assetId, teamMemberId, quantity, consumed },
-        });
-      }
-
-      if (consumedUnits > 0 && !canConsume) {
-        throw new ShelfError({
-          cause: null,
-          message:
-            "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
-          label,
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: {
-            assetId,
-            consumptionType: asset.consumptionType,
-          },
-        });
-      }
+      const assertConsumedInRange = (lineConsumed: number, lineQty: number) => {
+        if (
+          !Number.isInteger(lineConsumed) ||
+          lineConsumed < 0 ||
+          lineConsumed > lineQty
+        ) {
+          throw new ShelfError({
+            cause: null,
+            message: `Cannot mark ${lineConsumed} of ${lineQty} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: { assetId, teamMemberId, quantity, consumed },
+          });
+        }
+        if (lineConsumed > 0 && !canConsume) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: {
+              assetId,
+              consumptionType: asset.consumptionType,
+            },
+          });
+        }
+      };
 
       /**
-       * Step 4: Find the OPERATOR-allocated custody row for this
-       * (asset, teamMember) pair. `findFirst` filtered to
-       * `kitCustodyId: null` because the composite (assetId, teamMemberId)
-       * uniqueness was split into two partial uniques — a custodian can
-       * legitimately hold both an operator-allocated row AND one-or-more
-       * kit-allocated rows on the same asset, and only the operator row
-       * is releasable from this endpoint. The kit-allocated rows are
-       * released by releasing the kit's custody (which cascade-deletes
-       * them via `KitCustody.id` → `Custody.kitCustodyId`).
+       * Step 4: The holder's OPERATOR-allocated rows (`kitCustodyId` NULL),
+       * one per source location. Kit-allocated rows are released by
+       * releasing the kit's custody, which cascade-deletes them.
        */
-      const custody = await tx.custody.findFirst({
-        where: { assetId, teamMemberId, kitCustodyId: null },
+      const sourceState = await loadCustodySources(tx, {
+        assetId,
+        total: asset.quantity ?? 0,
       });
+      const holderRows = sourceState.rows.filter(
+        (row) => row.teamMemberId === teamMemberId
+      );
 
-      if (!custody) {
+      if (holderRows.length === 0) {
         throw new ShelfError({
           cause: null,
           message: "No custody record found for this team member and asset.",
@@ -9315,43 +11001,154 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 5: Validate the release quantity does not exceed custodied amount */
-      if (quantity > custody.quantity) {
+      const heldTotal = holderRows.reduce((sum, row) => sum + row.quantity, 0);
+      /**
+       * The holder's row for a submitted source: a location id, the unplaced
+       * units (`isUnplacedSource`), or `UNRECORDED_SOURCE`. Rows are keyed by
+       * `custodySourceKey`, so the unplaced row and the never-recorded row of
+       * one holder stay apart although both have a NULL location.
+       */
+      const rowForSource = (submitted: string | null) => {
+        const sourceId = isUnplacedSource(submitted)
+          ? UNPLACED_SOURCE
+          : submitted;
+        const row = holderRows.find((r) => custodySourceKey(r) === sourceId);
+        if (!row) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This person holds no units of this asset from the selected location.",
+            label,
+            status: 404,
+            additionalData: { assetId, teamMemberId, locationId: sourceId },
+            shouldBeCaptured: false,
+          });
+        }
+        return row;
+      };
+      const refuseOverRelease = (held: number) => {
         throw new ShelfError({
           cause: null,
-          message: `Cannot release ${quantity} units. The custodian only holds ${custody.quantity} units.`,
+          message: `Cannot release ${quantity} units. The custodian only holds ${held} units.`,
           label,
           status: 400,
           additionalData: {
             assetId,
             teamMemberId,
             quantity,
-            custodied: custody.quantity,
+            custodied: held,
           },
         });
+      };
+
+      /** Step 5: Decide which rows lose how many units. */
+      let lines: ReleaseLine[];
+
+      if (sourceLines && sourceLines.length > 0) {
+        const seen = new Set<string>();
+        lines = sourceLines
+          .filter((line) => line.quantity > 0)
+          .map((line) => {
+            const sourceId = isUnplacedSource(line.locationId)
+              ? UNPLACED_SOURCE
+              : line.locationId;
+            if (seen.has(sourceId)) {
+              throw new ShelfError({
+                cause: null,
+                message: "Each location can appear only once in a release.",
+                label,
+                status: 400,
+                additionalData: { assetId, teamMemberId },
+                shouldBeCaptured: false,
+              });
+            }
+            seen.add(sourceId);
+            const row = rowForSource(sourceId);
+            if (
+              !Number.isInteger(line.quantity) ||
+              line.quantity > row.quantity
+            ) {
+              refuseOverRelease(row.quantity);
+            }
+            const lineConsumed =
+              line.consumed ?? (canConsume ? line.quantity : 0);
+            assertConsumedInRange(lineConsumed, line.quantity);
+            return {
+              rowId: row.id,
+              locationId: row.locationId,
+              quantity: line.quantity,
+              consumed: lineConsumed,
+            };
+          });
+
+        const linesTotal = lines.reduce((sum, line) => sum + line.quantity, 0);
+        if (linesTotal !== quantity) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "The quantities per location do not add up to the quantity being released.",
+            label,
+            status: 400,
+            additionalData: { assetId, teamMemberId, quantity, linesTotal },
+            shouldBeCaptured: false,
+          });
+        }
+      } else {
+        const consumedUnits = consumed ?? (canConsume ? quantity : 0);
+        assertConsumedInRange(consumedUnits, quantity);
+
+        if (locationId !== undefined) {
+          const row = rowForSource(locationId);
+          if (quantity > row.quantity) refuseOverRelease(row.quantity);
+          lines = [
+            {
+              rowId: row.id,
+              locationId: row.locationId,
+              quantity,
+              consumed: consumedUnits,
+            },
+          ];
+        } else {
+          if (quantity > heldTotal) refuseOverRelease(heldTotal);
+          lines = planDrainRelease({
+            rows: holderRows,
+            quantity,
+            consumed: consumedUnits,
+          });
+        }
       }
 
+      const consumedTotal = lines.reduce((sum, line) => sum + line.consumed, 0);
+      const returnedTotal = quantity - consumedTotal;
+
+      /** The pool's stock before any write, for the CONSUME ledger rows. */
+      const stockBefore =
+        consumedTotal > 0
+          ? await readStockState(tx, { assetId, organizationId })
+          : null;
+
       /**
-       * Step 6: Delete the custody record if releasing full amount, else
-       * decrement. Target by `Custody.id` (primary key) since the global
-       * composite unique is gone — the row we already loaded via
-       * `findFirst` above is the authoritative reference.
+       * Step 6: Delete each drawn row when fully released, else decrement.
+       * Targets by `Custody.id`: the rows were read above under the lock.
        */
-      if (quantity === custody.quantity) {
-        await tx.custody.delete({
-          where: { id: custody.id },
-        });
-      } else {
-        await tx.custody.update({
-          where: { id: custody.id },
-          data: { quantity: { decrement: quantity } },
-        });
+      for (const line of lines) {
+        const row = holderRows.find((r) => r.id === line.rowId);
+        if (row && line.quantity === row.quantity) {
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `line.rowId` is one of the holder's operator rows read above for this org-verified, locked asset
+          await tx.custody.delete({ where: { id: line.rowId } });
+        } else {
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
+          await tx.custody.update({
+            where: { id: line.rowId },
+            data: { quantity: { decrement: line.quantity } },
+          });
+        }
       }
 
       /**
        * Step 6b: If this release removed the last Custody row on the asset,
        * flip Asset.status back to AVAILABLE. Without this, the asset stays
-       * stuck at IN_CUSTODY even after every unit has been returned —
+       * stuck at IN_CUSTODY even after every unit has been returned,
        * matching the conditional-flip pattern used by the kit-custody
        * flows (`releaseCustody` / `bulkRemoveAssetsFromKits` /
        * `updateKitAssets` removal). We only flip when zero rows remain so
@@ -9363,7 +11160,7 @@ export async function releaseQuantity({
        * are still out on an ONGOING booking would advertise the asset as
        * `AVAILABLE` on every picker and index while it is physically gone.
        * Same precedence as the sibling guard in `checkOutQuantity` Step 6b
-       * and as `reconcileAssetStatusForBookingExit` — the booking flows own
+       * and as `reconcileAssetStatusForBookingExit`; the booking flows own
        * the transition out of `CHECKED_OUT`.
        */
       const remainingCustodyCount = await tx.custody.count({
@@ -9381,7 +11178,7 @@ export async function releaseQuantity({
       }
 
       /**
-       * Step 6c: Consumed units did not come back — they were used up.
+       * Step 6c: Consumed units did not come back: they were used up.
        * Permanently remove exactly those from stock, mirroring the `CONSUME`
        * branch in booking check-in. Returned units are untouched here: they
        * are already back in the pool the moment custody dropped.
@@ -9389,34 +11186,28 @@ export async function releaseQuantity({
        * No pool-drain guard is needed (unlike booking check-in, which
        * decrements the pool WITHOUT touching custody). With
        * `available = Asset.quantity - SUM(Custody.quantity)`, this step
-       * changes the total by `-consumedUnits` while step 6 changed custody by
-       * `-quantity`, so available moves by exactly `returnedUnits` and never
-       * goes negative: `consumedUnits <= quantity <= custody.quantity <= C <= Q`.
-       * The same cancellation holds for `bookable` and `physicalAvailable`,
-       * both of which subtract `inCustody` from `total` — which is why no
-       * reservation guard is required either.
+       * changes the total by `-consumedTotal` while step 6 changed custody by
+       * `-quantity`, so available moves by exactly `returnedTotal` and never
+       * goes negative.
        *
        * Lowering the total can push the location axis out of bounds, so the
-       * placement sum is reconciled below — nothing else catches it.
+       * placement sum is reconciled below: nothing else catches it.
        * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
-       * DELETE ON "AssetLocation"` (see
-       * `20260519143054_add_asset_location_pivot`), so it never fires on an
-       * `Asset` write, and `assertAssetQuantityNotBelowReservations` queries
-       * custody / assetKit / bookingAsset / consumptionLog, not assetLocation.
+       * DELETE ON "AssetLocation"`, so it never fires on an `Asset` write.
        */
-      if (consumedUnits > 0) {
+      if (consumedTotal > 0) {
         const beforeQuantity = asset.quantity ?? 0;
         await tx.asset.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
           where: { id: assetId },
-          data: { quantity: { decrement: consumedUnits } },
+          data: { quantity: { decrement: consumedTotal } },
         });
 
         /**
          * Audit the stock drop as its own event. Consuming changes TWO
-         * things — who holds the units (CUSTODY_RELEASED, below) and how
-         * many exist (this one) — and per the one-event-per-field rule each
-         * gets its own row so reports can aggregate stock movement without
+         * things (who holds the units, CUSTODY_RELEASED below, and how many
+         * exist, this one) and per the one-event-per-field rule each gets
+         * its own row so reports can aggregate stock movement without
          * parsing custody meta.
          */
         await recordEvent(
@@ -9429,36 +11220,38 @@ export async function releaseQuantity({
             assetId,
             field: "quantity",
             fromValue: beforeQuantity,
-            toValue: beforeQuantity - consumedUnits,
+            toValue: beforeQuantity - consumedTotal,
           },
           tx
         );
 
         /**
-         * Restore the PRD's location-axis invariant
-         * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
-         * Asset.quantity`). Destroying units lowers the total every claim is
-         * measured against, so a placement sum that was valid a moment ago can
-         * now exceed it. Nothing else catches that:
-         * `asset_location_sum_within_total` only fires on an `AssetLocation`
-         * write, so an `Asset` write slips past it silently until a later,
-         * legitimate placement edit is refused.
-         *
-         * Runs inside this tx so the reconcile commits with the decrement it
-         * corrects — a half-applied pair would leave exactly the drift this is
-         * here to prevent.
+         * Restore the location-axis invariant (`SUM(AssetLocation.quantity
+         * WHERE assetKitId IS NULL) <= Asset.quantity`). Consumed units come
+         * off the location their custody row recorded; units with no
+         * recorded source fall to the generic rules (unplaced remainder
+         * first, then a single placement). Runs inside this tx so the
+         * reconcile commits with the decrement it corrects.
          */
         const reconcile = await reconcileManualPlacementsForStockDecrease({
           assetId,
-          newTotal: beforeQuantity - consumedUnits,
+          newTotal: beforeQuantity - consumedTotal,
           tx,
+          sources: lines
+            .filter(
+              (line): line is ReleaseLine & { locationId: string } =>
+                line.locationId !== null && line.consumed > 0
+            )
+            .map((line) => ({
+              locationId: line.locationId,
+              quantity: line.consumed,
+            })),
         });
 
         /**
-         * Surface an unresolvable case rather than fabricating provenance.
-         * With several placements and no unplaced residual left, nothing
-         * records which location the consumed units came off, so the drift
-         * persists and is reported instead of being papered over with a guess.
+         * Surface an unresolvable case rather than fabricating provenance:
+         * units with no recorded source on a pool whose placements already
+         * exceed its total.
          */
         reportAmbiguousPlacementReconcile({
           result: reconcile,
@@ -9468,51 +11261,59 @@ export async function releaseQuantity({
       }
 
       /**
-       * Step 7: Immutable audit log — one entry per non-zero leg. `CONSUME`
-       * records units that were used up (the decrement above); `RETURN`
-       * records units that went back into the available pool. Same category
+       * Step 7: Immutable audit log, one entry per non-zero leg per source.
+       * `CONSUME` records units that were used up, at the place the
+       * reconcile above actually took them from (the ledger diffs the stock
+       * before and after); `RETURN` records units that went back into the
+       * available pool, with the custody's source. Same category
        * discriminator booking check-in uses, so consumption reporting sees
        * every path identically.
        *
-       * Both calls are conditional because `createConsumptionLog` rejects a
-       * non-positive quantity. A pure return therefore writes exactly the one
-       * RETURN row it always did.
-       *
-       * A split attaches the operator's note to both rows: it explains the
-       * single action the operator took, and there is no per-leg note field.
+       * `createConsumptionLog` rejects a non-positive quantity, hence the
+       * guard. A split attaches the operator's note to both rows: it
+       * explains the single action the operator took.
        */
-      if (consumedUnits > 0) {
-        await createConsumptionLog({
-          assetId,
-          category: "CONSUME",
-          quantity: consumedUnits,
-          userId,
-          custodianId: teamMemberId,
-          note,
-          tx,
-        });
-      }
-
-      if (returnedUnits > 0) {
-        await createConsumptionLog({
-          assetId,
-          category: "RETURN",
-          quantity: returnedUnits,
-          userId,
-          custodianId: teamMemberId,
-          note,
-          tx,
-        });
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [
+          {
+            assetId,
+            before: stockBefore,
+            events: lines
+              .filter((line) => line.consumed > 0)
+              .map((line) => ({
+                category: "CONSUME" as const,
+                change: -line.consumed,
+                locationId: line.locationId,
+                custodianId: teamMemberId,
+                note,
+              })),
+          },
+        ],
+      });
+      for (const line of lines) {
+        const lineReturned = line.quantity - line.consumed;
+        if (lineReturned > 0) {
+          await createConsumptionLog({
+            assetId,
+            category: "RETURN",
+            quantity: lineReturned,
+            userId,
+            custodianId: teamMemberId,
+            locationId: line.locationId,
+            note,
+            tx,
+          });
+        }
       }
 
       /**
-       * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
-       * it commits atomically with the custody decrement/delete. Mirrors
-       * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
-       * qty-tracked releases from INDIVIDUAL-asset custody releases. The
-       * custodian stops holding the units either way, so this event is
-       * emitted for both outcomes; `meta.consumed` / `meta.returned` record
-       * the split.
+       * Step 8: Activity event: one `CUSTODY_RELEASED` per source line,
+       * inside the tx so it commits atomically with the custody change.
+       * The `viaQuantity` meta flag distinguishes qty-tracked releases from
+       * INDIVIDUAL-asset custody releases; `meta.consumed` /
+       * `meta.returned` record the split and `locationId` the source.
        */
       const custodianTeamMember = await tx.teamMember.findFirst({
         // org-scoped: teamMemberId is request input, so scope the lookup to
@@ -9520,38 +11321,86 @@ export async function releaseQuantity({
         where: { id: teamMemberId, organizationId },
         select: { user: { select: { id: true } } },
       });
-      await recordEvent(
-        {
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: assetId,
-          assetId,
-          teamMemberId,
-          targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: {
-            quantity,
-            viaQuantity: true,
-            consumed: consumedUnits,
-            returned: returnedUnits,
+      for (const line of lines) {
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            teamMemberId,
+            targetUserId: custodianTeamMember?.user?.id ?? undefined,
+            locationId: line.locationId ?? undefined,
+            meta: {
+              quantity: line.quantity,
+              viaQuantity: true,
+              consumed: line.consumed,
+              returned: line.quantity - line.consumed,
+            },
           },
-        },
-        tx
-      );
+          tx
+        );
+      }
+
+      /** Location names for the audit note, org-scoped. */
+      const lineLocationIds = lines
+        .map((line) => line.locationId)
+        .filter((id): id is string => id !== null);
+      const lineLocations = lineLocationIds.length
+        ? await tx.location.findMany({
+            where: { id: { in: lineLocationIds }, organizationId },
+            select: { id: true, name: true },
+          })
+        : [];
+      const nameById = new Map(lineLocations.map((l) => [l.id, l.name]));
 
       /** Step 9: Return the refreshed asset plus the split that was applied */
       const updatedAsset = await tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function; why: re-read of the row this transaction just updated
         where: { id: assetId },
       });
 
+      const appliedLines: AppliedReleaseLine[] = lines.map((line) => ({
+        locationId: line.locationId,
+        locationName: line.locationId
+          ? nameById.get(line.locationId) ?? null
+          : null,
+        quantity: line.quantity,
+        consumed: line.consumed,
+        returned: line.quantity - line.consumed,
+      }));
+
       return {
         asset: updatedAsset,
-        consumed: consumedUnits,
-        returned: returnedUnits,
+        consumed: consumedTotal,
+        returned: returnedTotal,
+        lines: appliedLines,
+        multiSource: hasMultipleSources(sourceState.state),
       };
     });
+
+    /**
+     * Step 10: Used-up units taken off a location are written on that
+     * location's timeline, for pools placed at two or more locations only.
+     */
+    if (result.multiSource) {
+      for (const line of result.lines) {
+        if (line.locationId && line.consumed > 0) {
+          await createCustodySourceLocationNote({
+            userId,
+            asset: result.asset,
+            locationId: line.locationId,
+            locationName: line.locationName,
+            quantity: line.consumed,
+            verb: "consumed",
+          });
+        }
+      }
+    }
+
+    return result;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -9751,9 +11600,17 @@ export async function moveAssetLocationUnits(
         });
       }
 
+      /** Custody sources as they stand before the move, for the re-home. */
+      const custodyBefore = await loadCustodySources(tx, {
+        assetId,
+        total: asset.quantity ?? 0,
+      });
+      /** The pool's stock before the move, for the ledger's MOVE rows. */
+      const stockBefore = await readStockState(tx, { assetId, organizationId });
+
       /**
        * Step 8: Decrement (or delete) the source manual row. Deleting
-       * at zero keeps the manual-placement reads clean — an empty
+       * at zero keeps the manual-placement reads clean: an empty
        * `AssetLocation` row would otherwise show up in placement lists
        * as "0 units here", which the existing UI doesn't expect.
        */
@@ -9802,6 +11659,13 @@ export async function moveAssetLocationUnits(
           },
         });
       }
+
+      /** Step 9b: Ledger rows, one MOVE out of the source, one into the destination. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * Step 10: Emit two paired `ASSET_LOCATION_CHANGED` events
@@ -9853,11 +11717,25 @@ export async function moveAssetLocationUnits(
         tx
       );
 
+      /**
+       * Step 10b: Custody follows the units. Units not in custody leave the
+       * source first; only when the source ends up holding fewer units than
+       * are in custody from it does that excess custody move to the
+       * destination. Never refused.
+       */
+      const rehome = await rehomeCustodyForPlacementChange(tx, {
+        assetId,
+        total: asset.quantity ?? 0,
+        before: custodyBefore,
+        destinationLocationId: toLocationId,
+      });
+
       /** Returned to the caller so we can write notes outside the tx. */
       return {
         fromQuantity: sourceRowDeleted ? 0 : source.quantity - quantity,
         toQuantity: destNewQuantity,
         sourceRowDeleted,
+        rehome,
         assetSnapshot: {
           type: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
@@ -9927,43 +11805,29 @@ export async function moveAssetLocationUnits(
         quantity,
       });
 
-      // Per-location timeline notes (one each side) — same shape as
-      // the single-location update path at ~line 2596.
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        displayName,
-        firstName,
-        lastName,
+      await createAssetLocationMoveNotes({
+        moves: [
+          {
+            asset: { id: assetId, ...txResult.assetSnapshot },
+            from: fromLocation,
+            to: toLocation,
+            quantity,
+          },
+        ],
+        actor: { ...user, id: userId },
       });
-      const assetForCount = {
+    }
+
+    await createCustodyRehomeNote({
+      result: txResult.rehome,
+      asset: {
         id: assetId,
-        title: txResult.assetSnapshot.title,
         type: txResult.assetSnapshot.type,
         unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
-      };
-      const assetMarkup = wrapAssetWithCountForNote(assetForCount, quantity);
-      const fromLink = wrapLinkForNote(
-        `/locations/${fromLocation.id}`,
-        fromLocation.name
-      );
-      const toLink = wrapLinkForNote(
-        `/locations/${toLocation.id}`,
-        toLocation.name
-      );
-
-      await Promise.all([
-        createSystemLocationNote({
-          locationId: fromLocation.id,
-          content: `${userLink} removed ${assetMarkup} from ${fromLink}. Moved to ${toLink}.`,
-          userId,
-        }),
-        createSystemLocationNote({
-          locationId: toLocation.id,
-          content: `${userLink} added ${assetMarkup} to ${toLink}. Moved from ${fromLink}.`,
-          userId,
-        }),
-      ]);
-    }
+      },
+      userId,
+      organizationId,
+    });
 
     return {
       fromQuantity: txResult.fromQuantity,
@@ -10111,10 +11975,18 @@ export async function placeUnplacedUnits(
         });
       }
 
+      /** Custody sources as they stand before placing, for the re-home. */
+      const custodyBefore = await loadCustodySources(tx, {
+        assetId,
+        total: totalQuantity,
+      });
+      /** The pool's stock before placing, for the ledger's MOVE rows. */
+      const stockBefore = await readStockState(tx, { assetId, organizationId });
+
       /**
        * Upsert the manual destination row, scoped by the
        * `assetKitId IS NULL` partial-unique. A kit-driven row may coexist
-       * at the same `(assetId, locationId)` — we must not collide with it.
+       * at the same `(assetId, locationId)`, so we must not collide with it.
        */
       const existingDest = await tx.assetLocation.findFirst({
         where: { assetId, locationId: toLocationId, assetKitId: null },
@@ -10141,6 +12013,13 @@ export async function placeUnplacedUnits(
           },
         });
       }
+
+      /** Ledger rows: a MOVE out of the unplaced units and into the location. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * One `ASSET_LOCATION_CHANGED` event for the to-side. We still
@@ -10173,8 +12052,22 @@ export async function placeUnplacedUnits(
         tx
       );
 
+      /**
+       * Unplaced units not in custody are placed first. Once the unplaced
+       * pile holds fewer units than are in custody from it, that excess
+       * custody now belongs at the destination: it is the only place the
+       * unplaced units went.
+       */
+      const rehome = await rehomeCustodyForPlacementChange(tx, {
+        assetId,
+        total: totalQuantity,
+        before: custodyBefore,
+        destinationLocationId: toLocationId,
+      });
+
       return {
         toQuantity: destNewQuantity,
+        rehome,
         assetSnapshot: {
           type: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
@@ -10242,6 +12135,17 @@ export async function placeUnplacedUnits(
         userId,
       });
     }
+
+    await createCustodyRehomeNote({
+      result: txResult.rehome,
+      asset: {
+        id: assetId,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+      },
+      userId,
+      organizationId,
+    });
 
     return {
       toQuantity: txResult.toQuantity,

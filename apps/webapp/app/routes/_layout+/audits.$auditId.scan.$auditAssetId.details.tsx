@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { auditCountLabel } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import { MessageSquare, ImageIcon } from "lucide-react";
 import type {
@@ -40,14 +41,16 @@ import {
   deleteAuditImage,
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { auditRowHeading } from "~/modules/audit/quantity";
 import {
   assertAuditAcceptsComments,
   assertAuditAcceptsCommentsOnLockedRow,
   createWhileAuditAcceptsComments,
   requireAuditAssignee,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import {
@@ -79,7 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, isSelfServiceOrBase } = permissionResult;
+    const { organizationId, access } = permissionResult;
 
     // Fetch audit asset with notes and images
     const auditAsset = await db.auditAsset.findFirst({
@@ -100,6 +103,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           select: {
             id: true,
             title: true,
+            unitOfMeasure: true,
           },
         },
         auditSession: {
@@ -123,10 +127,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit: auditAsset.auditSession,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
@@ -176,15 +180,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: true,
         imageUrl: true,
         thumbnailUrl: true,
+        capturedAt: true,
+        captureSource: true,
+        createdAt: true,
       },
       orderBy: {
         createdAt: "desc",
       },
     });
 
+    // Quantity rows lead with their count, e.g. "Counted: 8 of 14 pcs", or
+    // with "Not counted" / "14 pcs expected" when there is no count. An
+    // unexpected row's label already says "8 pcs counted".
+    const countLabel = auditCountLabel(
+      auditAsset,
+      auditAsset.asset.unitOfMeasure
+    );
     const header = {
       title: auditAsset.asset.title,
-      subHeading: "Notes and images",
+      subHeading: auditRowHeading(countLabel, auditAsset),
     };
 
     return payload({
@@ -212,14 +226,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
       action: PermissionAction.update,
     });
 
-    // The loader gates the read with `requireAuditAssigneeForBaseSelfService`;
+    // The loader gates the read with `requireAuditAssigneeForScopedViewer`;
     // this action did not gate the writes. Every intent below mutates the
     // audit — notes, condition, evidence deletion — so the guard is hoisted
     // here rather than repeated per intent, and a new intent inherits it.
@@ -227,7 +241,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     // …and prove the audit asset actually belongs to that audit. Both ids come
@@ -441,6 +455,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 
@@ -584,6 +601,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           auditSessionId: auditId,
           organizationId,
           uploadedById: userId,
+          uploadedVia: "web",
+          // The rebuilt request has no cookies; keep the user's own hints.
+          hints: getClientHint(request),
           auditAssetId: auditAssetId,
         });
 

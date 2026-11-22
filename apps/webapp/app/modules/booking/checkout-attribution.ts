@@ -20,6 +20,19 @@
  * @see docs/superpowers/specs/2026-07-03-multislice-qt-checkout-fix-design.md sections D + F
  */
 
+import { isSliceOutByMarker } from "./slice-return";
+
+/**
+ * The `ConsumptionLog` categories that account for a booked unit coming off a
+ * booking. Callers filter their disposition-log query to these.
+ */
+export const BOOKING_DISPOSITION_CATEGORIES = [
+  "RETURN",
+  "CONSUME",
+  "LOSS",
+  "DAMAGE",
+] as const;
+
 /**
  * One raw persisted checkout session, as stored on `PartialBookingCheckout`.
  *
@@ -217,6 +230,59 @@ export function attributeDispositionsByBookingAsset(args: {
     legacyPool -= take;
   }
   return out;
+}
+
+/**
+ * Units of each slice of ONE asset still to check OUT on its booking.
+ *
+ * Per slice: its booked quantity minus the checkout claims attributed to it
+ * (through {@link attributeDispositionsByBookingAsset}), floored at 0. One
+ * exception, the all-at-once fallback: that checkout stamps `checkedOutAt` and
+ * writes no session, so on an active booking a slice that is out by its
+ * markers ({@link isSliceOutByMarker}: left, not returned since) with no claim
+ * of its own has nothing left to send. A slice that fully came back reads as
+ * not out, so it may go out again.
+ *
+ * The asset-level and per-slice remaining readers both derive from this, so
+ * the total for an asset and the sum over its slices cannot disagree.
+ *
+ * Pure derivation, no DB calls.
+ *
+ * @param args.slices - Every slice of the asset on the booking, with markers.
+ * @param args.checkoutClaims - The asset's checkout claims from its sessions.
+ * @param args.isActiveBooking - Whether the booking is ONGOING or OVERDUE.
+ * @returns Map of slice id to units still to check out.
+ */
+export function computeSlicesRemainingToCheckOut(args: {
+  slices: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  }>;
+  checkoutClaims: Array<{ bookingAssetId: string | null; quantity: number }>;
+  isActiveBooking: boolean;
+}): Map<string, number> {
+  const { slices, checkoutClaims, isActiveBooking } = args;
+  const claimedBySlice = attributeDispositionsByBookingAsset({
+    bookingAssetRows: slices,
+    consumptionLogs: checkoutClaims,
+  });
+  const remaining = new Map<string, number>();
+  for (const slice of slices) {
+    const claimed = claimedBySlice.get(slice.id) ?? 0;
+    const sentAllAtOnce =
+      isActiveBooking &&
+      slice.quantity > 0 &&
+      claimed === 0 &&
+      isSliceOutByMarker(slice);
+    remaining.set(
+      slice.id,
+      sentAllAtOnce ? 0 : Math.max(0, slice.quantity - claimed)
+    );
+  }
+  return remaining;
 }
 
 /**

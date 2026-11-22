@@ -6,12 +6,15 @@ import type {
 } from "react-router";
 import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
+import { buildAssetsFilterHref } from "~/components/assets/assets-filter-link";
+import { buildBookingsFilterHref } from "~/components/booking/bookings-filter-href";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { CountLink } from "~/components/list/count-link";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -20,15 +23,20 @@ import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
-import { deleteTag, getTags } from "~/modules/tag/service.server";
+import {
+  assertTagDeleteConfirmed,
+  deleteTag,
+  getTags,
+} from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -45,6 +53,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -70,6 +79,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       perPage,
       search,
       request,
+      userId,
     });
     const totalPages = Math.ceil(totalTags / perPage);
 
@@ -121,15 +131,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       await request.formData(),
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
+
+    // A tag on any asset or booking needs its name typed, as the dialog asks;
+    // an unused one deletes with one click.
+    await assertTagDeleteConfirmed({ id, organizationId, confirmation });
 
     await deleteTag({ id, organizationId });
 
@@ -153,7 +169,13 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  // The bulk menu offers Delete only.
+  const showBulkActions = userHasPermission({
+    roles,
+    entity: PermissionEntity.tag,
+    action: PermissionAction.delete,
+  });
 
   return (
     <>
@@ -175,9 +197,7 @@ export default function CategoriesPage() {
         />
         <Outlet />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
-          }
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
           customEmptyStateContent={{
             title: "No tags yet",
             text: "Tags let you label assets with flexible keywords. Create tags to add custom metadata to your inventory.",
@@ -189,6 +209,8 @@ export default function CategoriesPage() {
             <>
               <Th>Description</Th>
               <Th>Use for</Th>
+              <Th>Assets</Th>
+              <Th>Bookings</Th>
               <Th>Actions</Th>
             </>
           }
@@ -201,7 +223,9 @@ export default function CategoriesPage() {
 const TagItem = ({
   item,
 }: {
-  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color">;
+  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color"> & {
+    _count: { assets: number; bookings: number };
+  };
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
@@ -229,6 +253,20 @@ const TagItem = ({
           <GrayBadge>All</GrayBadge>
         )}
       </div>
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.assets}
+        to={buildAssetsFilterHref({ tag: item.id })}
+        label={`View the assets tagged ${item.name}`}
+      />
+    </Td>
+    <Td>
+      <CountLink
+        count={item._count.bookings}
+        to={buildBookingsFilterHref({ tag: item.id })}
+        label={`View the bookings tagged ${item.name}`}
+      />
     </Td>
     <Td className="text-left">
       <TagQuickActions tag={item} />

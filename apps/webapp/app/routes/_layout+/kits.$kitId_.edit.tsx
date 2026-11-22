@@ -225,6 +225,7 @@ export default function KitEdit() {
 
       <div className="items-top flex justify-between">
         <KitsForm
+          key={kit.id}
           id={kit.id}
           name={kit.name}
           description={kit.description}

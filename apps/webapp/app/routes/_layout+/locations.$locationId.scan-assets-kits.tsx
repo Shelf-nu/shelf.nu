@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
@@ -14,8 +14,9 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import AddAssetsKitsToLocationDrawer, {
   addScannedAssetsOrKitsToLocationSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-location-drawer";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
+import { useScanDraftOnEntry } from "~/hooks/use-scan-draft";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getLocation,
   updateLocationAssets,
@@ -31,7 +32,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
+import { scanSaveError } from "~/utils/scan-save-error.server";
+import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export type LoaderData = typeof loader;
 
@@ -87,6 +89,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Keeps the scanner, and the list on it, on screen when the save request gets
+ * no answer (a gateway timeout, an unreachable server, a dropped connection).
+ * The drawer then tells the operator to check before confirming again,
+ * because a request cut off in transit may still have been saved.
+ */
+export const clientAction = keepScanListOnSubmitFailure;
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
@@ -98,6 +108,9 @@ export const handle = {
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
   const { locationId } = getParams(params, paramsSchema);
+  // The assets and the kits are saved by separate calls. Once the assets are
+  // saved, a failure in the kits step is not "nothing saved".
+  let assetsSaved = false;
 
   try {
     const { organizationId } = await requirePermission({
@@ -132,6 +145,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         removedAssetIds: [],
         assetQuantities,
       });
+      assetsSaved = true;
     }
 
     if (kitIds.length) {
@@ -148,17 +162,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/locations/${locationId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason, { partlySaved: assetsSaved });
   }
 }
 
 export default function ScanAssetsKitsForLocation() {
+  const { location } = useLoaderData<typeof loader>();
+  // Keeps the scanned codes through a reload, a closed tab or an error page.
+  useScanDraftOnEntry({ scope: "location", targetId: location.id });
+
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -177,7 +197,11 @@ export default function ScanAssetsKitsForLocation() {
 
       <AddAssetsKitsToLocationDrawer isLoading={isLoading} />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -185,9 +209,6 @@ export default function ScanAssetsKitsForLocation() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

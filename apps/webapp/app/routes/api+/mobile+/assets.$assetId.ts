@@ -24,6 +24,8 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { buildCustodySourceEntries } from "~/modules/asset/custody-source";
+import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -42,6 +44,10 @@ import {
   resolveDisplayCode,
   serializeDisplayCode,
 } from "~/modules/barcode/display";
+import {
+  getLinkTitles,
+  linkTitlesByField,
+} from "~/modules/link-preview/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import {
   canSeeBooking,
@@ -50,7 +56,13 @@ import {
 } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 /**
  * GET /api/mobile/assets/:assetId
@@ -72,15 +84,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Custody visibility is permission-gated (web parity): viewers without
     // custody-view permission (SELF_SERVICE/BASE, unless the org overrides
     // allow) must not receive other holders' custody. Resolve the flags once
-    // here; the filtering happens below, after shaping. `canSeeAllBookings`
+    // here; the filtering happens below, after shaping. `access.bookings.seeAll`
     // is the booking screen's own read gate, which `activeBooking.canOpen`
     // answers in advance.
-    const { canSeeAllCustody, canSeeAllBookings } = await getMobileUserContext(
+    const { access, roles } = await getMobileUserContext(
       user.id,
       organizationId
     );
 
+    // Activity notes are readable only with `note: read`, as on the web asset
+    // page. Passing `roles` keeps this a static matrix lookup (no query). A
+    // caller without it gets `notes: []`, so the response keeps its shape.
+    const canReadNotes = await hasPermission({
+      userId: user.id,
+      organizationId,
+      roles,
+      workspace: access.workspaceGrants,
+      entity: PermissionEntity.note,
+      action: PermissionAction.read,
+    });
+
     const storedAsset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail screen must still load an archived asset
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -116,6 +141,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         mainImageExpiration: true,
         thumbnailImage: true,
         availableToBook: true,
+        // The detail screen badges an archived asset and turns its actions off.
+        archivedAt: true,
         valuation: true,
         // Quantity fields (additive) — surfaced so the companion detail
         // screen can DISPLAY quantity. Null for INDIVIDUAL assets.
@@ -157,6 +184,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // why: discriminates operator rows (null) from kit-allocated rows
             // so the shaper can compute `releasableQuantity` per holder.
             kitCustodyId: true,
+            // why: the location each operator row's units were taken from,
+            // for the additive `custodyList[].sources` below.
+            location: { select: { id: true, name: true } },
+            // why: tells unplaced units apart from a source never recorded
+            // in those `sources` (both have a null location).
+            sourceUnknown: true,
             custodian: {
               select: {
                 id: true,
@@ -237,7 +270,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             },
           },
           orderBy: { createdAt: "desc" as const },
-          take: 25,
+          // No rows for a caller without `note: read`; the field stays.
+          take: canReadNotes ? 25 : 0,
         },
         customFields: {
           select: {
@@ -248,6 +282,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 name: true,
                 type: true,
+                format: true,
                 helpText: true,
                 active: true,
               },
@@ -261,10 +296,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    const [asset] = await refreshExpiredAssetImages([storedAsset], {
-      organizationId,
-      ...ASSET_IMAGE_RESIGN_LIMITS,
-    });
+    // The values the screen shows: those of active fields.
+    const shownValues = storedAsset.customFields.filter(
+      ({ customField }) => customField.active
+    );
+
+    // Read together, neither depending on the other. `linkTitles` holds the
+    // titles for the links in the values shown, and never throws.
+    const [[refreshedAsset], linkTitles] = await Promise.all([
+      refreshExpiredAssetImages([storedAsset], {
+        organizationId,
+        ...ASSET_IMAGE_RESIGN_LIMITS,
+      }),
+      getLinkTitles({ organizationId, values: shownValues }),
+    ]);
+
+    // The companion prints `custodian.name` as it arrives, in the custody
+    // card and in every `custodyList` row. The stored `TeamMember.name` can
+    // be empty for a registered member, so each holder is named here the way
+    // the web names them: the user's display name first, the stored name for
+    // a non-registered member.
+    const asset = {
+      ...refreshedAsset,
+      custody: refreshedAsset.custody.map((row) => ({
+        ...row,
+        custodian: {
+          ...row.custodian,
+          name: resolveTeamMemberName(row.custodian),
+        },
+      })),
+    };
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,
@@ -293,6 +354,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       thumbnailImage: asset.thumbnailImage,
       assetModel: asset.assetModel,
       availableToBook: asset.availableToBook,
+      archivedAt: asset.archivedAt,
       // Helper's `category` type is `{ name } | null`; widen-then-narrow.
       category: asset.category ? { name: asset.category.name } : null,
       // Quantity scalars the helper requires (this route only consumes
@@ -331,11 +393,43 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedOut: number;
       custodyAvailable: number;
     } | null = null;
+    /**
+     * Units free to hand over right now, the figure the web labels "Free now":
+     * total minus custody, units in kits and units out, from the availability
+     * engine. Reservations are not subtracted. Sent for every QUANTITY_TRACKED
+     * asset, including one whose `quantityBreakdown` is null because its units
+     * sit only in kits; null for INDIVIDUAL assets.
+     */
+    let freeNow: number | null = null;
+    /**
+     * Where a pool's units can be taken from (additive). The same summary the
+     * web asset page ships to its Assign dialog: `multiSource` is true only
+     * for a pool placed at two or more locations, and `options` then lists
+     * each location (and "Unplaced" when units are unplaced) with what it has
+     * left. The app shows a "From location" picker from it; an older build
+     * ignores the field and the server records no source.
+     *
+     * Not gated on custody permissions: the holder rows' source line reads
+     * `multiSource` for every viewer. The options read skips the pool-wide
+     * availability, which this loader already derives from the quantity rows.
+     */
+    let custodySources: Awaited<
+      ReturnType<typeof getCustodySourceOptions>
+    > | null = null;
     if (isQuantityTracked(asset)) {
-      const rows = await getAssetQuantityRows(db, {
-        assetId,
-        organizationId,
-      });
+      const [rows, sources] = await Promise.all([
+        getAssetQuantityRows(db, {
+          assetId,
+          organizationId,
+        }),
+        getCustodySourceOptions({
+          assetId,
+          organizationId,
+          total: asset.quantity ?? 0,
+        }),
+      ]);
+      custodySources = sources;
+      freeNow = rows.freeNow;
       const breakdown = getQuantityData(rows);
       quantityBreakdown = breakdown
         ? {
@@ -423,13 +517,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `custodyList` to their OWN entries and report how many holders were
     // hidden — mirroring the web's `QuantityCustodyList` filter and hidden
     // count (its `canViewAllCustody` prop).
-    const { custodyList, custodyListOthersCount } =
+    const { custodyList: visibleCustodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
         custodyRows: detailCustody,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
+
+    /**
+     * Additive: where each holder's operator units were taken from, one entry
+     * per source (`locationId` null: the unplaced units, or with
+     * `unrecorded: true` a source never recorded). Kit-inherited units are not
+     * listed: they follow the kit. The app shows these only for a pool placed
+     * at two or more distinct locations (count distinct manual `placements`),
+     * and releases per source with the entry's `locationId`, or
+     * `"unrecorded"` for an unrecorded entry.
+     */
+    const custodyList = visibleCustodyList.map((entry) => ({
+      ...entry,
+      sources: buildCustodySourceEntries(
+        detailCustody.filter(
+          (row) => !row.kitCustodyId && row.custodian.id === entry.custodian.id
+        )
+      ),
+    }));
 
     // Legacy single `custody`: the web HIDES its single-custodian card from
     // viewers without custody-view permission unless they ARE the custodian —
@@ -443,7 +555,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       viewerCanSeeLegacyCustody({
         custodianUserId: primaryCustody.custodian.userId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       })
         ? primaryCustody
         : null;
@@ -468,7 +580,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const activeBooking =
       checkedOutOn &&
       canSeeBookingCustodian({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: checkedOutOn,
         userId: user.id,
       })
@@ -478,7 +590,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             from: checkedOutOn.from,
             // The resolver every mobile booking surface names a holder with.
             custodianName: resolveBookingCustodianName({
-              canSeeAllCustody,
+              canSeeAllCustody: access.custody.seeAll,
               booking: checkedOutOn,
               userId: user.id,
             }),
@@ -487,7 +599,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // the booking screen. This is that screen's own gate, answered here
             // so the app only offers a tap that will open.
             canOpen: canSeeBooking({
-              canSeeAllBookings,
+              access,
               booking: {
                 custodianUserId: checkedOutOn.custodianUser?.id ?? null,
                 custodianTeamMember: checkedOutOn.custodianTeamMember,
@@ -500,6 +612,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return data({
       asset: {
         ...assetData,
+        // Empty for a caller without `note: read`: the query takes none.
+        notes: assetData.notes,
         // why: `assetData` carries the RAW image columns. Take the resolved
         // ones from the helper so an asset with no image of its own renders
         // its model's cover image on the detail screen.
@@ -549,6 +663,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // assets and for QUANTITY_TRACKED assets with no custody/booking
         // activity (see getQuantityData's null contract).
         quantityBreakdown,
+        // Free now (additive, see above). A top-level field, not part of
+        // `quantityBreakdown`, so it arrives even when the breakdown is null.
+        freeNow,
+        // Where the pool's units can be taken from (additive, see above).
+        // Null for INDIVIDUAL assets.
+        custodySources,
         // Reshaped from the widened select above so the companion keeps
         // reading `asset.organization.currency` and nothing else.
         organization: { currency: detailOrganization.currency },
@@ -569,6 +689,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // workspace without alternative barcodes must not receive barcode
         // rows, matching every other mobile barcode surface.
         barcodes: barcodesAllowed ? detailBarcodes : [],
+        // Additive: page titles and workspace names for the links in
+        // `customFields`, keyed by custom field id. Keyed on the server: the
+        // phone's URL implementation cannot reproduce link keys for every
+        // host (see `FieldLinkTitles` in @shelf/links).
+        fieldLinkTitles: linkTitlesByField(shownValues, linkTitles),
       },
     });
   } catch (cause) {

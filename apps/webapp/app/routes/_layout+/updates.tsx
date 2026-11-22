@@ -33,17 +33,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { role } = await requirePermission({
+    const { access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.update,
       action: PermissionAction.read,
     });
 
-    // Get updates for the user with their organization role
+    // `access.role` is `announcementRole(roles)` for every member with at
+    // least one role: the same audience the layout badge counts.
     const updates = await getUpdatesForUser({
       userId,
-      userRole: role,
+      userRole: access.role,
     });
 
     return data(

@@ -32,6 +32,8 @@
  */
 import { releaseCategory } from "@shelf/quantity-control";
 
+import { ARCHIVED_ROW_ERROR } from "./archived-assets";
+
 import type {
   AssetCustodyListEntry,
   AssetQuantityBreakdown,
@@ -340,6 +342,12 @@ type CustodySubmitOutcome = {
    * of the request was.
    */
   refusedQuantities?: { assetId: string; message: string }[];
+  /**
+   * With `assetError`: the assets the server refused because they are
+   * archived (`archivedIdsFromError`). The server wrote nothing for the asset
+   * request, but only these rows are at fault, so only they carry an error.
+   */
+  archivedAssetIds?: string[];
 };
 
 /** Shown on rows that may have been skipped as quantity-tracked assets. */
@@ -460,8 +468,41 @@ export function summarizeCustodySubmit(
 
   // The asset request carries whole assets and quantity rows together, and
   // the server writes none of it when it refuses, so they share one result.
+  // An archived refusal names the archived rows: only they are marked, and
+  // the rest wait unmarked for the next submit.
+  const archivedIds = new Set(outcome.archivedAssetIds ?? []);
+  const archivedRows = [
+    ...plan.individual
+      .filter((row) => archivedIds.has(row.targetId))
+      .map((row) => ({ qrId: row.qrId, title: row.title })),
+    ...plan.quantityRows
+      .filter((row) => archivedIds.has(row.assetId))
+      .map((row) => ({ qrId: row.qrId, title: row.title })),
+  ];
   if (plan.individual.length > 0 || plan.quantityRows.length > 0) {
-    if (outcome.assetError) {
+    if (outcome.assetError && archivedRows.length > 0) {
+      fail(
+        archivedRows.map((row) => row.qrId),
+        describeItems({ individual: archivedRows.map((row) => row.title) }),
+        ARCHIVED_ROW_ERROR
+      );
+      const archivedQrIds = new Set(archivedRows.map((row) => row.qrId));
+      const waiting = {
+        individual: plan.individual
+          .filter((row) => !archivedQrIds.has(row.qrId))
+          .map((row) => row.title),
+        quantityRows: plan.quantityRows.filter(
+          (row) => !archivedQrIds.has(row.qrId)
+        ),
+      };
+      if (waiting.individual.length + waiting.quantityRows.length > 0) {
+        failureLines.push(
+          `${describeItems(
+            waiting
+          )}: not sent with an archived asset in the list. Remove it and submit again.`
+        );
+      }
+    } else if (outcome.assetError) {
       fail(
         [
           ...plan.individual.map((row) => row.qrId),

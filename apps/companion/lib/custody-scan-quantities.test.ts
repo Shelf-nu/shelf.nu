@@ -423,6 +423,59 @@ test("a refused asset request keeps every asset row, whole or by units, with the
   assert.deepEqual(summary.rowErrors, { "qr-1": reason, "qr-2": reason });
 });
 
+test("an archived refusal marks only the archived row; the others wait unmarked", () => {
+  // The server writes nothing while the request holds an archived asset, but
+  // the active rows are not at fault, so they carry no error.
+  const plan = planCustodySubmit("assign_custody", [
+    individualRow("qr-1", "Old camera"),
+    individualRow("qr-2", "Tripod"),
+    individualRow("qr-3", "Light"),
+  ]);
+  const summary = summarizeCustodySubmit(
+    "assign_custody",
+    plan,
+    {
+      assetError: "Archived assets are read-only.",
+      kitError: null,
+      archivedAssetIds: ["asset-qr-1"],
+    },
+    { custodianName: "Jane", isSelfService: false }
+  );
+
+  assert.equal(summary.title, "Not done");
+  assert.deepEqual(summary.succeededQrIds, []);
+  assert.deepEqual(summary.rowErrors, {
+    "qr-1": "Archived. Remove it from the list.",
+  });
+  assert.equal(
+    summary.message,
+    "Still in your list:\n" +
+      '• "Old camera": Archived. Remove it from the list.\n' +
+      "• 2 assets: not sent with an archived asset in the list. Remove it and submit again."
+  );
+});
+
+test("an archived refusal that names no row in the list falls back to marking them all", () => {
+  // e.g. the asset was archived under another code than the one scanned.
+  const plan = planCustodySubmit("assign_custody", [
+    individualRow("qr-1", "Tripod"),
+  ]);
+  const summary = summarizeCustodySubmit(
+    "assign_custody",
+    plan,
+    {
+      assetError: "Archived assets are read-only.",
+      kitError: null,
+      archivedAssetIds: ["asset-elsewhere"],
+    },
+    { custodianName: "Jane", isSelfService: false }
+  );
+
+  assert.deepEqual(summary.rowErrors, {
+    "qr-1": "Archived assets are read-only.",
+  });
+});
+
 test("a quantity row the server refused after its checks stays with the reason, and the rest are done", () => {
   const plan = planCustodySubmit("assign_custody", [
     individualRow("qr-1", "Tripod"),

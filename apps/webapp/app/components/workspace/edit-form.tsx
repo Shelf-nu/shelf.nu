@@ -6,20 +6,23 @@ import {
   type QrIdDisplayPreference,
 } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useLocation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { GENERAL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
+import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
+import { ManagersCanEditAssetsForm } from "./managers-can-edit-assets-form";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
 import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
@@ -27,7 +30,7 @@ import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import { DateS } from "../shared/date";
 import {
   AlertDialog,
@@ -65,6 +68,13 @@ interface Props {
    */
   scimEnabled?: boolean;
   scimTokens?: ScimTokenItem[];
+  /**
+   * Whether the Permissions card shows the owner-only Managers switch
+   * (`managersCanEditAssets`). Only the workspace settings route supplies it:
+   * its action saves the switch, and the switch judges ownership in the
+   * selected workspace, which is the one that route edits.
+   */
+  showManagersSwitch?: boolean;
 }
 
 export const EditGeneralWorkspaceSettingsFormSchema = (
@@ -101,6 +111,7 @@ export const WorkspaceEditForms = ({
   className,
   scimEnabled,
   scimTokens,
+  showManagersSwitch,
 }: Props) => (
   <div className={tw("flex flex-col gap-3", className)}>
     <WorkspaceGeneralEditForms
@@ -108,7 +119,7 @@ export const WorkspaceEditForms = ({
       currency={currency}
       qrIdDisplayPreference={qrIdDisplayPreference}
     />
-    <WorkspacePermissionsEditForm />
+    <WorkspacePermissionsEditForm showManagersSwitch={showManagersSwitch} />
     <WorkspaceSSOEditForm />
     <WorkspaceScimTokensSection
       scimEnabled={scimEnabled}
@@ -126,12 +137,16 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  // Focus the Name input on mount, but skip it when the field is disabled
-  // (personal workspaces don't allow renaming). Arriving via a section anchor
-  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
-  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
+  // Focus the Name input on mount, except when the field is disabled
+  // (personal workspaces cannot be renamed) or the page opened at a linked
+  // card (/settings/general#permissions): keyboard focus belongs on that card
+  // (`useSectionHashSync` moves it there, and so does the browser on a
+  // native fragment load), and focusing the name would send Tab back to the
+  // top. React Router's `location.hash` is the hash the page opened with;
+  // the scroll-synced hash is written past the router, so it never flips this.
+  const { hash } = useLocation();
   const nameInputRef = useAutoFocus<HTMLInputElement>({
-    when: !isPersonalWorkspace,
+    when: !isPersonalWorkspace && !hash,
   });
 
   const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
@@ -164,9 +179,12 @@ const WorkspaceGeneralEditForms = ({
       className="flex  flex-col gap-2"
       encType="multipart/form-data"
     >
-      <Card className={tw("my-0", className)}>
+      <Card
+        id={GENERAL_SETTINGS_ANCHORS.general}
+        className={tw("my-0", className)}
+      >
         <div className="mb-6">
-          <h3 className="text-text-lg font-semibold">General</h3>
+          <CardTitle>General</CardTitle>
           <p className="text-sm text-gray-600">
             Manage general workspace settings.
           </p>
@@ -314,12 +332,12 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow
-          rowLabel={"QR codes on PDFs"}
+          rowLabel={"Code images on PDFs"}
           className={"border-b-0"}
           subHeading={
             <p>
-              Control whether the QR image is printed on the booking checklist
-              and the audit receipt.
+              Control whether each item's code is printed as a picture on
+              booking documents and the audit receipt.
             </p>
           }
         >
@@ -342,16 +360,15 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showQrCodesOnPdfs"
                 className="cursor-pointer text-[14px] font-medium text-gray-700"
               >
-                Print QR codes on PDFs
+                Print code images on PDFs
               </label>
               <p
                 id="showQrCodesOnPdfs-desc"
                 className="text-[14px] text-gray-600"
               >
-                Turn this off when people should scan the label on the item
-                itself. A printed sheet carries the same codes, so it can be
-                scanned instead of walking to the equipment. The code still
-                prints as text either way.
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>
@@ -393,7 +410,10 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
       .default("false"),
   });
 
-const WorkspacePermissionsEditForm = ({ className }: Props) => {
+const WorkspacePermissionsEditForm = ({
+  className,
+  showManagersSwitch,
+}: Props) => {
   const { organization } = useLoaderData<typeof loader>();
   const fetcher = useFetcher({ key: "permissions" });
   const schema = EditWorkspacePermissionsSettingsFormSchema();
@@ -401,18 +421,50 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
   const disabled = useDisabled(fetcher);
 
   return organization.type === OrganizationType.TEAM ? (
-    <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
-      <Card className={tw("my-0 w-full", className)}>
-        <div className="border-b pb-5">
-          <h3 className="text-text-lg font-semibold">Permissions</h3>
-          <p className="text-sm text-gray-600">
-            Adjust specific permissions for <b>Self Service</b> and <b>Base</b>{" "}
-            users.
-          </p>
-        </div>
+    <Card
+      id={GENERAL_SETTINGS_ANCHORS.permissions}
+      className={tw("my-0 w-full", className)}
+    >
+      <div className="border-b pb-5">
+        <CardTitle>Permissions</CardTitle>
+        <p className="text-sm text-gray-600">
+          {showManagersSwitch ? (
+            <>
+              Adjust specific permissions for <b>Managers</b>,{" "}
+              <b>Self Service</b> and <b>Base</b> users.
+            </>
+          ) : (
+            <>
+              Adjust specific permissions for <b>Self Service</b> and{" "}
+              <b>Base</b> users.
+            </>
+          )}
+        </p>
+      </div>
+
+      {/* Its own form and intent: saving the visibility switches below never
+          submits it, so an Administrator cannot change it from there. */}
+      {showManagersSwitch ? (
+        <ManagersCanEditAssetsForm
+          defaultChecked={organization.managersCanEditAssets}
+        />
+      ) : null}
+
+      <fetcher.Form ref={zo.ref} method="post">
         <input type="hidden" value={organization.id} name="id" />
 
-        <h4 className="mt-5 text-text-md">Self service users</h4>
+        <h4
+          className={tw(
+            "text-text-md",
+            showManagersSwitch ? "border-t pt-5" : "mt-5"
+          )}
+        >
+          Self service users
+        </h4>
+        <p className="text-sm text-gray-600">
+          By default, Self service users book assets and check them out and in
+          for themselves, and see only their own bookings and custody.
+        </p>
         <FormRow
           rowLabel={`View custody`}
           subHeading={
@@ -470,6 +522,10 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
         </FormRow>
 
         <h4 className="border-t pt-5 text-text-md">Base users</h4>
+        <p className="text-sm text-gray-600">
+          By default, Base users request assets through bookings that an
+          Administrator or Manager checks out, and see only their own bookings.
+        </p>
         <FormRow
           rowLabel={`View custody`}
           subHeading={
@@ -536,8 +592,8 @@ const WorkspacePermissionsEditForm = ({ className }: Props) => {
             {disabled ? <Spinner /> : "Save"}
           </Button>
         </div>
-      </Card>
-    </fetcher.Form>
+      </fetcher.Form>
+    </Card>
   ) : null;
 };
 
@@ -561,18 +617,22 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
   z
     .object({
       id: z.string(),
+      adminGroupId: z.string().optional(),
+      managerGroupId: z.string().optional(),
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
-      adminGroupId: z.string().optional(),
     })
     .superRefine((data, ctx) => {
       if (!sso) return;
 
-      const hasAtLeastOneGroup = [
-        data.adminGroupId,
-        data.selfServiceGroupId,
-        data.baseUserGroupId,
-      ].some((value) => value != null && value.trim().length > 0);
+      /* Every group-id column counts, so a workspace that maps only one role
+         (whichever it is) passes. */
+      const hasAtLeastOneGroup = (
+        Object.keys(SSO_GROUP_ROLE) as SsoGroupField[]
+      ).some((field) => {
+        const value = data[field];
+        return value != null && value.trim().length > 0;
+      });
 
       if (!hasAtLeastOneGroup) {
         ctx.addIssue({
@@ -586,7 +646,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -603,9 +663,9 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
 
   return isOwner && organization.enabledSso && organization.ssoDetails ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
-      <Card className={tw("my-0 ", className)}>
+      <Card id={GENERAL_SETTINGS_ANCHORS.sso} className={tw("my-0", className)}>
         <div className=" border-b pb-5">
-          <h2 className=" text-[18px] font-semibold">SSO details</h2>
+          <CardTitle as="h2">SSO details</CardTitle>
           <p>
             This workspace has SSO enabled so you can see your SSO settings.
           </p>
@@ -683,6 +743,29 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
         </FormRow>
 
         <FormRow
+          rowLabel={`Manager role group`}
+          subHeading={
+            <div>
+              The group identifier that should be mapped to the <b>Manager</b>{" "}
+              role.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <Input
+            label={"Manager role group"}
+            hideLabel
+            className="w-full"
+            name={zo.fields.managerGroupId()}
+            error={
+              validationErrors?.managerGroupId?.message ||
+              zo.errors.managerGroupId()?.message
+            }
+            defaultValue={organization.ssoDetails.managerGroupId || undefined}
+          />
+        </FormRow>
+
+        <FormRow
           rowLabel={`Self service role group`}
           subHeading={
             <div>
@@ -748,7 +831,7 @@ const WorkspaceScimTokensSection = ({
   className?: string;
 }) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
   const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);
@@ -795,9 +878,12 @@ const WorkspaceScimTokensSection = ({
 
   return (
     <>
-      <Card className={tw("my-0", className)}>
+      <Card
+        id={GENERAL_SETTINGS_ANCHORS.scim}
+        className={tw("my-0", className)}
+      >
         <div className="border-b pb-5">
-          <h2 className="text-[18px] font-semibold">SCIM provisioning</h2>
+          <CardTitle as="h2">SCIM provisioning</CardTitle>
           <p className="text-sm text-gray-600">
             Manage bearer tokens for SCIM user provisioning (e.g. Microsoft
             Entra ID).

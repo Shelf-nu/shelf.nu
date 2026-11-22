@@ -9,6 +9,7 @@ import NewBooking, {
   action as newBookingAction,
 } from "~/routes/_layout+/bookings.new";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -34,7 +35,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
@@ -58,7 +59,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getTeamMemberForForm({
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        access,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
@@ -68,13 +69,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    const selfServiceOrBaseUser = isSelfServiceOrBase
-      ? teamMembersData.teamMembers.find(
-          (member) => member.userId === authSession.userId
-        )
-      : undefined;
-
-    if (isSelfServiceOrBase && !selfServiceOrBaseUser) {
+    // A member whose booking custodian is fixed to themself must find their
+    // own team member in the seed, or the form has no custodian to offer.
+    if (
+      bookingCustodianIsSelf(access) &&
+      !teamMembersData.teamMembers.some(
+        (member) => member.userId === authSession.userId
+      )
+    ) {
       throw new ShelfError({
         cause: null,
         message:
@@ -88,8 +90,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userId,
       showModal: true,
-      isSelfServiceOrBase,
-      selfServiceOrBaseUser,
       ...teamMembersData,
       // For consistency, also provide teamMembersForForm
       teamMembersForForm: teamMembersData.teamMembers,

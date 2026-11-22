@@ -1,0 +1,407 @@
+/**
+ * Tests for the scan draft.
+ *
+ * @see {@link file://./scan-draft.ts}
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { ScanListItems } from "~/atoms/qr-scanner";
+import {
+  QUICK_CHECKIN_QR_PREFIX,
+  QUICK_CHECKOUT_QR_PREFIX,
+} from "~/atoms/qr-scanner";
+import {
+  clearScanDraft,
+  readScanDraft,
+  readScanDraftChoices,
+  readScanDraftContext,
+  saveScanDraft,
+  scanDraftKey,
+} from "./scan-draft";
+
+const KEY = scanDraftKey("fulfil", "user-1", "booking-1");
+
+function scanned(overrides: Partial<NonNullable<ScanListItems[string]>> = {}) {
+  return {
+    data: { id: "asset-1", title: "Camera" },
+    type: "asset" as const,
+    codeType: "qr" as const,
+    ...overrides,
+  } as ScanListItems[string];
+}
+
+beforeEach(() => {
+  localStorage.clear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("scanDraftKey", () => {
+  it("keeps two scanners on the same target apart", () => {
+    expect(scanDraftKey("fulfil", "user-1", "booking-1")).not.toBe(
+      scanDraftKey("assign", "user-1", "booking-1")
+    );
+  });
+
+  /**
+   * Local storage belongs to the browser, not to the account. On a shared
+   * terminal the next person to sign in opens the same booking, and without
+   * the user in the key they would inherit the previous one's parked list and
+   * could check it out under their own name.
+   */
+  it("keeps two people on the same booking apart", () => {
+    expect(scanDraftKey("fulfil", "user-1", "booking-1")).not.toBe(
+      scanDraftKey("fulfil", "user-2", "booking-1")
+    );
+  });
+
+  it("keeps one person's two bookings apart", () => {
+    expect(scanDraftKey("fulfil", "user-1", "booking-1")).not.toBe(
+      scanDraftKey("fulfil", "user-1", "booking-2")
+    );
+  });
+});
+
+describe("saveScanDraft / readScanDraft", () => {
+  /**
+   * A restored code comes back like one that has just been scanned and is
+   * still being looked up: its code type, and nothing a drawer would read
+   * `data` off. Scanner drawers treat a `type` as a promise of `data`.
+   */
+  it("round-trips a scanned code as one still owed its lookup", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+    });
+  });
+
+  it("restores no type, so no drawer reads data that is not there yet", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraft(KEY)?.["qr-1"]).not.toHaveProperty("type");
+  });
+
+  /**
+   * The whole point of storing codes rather than rows: a restored entry has no
+   * `data`, so `GenericItemRow` fetches it again and a list parked overnight
+   * comes back with today's availability rather than yesterday's.
+   */
+  it("stores no row payload, so a restored row re-resolves", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    const restored = readScanDraft(KEY);
+
+    expect(restored?.["qr-1"]).not.toHaveProperty("data");
+  });
+
+  /**
+   * A restored entry has neither type nor data until its fetch lands, so
+   * re-saving the list it was restored into must keep it. Dropping it there
+   * would empty the draft in the moment between restoring a list and its rows
+   * resolving again.
+   */
+  it("keeps a restored entry that has not re-resolved yet", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+    const restored = readScanDraft(KEY)!;
+
+    saveScanDraft(KEY, restored);
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+    });
+  });
+
+  /**
+   * A reload can land while a code scanned a moment ago is still being looked
+   * up. Nothing is known to be wrong with it, so it must not be lost.
+   */
+  it("keeps a code whose first lookup has not answered yet", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      "qr-2": undefined,
+      "qr-3": { codeType: "barcode" },
+    });
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "qr-3": { codeType: "barcode", pendingLookup: true },
+    });
+  });
+
+  /** A code that failed once fails again; restoring it only repeats the error. */
+  it("drops codes that errored", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      "qr-2": { error: "Asset not found" },
+    });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {})).toEqual(["qr-1"]);
+  });
+
+  /**
+   * Quick check-in and check-out mint keys that name a booking row, not a code.
+   * They mean nothing once the booking has moved on.
+   */
+  /**
+   * A lookup that got no answer (no connection, a gateway page) is not a
+   * verdict on the code. Dropping it would empty the draft the moment a
+   * restored list is looked up against a server that is still struggling,
+   * which is exactly when the draft is needed.
+   */
+  it("keeps a code whose lookup got no answer, to try again later", () => {
+    saveScanDraft(KEY, {
+      "qr-1": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "qr",
+      },
+      // Scanned for the first time while offline: no type is known yet.
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "barcode-2": { codeType: "barcode", pendingLookup: true },
+    });
+  });
+
+  /**
+   * A restored list is mirrored again as soon as any row on it changes. An
+   * entry still waiting for its lookup has no type, and must not be dropped
+   * by that write: another reload would lose the scan.
+   */
+  it("keeps a still-unanswered code through a restore and the next save", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+
+    // The restore, then a mirror write while the barcode is still pending.
+    const restored = readScanDraft(KEY)!;
+    saveScanDraft(KEY, { ...restored, "qr-1": scanned() });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {}).sort()).toEqual([
+      "barcode-2",
+      "qr-1",
+    ]);
+  });
+
+  it("lets go of a retried code once the server refuses it", () => {
+    saveScanDraft(KEY, {
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+    readScanDraft(KEY);
+
+    saveScanDraft(KEY, { "barcode-2": { error: "Asset not found" } });
+
+    expect(readScanDraft(KEY)).toBeNull();
+  });
+
+  it("drops the synthetic booking-row keys", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      [`${QUICK_CHECKIN_QR_PREFIX}ba-1`]: scanned(),
+      [`${QUICK_CHECKOUT_QR_PREFIX}ba-2`]: scanned(),
+    });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {})).toEqual(["qr-1"]);
+  });
+
+  it("returns null when nothing was ever saved", () => {
+    expect(readScanDraft(KEY)).toBeNull();
+  });
+
+  it("removes the draft instead of storing an empty one", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+    saveScanDraft(KEY, {});
+
+    expect(readScanDraft(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("replaces rather than merges, so a removed row stays removed", () => {
+    saveScanDraft(KEY, { "qr-1": scanned(), "qr-2": scanned() });
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {})).toEqual(["qr-1"]);
+  });
+});
+
+describe("expiry", () => {
+  it("refuses a draft older than the cutoff and removes it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T08:00:00Z"));
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    vi.setSystemTime(new Date("2026-01-02T08:00:00Z"));
+
+    expect(readScanDraft(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("still restores one parked over a lunch break", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T08:00:00Z"));
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    vi.setSystemTime(new Date("2026-01-01T09:30:00Z"));
+
+    expect(readScanDraft(KEY)).not.toBeNull();
+  });
+});
+
+describe("corrupt storage", () => {
+  it("discards a draft it cannot parse", () => {
+    localStorage.setItem(KEY, "{not json");
+
+    expect(readScanDraft(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("discards a draft of the wrong shape", () => {
+    localStorage.setItem(KEY, JSON.stringify({ entries: { "qr-1": {} } }));
+
+    expect(readScanDraft(KEY)).toBeNull();
+  });
+
+  /**
+   * Private windows and blocked site data make every call throw. Scanning has
+   * to carry on regardless, so the draft is a convenience that fails silently.
+   */
+  it("never throws when storage is unavailable", () => {
+    // why: a private window and blocked site data make every storage call
+    // throw, and there is no way to produce that from happy-dom's working
+    // implementation. The point under test is that scanning survives it.
+    const boom = () => {
+      throw new Error("blocked");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(boom);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(boom);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(boom);
+
+    expect(() => saveScanDraft(KEY, { "qr-1": scanned() })).not.toThrow();
+    expect(() => clearScanDraft(KEY)).not.toThrow();
+    expect(readScanDraft(KEY)).toBeNull();
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe("clearScanDraft", () => {
+  it("removes a saved draft", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+    clearScanDraft(KEY);
+
+    expect(readScanDraft(KEY)).toBeNull();
+  });
+
+  it("removes the context saved with it, leaving nothing behind", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+    clearScanDraft(KEY);
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+    expect(
+      Object.keys(localStorage).filter((key) => key.startsWith(KEY))
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The context (on the bulk scanner, the action a list was parked under) is
+ * stored inside the draft, so it lives, expires and goes with its list.
+ */
+describe("draft context", () => {
+  it("round-trips with the draft", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+
+    expect(readScanDraftContext(KEY)).toBe("Assign custody");
+  });
+
+  it("is gone once the list is emptied", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+    saveScanDraft(KEY, {}, { context: "Assign custody" });
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+  });
+
+  it("expires with its draft", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T08:00:00Z"));
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+
+    vi.setSystemTime(new Date("2026-01-02T08:00:00Z"));
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("is null when none was saved", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+  });
+});
+
+/**
+ * The units and source locations set on the rows are kept with the codes, so
+ * a restored list is not one that looks complete while every row has fallen
+ * back to its default.
+ */
+describe("draft choices", () => {
+  const choices = {
+    quantities: { "pool-1": 3 },
+    sources: { "pool-1": "loc-2" },
+  };
+
+  it("round-trips the quantities and sources set on the rows", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+
+    expect(readScanDraftChoices(KEY)).toEqual(choices);
+  });
+
+  it("goes with the draft when the list is emptied", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+    saveScanDraft(KEY, {}, { choices });
+
+    expect(readScanDraftChoices(KEY)).toEqual({ quantities: {}, sources: {} });
+  });
+
+  it("goes with the draft when it is cleared", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+    clearScanDraft(KEY);
+
+    expect(readScanDraftChoices(KEY)).toEqual({ quantities: {}, sources: {} });
+  });
+
+  it("leaves out values of the wrong shape, so the row falls back to its default", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        savedAt: Date.now(),
+        entries: { "qr-1": { codeType: "qr" } },
+        quantities: { a: 2, b: 0, c: 1.5, d: "4" },
+        sources: { a: "loc-1", b: "", c: 7 },
+      })
+    );
+
+    expect(readScanDraftChoices(KEY)).toEqual({
+      quantities: { a: 2 },
+      sources: { a: "loc-1" },
+    });
+  });
+});

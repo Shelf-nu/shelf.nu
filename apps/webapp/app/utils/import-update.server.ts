@@ -23,8 +23,10 @@ import type {
   ICustomFieldValueJson,
   UpdateAssetPayload,
 } from "~/modules/asset/types";
+import { planModelDefaultFill } from "~/modules/asset-model/defaults";
+import { getAssetModelsDefaults } from "~/modules/asset-model/defaults.server";
 import { decodeCsvListCell } from "~/utils/csv-cells";
-import { buildCustomFieldValue } from "~/utils/custom-fields";
+import { buildCustomFieldValue, parseYesNo } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
@@ -33,7 +35,6 @@ import {
   describeBulkUpdateRowFailure,
   isBackupExportHeaderRow,
   normalizeExportedCurrencyValue,
-  parseYesNo,
 } from "./import-update-diff";
 import {
   batchResolveAssetModelNames,
@@ -106,19 +107,17 @@ const NO_UPDATABLE_COLUMNS_MESSAGE =
 
 /**
  * "Workspace backup export detected" error message. Fires when the header
- * row carries raw Prisma field/relation names that only the workspace
- * backup export (Settings → General → Export backup) emits — see
- * `isBackupExportHeaderRow` in `./import-update-diff`. That file's
- * `category`, `tags`, and `assetModel` cells are JSON blobs, not plain
- * values, so letting it through would propose creating entities literally
- * named `{}` / `[]` / a raw JSON string. Checked BEFORE the identifier
- * check below: the backup file's `id` header now resolves as a valid
- * identifier column (case-insensitive matching, added by this branch), so
- * without this guard the file would sail past that check too.
+ * row carries the raw Prisma field/relation names of a legacy workspace
+ * backup file, see `isBackupExportHeaderRow` in `./import-update-diff`.
+ * That file's `category`, `tags`, and `assetModel` cells are JSON blobs, not
+ * plain values, so letting it through would propose creating entities
+ * literally named `{}` / `[]` / a raw JSON string. Checked BEFORE the
+ * identifier check: the backup file's `id` header resolves as a valid
+ * (case-insensitive) identifier column, so that check alone lets it through.
  */
 const BACKUP_EXPORT_MESSAGE =
-  "This looks like a workspace backup export. Use Export → Import-ready " +
-  "from the Asset Index instead — the backup file's category, tags, and " +
+  "This looks like a workspace backup export. Use Export > Import-ready " +
+  "from the Asset Index instead. The backup file's category, tags, and " +
   "asset model cells are stored as raw data and can't be matched to real " +
   "entities here.";
 
@@ -162,15 +161,15 @@ export async function buildUpdatePreview({
   // Get org custom fields for header analysis
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, format: true },
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
 
   // Reject a workspace backup export before it can be misread as a normal
-  // update CSV — see BACKUP_EXPORT_MESSAGE. Checked before the identifier
-  // check below because the backup file's `id` header now resolves as a
-  // valid (case-insensitive) identifier column.
+  // update CSV, see BACKUP_EXPORT_MESSAGE. Checked before the identifier
+  // check below because the backup file's `id` header resolves as a valid
+  // (case-insensitive) identifier column.
   if (isBackupExportHeaderRow(headers)) {
     throw new ShelfError({
       cause: null,
@@ -326,7 +325,7 @@ export async function applyBulkUpdatesFromImport({
 
   const orgCustomFields = await db.customField.findMany({
     where: { organizationId, active: true, deletedAt: null },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, format: true },
   });
 
   const headerAnalysis = analyzeUpdateHeaders(headers, orgCustomFields);
@@ -601,6 +600,16 @@ export async function applyBulkUpdatesFromImport({
         )
       : new Map<string, string>();
 
+  /**
+   * Defaults of every model the file moves assets onto, read once. Joining a
+   * model fills the asset's empty fields from them, the same rule as every
+   * other way an asset joins a model.
+   */
+  const modelDefaults = await getAssetModelsDefaults({
+    assetModelIds: [...new Set(assetModelNameToId.values())],
+    organizationId,
+  });
+
   for (const assetPreview of diffs.assetsToUpdate) {
     const { id: matchId, assetDbId, title: assetTitle, changes } = assetPreview;
     // Look up in primary map first, then fallback (matches computeAssetDiffs logic)
@@ -735,9 +744,11 @@ export async function applyBulkUpdatesFromImport({
 
           case "description":
             // Plain scalar, no side-effects. Not clearable via an empty
-            // cell (see compareCoreField's "description" case) — this
+            // cell (see compareCoreField's "description" case). This
             // branch only runs for a change the diff already produced,
-            // i.e. a non-empty cell that differs from the current value.
+            // i.e. a non-empty cell that differs from the current value
+            // and fits the length limit (computeAssetDiffs refuses the
+            // row otherwise).
             description = change.newValue;
             break;
 
@@ -839,8 +850,52 @@ export async function applyBulkUpdatesFromImport({
         }
       }
 
+      const joinedModel = assetModelIdPatch
+        ? modelDefaults.get(assetModelIdPatch)
+        : undefined;
+      if (joinedModel) {
+        const fill = planModelDefaultFill({
+          model: joinedModel,
+          current: {
+            // The file's own cells win; the saved asset decides the rest.
+            categoryId:
+              categoryId === undefined
+                ? existingAsset.categoryId
+                : categoryId === "uncategorized"
+                ? null
+                : categoryId,
+            // A Category cell the file clears is an answer, so the model
+            // neither fills it nor fills fields limited to categories. The
+            // asset form treats "uncategorized" as blank instead (see
+            // `fillAssetFormDataFromModel`): its select cannot tell a choice
+            // from no choice, while an import cell is always typed.
+            categoryCleared: categoryId === "uncategorized",
+            valuation:
+              valuation === undefined ? existingAsset.valuation : valuation,
+            // A cell the file clears is an answer too, so it is not filled.
+            customFieldIdsWithValue: new Set([
+              ...existingAsset.customFields.map(
+                (value) => value.customField.id
+              ),
+              ...customFieldsValues.map((v) => v.id),
+            ]),
+          },
+        });
+        if (fill.categoryId !== undefined) {
+          categoryId = fill.categoryId;
+        }
+        if (fill.valuation !== undefined) valuation = fill.valuation;
+        for (const fieldDefault of fill.customFields) {
+          customFieldsValues.push({
+            id: fieldDefault.customFieldId,
+            value: fieldDefault.value,
+          });
+        }
+      }
+
       // Count actual payload fields (not otherChanges.length, which may include
-      // fields that were silently skipped like invalid numbers)
+      // fields that were silently skipped like invalid numbers). Counted after
+      // the model fill, so fields the model filled are reported too.
       let changesApplied = 0;
       if (title !== undefined) changesApplied++;
       if (description !== undefined) changesApplied++;
@@ -954,6 +1009,7 @@ export async function applyBulkUpdatesFromImport({
               id: assetDbId,
               availableToBook: newBool,
               organizationId,
+              userId,
             });
             changesApplied++;
           }

@@ -10,6 +10,7 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { createNote } from "~/modules/note/service.server";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   PermissionAction,
   PermissionEntity,
@@ -29,14 +30,20 @@ export async function action({ request }: ActionFunctionArgs) {
     await requireMobilePermission({
       userId: user.id,
       organizationId,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      entity: PermissionEntity.note,
+      action: PermissionAction.create,
     });
 
     const { assetId, content } = await parseMobileBody(
       z.object({
         assetId: z.string().min(1),
-        content: z.string().min(1).max(NOTE_MAX_CONTENT_LENGTH),
+        // Strip Markdoc delimiters so the comment renders as text, never as a
+        // live tag, matching the web note schema.
+        content: z
+          .string()
+          .max(NOTE_MAX_CONTENT_LENGTH)
+          .transform(stripMarkdocDelimiters)
+          .pipe(z.string().min(1)),
       }),
       request,
       "Assets"
@@ -44,6 +51,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Verify asset exists and belongs to the organization
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership check for notes on an asset's own page, which stays usable for archived assets
       where: { id: assetId, organizationId },
       select: { id: true },
     });

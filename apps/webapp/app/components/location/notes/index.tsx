@@ -1,6 +1,7 @@
 import { useFetcher, useLoaderData } from "react-router";
 import type { NoteWithUser } from "~/components/assets/notes/note";
 import { Note } from "~/components/assets/notes/note";
+import { LinkTitlesProvider } from "~/components/links/link-titles-context";
 import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/locations.$locationId.activity";
@@ -15,7 +16,7 @@ export const LocationNotes = ({
   canCreate?: boolean;
   canDelete?: boolean;
 } = {}) => {
-  const { location, notes } = useLoaderData<typeof loader>();
+  const { location, notes, linkTitles } = useLoaderData<typeof loader>();
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
@@ -64,32 +65,34 @@ export const LocationNotes = ({
       ) : null}
       {canCreate ? <NewLocationNote fetcher={fetcher} /> : null}
       {hasNotes || optimisticNote ? (
-        <ul className="notes-list mt-8 w-full">
-          {/* Render optimistic note using the same Note component */}
-          {optimisticNote && (
-            <Note
-              key={optimisticNote.id}
-              note={optimisticNote}
-              actionsDropdown={
-                canDelete ? (
-                  <LocationNoteActionsDropdown noteId={optimisticNote.id} />
-                ) : undefined
-              }
-            />
-          )}
-          {/* Render all existing notes */}
-          {(notes as NoteWithUser[]).map((note) => (
-            <Note
-              key={note.id}
-              note={note}
-              actionsDropdown={
-                canDelete ? (
-                  <LocationNoteActionsDropdown noteId={note.id} />
-                ) : undefined
-              }
-            />
-          ))}
-        </ul>
+        <LinkTitlesProvider value={linkTitles}>
+          <ul className="notes-list mt-8 w-full">
+            {/* Render optimistic note using the same Note component */}
+            {optimisticNote && (
+              <Note
+                key={optimisticNote.id}
+                note={optimisticNote}
+                actionsDropdown={
+                  canDelete ? (
+                    <LocationNoteActionsDropdown noteId={optimisticNote.id} />
+                  ) : undefined
+                }
+              />
+            )}
+            {/* Render all existing notes */}
+            {(notes as NoteWithUser[]).map((note) => (
+              <Note
+                key={note.id}
+                note={note}
+                actionsDropdown={
+                  canDelete ? (
+                    <LocationNoteActionsDropdown noteId={note.id} />
+                  ) : undefined
+                }
+              />
+            ))}
+          </ul>
+        </LinkTitlesProvider>
       ) : (
         <div className="flex h-[500px] items-center justify-center">
           <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">

@@ -16,6 +16,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import {
   bulkCheckInAssets,
@@ -55,7 +56,12 @@ vi.mock("~/database/db.server", () => ({
 // why: exercising the route's split, not the custody writes themselves
 vi.mock("~/modules/asset/service.server", () => ({
   bulkCheckInAssets: vi.fn().mockResolvedValue({ skippedQuantityTracked: 0 }),
-  releaseQuantity: vi.fn().mockResolvedValue({ consumed: 0, returned: 4 }),
+  releaseQuantity: vi.fn().mockResolvedValue({
+    consumed: 0,
+    returned: 4,
+    lines: [],
+    multiSource: false,
+  }),
 }));
 
 // why: authorization is asserted at the service layer; here it only needs to resolve
@@ -156,12 +162,12 @@ function holder(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
-    canUseBarcodes: false,
-    canSeeAllCustody: true,
-  } as Awaited<ReturnType<typeof requirePermission>>);
+  requirePermissionMock.mockResolvedValue(
+    permissionContext({
+      organizationId: "org-1",
+      roles: [OrganizationRoles.ADMIN],
+    }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+  );
 });
 
 describe("api/assets/bulk-release-custody", () => {
@@ -225,6 +231,28 @@ describe("api/assets/bulk-release-custody", () => {
     expect(body.error.message).toContain("Drill Bits");
     expect(body.error.message).toContain("held by more than one person");
     expect(mockReleaseQuantity).not.toHaveBeenCalled();
+  });
+
+  it("treats one person holding units from two locations as one holder", async () => {
+    // One operator row per source location: 2 from one, 1 from another.
+    dbMocks.custodyFindMany.mockResolvedValue([
+      holder("asset-qty", "tm-1", { quantity: 2 }),
+      holder("asset-qty", "tm-1", { quantity: 1 }),
+    ]);
+
+    const response = (await action(
+      makeRequest(["asset-qty"], { "asset-qty": 3 })
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    // The service draws from the person's rows; the route only resolves who.
+    expect(mockReleaseQuantity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-qty",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      })
+    );
   });
 
   it("writes nothing when one asset asks for more units than its holder has", async () => {

@@ -3,6 +3,7 @@ import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { RecordEventTxClient } from "~/modules/activity-event/service.server";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import type { ModelDefaultsTxClient } from "~/modules/asset-model/defaults.server";
 import {
   buildAssetModelChangeNote,
   resolveUserLink,
@@ -11,16 +12,24 @@ import { createLoadUserForNotes } from "~/modules/note/load-user-for-notes.serve
 import type { NotesTxClient } from "~/modules/note/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "~/utils/constants";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
 } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { assertCategoryBelongsToOrg } from "~/utils/org-validation.server";
 import { getFileUploadPath, parseFileFormData } from "~/utils/storage.server";
-import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import type {
+  CreateAssetFromContentImportPayload,
+  ICustomFieldValueJson,
+} from "../asset/types";
 
 const label: ErrorLabel = "Asset Model";
 
@@ -78,8 +87,50 @@ export async function createAssetModel({
 }
 
 /**
+ * Builds the asset models index where-clause for the active search.
+ *
+ * Shared by {@link getAssetModels}, which renders the list, and
+ * {@link bulkDeleteAssetModels}, which expands a "select all" over it. They
+ * must agree: the delete is permanent, so any difference removes models the
+ * user never saw.
+ *
+ * @param params.organizationId - The caller's organization
+ * @param params.search - The list's search term (the `s` param)
+ * @returns A `Prisma.AssetModelWhereInput` scoped to the org and search
+ */
+function getAssetModelsWhereInput({
+  organizationId,
+  search,
+}: {
+  organizationId: Organization["id"];
+  search?: string | null;
+}): Prisma.AssetModelWhereInput {
+  const where: Prisma.AssetModelWhereInput = { organizationId };
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+/**
  * Fetches a paginated list of asset models for the given organization.
- * Includes the count of assets associated with each model.
+ *
+ * Each model carries two counts. `_count.assets` is every asset linked to it,
+ * archived ones included: the delete dialog warns about all of them, since
+ * deleting the model unlinks archived assets too. `activeAssetCount` leaves
+ * archived assets out, as every inventory count does, and is what the list
+ * shows.
+ *
+ * With `withCustomFieldDefaults`, each model also carries its default custom
+ * field values (`customFieldId` and `value` only). The asset form uses them to
+ * pre-fill empty custom fields when a model is picked; it checks each value
+ * against the field definitions it already loads, so no field rows are read
+ * here.
  */
 export async function getAssetModels(params: {
   organizationId: Organization["id"];
@@ -88,42 +139,116 @@ export async function getAssetModels(params: {
   /** Items to be loaded per page */
   perPage?: number;
   search?: string | null;
+  /** Also load each model's default custom field values. */
+  withCustomFieldDefaults?: boolean;
+  /**
+   * A model that must be in the result even when it falls outside the page,
+   * such as the one an asset being edited already has. A select shows its
+   * value only if the value is among its options.
+   *
+   * When it is not on the page it is added first, ahead of the `updatedAt`
+   * order, ignoring `search` and `page`, so the list can be `perPage + 1`
+   * long. Meant for an unfiltered first page, such as the edit form's.
+   */
+  includeId?: string | null;
 }) {
-  const { organizationId, page = 1, perPage = 8, search } = params;
+  const {
+    organizationId,
+    page = 1,
+    perPage = 8,
+    search,
+    withCustomFieldDefaults = false,
+    includeId,
+  } = params;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8;
 
-    const where: Prisma.AssetModelWhereInput = { organizationId };
+    const where = getAssetModelsWhereInput({ organizationId, search });
 
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    const include = {
+      _count: {
+        select: { assets: true },
+      },
+      defaultCategory: {
+        select: { id: true, name: true, color: true },
+      },
+    } as const;
 
-    const [assetModels, totalAssetModels] = await Promise.all([
+    const [pageModels, totalAssetModels, includedModel] = await Promise.all([
       db.assetModel.findMany({
         skip,
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        include: {
-          _count: {
-            select: { assets: true },
-          },
-          defaultCategory: {
-            select: { id: true, name: true, color: true },
-          },
-        },
+        include,
       }),
 
       db.assetModel.count({ where }),
+
+      includeId
+        ? db.assetModel.findFirst({
+            where: { id: includeId, organizationId },
+            include,
+          })
+        : null,
     ]);
 
-    return { assetModels, totalAssetModels };
+    const assetModels =
+      includedModel && !pageModels.some((m) => m.id === includedModel.id)
+        ? [includedModel, ...pageModels]
+        : pageModels;
+
+    const modelIds = assetModels.map((model) => model.id);
+    const [archivedCounts, fieldDefaults] = await Promise.all([
+      modelIds.length > 0
+        ? db.asset.groupBy({
+            by: ["assetModelId"],
+            where: {
+              organizationId,
+              assetModelId: { in: modelIds },
+              archivedAt: { not: null },
+            },
+            _count: { _all: true },
+          })
+        : [],
+      withCustomFieldDefaults && modelIds.length > 0
+        ? db.assetModelCustomFieldDefault.findMany({
+            where: { assetModelId: { in: modelIds } },
+            select: { assetModelId: true, customFieldId: true, value: true },
+          })
+        : [],
+    ]);
+    const archivedByModelId = new Map(
+      archivedCounts.map((row) => [row.assetModelId, row._count._all])
+    );
+
+    /** Default custom field values by model id, as the asset form reads them. */
+    const defaultsByModelId = new Map<
+      string,
+      { customFieldId: string; value: ICustomFieldValueJson }[]
+    >();
+    for (const fieldDefault of fieldDefaults) {
+      const list = defaultsByModelId.get(fieldDefault.assetModelId) ?? [];
+      list.push({
+        customFieldId: fieldDefault.customFieldId,
+        value: fieldDefault.value as unknown as ICustomFieldValueJson,
+      });
+      defaultsByModelId.set(fieldDefault.assetModelId, list);
+    }
+
+    return {
+      assetModels: assetModels.map((model) => ({
+        ...model,
+        activeAssetCount:
+          model._count.assets - (archivedByModelId.get(model.id) ?? 0),
+        ...(withCustomFieldDefaults && {
+          customFieldDefaults: defaultsByModelId.get(model.id) ?? [],
+        }),
+      })),
+      totalAssetModels,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -170,34 +295,43 @@ export async function getAssetModel({
 
 /**
  * Updates an existing asset model's fields.
+ *
+ * @param tx - Optional transaction, so the model and its custom field
+ *   defaults can be saved together
  */
-export async function updateAssetModel({
-  id,
-  organizationId,
-  name,
-  description,
-  defaultCategoryId,
-  defaultValuation,
-}: Pick<AssetModel, "id" | "organizationId"> & {
-  name?: string;
-  description?: string | null;
-  defaultCategoryId?: string | null;
-  defaultValuation?: number | null;
-}) {
+export async function updateAssetModel(
+  {
+    id,
+    organizationId,
+    name,
+    description,
+    defaultCategoryId,
+    defaultValuation,
+  }: Pick<AssetModel, "id" | "organizationId"> & {
+    name?: string;
+    description?: string | null;
+    defaultCategoryId?: string | null;
+    defaultValuation?: number | null;
+  },
+  tx: ModelDefaultsTxClient = db
+) {
   // why: defaultCategoryId comes from form input and Prisma's foreign key
   // only proves the row exists, not that it belongs to this workspace —
   // without this the model would connect another tenant's category. Runs
   // outside the try so its 400 reaches the form instead of being rewritten
   // into the generic constraint-violation message.
   if (defaultCategoryId) {
-    await assertCategoryBelongsToOrg({
-      categoryId: defaultCategoryId,
-      organizationId,
-    });
+    await assertCategoryBelongsToOrg(
+      {
+        categoryId: defaultCategoryId,
+        organizationId,
+      },
+      tx
+    );
   }
 
   try {
-    return await db.assetModel.update({
+    return await tx.assetModel.update({
       where: { id, organizationId },
       data: {
         name: name?.trim(),
@@ -448,6 +582,35 @@ async function recordAssetModelDeletionUnlinks(
 }
 
 /**
+ * Refuses a single asset model delete unless the user typed its name, as the delete
+ * dialog asks. A asset model that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The asset model to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertAssetModelDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.assetModel
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((model) => model?.name ?? null),
+    label,
+  });
+}
+
+/**
  * Deletes an asset model by ID, scoped to the given organization.
  */
 export async function deleteAssetModel({
@@ -470,6 +633,7 @@ export async function deleteAssetModel({
      * placeholder on its own.
      */
     const assetsLosingTheModel = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ON DELETE SET NULL unlinks archived assets too, so their unlink history must be recorded
       where: { assetModelId: id, organizationId },
       select: { id: true, assetModel: { select: { id: true, name: true } } },
     });
@@ -664,34 +828,30 @@ export async function bulkDeleteAssetModels({
   organizationId,
   currentSearchParams,
   userId,
+  confirmation,
 }: {
   assetModelIds: AssetModel["id"][];
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
   /** Actor for the unlink events and notes the delete cascades into */
   userId: User["id"];
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * models this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
-    let where: Prisma.AssetModelWhereInput;
-
-    if (assetModelIds.includes(ALL_SELECTED_KEY)) {
-      where = { organizationId };
-
-      /** When there are active filters, scope the delete to matching models */
-      if (currentSearchParams) {
-        const params = new URLSearchParams(currentSearchParams);
-        const search = params.get("search");
-
-        if (search) {
-          where.OR = [
-            { name: { contains: search, mode: "insensitive" } },
-            { description: { contains: search, mode: "insensitive" } },
-          ];
-        }
-      }
-    } else {
-      where = { id: { in: assetModelIds }, organizationId };
-    }
+    // A "select all" resolves through the index's own builder, so it removes
+    // exactly the models the list shows for the active search.
+    const where: Prisma.AssetModelWhereInput = assetModelIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getAssetModelsWhereInput({
+          organizationId,
+          search: new URLSearchParams(currentSearchParams ?? "").get("s"),
+        })
+      : { id: { in: assetModelIds }, organizationId };
 
     /**
      * Resolved before the delete so the assets can be found by the models they
@@ -706,9 +866,19 @@ export async function bulkDeleteAssetModels({
       select: { id: true },
     });
 
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: assetModelIds,
+      confirmation,
+      matchedCount: modelsToDelete.length,
+      noun: { one: "asset model", many: "asset models" },
+      label,
+    });
+
     const assetsLosingTheirModel =
       modelsToDelete.length > 0
         ? await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ON DELETE SET NULL unlinks archived assets too, so their unlink history must be recorded
             where: {
               assetModelId: { in: modelsToDelete.map((model) => model.id) },
               organizationId,
@@ -739,7 +909,14 @@ export async function bulkDeleteAssetModels({
           tx
         );
 
-        return tx.assetModel.deleteMany({ where });
+        // Scoped to the ids read above, so the count confirmed is the count
+        // removed even if a model matching the search is added meanwhile.
+        return tx.assetModel.deleteMany({
+          where: {
+            id: { in: modelsToDelete.map((model) => model.id) },
+            organizationId,
+          },
+        });
       },
       // A select-all spans the whole workspace, so this writes one event and
       // one note per asset in it. 15s matches the ceiling the comparable bulk
@@ -747,6 +924,9 @@ export async function bulkDeleteAssetModels({
       { timeout: 15000 }
     );
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting asset models.",

@@ -1,7 +1,9 @@
 import { transporter } from "~/emails/transporter.server";
 import { ShelfError } from "~/utils/error";
+import { isLastAttempt } from "~/utils/job-retry";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { formatRecipientList, parseRecipientList } from "./recipient-list";
 import { redactEmailPayloadForLog } from "./redact-email-payload";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
@@ -37,16 +39,7 @@ export const registerEmailWorkers = async () => {
       try {
         await triggerEmail(job.data);
       } catch (cause) {
-        // why: pg-boss increments retrycount at fetch time, so with N retries
-        // the handler observes retrycount = 0, 1, 2, ... N — the final attempt
-        // has retrycount === retrylimit. Using `- 1` here double-logs (fires on
-        // both the second-to-last AND the final attempt).
-        const isLastRetry =
-          job.retrycount != null &&
-          job.retrylimit != null &&
-          job.retrycount >= job.retrylimit;
-
-        if (isLastRetry) {
+        if (isLastAttempt(job)) {
           Logger.error(
             new ShelfError({
               cause,
@@ -75,19 +68,38 @@ export const triggerEmail = async ({
   from,
   replyTo,
 }: EmailPayloadType) => {
-  if (to.endsWith(SOFT_DELETED_EMAIL_DOMAIN)) {
+  /**
+   * `to` can carry a comma separated list of addresses (in-app feedback goes
+   * to every inbox in FEEDBACK_EMAIL). Each address is checked on its own:
+   * one soft-deleted recipient does not suppress the others, and the outcome
+   * does not depend on address order. An empty `to` is passed through
+   * untouched so it fails loudly in nodemailer rather than being silently
+   * swallowed here.
+   */
+  const recipients = parseRecipientList(to);
+  const deliverableRecipients = recipients.filter(
+    // Lower-cased first: domains are case-insensitive, so an address stored
+    // as "@DELETED.SHELF.NU" is the same dead inbox and must not be mailed
+    ({ address }) => !address.toLowerCase().endsWith(SOFT_DELETED_EMAIL_DOMAIN)
+  );
+
+  if (recipients.length > 0 && deliverableRecipients.length === 0) {
     Logger.warn(
       `Skipping email to soft-deleted user: ${to} (subject: ${subject})`
     );
     return;
   }
 
+  const toHeader = deliverableRecipients.length
+    ? formatRecipientList(deliverableRecipients)
+    : to;
+
   try {
     // send mail with defined transport object
     await transporter.sendMail({
       from: from || SMTP_FROM || `"Shelf" <hello@example.com>`, // sender address
       replyTo: replyTo || SUPPORT_EMAIL, // reply to
-      to, // list of receivers
+      to: toHeader, // list of receivers
       subject, // Subject line
       text, // plain text body
       html: html || "", // html body

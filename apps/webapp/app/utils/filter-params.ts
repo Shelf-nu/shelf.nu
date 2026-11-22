@@ -19,6 +19,11 @@ export const NON_FILTER_PARAMS = new Set([
   "modelSortDirection",
   "index",
   "view",
+  // `archived` is the Active/Archived/All VIEW dimension on the asset index
+  // (issue #382), not a filter the user applied. It must never count as one:
+  // an empty Archived view is "nothing archived", not "your filters exclude
+  // everything", and Clear Filters must not appear for a tab.
+  "archived",
 ]);
 
 /**

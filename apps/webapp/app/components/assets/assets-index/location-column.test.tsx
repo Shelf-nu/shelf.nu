@@ -122,4 +122,39 @@ describe("LocationColumn", () => {
     expect(tooltip).toHaveTextContent("Warehouse");
     expect(tooltip).toHaveTextContent("Field");
   });
+
+  it("counts distinct locations, not placements", async () => {
+    const user = userEvent.setup();
+
+    // A quantity-tracked asset can hold a manual placement and a kit-driven
+    // one at the same location, so the rows repeat location ids.
+    renderCell([
+      makeLocation("loc-1", "Office"),
+      makeLocation("loc-1", "Office"),
+      makeLocation("loc-2", "Warehouse"),
+      makeLocation("loc-2", "Warehouse"),
+    ]);
+
+    const chip = screen.getByTestId("location-more-chip");
+    expect(chip).toHaveTextContent(/^\+1$/);
+    expect(chip).toHaveAttribute("aria-label", "+1 more location");
+
+    await user.hover(chip);
+    const tooltip = await screen.findByTestId("location-more-tooltip");
+    // Radix also renders a hidden copy of the content, so read one list.
+    const names = Array.from(
+      tooltip.querySelector("ul")?.querySelectorAll("li") ?? []
+    ).map((li) => li.textContent);
+    expect(names).toEqual(["Office", "Warehouse"]);
+  });
+
+  it("shows no +N chip when every placement is at the primary location", () => {
+    renderCell([
+      makeLocation("loc-1", "Office"),
+      makeLocation("loc-1", "Office"),
+    ]);
+
+    expect(screen.getByTestId("location-badge")).toHaveTextContent("Office");
+    expect(screen.queryByTestId("location-more-chip")).not.toBeInTheDocument();
+  });
 });

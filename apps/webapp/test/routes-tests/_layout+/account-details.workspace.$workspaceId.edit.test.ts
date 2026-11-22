@@ -11,6 +11,9 @@
  * The permission check and the owner gate run for real; only the membership
  * lookup and the reads and writes around them are stubbed.
  *
+ * The SSO intent's write is pinned too: every role's group id, the Manager's
+ * included, reaches `updateOrganization` trimmed, and a blank one as `null`.
+ *
  * @see {@link file://./../../../app/routes/_layout+/account-details.workspace.$workspaceId.edit.tsx}
  * @see {@link file://./../../../app/utils/roles.server.ts} requirePermissionInOrganization
  */
@@ -21,6 +24,7 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 import { db } from "~/database/db.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import { updateOrganization } from "~/modules/organization/service.server";
 
 import {
   action,
@@ -218,6 +222,83 @@ describe("workspace edit route", () => {
 
       expect(refusal.status).toBe(403);
       expect(db.organization.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("action — sso group mapping", () => {
+    beforeEach(() => {
+      givenMemberships([OrganizationRoles.OWNER]);
+      vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+        id: EDITED_WORKSPACE,
+        name: "Edited workspace",
+        type: OrganizationType.TEAM,
+        userId: "user123",
+        enabledSso: true,
+        ssoDetails: { id: "sso-1" },
+      } as never);
+    });
+
+    /**
+     * Posts the SSO form with the given group fields.
+     *
+     * @param groups - The group-id fields as the form submits them
+     */
+    async function saveGroups(groups: Record<string, string>) {
+      return action(
+        createActionArgs({
+          request: new Request("http://localhost/test", {
+            method: "POST",
+            body: new URLSearchParams({
+              intent: "sso",
+              id: EDITED_WORKSPACE,
+              ...groups,
+            }),
+          }),
+          params: { workspaceId: EDITED_WORKSPACE },
+          context,
+        })
+      );
+    }
+
+    it("saves the Manager group trimmed, and stores blank groups as null", async () => {
+      await saveGroups({
+        adminGroupId: "",
+        managerGroupId: "  grp-manager  ",
+        selfServiceGroupId: "   ",
+        baseUserGroupId: "",
+      });
+
+      expect(updateOrganization).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: EDITED_WORKSPACE,
+          ssoDetails: {
+            adminGroupId: null,
+            managerGroupId: "grp-manager",
+            selfServiceGroupId: null,
+            baseUserGroupId: null,
+          },
+        })
+      );
+    });
+
+    it("stores a blank Manager group as null next to the other mapped groups", async () => {
+      await saveGroups({
+        adminGroupId: "grp-admin",
+        managerGroupId: "  ",
+        selfServiceGroupId: "grp-self-service",
+        baseUserGroupId: "grp-base",
+      });
+
+      expect(updateOrganization).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ssoDetails: {
+            adminGroupId: "grp-admin",
+            managerGroupId: null,
+            selfServiceGroupId: "grp-self-service",
+            baseUserGroupId: "grp-base",
+          },
+        })
+      );
     });
   });
 });

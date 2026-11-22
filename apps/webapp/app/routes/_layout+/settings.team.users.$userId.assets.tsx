@@ -19,7 +19,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMemberProfile,
@@ -41,7 +41,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       // could then list any user's custody.
       userId: selectedUserId,
       viewerId: userId,
-      canSeeAllCustody,
+      canSeeAllCustody: access.custody.seeAll,
       request,
       organizationId,
     });

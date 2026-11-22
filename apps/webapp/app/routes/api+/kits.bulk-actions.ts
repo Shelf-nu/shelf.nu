@@ -1,11 +1,9 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
 import { KitBulkLocationUpdateSchema } from "~/components/kits/bulk-location-update-dialog";
 import { BulkReleaseKitCustodySchema } from "~/components/kits/bulk-release-custody-dialog";
-import { db } from "~/database/db.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
   bulkAssignKitCustody,
@@ -60,13 +58,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-update-location": PermissionAction.update,
     };
 
-    const { organizationId, role, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: intent2ActionMap[intent],
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
     /**
      * `?teamMember=` rides in on `currentSearchParams` and is applied to a
@@ -78,17 +76,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
       teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
         "teamMember"
       ),
-      canSeeAllCustody,
+      canSeeAllCustody: access.custody.seeAll,
       userId,
       organizationId,
     });
 
     switch (intent) {
       case "bulk-delete": {
-        const { kitIds } = parseData(formData, BulkDeleteKitsSchema);
+        const { kitIds, confirmation } = parseData(
+          formData,
+          BulkDeleteKitsSchema
+        );
 
         await bulkDeleteKits({
           kitIds,
+          confirmation,
           organizationId,
           userId,
           currentSearchParams,
@@ -132,7 +134,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           });
         });
 
-        if (isSelfService && teamMember.userId !== userId) {
+        if (assignsSelfOnly && teamMember.userId !== userId) {
           throw new ShelfError({
             cause: null,
             title: "Action not allowed",
@@ -168,15 +170,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
       case "bulk-release-custody": {
         const { kitIds } = parseData(formData, BulkReleaseKitCustodySchema);
 
-        // The SELF_SERVICE "release only your own custody" check now lives in
-        // `bulkReleaseKitCustody`, because it has to run on the RESOLVED kits.
-        // Here it queried `kitCustody` with the raw `kitIds` — which is
-        // `["all-selected"]` on a select-all, matching zero rows — so the
-        // guard passed and every matched kit was released. Same shape as
-        // `bulkCheckInAssets`, which already guards inside the service.
+        // `bulkReleaseKitCustody` enforces the caller's custody scope on the
+        // RESOLVED kits: on a select-all the raw `kitIds` is `["all-selected"]`,
+        // which matches no custody row.
         await bulkReleaseKitCustody({
           userId,
-          role,
+          custodyAssign: access.custody.assign,
           kitIds,
           organizationId,
           currentSearchParams,

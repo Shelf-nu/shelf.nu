@@ -17,16 +17,18 @@
  */
 
 import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
-import { useLoaderData, useRouteLoaderData } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useActionData, useLoaderData, useRouteLoaderData } from "react-router";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import {
   type AlreadyIncludedRow,
   type ExpectedModelRequest,
+  type ReservedModel,
   assignAlreadyIncludedAtom,
+  assignReservedModelsAtom,
   expectedModelRequestsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
@@ -53,6 +55,9 @@ vi.mock("react-router", async () => {
     useLoaderData: vi.fn(),
     useRouteLoaderData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
+    // why: the shared drawer reads the route's action data for its
+    // save-not-confirmed notice, which needs a mounted data router.
+    useActionData: vi.fn(() => undefined),
     useLocation: vi.fn(() => ({
       pathname: "/bookings/booking-1/overview/scan-assets",
       search: "",
@@ -145,6 +150,7 @@ function kitFixture({
       asset: {
         status: AssetStatus.AVAILABLE,
         availableToBook: true,
+        archivedAt: null,
         custody: [],
         ...member,
       },
@@ -157,6 +163,8 @@ function kitFixture({
  *
  * @param options.expectedModelRequests - Outstanding model reservations, as
  *   the route's session hook would seed `expectedModelRequestsAtom`.
+ * @param options.reservedModels - Every model the booking reserves, fully
+ *   filled ones included. Defaults to the models in `expectedModelRequests`.
  * @param options.alreadyIncluded - Assets already on the booking, as the
  *   route would seed `assignAlreadyIncludedAtom`.
  * @param options.bookingAssets - The booking's own `bookingAssets` rows, as
@@ -169,6 +177,7 @@ function kitFixture({
 function renderDrawer(
   options: {
     expectedModelRequests?: ExpectedModelRequest[];
+    reservedModels?: ReservedModel[];
     alreadyIncluded?: AlreadyIncludedRow[];
     bookingAssets?: Array<{ assetId: string }>;
     scannedAssets?: Record<string, Partial<AssetFromQr>>;
@@ -177,6 +186,13 @@ function renderDrawer(
 ) {
   const store = createStore();
   store.set(expectedModelRequestsAtom, options.expectedModelRequests ?? []);
+  store.set(
+    assignReservedModelsAtom,
+    options.reservedModels ??
+      (options.expectedModelRequests ?? []).map(
+        ({ assetModelId, assetModelName }) => ({ assetModelId, assetModelName })
+      )
+  );
   store.set(assignAlreadyIncludedAtom, options.alreadyIncluded ?? []);
   store.set(scannedItemsAtom, {
     ...Object.fromEntries(
@@ -210,6 +226,58 @@ function renderDrawer(
     </Provider>
   );
 }
+
+describe("AddAssetsToBookingDrawer after a save that got no answer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * The shared drawer owns the notice, and this drawer tells it where the
+   * operator can check: the booking, in a new tab so the list stays put.
+   */
+  it("shows the notice in the drawer with a link to the booking", () => {
+    // why: a transport failure reaches the drawer as the route's action data.
+    // Set for this test only, and put back so it cannot answer the others.
+    const actionData = vi.mocked(useActionData);
+    actionData.mockReturnValue({
+      scanSubmitFailure: { kind: "timeout", status: 524 },
+    });
+    onTestFinished(() => {
+      actionData.mockReturnValue(undefined);
+    });
+
+    renderDrawer({ scannedAssets: { "qr-1": { id: "asset-1" } } });
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("The save took too long to answer.");
+    const link = within(alert).getByRole("link", { name: "Open the booking" });
+    expect(link.getAttribute("href")).toBe("/bookings/booking-1");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  /** The notice is about the list, so it goes with the list. */
+  it("drops the notice once the list is emptied", () => {
+    // why: as above, the failure arrives as the route's action data.
+    const actionData = vi.mocked(useActionData);
+    actionData.mockReturnValue({
+      scanSubmitFailure: { kind: "timeout", status: 524 },
+    });
+    onTestFinished(() => {
+      actionData.mockReturnValue(undefined);
+    });
+
+    renderDrawer();
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows no notice when the last save had an answer", () => {
+    renderDrawer({ scannedAssets: { "qr-1": { id: "asset-1" } } });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
 
 describe("AddAssetsToBookingDrawer reservation progress", () => {
   beforeEach(() => {
@@ -512,5 +580,194 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
     });
 
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  });
+});
+
+describe("AddAssetsToBookingDrawer scanned row details", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const oneUnitOfModelOne: ExpectedModelRequest[] = [
+    {
+      assetModelId: "model-1",
+      assetModelName: "Model One",
+      booked: 1,
+      remaining: 1,
+    },
+  ];
+
+  // Two assets can share a title, so a row must carry something the operator
+  // can check against the physical item.
+  it("names each row by its asset ID and the code that was scanned", () => {
+    renderDrawer({
+      scannedAssets: {
+        "qr-a": { id: "asset-1", title: "Asset 2", sequentialId: "SAM-0001" },
+        "qr-b": { id: "asset-2", title: "Asset 2", sequentialId: "SAM-0002" },
+      },
+    });
+
+    expect(screen.getByText("SAM-0001")).toBeTruthy();
+    expect(screen.getByText("SAM-0002")).toBeTruthy();
+    expect(screen.getByText("qr-a")).toBeTruthy();
+    expect(screen.getByText("qr-b")).toBeTruthy();
+  });
+
+  it("shows only the scanned code for an asset with no asset ID", () => {
+    renderDrawer({
+      scannedAssets: {
+        "qr-a": { id: "asset-1", title: "Asset 1", sequentialId: null },
+      },
+    });
+
+    expect(screen.getByText("qr-a")).toBeTruthy();
+    expect(screen.queryByText("ID")).toBeNull();
+    expect(screen.queryByText(/undefined|null/)).toBeNull();
+  });
+
+  it("does not repeat the asset ID when the asset ID is what was scanned", () => {
+    renderDrawer({
+      scannedAssets: {
+        "sam-0001": {
+          id: "asset-1",
+          title: "Asset 1",
+          sequentialId: "SAM-0001",
+        },
+      },
+    });
+
+    expect(screen.getByText("SAM-0001")).toBeTruthy();
+    expect(screen.queryByText("sam-0001")).toBeNull();
+  });
+
+  it("names the model a matched scan fills", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-1" },
+      },
+    });
+
+    expect(screen.getByText("Counts toward Model One")).toBeTruthy();
+  });
+
+  it("marks a scan past the reserved count as an extra for that model", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-1" },
+        "qr-2": { id: "asset-2", title: "Asset 2", assetModelId: "model-1" },
+      },
+    });
+
+    expect(screen.getAllByText("Counts toward Model One")).toHaveLength(1);
+    expect(
+      screen.getByText("Extra: every Model One unit is already filled")
+    ).toBeTruthy();
+  });
+
+  // A reservation filled before the drawer opened is gone from the
+  // outstanding list, but its model is still reserved: an extra scan of it is
+  // over the count, not an unreserved model.
+  it("marks a scan of a fully filled model as over the count, not unreserved", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      reservedModels: [
+        { assetModelId: "model-1", assetModelName: "Model One" },
+        { assetModelId: "model-2", assetModelName: "Model Two" },
+      ],
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-2" },
+      },
+    });
+
+    expect(
+      screen.getByText("Extra: every Model Two unit is already filled")
+    ).toBeTruthy();
+    expect(screen.queryByText("Extra: model not reserved")).toBeNull();
+  });
+
+  it("still marks an over-scan when every reservation is already filled", () => {
+    renderDrawer({
+      expectedModelRequests: [],
+      reservedModels: [
+        { assetModelId: "model-1", assetModelName: "Model One" },
+      ],
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-1" },
+      },
+    });
+
+    expect(
+      screen.getByText("Extra: every Model One unit is already filled")
+    ).toBeTruthy();
+    // Nothing is outstanding, so there is no progress chrome to show.
+    expect(screen.queryByText(/models? reserved/)).toBeNull();
+  });
+
+  it("marks a scan of an unreserved model as an extra", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-9" },
+      },
+    });
+
+    expect(screen.getByText("Extra: model not reserved")).toBeTruthy();
+  });
+
+  // A blocker refuses these on submit, so a note saying the scan counts
+  // toward a model, or joins as an extra, would be false.
+  it.each([
+    ["archived", { archivedAt: new Date("2026-01-01T00:00:00Z") }],
+    ["not available to book", { availableToBook: false }],
+  ])("adds no reservation note to a scan that is %s", (_state, overrides) => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          assetModelId: "model-1",
+          ...overrides,
+        } as Partial<AssetFromQr>,
+      },
+    });
+
+    expect(screen.queryByText(/^Counts toward/)).toBeNull();
+    expect(screen.queryByText(/^Extra:/)).toBeNull();
+  });
+
+  // On a booking with no reservations every scan is simply added, so
+  // calling each one an extra would be noise.
+  it("adds no reservation note on a booking that reserves no models", () => {
+    renderDrawer({
+      scannedAssets: {
+        "qr-1": { id: "asset-1", title: "Asset 1", assetModelId: "model-9" },
+      },
+    });
+
+    expect(screen.queryByText(/^Extra:/)).toBeNull();
+    expect(screen.queryByText(/^Counts toward/)).toBeNull();
+  });
+
+  // A reservation is for whole units, so a quantity-tracked scan never fills
+  // one and must not be told it is an extra of a model either.
+  it("adds no reservation note to a quantity-tracked scan", () => {
+    renderDrawer({
+      expectedModelRequests: oneUnitOfModelOne,
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Cables",
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 10,
+          assetModelId: "model-1",
+        },
+      },
+    });
+
+    expect(screen.queryByText(/^Extra:/)).toBeNull();
+    expect(screen.queryByText(/^Counts toward/)).toBeNull();
   });
 });

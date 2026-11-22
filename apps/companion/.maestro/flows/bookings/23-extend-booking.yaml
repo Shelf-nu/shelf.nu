@@ -1,0 +1,73 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - extend a running booking"
+tags:
+  - bookings
+  - actions
+  - fixture
+
+---
+# Test: an ONGOING booking offers "Extend booking" in its More actions menu.
+# The sheet opens on the current end, "+1 day" moves it, Confirm extends the
+# booking, and the success alert names the new end before the booking reloads.
+#
+# Needs the extend fixture:
+#   ./scripts/seed-e2e.sh extend-up
+#   ./scripts/run-suite.sh bookings   # loads env/test.env and env/e2e*.env
+# or one flow on its own:
+#   maestro test -e <each line of both files> flows/bookings/23-extend-booking.yaml
+#
+# Each run moves the fixture's end a day later: re-run `extend-up` to reset it.
+#
+# GOTCHAS:
+# - The fixture booking belongs to the workspace OWNER. The test.env account
+#   must be that owner, an admin or a manager: a Self Service member is not
+#   offered "Extend booking" on someone else's booking, and Base never is.
+# - On iOS the sheet opens with the inline date picker showing, which pushes
+#   the step buttons down; the scroll step brings them into view on a small
+#   screen.
+# - The success alert's button is the single word "OK", which taps reliably
+#   (see 08-action-cancel.yaml for the multi-word alert button trap).
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://bookings/${SHELF_TEST_EXTEND_BOOKING_ID}"
+
+# If the fixture booking never opens, its rows are gone: re-run seed-e2e.sh extend-up.
+- extendedWaitUntil:
+    visible: "E2E Extend Booking"
+    timeout: 20000
+
+- tapOn: "More booking actions"
+- extendedWaitUntil:
+    visible: "Extend booking"
+    timeout: 10000
+- tapOn:
+    text: "^Extend booking$"
+
+- extendedWaitUntil:
+    visible:
+      id: "extend-booking-submit"
+    timeout: 10000
+- takeScreenshot: extend-booking-sheet
+
+- scrollUntilVisible:
+    element:
+      id: "extend-preset-day"
+    direction: DOWN
+- tapOn:
+    id: "extend-preset-day"
+- tapOn:
+    id: "extend-booking-submit"
+
+- extendedWaitUntil:
+    visible: "Booking extended"
+    timeout: 20000
+- takeScreenshot: extend-booking-success
+- tapOn: "OK"
+
+- extendedWaitUntil:
+    visible: "Ongoing"
+    timeout: 10000

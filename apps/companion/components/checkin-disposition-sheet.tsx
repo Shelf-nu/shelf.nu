@@ -44,6 +44,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 /** How the checked-out units were reconciled. Sum must be in [1, remaining]. */
 export type CheckinDispositionValue = {
@@ -126,6 +127,7 @@ export function CheckinDispositionSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
 
   // The "good" bucket is consume for consumables, return otherwise.
   const isConsumable = consumptionType === "ONE_WAY";
@@ -253,7 +255,10 @@ export function CheckinDispositionSheet({
       presentationStyle="pageSheet"
       onRequestClose={requestClose}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Check in</Text>
           <TouchableOpacity

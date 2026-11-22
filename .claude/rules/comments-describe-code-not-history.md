@@ -1,6 +1,10 @@
 ---
 description: Comments and JSDoc must describe what the code is and how to use it — never the bug, PR, or drift that prompted them
-globs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
+paths:
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+  - "**/*.jsx"
 ---
 
 # Comments Describe The Code, Not Its History

@@ -306,6 +306,72 @@ describe("calculateBookingLifecycleProgress (asset mode)", () => {
     expect(p.checkinProgressPercentage).toBe(50);
     expect(p.hasPartialCheckins).toBe(true);
   });
+
+  it.each([BookingStatus.COMPLETE, BookingStatus.ARCHIVED])(
+    "%s: a dispatched INDIVIDUAL slice with no return marker is Returned",
+    (bookingStatus) => {
+      // The status is the record: a finished booking returned every
+      // INDIVIDUAL slice that left, so "unstamped" reads Returned like the
+      // rows and the check-in receipt do. The status settles returns, not
+      // departures, so a slice that never left stays Booked.
+      const slice = (id: string, out: boolean, back: boolean) => ({
+        ...A(id, AssetStatus.AVAILABLE),
+        assetType: AssetType.INDIVIDUAL,
+        sliceCheckedOut: out,
+        sliceCheckedIn: back,
+      });
+      const p = calculateBookingLifecycleProgress({
+        bookingAssets: [
+          slice("stamped", true, true),
+          slice("unstamped", true, false),
+          slice("never", false, false),
+        ],
+        checkedInAssetIds: ["stamped"],
+        checkedOutAssetIds: ["stamped", "unstamped"],
+        bookingStatus,
+      });
+      expect(p.returnedCount).toBe(2);
+      expect(p.checkedOutCount).toBe(0);
+      expect(p.bookedCount).toBe(1);
+      expect(p.checkinProgressCount).toBe(2);
+    }
+  );
+
+  it("ARCHIVED without check-in keeps every item Booked", () => {
+    // Archived straight from RESERVED: nothing left, so no slice markers and
+    // no session records. Without the flag that reads as legacy data.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        A("a", AssetStatus.AVAILABLE),
+        A("b", AssetStatus.AVAILABLE),
+        {
+          ...A("cables", AssetStatus.AVAILABLE),
+          assetType: AssetType.QUANTITY_TRACKED,
+          bookedQuantity: 5,
+          checkedOutQuantity: 0,
+          dispositionedQuantity: 0,
+        },
+      ],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.ARCHIVED,
+      archivedWithoutCheckin: true,
+    });
+    expect(p.bookedCount).toBe(3);
+    expect(p.returnedCount).toBe(0);
+    expect(p.checkoutProgressPercentage).toBe(0);
+    expect(p.checkinProgressPercentage).toBe(0);
+  });
+
+  it("ARCHIVED from COMPLETE with no records still reads legacy data as returned", () => {
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [A("a", AssetStatus.AVAILABLE)],
+      checkedInAssetIds: [],
+      bookingStatus: BookingStatus.ARCHIVED,
+      archivedWithoutCheckin: false,
+    });
+    expect(p.returnedCount).toBe(1);
+    expect(p.bookedCount).toBe(0);
+  });
 });
 
 describe("calculateBookingLifecycleProgress (unit mode)", () => {
@@ -401,6 +467,27 @@ describe("calculateBookingLifecycleProgress (unit mode)", () => {
     expect(p.returnedCount).toBe(1);
     expect(p.bookedCount).toBe(0);
     expect(p.checkedOutCount).toBe(0);
+  });
+
+  it("COMPLETE: a kit whose dispatched members carry no return marker is Returned", () => {
+    // Neither member is in `checkedInAssetIds` and neither slice is stamped
+    // in: the finished status is the record that both came back.
+    const member = (id: string) => ({
+      ...A(id, AssetStatus.AVAILABLE, "K"),
+      sliceCheckedOut: true,
+      sliceCheckedIn: false,
+    });
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [member("k1"), member("k2")],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["k1", "k2"],
+      bookingStatus: BookingStatus.COMPLETE,
+      countKitsAsSingleUnit: true,
+    });
+    expect(p.totalUnits).toBe(1);
+    expect(p.returnedCount).toBe(1);
+    expect(p.checkedOutCount).toBe(0);
+    expect(p.bookedCount).toBe(0);
   });
 });
 

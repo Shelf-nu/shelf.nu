@@ -10,6 +10,7 @@ import { Search } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { filterQueryableColumns } from "~/modules/asset/last-audit-date-access";
 import {
   parseColumnName,
   type Column,
@@ -29,8 +30,17 @@ export function FieldSelector({
   filters: Filter[];
   setFilter: (name: string) => void;
 }) {
-  const { settings } = useLoaderData<AssetIndexLoaderData>();
-  const columns = settings.columns as Column[];
+  const { settings, lastAuditDateAccess } =
+    useLoaderData<AssetIndexLoaderData>();
+  // Same rule as the filter popover: a column the caller cannot query is not offered.
+  const columns = useMemo(
+    () =>
+      filterQueryableColumns(
+        settings.columns as Column[],
+        lastAuditDateAccess ?? "hidden"
+      ),
+    [settings.columns, lastAuditDateAccess]
+  );
   const [fieldName, setFieldName] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);

@@ -27,12 +27,9 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    const [qrObj, asset] = await Promise.all([
-      generateQrObj({
-        assetId,
-        userId,
-        organizationId,
-      }),
+    // Both lookups are scoped to the caller's workspace: getAsset refuses a
+    // asset from another workspace, and so does generateQrObj's own lock.
+    const [asset, qrObj] = await Promise.all([
       getAsset({
         id: assetId,
         organizationId,
@@ -47,6 +44,11 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
             },
           },
         },
+      }),
+      generateQrObj({
+        assetId,
+        userId,
+        organizationId,
       }),
     ]);
 

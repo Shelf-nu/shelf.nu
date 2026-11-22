@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Button } from "../shared/button";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
@@ -10,6 +11,8 @@ interface Props {
     text: string | undefined;
   };
   icon: IconType;
+  /** Extra content under the message, e.g. an action that is not a link. */
+  children?: ReactNode;
 }
 
 export default function BlockInteractions({
@@ -17,6 +20,7 @@ export default function BlockInteractions({
   content,
   cta = undefined,
   icon,
+  children,
 }: Props) {
   return (
     // `h-screen` is the fallback for browsers without dynamic viewport units,
@@ -49,6 +53,7 @@ export default function BlockInteractions({
               {cta.text}
             </Button>
           )}
+          {children}
         </div>
       </div>
     </div>

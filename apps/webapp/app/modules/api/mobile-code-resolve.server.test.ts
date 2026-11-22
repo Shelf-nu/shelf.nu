@@ -3,11 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
+  getMobileWorkspaceAccess,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
 } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { ShelfError } from "~/utils/error";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
@@ -43,17 +46,37 @@ vi.mock("~/utils/subscription.server", () => ({
 
 // why: `mobile-auth.server` transitively loads the Supabase admin client
 // (needs env + network wiring we don't have in unit tests). The resolver only
-// needs the select constants and the shape helpers from it; pass-through
-// stubs keep the branching under test observable without the heavy imports.
+// needs the select constants, the shape helpers and the viewer context from
+// it; pass-through stubs keep the branching under test observable without the
+// heavy imports.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
+  // why: the lapse gate has its own tests in
+  // mobile-auth.server.workspace-lapse.test.ts. Here it answers membership
+  // from the mocked membership row, so the QR path's wrong-workspace branches
+  // stay driven by `userOrganization.findUnique`.
+  getMobileWorkspaceAccess: vi.fn(
+    async (args: { userId: string; organizationId: string }) =>
+      (
+        await import("@mocks/mobile-workspace-access")
+      ).fakeMobileWorkspaceAccess(args)
+  ),
+  // why: custody visibility is read per owning workspace; the route tests pin
+  // the filtering itself, so here every caller may see all custody and the
+  // assertions check which workspace was asked.
+  // An Administrator's context: sees every holder's custody.
+  getMobileUserContext: vi.fn(async () =>
+    (await import("@helpers/mobile-user-context")).mobileUserContext()
+  ),
   MOBILE_ASSET_SELECT: {},
   MOBILE_KIT_SELECT: {},
   // why: the shared re-sign-then-shape step has its own tests in
-  // mobile-auth.server.test.ts; here it passes the row through so the
-  // resolver's routing is what the assertions see, including which workspace
-  // it hands the step.
-  resignAndShapeMobileAsset: vi.fn((asset: unknown) => Promise.resolve(asset)),
+  // mobile-auth.server.test.ts; here it hands the row back as a shaped asset
+  // nobody holds, so the resolver's routing is what the assertions see,
+  // including which workspace it hands the step.
+  resignAndShapeMobileAsset: vi.fn((asset: object) =>
+    Promise.resolve({ ...asset, custody: null, custodyList: [] })
+  ),
   shapeMobileKitResponse: (kit: unknown) => kit,
 }));
 
@@ -82,6 +105,15 @@ const requireOrgAccess = vi.mocked(requireOrganizationAccess);
 const barcodeByValue = vi.mocked(getBarcodeByValue);
 const barcodesCapability = vi.mocked(canUseBarcodes);
 const resignAndShape = vi.mocked(resignAndShapeMobileAsset);
+const viewerContext = vi.mocked(getMobileUserContext);
+
+/**
+ * The asset a resolve returns for a row: the stub's shaped asset with nobody
+ * holding it, scoped to a caller who may see all custody.
+ */
+function scannedAsset<TRow extends object>(row: TRow) {
+  return { ...row, custody: null, custodyList: [], custodyListOthersCount: 0 };
+}
 
 /**
  * The two handles the SAM tests drive, narrowed to the shape the resolver
@@ -222,7 +254,13 @@ describe("resolveMobileScannedCode failure discrimination", () => {
 
     expect(result).toEqual({
       ok: true,
-      recordableQrId: "qr-claimed",
+      scanToRecord: {
+        codeType: "QR",
+        qrId: "qr-claimed",
+        assetId: null,
+        kitId: null,
+        organizationId: "org-1",
+      },
       qr: {
         id: "qr-claimed",
         assetId: null,
@@ -268,6 +306,7 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
   it("resolves an asset-linked barcode when no asset carries that SAM id", async () => {
     assetFindFirst.mockResolvedValue(null);
     barcodeByValue.mockResolvedValue({
+      id: "barcode-1",
       value: SAM_SHAPED,
       assetId: "asset-1",
       kitId: null,
@@ -279,14 +318,20 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
 
     expect(result).toEqual({
       ok: true,
-      // A barcode has no QR row, so there is nothing to attribute a scan to.
-      recordableQrId: null,
+      // Recorded as the barcode it is, not as a SAM ID.
+      scanToRecord: {
+        codeType: "BARCODE",
+        barcodeId: "barcode-1",
+        assetId: "asset-1",
+        kitId: null,
+        organizationId: ORG_ID,
+      },
       qr: {
         id: SAM_SHAPED,
         assetId: "asset-1",
         kitId: null,
         organizationId: ORG_ID,
-        asset: { id: "asset-1", title: "Asset one" },
+        asset: scannedAsset({ id: "asset-1", title: "Asset one" }),
         kit: null,
       },
     });
@@ -295,16 +340,19 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
     expect(barcodeByValue).toHaveBeenCalledWith(
       expect.objectContaining({ value: SAM_SHAPED, organizationId: ORG_ID })
     );
-    // The asset goes through the shared photo re-sign for this workspace.
+    // The asset goes through the shared photo re-sign for this workspace,
+    // and its custody is scoped by the caller's visibility there.
     expect(resignAndShape).toHaveBeenCalledWith(
       { id: "asset-1", title: "Asset one" },
       ORG_ID
     );
+    expect(viewerContext).toHaveBeenCalledWith("user-1", ORG_ID);
   });
 
   it("resolves a kit-linked barcode with the kit shaped as the QR path shapes it", async () => {
     assetFindFirst.mockResolvedValue(null);
     barcodeByValue.mockResolvedValue({
+      id: "barcode-2",
       value: SAM_SHAPED,
       assetId: null,
       kitId: "kit-1",
@@ -316,7 +364,13 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
 
     expect(result).toEqual({
       ok: true,
-      recordableQrId: null,
+      scanToRecord: {
+        codeType: "BARCODE",
+        barcodeId: "barcode-2",
+        assetId: null,
+        kitId: "kit-1",
+        organizationId: ORG_ID,
+      },
       qr: {
         id: SAM_SHAPED,
         assetId: null,
@@ -326,6 +380,8 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
         kit: { id: "kit-1", name: "Kit one" },
       },
     });
+    // A kit carries no custody holders, so there is no visibility to look up.
+    expect(viewerContext).not.toHaveBeenCalled();
   });
 
   it("keeps the SAM 404 and never reads the barcode table without the add-on", async () => {
@@ -376,13 +432,17 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
 
     expect(result).toEqual({
       ok: true,
-      recordableQrId: null,
+      scanToRecord: {
+        codeType: "SAM_ID",
+        assetId: "asset-9",
+        organizationId: ORG_ID,
+      },
       qr: {
         id: SAM_SHAPED,
         assetId: "asset-9",
         kitId: null,
         organizationId: ORG_ID,
-        asset: { id: "asset-9", title: "Asset nine" },
+        asset: scannedAsset({ id: "asset-9", title: "Asset nine" }),
         kit: null,
       },
     });
@@ -392,15 +452,16 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
       { id: "asset-9", title: "Asset nine" },
       ORG_ID
     );
+    expect(viewerContext).toHaveBeenCalledWith("user-1", ORG_ID);
   });
 });
 
 /**
  * A QR code can belong to a sibling workspace the caller is a member of. Its
- * asset photo is re-signed through the shared step against the workspace that
- * owns the code, not the caller's current one.
+ * asset photo is re-signed through the shared step, and its custody scoped,
+ * against the workspace that owns the code, not the caller's current one.
  */
-describe("resolveMobileScannedCode photo re-sign on the QR path", () => {
+describe("resolveMobileScannedCode owning workspace on the QR path", () => {
   it("hands the asset to the shared step with the workspace that owns the code", async () => {
     qrRowFindUnique.mockResolvedValue({
       id: "qr-sibling",
@@ -417,6 +478,7 @@ describe("resolveMobileScannedCode photo re-sign on the QR path", () => {
       { id: "asset-7", title: "Asset seven" },
       "org-sibling"
     );
+    expect(viewerContext).toHaveBeenCalledWith("user-1", "org-sibling");
     expect(result).toMatchObject({
       ok: true,
       qr: {
@@ -424,5 +486,80 @@ describe("resolveMobileScannedCode photo re-sign on the QR path", () => {
         asset: { id: "asset-7", title: "Asset seven" },
       },
     });
+  });
+
+  it("refuses a code whose linked asset is outside the code's workspace", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-mixed",
+      assetId: "asset-foreign",
+      kitId: null,
+      organizationId: "org-1",
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-1" });
+    // The org-scoped read finds nothing: the asset is in another workspace.
+    assetFindFirst.mockResolvedValue(null);
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-mixed"));
+
+    expect(result).toEqual({
+      ok: false,
+      status: 404,
+      message:
+        "This code doesn't exist or it doesn't belong to your current organization.",
+    });
+    expect(resignAndShape).not.toHaveBeenCalled();
+  });
+
+  it("refuses a code whose linked kit is outside the code's workspace", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-mixed-kit",
+      assetId: null,
+      kitId: "kit-foreign",
+      organizationId: "org-1",
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-1" });
+    // The org-scoped read finds nothing: the kit is in another workspace.
+    vi.mocked(db.kit.findFirst).mockResolvedValue(null);
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-mixed-kit"));
+
+    expect(result).toMatchObject({ ok: false, status: 404 });
+  });
+});
+
+/**
+ * A scan opens the item in the workspace that owns the code, so that
+ * workspace must be active, whatever workspace the app is in.
+ */
+describe("resolveMobileScannedCode inactive owning workspace", () => {
+  it("refuses the scan and reads no linked data when the code's workspace is inactive", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-lapsed",
+      assetId: "asset-8",
+      kitId: null,
+      organizationId: "org-lapsed",
+    });
+    vi.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
+      access: "inactive",
+      error: new ShelfError({
+        cause: null,
+        message:
+          "The workspace this code belongs to is inactive because its subscription has expired.",
+        label: "Auth",
+        status: 403,
+      }),
+    });
+
+    await expect(
+      resolveMobileScannedCode(resolveArgs("qr-lapsed"))
+    ).rejects.toMatchObject({ status: 403 });
+    expect(getMobileWorkspaceAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        organizationId: "org-lapsed",
+        reason: "code",
+      })
+    );
+    expect(assetFindFirst).not.toHaveBeenCalled();
   });
 });

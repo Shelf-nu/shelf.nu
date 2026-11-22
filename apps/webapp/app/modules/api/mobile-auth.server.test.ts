@@ -4,19 +4,26 @@ import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   getMobileAssetForViewer,
+  MOBILE_ASSET_SELECT,
+  MOBILE_KIT_SELECT,
   requireMobileAuth,
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
+  shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
+import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import type * as StorageServer from "~/utils/storage.server";
 import { createSignedUrl } from "~/utils/storage.server";
+import { recordMobileActivity } from "./mobile-usage.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
 // instantiates a real Prisma client and tries to connect at module load — under
 // `pnpm test:run` (no DB available) that triggers an unhandled rejection that
 // fails the whole suite even though every test here is a pure unit test.
 // Mocking the db module short-circuits the connection; `user.findUnique` is a
-// spy so the `requireMobileAuth` test can assert the select shape.
+// spy so the `requireMobileAuth` test can assert the lookup and select shape.
 vi.mock("~/database/db.server", () => ({
   db: {
     user: { findUnique: vi.fn() },
@@ -45,6 +52,23 @@ vi.mock("~/integrations/supabase/client", () => ({
 // irrelevant to the auth/format-prefs contract, so stub it to a no-op.
 vi.mock("./mobile-usage.server", () => ({
   recordMobileActivity: vi.fn(),
+}));
+
+// why: the SSO decision has its own tests (sso-enforcement.server.test.ts);
+// here only whether `requireMobileAuth` asks it, and what it does with the
+// answer, matters. The error factory stays real so the 403 is the shared one.
+vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof SsoEnforcementModule>();
+  return {
+    createSsoRequiredError: actual.createSsoRequiredError,
+    getLegacyLoginDecisionForUser: vi.fn(),
+  };
+});
+
+// why: revoking a refused account's sessions is a Supabase Auth admin call;
+// the spy records whether `requireMobileAuth` made it.
+vi.mock("~/modules/auth/service.server", () => ({
+  revokeAllSessions: vi.fn(),
 }));
 
 /**
@@ -77,6 +101,7 @@ const baseAsset = {
     thumbnailImage: string | null;
   } | null,
   availableToBook: true,
+  archivedAt: null as Date | null,
   category: null,
   type: "INDIVIDUAL" as const,
   quantity: null,
@@ -109,6 +134,64 @@ function custodyRow(
     custodian: { id, name, userId: opts.userId ?? null },
   };
 }
+
+describe("MOBILE_KIT_SELECT", () => {
+  it("selects every member with its archivedAt, so the shaper can split them", () => {
+    // Filtering here would hide the archived members the phone must count.
+    expect(MOBILE_KIT_SELECT.assetKits).not.toHaveProperty("where");
+    expect(MOBILE_KIT_SELECT.assetKits.select.asset.select.archivedAt).toBe(
+      true
+    );
+    expect(MOBILE_KIT_SELECT).not.toHaveProperty("_count");
+  });
+});
+
+describe("shapeMobileKitResponse", () => {
+  const member = { id: "asset-1", status: "AVAILABLE", availableToBook: true };
+  const archivedMember = (id: string) => ({
+    asset: {
+      id,
+      status: "AVAILABLE",
+      availableToBook: true,
+      archivedAt: new Date("2026-10-01T00:00:00Z"),
+    },
+  });
+  const kit = {
+    id: "kit-1",
+    name: "Camera kit",
+    status: "AVAILABLE",
+    image: null,
+  };
+
+  it("lists and counts the active members and reports the archived ones apart", () => {
+    // One active member, two archived ones: the phone lists and counts the
+    // active one, and an archived member never raises a kit blocker.
+    const shaped = shapeMobileKitResponse({
+      ...kit,
+      assetKits: [
+        { asset: { ...member, archivedAt: null } },
+        archivedMember("asset-2"),
+        archivedMember("asset-3"),
+      ],
+    });
+
+    expect(shaped?._count).toEqual({ assets: 1 });
+    expect(shaped?.archivedAssetCount).toBe(2);
+    expect(shaped?.assets).toEqual([member]);
+  });
+
+  it("reads a kit holding only archived assets as no active members", () => {
+    // What the phone's "kit holds only archived assets" blocker keys on.
+    const shaped = shapeMobileKitResponse({
+      ...kit,
+      assetKits: [archivedMember("asset-2"), archivedMember("asset-3")],
+    });
+
+    expect(shaped?._count.assets).toBe(0);
+    expect(shaped?.assets).toEqual([]);
+    expect(shaped?.archivedAssetCount).toBe(2);
+  });
+});
 
 describe("shapeMobileAssetResponse", () => {
   it("returns null for kit, kitId, location, and custody when all pivots are empty", () => {
@@ -226,6 +309,21 @@ describe("shapeMobileAssetResponse", () => {
     expect(result.imageSource).toBe("placeholder");
   });
 
+  // The companion badges an archived asset and turns its actions off; it can
+  // only do that if the stamp survives the shaper.
+  it("passes archivedAt through, null for an active asset", () => {
+    const archivedAt = new Date("2026-10-09T13:44:00.000Z");
+
+    expect(shapeMobileAssetResponse(baseAsset).archivedAt).toBeNull();
+    expect(
+      shapeMobileAssetResponse({ ...baseAsset, archivedAt }).archivedAt
+    ).toEqual(archivedAt);
+  });
+
+  it("selects archivedAt in MOBILE_ASSET_SELECT", () => {
+    expect(MOBILE_ASSET_SELECT).toMatchObject({ archivedAt: true });
+  });
+
   it("preserves top-level fields (mainImage, availableToBook, category) via ...rest", () => {
     const result = shapeMobileAssetResponse({
       ...baseAsset,
@@ -340,6 +438,10 @@ describe("shapeMobileAssetResponse", () => {
  * select, the companion silently falls back to device-local formatting — a
  * regression with no other automated guard.
  *
+ * Also pins the SSO guard: the companion signs in with a password directly
+ * against Supabase, so this is where a non-SSO session for an address that
+ * must use SSO is refused.
+ *
  * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
  */
 describe("requireMobileAuth", () => {
@@ -347,12 +449,131 @@ describe("requireMobileAuth", () => {
   // assertions read only its own call, not calls accumulated by earlier suites.
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: true,
+    });
+  });
+
+  /**
+   * Stubs a valid Bearer JWT for an auth user and the Shelf row its id
+   * resolves to (`null` when no Shelf account has that id).
+   */
+  function signedInAs(
+    dbRow: Record<string, unknown> | null,
+    authUser: { id: unknown; email: unknown } = {
+      id: dbRow?.id,
+      email: dbRow?.email,
+    }
+  ) {
+    // why: stub the Supabase JWT validation to yield a valid auth user.
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: authUser },
+      error: null,
+    });
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      auth: { getUser },
+    } as unknown as ReturnType<typeof getSupabaseAdmin>);
+    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
+
+    return new Request("https://shelf.test/api/mobile/me", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+  }
+
+  const BASE_ROW = {
+    id: "user-1",
+    email: "jane@acme.com",
+    firstName: "Jane",
+    lastName: "Doe",
+    profilePicture: null,
+    onboarded: true,
+    deletedAt: null,
+    lastMobileActiveAt: null,
+  };
+
+  it("resolves the user by the session's auth user id, never by email", async () => {
+    const request = signedInAs({ ...BASE_ROW, sso: true });
+
+    const { user } = await requireMobileAuth(request);
+
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({ id: BASE_ROW.id });
+    expect(user.id).toBe(BASE_ROW.id);
+  });
+
+  it("refuses with 401 a session whose auth user has no Shelf account", async () => {
+    // A separate auth user holding a Shelf account's address: its id matches
+    // no Shelf row, so it must not act as that account.
+    const request = signedInAs(null, {
+      id: "twin-auth-user",
+      email: BASE_ROW.email,
+    });
+
+    await expect(requireMobileAuth(request)).rejects.toMatchObject({
+      status: 401,
+    });
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({ id: "twin-auth-user" });
+    expect(recordMobileActivity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a soft-deleted account with 404", async () => {
+    const request = signedInAs({ ...BASE_ROW, deletedAt: new Date() });
+
+    await expect(requireMobileAuth(request)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it("refuses a password session for an address that must use SSO", async () => {
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+    const request = signedInAs({ ...BASE_ROW, sso: false });
+
+    await expect(requireMobileAuth(request)).rejects.toMatchObject({
+      status: 403,
+      title: "Single sign-on required",
+      message:
+        "This email address signs in with single sign-on. Please use Login with SSO.",
+    });
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "jane@acme.com",
+    });
+    expect(revokeAllSessions).toHaveBeenCalledWith("valid-token");
+    expect(recordMobileActivity).not.toHaveBeenCalled();
+  });
+
+  it("lets an allowed non-SSO user through", async () => {
+    const request = signedInAs({ ...BASE_ROW, sso: false });
+
+    const { user } = await requireMobileAuth(request);
+
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "jane@acme.com",
+    });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+    expect(user.id).toBe("user-1");
+  });
+
+  it("lets an SSO user through without asking the decision", async () => {
+    const request = signedInAs({ ...BASE_ROW, sso: true });
+
+    const { user } = await requireMobileAuth(request);
+
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
+    expect(user.id).toBe("user-1");
+    // `sso` is read for the guard only and stays out of the returned user.
+    expect(user).not.toHaveProperty("sso");
   });
 
   it("selects and returns the user's date/time format prefs, stripping internal-only fields", async () => {
     // why: stub the Supabase JWT validation to yield a valid auth user.
     const getUser = vi.fn().mockResolvedValue({
-      data: { user: { email: "ada@example.com" } },
+      data: { user: { id: "user-1", email: "ada@example.com" } },
       error: null,
     });
     vi.mocked(getSupabaseAdmin).mockReturnValue({
@@ -374,6 +595,7 @@ describe("requireMobileAuth", () => {
       timeZone: "Asia/Tokyo",
       deletedAt: null,
       lastMobileActiveAt: null,
+      sso: false,
     };
     (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
 
@@ -406,6 +628,7 @@ describe("requireMobileAuth", () => {
     // Internal-only fields are stripped by the `safeUser` destructure.
     expect(user).not.toHaveProperty("deletedAt");
     expect(user).not.toHaveProperty("lastMobileActiveAt");
+    expect(user).not.toHaveProperty("sso");
   });
 });
 

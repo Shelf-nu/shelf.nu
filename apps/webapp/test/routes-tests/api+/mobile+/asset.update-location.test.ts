@@ -14,10 +14,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // transaction; stubbing the client avoids the real Prisma client (no DB in
 // unit tests). `$transaction` runs its callback against a tx stub so the
 // pivot writes and the in-tx re-read stay observable.
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findUnique: vi.fn() },
     location: { findFirst: vi.fn() },
+    // why: the location activity log lines are this route's output under
+    // test, asserted from the rows handed to `createMany`.
+    locationNote: { createMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -33,6 +46,13 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: the lock helper issues a raw `SELECT ... FOR UPDATE`; the test drives
 // the quantity validation through its resolved value instead of a DB.
+// why: the archived freeze reads the asset's archive state through the
+// database; none of these fixtures are archived (issue #382).
+vi.mock("~/utils/org-validation.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/org-validation.server")>()),
+  assertAssetsAreNotArchived: vi.fn(),
+}));
+
 vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vi.fn(),
 }));
@@ -56,9 +76,15 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/asset.update-location";
+import { ShelfError } from "~/utils/error";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 
 /** Shape of the `data()` result the route action returns. */
 type DataResult<T> = { data: T; init: ResponseInit | null };
@@ -92,6 +118,19 @@ const tx = {
     create: vi.fn(),
   },
   asset: { findUniqueOrThrow: vi.fn() },
+  // The collapse re-homes custody taken from a dropped placement: the route
+  // reads the operator custody rows before and after the pivot write and
+  // re-points any row whose location no longer holds its units.
+  custody: {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn(),
+  },
+  // The custody source read also counts units out on bookings per location;
+  // none are out in these tests.
+  bookingAsset: { findMany: vi.fn() },
 };
 
 /**
@@ -143,6 +182,10 @@ beforeEach(() => {
   // because the route derives the collapse events, the primary event and the
   // note from THIS read rather than from the pre-transaction one.
   tx.assetLocation.findMany.mockResolvedValue(qtyAsset().assetLocations);
+  // No custody out by default, so the re-home has nothing to move.
+  tx.custody.findMany.mockResolvedValue([]);
+  tx.bookingAsset.findMany.mockResolvedValue([]);
+  tx.custody.findFirst.mockResolvedValue(null);
   tx.asset.findUniqueOrThrow.mockResolvedValue({
     id: "asset-1",
     title: "Cords",
@@ -151,6 +194,35 @@ beforeEach(() => {
 });
 
 describe("POST /api/mobile/asset/update-location", () => {
+  it("takes custody from the collapsed placement along to the new location", async () => {
+    // Read order under the lock: the route's own placements read, then the
+    // custody sources before the write, then after it.
+    tx.assetLocation.findMany
+      .mockResolvedValueOnce(qtyAsset().assetLocations)
+      .mockResolvedValueOnce([{ locationId: "loc-storage", quantity: 10 }])
+      .mockResolvedValueOnce([{ locationId: "loc-van", quantity: 10 }]);
+    tx.custody.findMany.mockResolvedValue([
+      {
+        id: "custody-1",
+        teamMemberId: "tm-1",
+        locationId: "loc-storage",
+        quantity: 3,
+        createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      },
+    ]);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+    });
+
+    expect(status).toBe(200);
+    expect(tx.custody.update).toHaveBeenCalledWith({
+      where: { id: "custody-1" },
+      data: { locationId: "loc-van", sourceUnknown: false },
+    });
+  });
+
   it("places a partial quantity and reports it back", async () => {
     const { body, status } = await callAction({
       assetId: "asset-1",
@@ -174,6 +246,41 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(tx.assetLocation.deleteMany).toHaveBeenCalledWith({
       where: { assetId: "asset-1", assetKitId: null },
     });
+  });
+
+  it("hands the stock ledger the pool's stock from before the collapse", async () => {
+    const before = {
+      total: 10,
+      placed: new Map([["loc-store", 10]]),
+      ledgerStartedAt: null,
+    };
+    vi.mocked(readStockState).mockResolvedValueOnce(before);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(status).toBe(200);
+    expect(readStockState).toHaveBeenCalledWith(tx, {
+      assetId: "asset-1",
+      organizationId: "org-1",
+    });
+    // Read before the collapse, recorded after it: the ledger diffs the two.
+    expect(vi.mocked(readStockState).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(tx.assetLocation.deleteMany).mock.invocationCallOrder[0]
+    );
+    expect(recordStockChanges).toHaveBeenCalledWith(tx, {
+      organizationId: "org-1",
+      userId: expect.any(String),
+      changes: [{ assetId: "asset-1", before }],
+    });
+    expect(
+      vi.mocked(recordStockChanges).mock.invocationCallOrder[0]
+    ).toBeGreaterThan(
+      vi.mocked(tx.assetLocation.create).mock.invocationCallOrder[0]
+    );
   });
 
   it("records the placed quantity on the event and in the note", async () => {
@@ -210,6 +317,64 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(tx.assetLocation.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ quantity: 10 }),
     });
+  });
+
+  it("refuses an archived asset even when the request changes nothing (issue #382)", async () => {
+    // Already at the requested location with the same quantity: without the
+    // early check the no-op short-circuit would answer success for an asset
+    // every other request is refused on.
+    // why: the guard reports the asset archived.
+    vi.mocked(assertAssetsAreNotArchived).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: "Archived assets are read-only.",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+    });
+
+    expect(status).toBe(400);
+    expect(assertAssetsAreNotArchived).toHaveBeenCalledWith({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+    });
+    expect(tx.assetLocation.create).not.toHaveBeenCalled();
+  });
+
+  it("re-checks under the row lock for an archive that lands mid-request (issue #382)", async () => {
+    // why: the early read finds the asset active; the locked read inside the
+    // write transaction finds it archived.
+    vi.mocked(assertAssetsAreNotArchived)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          title: "Asset is archived",
+          message: "Archived assets are read-only.",
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+    });
+
+    expect(status).toBe(400);
+    expect(assertAssetsAreNotArchived).toHaveBeenLastCalledWith(
+      { assetIds: ["asset-1"], organizationId: "org-1" },
+      expect.anything()
+    );
+    expect(tx.assetLocation.create).not.toHaveBeenCalled();
   });
 
   it("rejects a quantity above the asset's total pool", async () => {
@@ -482,5 +647,166 @@ describe("POST /api/mobile/asset/update-location", () => {
       "nothing moved, so the note must not describe a journey"
     ).not.toMatch(/moved .* from .* to /);
     expect(note).toContain("changed the quantity");
+  });
+});
+
+describe("location activity log", () => {
+  const actor =
+    '{% link to="/settings/team/users/user-1" text="Carla Tester" /%}';
+  const cords = '{% link to="/assets/asset-1" text="Cords" /%}';
+  const storage = '{% link to="/locations/loc-storage" text="Storage" /%}';
+  const van = '{% link to="/locations/loc-van" text="Van" /%}';
+
+  /** Every LocationNote row the action wrote, in write order. */
+  function locationNoteRows() {
+    return vi
+      .mocked(db.locationNote.createMany)
+      .mock.calls.flatMap(([args]) => args?.data ?? []);
+  }
+
+  /** Builds the row the route hands to `createMany`. */
+  const row = (locationId: string, content: string) => ({
+    locationId,
+    type: "UPDATE",
+    userId: "user-1",
+    content,
+  });
+
+  /** Seeds the asset's manual placements, as read under the lock. */
+  function placedAt(rows: Array<[string, string, number]>) {
+    const placements = rows.map(([id, name, quantity]) => ({
+      quantity,
+      location: { id, name },
+    }));
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({ assetLocations: placements }) as never
+    );
+    tx.assetLocation.findMany.mockResolvedValue(placements);
+  }
+
+  it("names the units that moved and the units left unplaced", async () => {
+    // 10 at Storage, 4 placed at the Van: 4 moved, 6 are now unplaced.
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(locationNoteRows()).toEqual([
+      row(
+        "loc-van",
+        `${actor} added 4 pcs of ${cords} to ${van}. Moved from ${storage}.`
+      ),
+      row(
+        "loc-storage",
+        `${actor} removed 4 pcs of ${cords} from ${storage}. Moved to ${van}.`
+      ),
+      row("loc-storage", `${actor} removed 6 pcs of ${cords} from ${storage}.`),
+    ]);
+  });
+
+  it("leaves a location out when its amount does not change", async () => {
+    // 6 at Storage and 4 at the Van; 4 placed at the Van. The Van keeps its 4.
+    placedAt([
+      ["loc-storage", "Storage", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(locationNoteRows()).toEqual([
+      row("loc-storage", `${actor} removed 6 pcs of ${cords} from ${storage}.`),
+    ]);
+  });
+
+  it("takes the units added to a location from the unplaced pool", async () => {
+    // Only 4 at the Van; the full pool of 10 is placed there.
+    placedAt([["loc-van", "Van", 4]]);
+
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(locationNoteRows()).toEqual([
+      row("loc-van", `${actor} added 6 pcs of ${cords} to ${van}.`),
+    ]);
+  });
+
+  it("reads the placements oldest first, so the result does not depend on row order", async () => {
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(tx.assetLocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      })
+    );
+  });
+
+  it("logs a removal on every placement the replace collapsed", async () => {
+    const placements = [
+      { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+      { quantity: 4, location: { id: "loc-van", name: "Van" } },
+    ];
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({ assetLocations: placements }) as never
+    );
+    tx.assetLocation.findMany.mockResolvedValue(placements);
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+      quantity: 6,
+    });
+
+    expect(locationNoteRows()).toEqual([
+      {
+        locationId: "loc-van",
+        type: "UPDATE",
+        userId: "user-1",
+        content: `${actor} removed 4 pcs of ${cords} from ${van}.`,
+      },
+    ]);
+  });
+
+  it("does not log a removal from the location the asset is moved to", async () => {
+    // 6 at Storage and 4 at the Van; the full pool of 10 goes to the Van.
+    placedAt([
+      ["loc-storage", "Storage", 6],
+      ["loc-van", "Van", 4],
+    ]);
+
+    await callAction({ assetId: "asset-1", locationId: "loc-van" });
+
+    expect(locationNoteRows()).toEqual([
+      row(
+        "loc-van",
+        `${actor} added 6 pcs of ${cords} to ${van}. Moved from ${storage}.`
+      ),
+      row(
+        "loc-storage",
+        `${actor} removed 6 pcs of ${cords} from ${storage}. Moved to ${van}.`
+      ),
+    ]);
+  });
+
+  it("writes nothing when the request moves nothing", async () => {
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+      quantity: 10,
+    });
+
+    expect(locationNoteRows()).toEqual([]);
   });
 });

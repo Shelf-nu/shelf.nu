@@ -12,6 +12,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: React Router v7 single fetch — `data()` must return a real Response so
 // the response body is assertable.
@@ -83,8 +84,8 @@ describe("GET /api/audit-images", () => {
     mockFindMany.mockResolvedValue([]);
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: true,
       role: OrganizationRoles.BASE,
+      access: accessFor([OrganizationRoles.BASE]),
     });
   });
 
@@ -101,8 +102,8 @@ describe("GET /api/audit-images", () => {
   it("limits a SELF_SERVICE caller the same way", async () => {
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: true,
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
     });
 
     await loader(args("img-1"));
@@ -115,8 +116,8 @@ describe("GET /api/audit-images", () => {
   it("lets an ADMIN read any image in the workspace", async () => {
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
-      isSelfServiceOrBase: false,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await loader(args("img-1"));
@@ -141,6 +142,18 @@ describe("GET /api/audit-images", () => {
 
     expect(response.status).toBe(200);
     expect(body.images).toEqual([{ id: "img-1" }]);
+  });
+
+  it("asks for every field the photo caption reads", async () => {
+    // why: the consumer (audit-images-component) types these fields; a select
+    // that drops one shows the wrong flag with no error anywhere.
+    await loader(args("img-1"));
+
+    expect(mockFindMany.mock.calls[0][0].select).toMatchObject({
+      capturedAt: true,
+      captureSource: true,
+      createdAt: true,
+    });
   });
 
   it("reads nothing when no ids are asked for", async () => {

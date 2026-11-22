@@ -51,17 +51,27 @@ vi.mock("../shared/date", () => ({
   DateS: ({ date }: { date: Date }) => <span>{String(date)}</span>,
 }));
 
+// why: the row's Check out / Check in buttons read three layout-loader hooks
+// and a fetcher, and have their own render test in
+// `booking-quick-actions.test.tsx`; a stub keeps this test about the pills.
+vi.mock("./booking-quick-actions", () => ({
+  BookingQuickActions: () => <span>row actions</span>,
+}));
+
 // why: `BookingStatusBadge` (kept REAL below) reads these two hooks; stub
 // minimal values so it renders without needing a real auth/org context.
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    isBase: false,
-    isSelfService: false,
-    isBaseOrSelfService: false,
-    roles: [],
+vi.mock("~/hooks/use-reservation-is-request", () => ({
+  useReservationIsRequest: () => false,
+}));
+// why: the row derives the "Pending approval" badge from the workspace
+// setting; stub it off so these pill/badge tests render outside a router.
+vi.mock("~/hooks/use-booking-settings", () => ({
+  useBookingSettings: () => ({
+    requireApprovalForBase: false,
+    requireApprovalForSelfService: false,
   }),
 }));
 

@@ -1,16 +1,15 @@
 /**
- * Tests for the explicit check-out requirement: which roles each switch covers,
- * and the 403 the web booking action returns for a refused one-click check-out.
+ * Tests for the explicit check-out requirement: which memberships each switch
+ * covers, and the 403 the web booking action returns for a refused one-click
+ * check-out.
  *
  * @see {@link file://./explicit-checkout.ts}
  */
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { ShelfError } from "~/utils/error";
-import {
-  assertQuickCheckoutAllowed,
-  isExplicitCheckoutRequired,
-} from "./explicit-checkout";
+import { assertQuickCheckoutAllowed } from "./explicit-checkout";
 
 // @vitest-environment node
 
@@ -31,7 +30,14 @@ const BOTH_OFF = {
   requireExplicitCheckoutForSelfService: false,
 };
 
-describe("isExplicitCheckoutRequired", () => {
+/** The check-out switches plus the check-in pair, switched off. */
+const withCheckin = (s: typeof BOTH_OFF) => ({
+  requireExplicitCheckinForAdmin: false,
+  requireExplicitCheckinForSelfService: false,
+  ...s,
+});
+
+describe("assertQuickCheckoutAllowed", () => {
   it.each([
     [OrganizationRoles.ADMIN, ADMIN_ONLY, true],
     [OrganizationRoles.ADMIN, SELF_SERVICE_ONLY, false],
@@ -43,23 +49,53 @@ describe("isExplicitCheckoutRequired", () => {
     [OrganizationRoles.ADMIN, BOTH_OFF, false],
     [OrganizationRoles.SELF_SERVICE, BOTH_OFF, false],
   ])(
-    "%s with %o requires explicit check-out: %s",
-    (role, settings, expected) => {
-      expect(
-        isExplicitCheckoutRequired({ role, bookingSettings: settings })
-      ).toBe(expected);
+    "%s with %o refuses the one-click check-out: %s",
+    (role, settings, refused) => {
+      const run = () =>
+        assertQuickCheckoutAllowed({
+          access: accessFor([role]),
+          bookingSettings: withCheckin(settings),
+        });
+      if (refused) {
+        expect(run).toThrow(expect.objectContaining({ status: 403 }));
+      } else {
+        expect(run).not.toThrow();
+      }
     }
   );
-});
 
-describe("assertQuickCheckoutAllowed", () => {
-  it.each([
-    [OrganizationRoles.ADMIN, ADMIN_ONLY],
-    [OrganizationRoles.SELF_SERVICE, SELF_SERVICE_ONLY],
-  ])("refuses a %s with a 403 when its switch is on", (role, settings) => {
+  it("judges a mixed membership by its highest role", () => {
+    expect(() =>
+      assertQuickCheckoutAllowed({
+        access: accessFor([
+          OrganizationRoles.SELF_SERVICE,
+          OrganizationRoles.ADMIN,
+        ]),
+        bookingSettings: withCheckin(ADMIN_ONLY),
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
+  });
+
+  it("ignores the check-in switches", () => {
+    expect(() =>
+      assertQuickCheckoutAllowed({
+        access: accessFor([OrganizationRoles.ADMIN]),
+        bookingSettings: {
+          ...BOTH_OFF,
+          requireExplicitCheckinForAdmin: true,
+          requireExplicitCheckinForSelfService: true,
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it("refuses with an uncaptured 403 that tells the caller to scan", () => {
     let thrown: unknown;
     try {
-      assertQuickCheckoutAllowed({ role, bookingSettings: settings });
+      assertQuickCheckoutAllowed({
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        bookingSettings: withCheckin(SELF_SERVICE_ONLY),
+      });
     } catch (cause) {
       thrown = cause;
     }
@@ -73,16 +109,5 @@ describe("assertQuickCheckoutAllowed", () => {
     );
     // A refused one-click check-out is an expected outcome, not a fault.
     expect(error.shouldBeCaptured).toBe(false);
-  });
-
-  it.each([
-    [OrganizationRoles.OWNER, BOTH_ON],
-    [OrganizationRoles.BASE, BOTH_ON],
-    [OrganizationRoles.ADMIN, SELF_SERVICE_ONLY],
-    [OrganizationRoles.SELF_SERVICE, ADMIN_ONLY],
-  ])("lets a %s check out in one click under %o", (role, settings) => {
-    expect(() =>
-      assertQuickCheckoutAllowed({ role, bookingSettings: settings })
-    ).not.toThrow();
   });
 });

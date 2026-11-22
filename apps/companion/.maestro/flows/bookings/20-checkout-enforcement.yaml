@@ -22,7 +22,7 @@ env:
 #      An app already signed in keeps its session. An app on the login screen
 #      signs in through login-self-service.yaml, which needs
 #      SHELF_TEST_SELF_SERVICE_EMAIL / SHELF_TEST_SELF_SERVICE_PASSWORD.
-#   2. SETTING: "Require explicit check-out for Self Service" (or "for Admins")
+#   2. SETTING: "Require explicit check-out for Self Service" (or "for Admins and Managers")
 #      is ON for that workspace: Settings > Bookings as the owner, or psql:
 #        UPDATE "BookingSettings"
 #        SET "requireExplicitCheckoutForSelfService" = true

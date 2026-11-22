@@ -1,6 +1,7 @@
 import { useFetcher, useLoaderData } from "react-router";
 import type { NoteWithUser } from "~/components/assets/notes/note";
 import { Note } from "~/components/assets/notes/note";
+import { LinkTitlesProvider } from "~/components/links/link-titles-context";
 import { Button } from "~/components/shared/button";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.activity";
@@ -9,7 +10,7 @@ import { BookingActionsDropdown } from "./actions-dropdown";
 import { NewBookingNote } from "./new";
 
 export const BookingNotes = () => {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, linkTitles } = useLoaderData<typeof loader>();
 
   /* Using user data here for the BookingNote component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
@@ -58,26 +59,28 @@ export const BookingNotes = () => {
       ) : null}
       <NewBookingNote fetcher={fetcher} />
       {hasNotes ? (
-        <ul className="notes-list mt-8 w-full">
-          {/* Render optimistic note using the same Note component */}
-          {optimisticNote && (
-            <Note
-              key={optimisticNote.id}
-              note={optimisticNote}
-              actionsDropdown={
-                <BookingActionsDropdown noteId={optimisticNote.id} />
-              }
-            />
-          )}
-          {/* Render all existing notes */}
-          {(booking.notes as NoteWithUser[]).map((note) => (
-            <Note
-              key={note.id}
-              note={note}
-              actionsDropdown={<BookingActionsDropdown noteId={note.id} />}
-            />
-          ))}
-        </ul>
+        <LinkTitlesProvider value={linkTitles}>
+          <ul className="notes-list mt-8 w-full">
+            {/* Render optimistic note using the same Note component */}
+            {optimisticNote && (
+              <Note
+                key={optimisticNote.id}
+                note={optimisticNote}
+                actionsDropdown={
+                  <BookingActionsDropdown noteId={optimisticNote.id} />
+                }
+              />
+            )}
+            {/* Render all existing notes */}
+            {(booking.notes as NoteWithUser[]).map((note) => (
+              <Note
+                key={note.id}
+                note={note}
+                actionsDropdown={<BookingActionsDropdown noteId={note.id} />}
+              />
+            ))}
+          </ul>
+        </LinkTitlesProvider>
       ) : (
         <div className="flex h-[500px] items-center  justify-center">
           <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">

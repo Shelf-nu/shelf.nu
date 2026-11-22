@@ -1,6 +1,6 @@
 ---
 description: Prevent React re-render storms and component remount loops
-globs:
+paths:
   - "apps/webapp/app/routes/**/*.tsx"
   - "apps/webapp/app/components/**/*.tsx"
 ---

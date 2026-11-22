@@ -168,6 +168,7 @@ describe("markdoc.config", () => {
         "tag",
         "category_badge",
         "audit_images",
+        "name",
       ];
       const actualTags = Object.keys(markdocConfig.tags as any);
 
@@ -188,6 +189,7 @@ describe("markdoc.config", () => {
         "tag",
         "category_badge",
         "audit_images",
+        "name",
       ];
       const actualTags = Object.keys(markdocConfig.tags as any);
 

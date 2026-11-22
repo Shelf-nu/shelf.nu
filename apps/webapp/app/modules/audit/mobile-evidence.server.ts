@@ -11,7 +11,7 @@
  *  2. The auditAsset must belong **to that session** (closes cross-tenant
  *     note/image injection — a client that learns a foreign auditAssetId
  *     must not be able to attach evidence to it).
- *  3. BASE / SELF_SERVICE callers must be an assignee of the audit
+ *  3. Callers limited to assigned audits must be an assignee of the audit
  *     (mirrors `audits.complete.ts`).
  *
  * Lives outside `service.server.ts` so the audit service does not depend on
@@ -23,7 +23,6 @@
 import { db } from "~/database/db.server";
 import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssignee } from "~/modules/audit/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { ShelfError } from "~/utils/error";
 
 /**
@@ -36,7 +35,7 @@ import { ShelfError } from "~/utils/error";
  * @param args.organizationId - The caller's resolved organization id
  * @param args.userId - The authenticated user id
  * @throws {ShelfError} 404 if session not in org or asset not in session;
- *   403 if a BASE/SELF_SERVICE caller is not an assignee
+ *   403 if a caller limited to assigned audits is not an assignee
  */
 export async function requireAuditAssetInSession({
   auditSessionId,
@@ -77,18 +76,11 @@ export async function requireAuditAssetInSession({
     });
   }
 
-  // Resolved from ALL roles. `getMobileUserContext` sets `role = roles[0]`,
-  // and its own JSDoc warns that this is wrong for an authorization decision:
-  // a membership ordered `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE, so
-  // a real admin who is not an assignee would be refused here.
-  const { roles } = await getMobileUserContext(userId, organizationId);
-  const effectiveRole = resolveMostPrivilegedRole(roles);
-  const isSelfServiceOrBase =
-    effectiveRole === "SELF_SERVICE" || effectiveRole === "BASE";
+  const { access } = await getMobileUserContext(userId, organizationId);
   await requireAuditAssignee({
     auditSessionId,
     organizationId,
     userId,
-    isSelfServiceOrBase,
+    assignedOnly: !access.audits.seeAll,
   });
 }

@@ -5,6 +5,7 @@ import {
   KitStatus,
   type Prisma,
 } from "@prisma/client";
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   LinksFunction,
@@ -55,13 +56,15 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
-import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
+  buildKitSlicesForBooking,
+  countArchivedKitMembers,
   getBooking,
   getDetailedPartialCheckinData,
   getKitIdsByBookingSlices,
@@ -69,6 +72,7 @@ import {
   updateBookingAssets,
   createKitBookingNote,
 } from "~/modules/booking/service.server";
+import { stillOutOnOverdueKitSlice } from "~/modules/booking/utils.server";
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -76,13 +80,16 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { readModelTabParams } from "~/utils/booking-model-requests";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   payload,
   error,
+  getCurrentSearchParams,
   getParams,
   parseData,
   safeRedirect,
@@ -96,6 +103,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -158,18 +166,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const {
-      organizationId,
-      userOrganizations,
-      isSelfServiceOrBase,
-      canSeeAllCustody,
-      role,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const modelName = {
       singular: "kit",
@@ -184,42 +187,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * The permission check above proves `booking: update`, and BASE holds
-     * that permission alongside SELF_SERVICE, unlike `booking: checkout`,
-     * which only SELF_SERVICE holds (see the ownership check in
-     * `bookings.$bookingId.overview.fulfil-and-checkout.tsx`). So both
-     * restricted roles are checked here: a BASE or SELF_SERVICE user may
-     * only open this picker for a booking they created or hold custody of.
-     * `getBooking` fetches with `include`, which returns every scalar
-     * column, so `creatorId`/`custodianUserId` are already on `booking`.
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
      */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "manage kits for",
-      });
-    }
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage kits for",
+    });
 
-    /** Self service can only manage kits for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing kits is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
-
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    // Kits can be changed while the booking is open; roles whose policy does
+    // not allow adding after DRAFT are held to DRAFT.
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
-          ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of kits is not allowed for current status of booking.",
+        // The message names the rule that applies to this caller: members
+        // held to DRAFT get the "already reserved" explanation.
+        message: access.policy.bookings.manageItemsAfterDraft
+          ? "Changing of kits is not allowed for current status of booking."
+          : "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
       });
     }
@@ -251,6 +241,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const modelTabData = await getBookingModelTabData({
       organizationId,
       booking,
+      ...readModelTabParams(getCurrentSearchParams(request)),
+      // A stale page in the URL lands on the last page, not an empty one.
+      clampPageToResults: true,
+      // This booking's reservations lead the list, as on the tab's own route.
+      pinReservedModels: true,
     });
 
     const { page, perPage, kits, search, totalKits, totalPages } =
@@ -260,7 +255,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         currentBookingId: bookingId,
         // Only reaches `?teamMember=` here; pass the resolved rule so an
         // admin's custodian filter still works on this dialog.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
@@ -280,48 +275,57 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   custody: true,
                   bookingAssets: {
                     /**
-                     * Only bookings whose period overlaps this one make a kit
-                     * unavailable, so the picker's rows are filtered to those.
+                     * The slices that can make a kit unavailable to this
+                     * booking, for the row's availability label.
                      *
-                     * Two intervals overlap when each starts before the other
+                     * First, bookings whose period overlaps this one. Two
+                     * intervals overlap when each starts before the other
                      * ends: the other booking's `from` must not fall after this
                      * booking's `to`, and its `to` must not fall before this
                      * booking's `from`. Both comparisons cross between the two
                      * bookings — a clause comparing a candidate's `from` and
                      * `to` against the SAME endpoint of this booking narrows to
                      * containment or, if the endpoints are the wrong way round,
-                     * to nothing at all.
+                     * to nothing at all. The second clause is containment,
+                     * which the first already covers; it is kept so this
+                     * predicate stays identical to the booking overview's.
                      *
-                     * The second clause is containment, which the first already
-                     * covers. It is kept so this predicate stays identical to
-                     * the three siblings that answer the same question — the
-                     * booking overview, `getKitAvailability` and the scanner's
-                     * picker metadata — since a picker that disagrees with them
-                     * offers kits the save then refuses.
+                     * Second, a kit slice still out on an OVERDUE booking,
+                     * whatever its dates: an overdue kit has no known return
+                     * date. The picker's filter and the booking writes apply
+                     * the same rule (`findKitSlicesInWindow`), so the label
+                     * cannot offer a kit they hide or refuse.
                      */
                     where: {
-                      booking: {
-                        status: {
-                          in: [
-                            BookingStatus.RESERVED,
-                            BookingStatus.ONGOING,
-                            BookingStatus.OVERDUE,
-                          ],
+                      OR: [
+                        {
+                          booking: {
+                            status: {
+                              in: [
+                                BookingStatus.RESERVED,
+                                BookingStatus.ONGOING,
+                                BookingStatus.OVERDUE,
+                              ],
+                            },
+                            ...(booking.from &&
+                              booking.to && {
+                                OR: [
+                                  {
+                                    from: { lte: booking.to },
+                                    to: { gte: booking.from },
+                                  },
+                                  {
+                                    from: { gte: booking.from },
+                                    to: { lte: booking.to },
+                                  },
+                                ],
+                              }),
+                          },
                         },
-                        ...(booking.from &&
-                          booking.to && {
-                            OR: [
-                              {
-                                from: { lte: booking.to },
-                                to: { gte: booking.from },
-                              },
-                              {
-                                from: { gte: booking.from },
-                                to: { lte: booking.to },
-                              },
-                            ],
-                          }),
-                      },
+                        stillOutOnOverdueKitSlice({
+                          currentBookingId: booking.id,
+                        }),
+                      ],
                     },
                     include: {
                       booking: {
@@ -364,10 +368,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // `email` included, and this picker is reachable with `booking: update`
       // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
       // Scoping the custodian FILTER (above) does not shape the rows, so the
-      // identity has to be redacted here too. Not the literal `false` passed to
-      // the filter: that argument is deliberately fixed for a seed nothing
-      // renders, and reusing it would redact for ADMIN/OWNER as well.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+      // identity has to be redacted here too.
+      items: redactCustodianForViewer(kits, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       totalItems: totalKits,
       bookingKitIds,
       ...modelTabData,
@@ -386,13 +391,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase, role } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
@@ -440,40 +444,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
     /**
-     * The permission check above proves `booking: update`, and BASE holds
-     * that permission alongside SELF_SERVICE, unlike `booking: checkout`,
-     * which only SELF_SERVICE holds (see the ownership check in
-     * `bookings.$bookingId.overview.fulfil-and-checkout.tsx`). So both
-     * restricted roles are checked here: a BASE or SELF_SERVICE user may
-     * only write kits to a booking they created or hold custody of.
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
      */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "manage kits for",
-      });
-    }
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage kits for",
+    });
 
-    /** Self service can only manage kits for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing kits is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
-
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    // Kits can be changed while the booking is open; roles whose policy does
+    // not allow adding after DRAFT are held to DRAFT.
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
-          ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of kits is not allowed for current status of booking.",
+        // The message names the rule that applies to this caller: members
+        // held to DRAFT get the "already reserved" explanation.
+        message: access.policy.bookings.manageItemsAfterDraft
+          ? "Changing of kits is not allowed for current status of booking."
+          : "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
       });
     }
@@ -496,17 +489,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         name: true,
         status: true,
         assetKits: {
-          // `id` + `quantity` so the kit-driven BookingAsset rows created
-          // below get the matching `AssetKit.id` recorded on `assetKitId`
-          // and inherit the kit's slice quantity for QUANTITY_TRACKED
-          // assets (otherwise rows would default to qty=1, leaving the
-          // kit's "10 boxes of Pencils" looking like 1 box in the booking).
-          // `title` + `type` + `unitOfMeasure` feed the per-asset Note
-          // emission after `updateBookingAssets` so qty-tracked rows
-          // render "added 50 boxes of {asset} via {kit} to {booking}".
+          // `id` tells which memberships are already on the booking and
+          // matches each new slice back to its asset for the per-asset note.
+          // `status` feeds the checked-out guard. `title` + `type` +
+          // `unitOfMeasure` feed the per-asset Note emission after
+          // `updateBookingAssets` so qty-tracked rows render "added 50 boxes
+          // of {asset} via {kit} to {booking}".
           select: {
             id: true,
-            quantity: true,
             asset: {
               select: {
                 id: true,
@@ -521,51 +511,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    // Existing kit-driven AssetKit ids in this booking — we use these to
-    // detect "this kit is already added" rather than "this asset is
-    // already added" (which was the old, wrong test before BookingAsset
-    // grew multi-row support). A qty-tracked asset can now be in a
-    // booking as standalone AND kit-driven simultaneously; the standalone
-    // entry must NOT block the kit-driven row from being created.
+    // Kit-driven AssetKit ids already on this booking. "Is this kit already
+    // added" is answered per membership, never per asset: a qty-tracked
+    // asset can be on a booking standalone AND kit-driven at once, and the
+    // standalone row must not block the kit-driven one.
     const existingAssetKitIds = new Set(
       booking.bookingAssets
         .map((ba) => ba.assetKitId)
         .filter((v): v is string => v != null)
     );
 
-    // Build the kit-driven slice specs — one element per `AssetKit`
-    // membership we'd want to insert. Skip slices whose AssetKit is
-    // already represented in the booking — the user already added that
-    // kit.
-    //
-    // The SAME asset appearing in multiple selected kits produces
-    // MULTIPLE slice specs (one per AssetKit), each a distinct row in
-    // the kit-driven bucket (partial unique is on `assetKitId`, not
-    // `assetId`). This is what fixes the multi-kit-per-asset drop: a
-    // qty-tracked asset in two kits added to one booking now yields two
-    // kit-driven `BookingAsset` rows.
-    const kitSlices: KitSliceSpec[] = [];
-    for (const kit of selectedKits) {
-      for (const ak of kit.assetKits) {
-        if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
-        kitSlices.push({
-          assetId: ak.asset.id,
-          assetKitId: ak.id,
-          // Durable provenance — persisted to `BookingAsset.sourceKitId`, which
-          // outlives the `AssetKit` row `assetKitId` points at.
-          kitId: kit.id,
-          quantity: ak.quantity,
-        });
-      }
-    }
+    // Kits with a membership already on the booking are not joining it. The
+    // submitted selection includes them, so they are passed on to be exempt
+    // from the "no active assets" refusal; they only top up new memberships.
+    const kitIdsOnBooking = new Set(
+      selectedKits
+        .filter((kit) =>
+          kit.assetKits.some((ak) => existingAssetKitIds.has(ak.id))
+        )
+        .map((kit) => kit.id)
+    );
+    const kitIdsJoining = selectedKits
+      .map((kit) => kit.id)
+      .filter((kitId) => !kitIdsOnBooking.has(kitId));
+
+    // One kit-driven slice per new `AssetKit` membership of an active asset,
+    // org-scoped, skipping memberships already on the booking. A joining kit
+    // with no active member is refused by name. The SAME asset in several
+    // selected kits yields one slice per membership, so a qty-tracked asset in
+    // two kits becomes two kit-driven rows (the partial unique is on
+    // `assetKitId`, not `assetId`).
+    const [kitSlices, archivedMembersLeftOut] = await Promise.all([
+      buildKitSlicesForBooking({
+        kitIds: selectedKits.map((kit) => kit.id),
+        organizationId,
+        existingAssetKitIds,
+        kitIdsOnBooking,
+      }),
+      // Archived members of the joining kits stay out; the toast says so.
+      countArchivedKitMembers({ kitIds: kitIdsJoining, organizationId }),
+    ]);
     const newAssetIds = Array.from(new Set(kitSlices.map((s) => s.assetId)));
 
-    // Only validate kits that are actually adding NEW slices to the
-    // booking (i.e. at least one of the kit's AssetKits isn't already
-    // represented). Kits whose AssetKits are all already present in the
-    // booking are no-ops here.
+    // Only kits contributing a new slice are validated and attributed below.
+    // A kit whose active memberships are all on the booking already is a no-op.
+    const kitIdsAddingSlices = new Set(kitSlices.map((slice) => slice.kitId));
     const newlyAddedKits = selectedKits.filter((kit) =>
-      kit.assetKits.some((ak) => !existingAssetKitIds.has(ak.id))
+      kitIdsAddingSlices.has(kit.id)
     );
 
     // Get partial check-in details to determine actual availability using context-aware status
@@ -648,6 +640,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
         kitSlices,
+        // Re-checks the add rule against the locked booking status.
+        access,
+        hints: getClientHint(request),
       });
 
       if (newlyAddedKitIds.length > 0) {
@@ -757,6 +752,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * client-supplied form value, so route it through `safeRedirect` to block
      * open-redirects to another origin — falling back to the booking page.
      */
+    if (archivedMembersLeftOut > 0) {
+      sendNotification({
+        title: "Kits added",
+        message: archivedAssetsLeftOut(archivedMembersLeftOut),
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+    }
+
     if (redirectTo) {
       return redirect(safeRedirect(redirectTo, `/bookings/${bookingId}`));
     }
@@ -779,15 +783,25 @@ export default function AddKitsToBooking() {
     showModelsTab,
     assetModels,
     modelRequests,
+    matchedAssetModels,
+    modelsPage,
+    modelsPerPage,
   } = useLoaderData<typeof loader>();
 
   /**
-   * Local state for the active tab value. "kits" is the default on mount.
-   * "assets" always navigates away (existing manage-assets route); "models"
-   * renders inline via `ManageModelRequests`, mirroring manage-assets' tab
-   * pattern.
+   * Local state for the active tab value. "assets" always navigates away (the
+   * manage-assets route); "models" renders inline via `ManageModelRequests`,
+   * mirroring manage-assets' tab pattern.
+   *
+   * Seeded from `?tab=models`, which the Models tab's search and paging write,
+   * so a reload stays on the tab the operator was using. "kits" otherwise.
    */
-  const [activeTab, setActiveTab] = useState<"kits" | "models">("kits");
+  const [searchParams] = useSearchParams();
+  // Only when the tab exists: a workspace without models never renders it, so
+  // a stale `?tab=models` would otherwise open the dialog with no tab shown.
+  const [activeTab, setActiveTab] = useState<"kits" | "models">(() =>
+    searchParams.get("tab") === "models" && showModelsTab ? "models" : "kits"
+  );
 
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -986,6 +1000,9 @@ export default function AddKitsToBooking() {
             bookingId={booking.id}
             assetModels={assetModels}
             modelRequests={modelRequests}
+            matchedAssetModels={matchedAssetModels}
+            modelsPage={modelsPage}
+            modelsPerPage={modelsPerPage}
           />
         </TabsContent>
       ) : null}

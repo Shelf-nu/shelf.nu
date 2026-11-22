@@ -1,11 +1,16 @@
 /**
  * Explicit Requirement Settings Card
  *
- * Owner-only card on Settings > Bookings with one switch per restricted role
- * (Admin, Self Service). A switch that is on means that role must move a
+ * Owner-only card on Settings > Bookings with one switch per restricted
+ * group (Admins and Managers, Self Service users). A switch that is on means that role must move a
  * booking's assets through the explicit flow (scan or select them) instead of
  * the one-click action. The check-in and check-out cards share this layout and
  * differ only in their fields, copy and action intent.
+ *
+ * The card states on its face who the switches never apply to: the workspace
+ * owner is never restricted, and Base users hold no check-in or check-out
+ * permission. That sentence is plain text under the heading, never a tooltip,
+ * so nobody has to hover to learn why a switch changes nothing for a role.
  *
  * The switches save on change: every change submits the whole form through a
  * fetcher, so the action always receives both values. Only the workspace owner
@@ -16,13 +21,13 @@
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the action
  *   that persists both cards and refuses non-owners
  */
-import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRevisionOnRefusedSave } from "~/hooks/use-revision-on-refused-save";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
 import { Switch } from "../forms/switch";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 
 /** One role's switch on an explicit-requirement card. */
 export type ExplicitRequirementSwitch = {
@@ -40,45 +45,39 @@ export type ExplicitRequirementSwitch = {
  * Renders a save-on-change card of explicit-requirement switches.
  *
  * @param props.header - Card title and sub-heading
+ * @param props.exemption - The always-visible sentence naming who is never
+ *   restricted by these switches
  * @param props.intent - Action intent that persists this card's switches
  * @param props.switches - One switch per role, in display order
  * @returns The settings card
  */
 export function ExplicitRequirementSettingsCard({
+  id,
   header,
+  exemption,
   intent,
   switches,
 }: {
+  /** Anchor id, so `/settings/bookings#<id>` scrolls to this card */
+  id: string;
   header: { title: string; subHeading?: string };
+  /** Who the switches never apply to, shown under the heading at all times */
+  exemption: string;
   intent: "updateExplicitCheckin" | "updateExplicitCheckout";
   switches: ExplicitRequirementSwitch[];
 }) {
   const fetcher = useFetcher();
-  const { isOwner } = useUserRoleHelper();
-  // Bumped on every refused save; keyed on the form, it remounts the switches
-  // from `defaultChecked`. A Radix switch keeps its visible state in React and
-  // ignores a native form reset, so remounting is what returns it to the
-  // stored value.
-  const [formRevision, setFormRevision] = useState(0);
-
-  // The switches are uncontrolled and flip the moment they are clicked. When
-  // the action refuses the save, the stored values are what still apply, so
-  // the form goes back to its defaults while the error toast explains why.
-  useEffect(() => {
-    const refused =
-      fetcher.state === "idle" &&
-      fetcher.data != null &&
-      typeof fetcher.data === "object" &&
-      "error" in fetcher.data &&
-      Boolean((fetcher.data as { error?: unknown }).error);
-    if (refused) setFormRevision((revision) => revision + 1);
-  }, [fetcher.state, fetcher.data]);
+  const { ownsWorkspace: isOwner } = useRoleAccess();
+  // Keyed on the form: a refused save remounts the switches from their
+  // stored values.
+  const formRevision = useRevisionOnRefusedSave(fetcher);
 
   return (
-    <Card className="my-0">
+    <Card id={id} className="mt-0">
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
+        <CardTitle>{header.title}</CardTitle>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
+        <p className="mt-2 text-sm font-medium text-gray-700">{exemption}</p>
       </div>
       <div>
         <fetcher.Form
@@ -94,12 +93,17 @@ export function ExplicitRequirementSettingsCard({
         >
           {switches.map((item, index) => {
             const switchId = `${intent}-${item.name}`;
+            // Both cards sit on one page and label their switches by role
+            // alone, so the description (which names the role AND the
+            // direction) is what tells a screen reader user the check-in
+            // "Admins and Managers" switch from the check-out one.
+            const descriptionId = `${switchId}-description`;
 
             return (
               <FormRow
                 key={item.name}
                 rowLabel={item.label}
-                subHeading={<div>{item.description}</div>}
+                subHeading={<div id={descriptionId}>{item.description}</div>}
                 className={tw("border-b-0 pb-[10px] pt-0", index > 0 && "mt-4")}
               >
                 <div className="flex items-center gap-3 lg:flex-col lg:gap-2">
@@ -109,6 +113,7 @@ export function ExplicitRequirementSettingsCard({
                     disabled={!isOwner}
                     defaultChecked={item.defaultChecked}
                     title={item.label}
+                    aria-describedby={descriptionId}
                   />
                   {/* FormRow shows its row label from the lg breakpoint only,
                       and a card holds one switch per role, so below lg this

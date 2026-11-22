@@ -57,7 +57,8 @@ export function isSliceOutByMarker(
   slice: Pick<BookingAsset, "checkedOutAt" | "checkedInAt">
 ): boolean {
   return (
-    slice.checkedOutAt !== null &&
+    // `!= null`: a slice with no marker at all has not left.
+    slice.checkedOutAt != null &&
     (!slice.checkedInAt || slice.checkedInAt < slice.checkedOutAt)
   );
 }

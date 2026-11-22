@@ -4,18 +4,17 @@
  * Renders the body of the "Asset Activity" report: a hero section summarising
  * total activity counts (assignments, check-ins/outs, most active asset) plus
  * a chronological table of recent asset events with semantic activity-type
- * badges.
+ * badges and a plain-words description of each change.
  *
- * Extracted from the monolithic reports route during the
- * `reports.$reportId.tsx` decomposition. The route owns data fetching,
- * loader/action wiring, and row-click navigation; this component only
- * renders the report body it is handed.
+ * The route owns data fetching, loader/action wiring, and row-click
+ * navigation; this component only renders the report body it is handed.
  *
  * @see {@link file://./../../routes/_layout+/reports.$reportId.tsx}
  * @see {@link file://./report-table.tsx}
  * @see {@link file://./report-empty-state.tsx}
  */
 
+import { useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 
 import { ReportEmptyState } from "~/components/reports/report-empty-state";
@@ -24,12 +23,70 @@ import {
   DateCell,
   ReportTable,
 } from "~/components/reports/report-table";
-import type { AssetActivityRow, ReportKpi } from "~/modules/reports/types";
+import type {
+  AssetActivityRow,
+  AssetActivityType,
+  ReportKpi,
+} from "~/modules/reports/types";
 import { tw } from "~/utils/tw";
 
 /**
- * Column definitions for the Asset Activity table, hoisted to module
- * scope. Same loop fix as IDLE_ASSETS_COLUMNS.
+ * One change's description in the Details column.
+ *
+ * Table cells never wrap; this one does, so a long change such as
+ * "Location changed: Main warehouse → Unit 4, Leeds" stays readable. A
+ * rewritten asset description can run to pages, so three lines show, and a
+ * "Show more" button (reachable by keyboard and touch) opens the rest in
+ * place. The button appears only when the text is actually cut off.
+ *
+ * @param props.text - The row's plain-words description
+ */
+function DetailsCell({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+
+  /**
+   * Measures the collapsed text when it mounts or re-renders. A ref callback
+   * rather than an effect: it runs with the laid-out element in hand.
+   */
+  const measure = (element: HTMLSpanElement | null) => {
+    if (!element || expanded) return;
+    const isClamped = element.scrollHeight > element.clientHeight;
+    if (isClamped !== clamped) setClamped(isClamped);
+  };
+
+  return (
+    <div className="flex min-w-48 max-w-xs flex-col items-start gap-1">
+      <span
+        ref={measure}
+        className={tw(
+          "whitespace-normal text-gray-700",
+          !expanded && "line-clamp-3"
+        )}
+      >
+        {text}
+      </span>
+      {clamped || expanded ? (
+        <button
+          type="button"
+          className="text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:underline"
+          aria-expanded={expanded}
+          // The row itself opens the asset; this button only toggles the text.
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((open) => !open);
+          }}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Column definitions for the Asset Activity table. They live at module scope
+ * so the table receives the same array on every render.
  */
 const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
   {
@@ -51,7 +108,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
     cell: ({ row }) => {
       const type = row.original.activityType;
       // Plain English labels — no jargon or internal codes
-      const labels: Record<string, string> = {
+      // Keyed by every activity type, so a new type cannot ship without its
+      // label and color.
+      const labels: Record<AssetActivityType, string> = {
         CREATED: "Asset created",
         UPDATED: "Asset updated",
         CUSTODY_ASSIGNED: "Assigned to team member",
@@ -60,9 +119,11 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         BOOKING_CHECKED_IN: "Checked in",
         LOCATION_CHANGED: "Location changed",
         CATEGORY_CHANGED: "Category changed",
+        ARCHIVED: "Archived",
+        REINSTATED: "Reinstated",
       };
       // Semantic colors for activity types
-      const colors: Record<string, string> = {
+      const colors: Record<AssetActivityType, string> = {
         CREATED: "bg-green-100 text-green-700",
         UPDATED: "bg-blue-100 text-blue-700",
         CUSTODY_ASSIGNED: "bg-violet-100 text-violet-700",
@@ -71,6 +132,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         BOOKING_CHECKED_IN: "bg-green-100 text-green-700",
         LOCATION_CHANGED: "bg-blue-100 text-blue-700",
         CATEGORY_CHANGED: "bg-blue-100 text-blue-700",
+        // Taken out of service and back: neutral, like the archived badge.
+        ARCHIVED: "bg-gray-100 text-gray-700",
+        REINSTATED: "bg-gray-100 text-gray-700",
       };
       return (
         <span
@@ -83,6 +147,11 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
         </span>
       );
     },
+  },
+  {
+    accessorKey: "description",
+    header: "Details",
+    cell: ({ row }) => <DetailsCell text={row.original.description} />,
   },
   {
     accessorKey: "performedBy",
@@ -200,6 +269,9 @@ export function AssetActivityContent({
             </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
               Checked in
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+              Archived / Reinstated
             </span>
           </div>
         </div>

@@ -8,6 +8,7 @@
  *
  * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
+import type { Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -17,6 +18,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  bookableListScopeWhere,
+  resolveBookableListScope,
+} from "~/modules/asset/list-scope.server";
 import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
@@ -51,10 +56,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    // The same call yields `canSeeAllBookings`, which decides which bookings
-    // the sections may draw from, and `canSeeAllCustody` for their names.
-    const { canUseAudits, canSeeAllBookings, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // The same call yields `access.bookings.seeAll`, which decides which
+    // bookings the sections may draw from, and `access.custody.seeAll` for
+    // their names.
+    const { canUseAudits, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+
+    // The asset KPI, the status breakdown and the newest-assets list describe
+    // the same assets the caller's Assets tab lists: active assets only, and
+    // for a role whose `assets.listScope` is "bookable", those available for
+    // bookings plus the ones in the caller's custody. Each query names
+    // `archivedAt` itself so the archived-at lint rule can check it.
+    const bookableScope = resolveBookableListScope({
+      access,
+      userId: user.id,
+    });
+    const listScopeWhere: Prisma.AssetWhereInput = bookableScope
+      ? { AND: [bookableListScopeWhere(bookableScope)] }
+      : {};
 
     // Which bookings the Home sections may draw from.
     // `requireOrganizationAccess` above proves membership and performs NO role
@@ -62,10 +83,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // in the workspace — with custodian names attached — straight off the
     // dashboard.
     //
-    // `canSeeAllBookings` is that decision: ADMIN and OWNER see every booking,
-    // SELF_SERVICE and BASE see only the ones they hold unless the workspace
-    // has switched their override on. The role alone cannot answer it — it does
-    // not know what the workspace decided — so Home reads the same flag the
+    // `access.bookings.seeAll` is that decision: ADMIN and OWNER see every
+    // booking, SELF_SERVICE and BASE see only the ones they hold unless the
+    // workspace has switched their override on. Home reads the same flag the
     // website does and lands on the same set of bookings.
     //
     // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
@@ -81,7 +101,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // empty for both). The companion's Home tab is the app's landing screen
     // for every role, not an admin analytics surface — denying it would leave
     // those users on a permanent error state rather than a scoped dashboard.
-    const custodianScope = canSeeAllBookings
+    const custodianScope = access.bookings.seeAll
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });
 
@@ -99,8 +119,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       overdueBookingsResult,
       activeAudits,
     ] = await Promise.all([
-      // KPI: Total assets
-      db.asset.count({ where: { organizationId } }),
+      // KPI: Total assets, as the Assets tab lists them
+      db.asset.count({
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
+      }),
 
       // KPI: Categories
       db.category.count({ where: { organizationId } }),
@@ -113,19 +135,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: { organizationId, deletedAt: null },
       }),
 
-      // Assets by status
+      // Assets by status, over the same assets as the KPI
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
         _count: { id: true },
       }),
 
-      // My custody count — assets currently in custody of this user.
-      // Phase 2 widened `Asset.custody` from 1:1 to 1:many for
-      // QUANTITY_TRACKED multi-custodian support, so we filter via `some`.
+      // My custody count: assets currently in this user's custody, bookable
+      // or not, like the custody tab. `Asset.custody` is one-to-many (a
+      // quantity-tracked asset can have several holders), so filter via `some`.
       db.asset.count({
         where: {
           organizationId,
+          // Dashboard KPI: active inventory only, like the status groupBy.
+          archivedAt: null,
           custody: {
             some: {
               custodian: {
@@ -136,9 +160,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 5 newest assets
+      // 5 newest assets, from the same assets as the KPI
       db.asset.findMany({
-        where: { organizationId },
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
@@ -254,6 +278,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
           ...(canUseAudits ? {} : { id: { in: [] } }),
+          // Roles limited to assigned audits see only theirs, the same
+          // predicate `/api/mobile/audits` applies through `assignedOnly`.
+          ...(!access.audits.seeAll && {
+            assignments: { some: { userId: user.id } },
+          }),
         },
         select: {
           id: true,
@@ -329,7 +358,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // is what keeps Home naming a booking's holder the same way the list and
       // the calendar do.
       custodianName: resolveBookingCustodianName({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: b,
         userId: user.id,
       }),

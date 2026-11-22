@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { DateTime } from "luxon";
 import { data, type ActionFunctionArgs } from "react-router";
@@ -86,11 +86,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { bookingId, timeZone } = await parseMobileBody(BodySchema, request);
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    const isAdminOrOwner = !isSelfServiceOrBase;
+    // The caller's access, judged by the membership's effective role. Its
+    // `notifications.reservationAlertsAdmins` decides whether the reservation
+    // alerts the workspace booking broadcast audience.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // Read the draft's current values; the mobile "Reserve" tap transitions it
     // to RESERVED without re-entering the form.
@@ -120,8 +119,9 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Self-service / base users may only reserve their own bookings.
-    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+    // A caller who does not write every booking may only reserve bookings
+    // they are the custodian of.
+    if (!access.bookings.writeAll && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only reserve your own bookings.",
@@ -257,7 +257,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status: booking.status,
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }).parse({
         id: booking.id,
         name: booking.name,
@@ -293,11 +293,13 @@ export async function action({ request }: ActionFunctionArgs) {
       from: booking.from,
       to: booking.to,
       custodianTeamMemberId: booking.custodianTeamMemberId,
-      custodianUserId: booking.custodianUserId ?? undefined,
       tags: booking.tags.map((t) => ({ id: t.id })),
       hints,
-      isSelfServiceOrBase,
+      alertsOrgOnReservation:
+        access.policy.notifications.reservationAlertsAdmins,
+      actorApprovalSetting: access.policy.bookings.approvalSetting,
       userId: user.id,
+      seesAllBookings: access.bookings.seeAll,
     });
 
     return data({
@@ -306,6 +308,10 @@ export async function action({ request }: ActionFunctionArgs) {
         name: reserved.name,
         status: reserved.status,
       },
+      // What the reservation became, from the write itself: the app words its
+      // success message from this rather than from a prediction made when the
+      // booking loaded, which the workspace switches may have outdated.
+      isPendingApproval: reserved.approvedAt === null,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

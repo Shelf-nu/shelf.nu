@@ -31,6 +31,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -38,6 +39,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -93,6 +95,7 @@ export function AdjustQuantitySheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
 
   const [value, setValue] = useState("1");
   const [note, setNote] = useState("");
@@ -105,7 +108,7 @@ export function AdjustQuantitySheet({
   const [submittedDirection, setSubmittedDirection] = useState<
     "add" | "subtract" | null
   >(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   // Re-seed the inputs every time the sheet opens: each open is a fresh
   // adjustment, so stale values must not leak across.
@@ -179,7 +182,10 @@ export function AdjustQuantitySheet({
       // keyboard (and jsx-a11y/no-autofocus flags it).
       onShow={() => inputRef.current?.focus()}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Adjust Quantity</Text>

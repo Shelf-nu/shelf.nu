@@ -1,6 +1,6 @@
 import { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { loader } from "~/routes/_layout+/home";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -31,7 +31,7 @@ const PLACEHOLDER_ROW_KEYS = [
 
 export default function CustodiansList() {
   const { custodiansData } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   const isPersonal = isPersonalOrg(currentOrganization);
   const canViewTeamMemberUsers = userHasPermission({

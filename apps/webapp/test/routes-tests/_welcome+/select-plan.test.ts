@@ -128,4 +128,21 @@ describe("select-plan loader — the plan intent handed over by onboarding", () 
 
     expect((await response.json()).planIntent).toBeNull();
   });
+
+  it("redirects an SSO user home before any Stripe call", async () => {
+    vi.mocked(getUserByID).mockResolvedValue({
+      id: "user-123",
+      customerId: null,
+      sso: true,
+    } as never);
+
+    const response = await load("http://localhost:3000/select-plan");
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/");
+    expect(getStripeCustomer).not.toHaveBeenCalled();
+    expect(getStripePricesForTrialPlanSelection).not.toHaveBeenCalled();
+    expect(getAuditAddonPrices).not.toHaveBeenCalled();
+    expect(getBarcodeAddonPrices).not.toHaveBeenCalled();
+  });
 });

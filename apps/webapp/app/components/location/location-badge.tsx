@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Location } from "@prisma/client";
 import { ListTree } from "lucide-react";
 import useApiQuery from "~/hooks/use-api-query";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { LocationTreePayload } from "~/routes/api+/locations.$locationId.tree";
 import {
   PermissionAction,
@@ -43,7 +43,7 @@ export function LocationBadge({ location, className }: LocationBadgeProps) {
     return `/api/locations/${location.id}/tree`;
   }, [location?.id]);
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadLocations = userHasPermission({
     roles,
     entity: PermissionEntity.location,

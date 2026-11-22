@@ -4,7 +4,9 @@ import type { TeamMember } from "@prisma/client";
 import { CalendarRangeIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { tw } from "~/utils/tw";
 import { NewBookingForm } from "./forms/new-booking-form";
 import { Dialog, DialogPortal } from "../layout/dialog";
@@ -18,14 +20,14 @@ export default function CreateBookingDialog({
   className,
   trigger,
 }: CreateBookingDialogProps) {
-  const { teamMembersForForm, isSelfServiceOrBase } = useLoaderData<{
+  const { teamMembersForForm } = useLoaderData<{
     teamMembersForForm: TeamMember[];
-    isSelfServiceOrBase: boolean;
   }>();
   const user = useUserData();
+  const roleAccess = useRoleAccess();
 
   // The loader already takes care of returning only the current user so we just get the first and only element in the array
-  const custodianRef = isSelfServiceOrBase
+  const custodianRef = bookingCustodianIsSelf(roleAccess)
     ? teamMembersForForm.find((tm) => tm.userId === user!.id)?.id
     : undefined;
 

@@ -6,11 +6,14 @@
  * Unit tests for the SSRF protection utilities in `./ssrf.server`:
  * IP classification (`isPrivateOrReservedIp`), the guarded DNS lookup
  * (`ssrfGuardedLookup`), URL/IP-literal validation (`assertSafeUrl`), protocol
- * allowlisting and literal-host blocking in `safeFetch`, and the streaming /
- * abortable body size cap in `readBodyWithLimit`.
+ * allowlisting and literal-host blocking in `safeFetch`, the streaming /
+ * abortable body size cap in `readBodyWithLimit`, and the partial read,
+ * headers and port rule of `safeFetchPrefix`.
  */
 
+import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
+import { server } from "@mocks";
 
 import {
   assertSafeUrl,
@@ -18,6 +21,7 @@ import {
   isPrivateOrReservedIp,
   readBodyWithLimit,
   safeFetch,
+  safeFetchPrefix,
   ssrfGuardedLookup,
 } from "./ssrf.server";
 
@@ -244,5 +248,231 @@ describe("readBodyWithLimit", () => {
     await expect(
       readBodyWithLimit(res, 8000, "http://x/test", controller.signal)
     ).rejects.toThrow(/timed out/i);
+  });
+});
+
+/** A streamed response body made of these text chunks, in order. */
+function chunkedBody(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let next = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (next >= chunks.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(chunks[next++]));
+    },
+  });
+}
+
+// why: MSW answers in place of the network, so these tests make no outbound
+// request. It sits in front of the guarded dispatcher, so named-host blocking
+// is proven by the `ssrfGuardedLookup` suite above, not here.
+describe("safeFetchPrefix", () => {
+  it("stops reading once </head> has arrived, even when it spans two chunks", async () => {
+    server.use(
+      http.get(
+        "https://pages.example.com/manual",
+        () =>
+          new HttpResponse(
+            chunkedBody([
+              "<html><head><title>Manual</title></HE",
+              "AD><body>",
+              "x".repeat(10_000),
+            ]),
+            { headers: { "content-type": "text/html" } }
+          )
+      )
+    );
+
+    const result = await safeFetchPrefix("https://pages.example.com/manual", {
+      maxBytes: 1_000_000,
+      stopAfter: "</head>",
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body.toString("utf8")).toBe(
+      "<html><head><title>Manual</title></HEAD><body>"
+    );
+    expect(result.truncated).toBe(true);
+  });
+
+  it("cuts an oversized body at maxBytes instead of throwing", async () => {
+    server.use(
+      http.get(
+        "https://pages.example.com/big",
+        () =>
+          new HttpResponse(chunkedBody(["a".repeat(3000), "b".repeat(3000)]))
+      )
+    );
+
+    const result = await safeFetchPrefix("https://pages.example.com/big", {
+      maxBytes: 4000,
+    });
+
+    expect(result.body.toString("utf8")).toBe(
+      "a".repeat(3000) + "b".repeat(1000)
+    );
+    expect(result.truncated).toBe(true);
+  });
+
+  it("returns a body of exactly maxBytes whole and not truncated", async () => {
+    server.use(
+      http.get(
+        "https://pages.example.com/exact",
+        () =>
+          new HttpResponse(chunkedBody(["a".repeat(2000), "b".repeat(2000)]))
+      )
+    );
+
+    const result = await safeFetchPrefix("https://pages.example.com/exact", {
+      maxBytes: 4000,
+    });
+
+    expect(result.body.byteLength).toBe(4000);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("returns an error status with its headers instead of throwing", async () => {
+    server.use(
+      http.get(
+        "https://pages.example.com/challenge",
+        () =>
+          new HttpResponse("<html><head><title>Just a moment</title></head>", {
+            status: 403,
+            headers: { "cf-mitigated": "challenge" },
+          })
+      )
+    );
+
+    const result = await safeFetchPrefix(
+      "https://pages.example.com/challenge",
+      { maxBytes: 1000 }
+    );
+
+    expect(result.status).toBe(403);
+    expect(result.headers.get("cf-mitigated")).toBe("challenge");
+    expect(result.body.toString("utf8")).toBe(
+      "<html><head><title>Just a moment</title></head>"
+    );
+  });
+
+  it("sends the headers on every redirect hop and reports the final URL", async () => {
+    const seen: Array<{ url: string; agent: string | null }> = [];
+    server.use(
+      http.get("https://short.example.com/m", ({ request }) => {
+        seen.push({
+          url: request.url,
+          agent: request.headers.get("user-agent"),
+        });
+        return new HttpResponse(null, {
+          status: 302,
+          headers: { location: "https://pages.example.com/final" },
+        });
+      }),
+      http.get("https://pages.example.com/final", ({ request }) => {
+        seen.push({
+          url: request.url,
+          agent: request.headers.get("user-agent"),
+        });
+        return new HttpResponse("<title>Final</title>");
+      })
+    );
+
+    const result = await safeFetchPrefix("https://short.example.com/m", {
+      maxBytes: 1000,
+      headers: { "user-agent": "ShelfTest/1.0" },
+    });
+
+    expect(seen).toEqual([
+      { url: "https://short.example.com/m", agent: "ShelfTest/1.0" },
+      { url: "https://pages.example.com/final", agent: "ShelfTest/1.0" },
+    ]);
+    expect(result.finalUrl.href).toBe("https://pages.example.com/final");
+    expect(result.body.toString("utf8")).toBe("<title>Final</title>");
+  });
+
+  it("discards the body unread when readBodyIf declines it", async () => {
+    server.use(
+      http.get(
+        "https://files.example.com/manual.pdf",
+        () =>
+          new HttpResponse(chunkedBody(["%PDF-1.7", "x".repeat(5000)]), {
+            headers: { "content-type": "application/pdf" },
+          })
+      )
+    );
+
+    const result = await safeFetchPrefix(
+      "https://files.example.com/manual.pdf",
+      {
+        maxBytes: 1000,
+        readBodyIf: ({ headers }) =>
+          headers.get("content-type") === "text/html",
+      }
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body.byteLength).toBe(0);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("refuses a non-default port, on the first URL and on a redirect hop", async () => {
+    server.use(
+      http.get(
+        "https://short.example.com/to-port",
+        () =>
+          new HttpResponse(null, {
+            status: 301,
+            headers: { location: "https://pages.example.com:8443/admin" },
+          })
+      )
+    );
+
+    await expect(
+      safeFetchPrefix("https://pages.example.com:6379/", { maxBytes: 1000 })
+    ).rejects.toThrow("Refused to fetch from a non-default port");
+    await expect(
+      safeFetchPrefix("https://short.example.com/to-port", { maxBytes: 1000 })
+    ).rejects.toBeInstanceOf(BlockedAddressError);
+  });
+
+  it("allows a default port written out", async () => {
+    server.use(
+      http.get(
+        "https://pages.example.com/explicit-port",
+        () => new HttpResponse("ok")
+      )
+    );
+
+    const result = await safeFetchPrefix(
+      "https://pages.example.com:443/explicit-port",
+      { maxBytes: 1000 }
+    );
+
+    expect(result.body.toString("utf8")).toBe("ok");
+  });
+
+  it("blocks a private address, on the first URL and on a redirect hop", async () => {
+    server.use(
+      http.get(
+        "https://short.example.com/to-metadata",
+        () =>
+          new HttpResponse(null, {
+            status: 302,
+            headers: { location: "http://169.254.169.254/latest/meta-data/" },
+          })
+      )
+    );
+
+    await expect(
+      safeFetchPrefix("http://127.0.0.1/", { maxBytes: 1000 })
+    ).rejects.toBeInstanceOf(BlockedAddressError);
+    await expect(
+      safeFetchPrefix("https://short.example.com/to-metadata", {
+        maxBytes: 1000,
+      })
+    ).rejects.toBeInstanceOf(BlockedAddressError);
   });
 });

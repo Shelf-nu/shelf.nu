@@ -21,8 +21,7 @@ import { db } from "~/database/db.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
-import { organizationRolesMap } from "~/utils/organization-roles";
-import { resolveMostPrivilegedRole } from "~/utils/role-precedence";
+import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { WorkspacePlanRow } from "~/utils/workspace-plans";
 import {
@@ -104,7 +103,7 @@ export async function getWorkspacePlansForUser({
         type: organization.type,
         imageId: organization.imageId,
         isCurrent: organization.id === currentOrganizationId,
-        roleLabel: organizationRolesMap[resolveMostPrivilegedRole(roles)] ?? "",
+        roleLabel: ROLE_LABELS[resolveRole(roles)],
         plan: resolveWorkspacePlan({
           tierId: owner.tierId,
           isEnterprise: owner.customTierLimit?.isEnterprise,

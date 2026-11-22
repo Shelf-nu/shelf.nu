@@ -6,6 +6,7 @@ import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
 import { isUnsupportedBrowser } from "~/utils/browser-support";
+import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
 import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
@@ -21,7 +22,10 @@ if (window.env?.SENTRY_DSN) {
     // FLY_RELEASE_VERSION aren't set (local dev).
     release: window.env.SENTRY_RELEASE || undefined,
     environment: window.env.NODE_ENV,
-    tunnel: "/api/sentry-tunnel",
+    tunnel: SENTRY_TUNNEL_PATH,
+    // Sentry Logs, for client events worth counting but not worth an issue,
+    // such as a page that reloaded itself after a failed download.
+    enableLogs: true,
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
     beforeSendTransaction(event) {
@@ -67,6 +71,10 @@ if (window.env?.SENTRY_DSN) {
       const kept = handleClientBeforeSend(event);
       return kept && maskEmailsInSentryPayload(kept);
     },
+    /** Structured logs carry page paths and scope user data, which can name a user. */
+    beforeSendLog(log) {
+      return maskEmailsInSentryPayload(log);
+    },
   });
 }
 
@@ -74,9 +82,13 @@ if (isUnsupportedBrowser()) {
   // The inline check in `root.tsx` flagged a browser that cannot run this
   // bundle. Leave the server-rendered "browser out of date" screen in place
   // rather than hydrating an app that would crash behind it, and record the
-  // visit so the size of that audience stays visible.
+  // visit so the size of that audience stays visible. It goes to Sentry Logs,
+  // not issues: the screen is expected behaviour with nothing to fix.
   if (window.env?.SENTRY_DSN) {
-    Sentry.captureMessage("Unsupported browser blocked", "info");
+    Sentry.logger.info("Unsupported browser blocked", {
+      label: "Browser support",
+      path: window.location.pathname,
+    });
   }
 } else {
   React.startTransition(() => {

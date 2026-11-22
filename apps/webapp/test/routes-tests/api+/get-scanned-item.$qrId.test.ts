@@ -66,7 +66,14 @@ const { mockGetQr } = vi.hoisted(() => ({ mockGetQr: vi.fn() }));
 // module cannot fall through to a database.
 vi.mock("~/modules/qr/service.server", () => ({ getQr: mockGetQr }));
 
+// why: recording writes to the database; what these resolves record is pinned
+// in get-scanned-item.$qrId.records-scan.test.ts.
+vi.mock("~/modules/scan/service.server", () => ({
+  recordScanNonFatal: vi.fn(),
+}));
+
 import { loader } from "~/routes/api+/get-scanned-item.$qrId";
+import { accessFor } from "@helpers/role-access";
 
 const ORG_ID = "org-1";
 /** A value that satisfies the SAM id pattern but is stored as a barcode. */
@@ -76,18 +83,17 @@ const SAM_NOT_FOUND =
 /**
  * The status the SAM error carries.
  *
- * `ShelfError` defaults to 500 when no status is given, and this throw gives
- * none — so a SAM miss answers 500, not 404. `shouldBeCaptured: false` keeps it
- * out of Sentry, and `resolveAssetIdFromSamId` maps whatever status it gets, so
- * nothing downstream depends on the number. Asserted as it stands: the fallback
- * must not move it either way.
+ * A miss is a refusal of the code, so a 4xx. Scanner rows depend on that: a
+ * 5xx means the server failed, and a scan draft keeps such a code to look it
+ * up again, while a refused code is dropped.
  */
-const SAM_NOT_FOUND_STATUS = 500;
+const SAM_NOT_FOUND_STATUS = 404;
 
 /** An asset row as `ASSET_INCLUDE` returns it, trimmed to the image cascade. */
 function assetRow(id: string) {
   return {
     id,
+    organizationId: ORG_ID,
     title: "An asset",
     mainImage: null,
     thumbnailImage: null,
@@ -128,6 +134,7 @@ beforeEach(() => {
   mockRequirePermission.mockResolvedValue({
     organizationId: ORG_ID,
     canUseBarcodes: true,
+    access: accessFor(["ADMIN"]),
   });
 });
 
@@ -172,6 +179,7 @@ describe("GET /api/get-scanned-item/:qrId — SAM-shaped barcode fallback", () =
     mockRequirePermission.mockResolvedValue({
       organizationId: ORG_ID,
       canUseBarcodes: false,
+      access: accessFor(["ADMIN"]),
     });
     mockAssetFindFirst.mockResolvedValue(null);
 
@@ -235,5 +243,157 @@ describe("GET /api/get-scanned-item/:qrId — SAM-shaped barcode fallback", () =
     expect(body.qr?.type).toBe("asset");
     expect(body.qr?.asset?.id).toBe("asset-2");
     expect(mockGetBarcodeByValue).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/get-scanned-item/:qrId: workspace of the linked item", () => {
+  it("refuses a code whose linked asset is in another workspace", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: "asset-3",
+      kitId: null,
+      asset: { ...assetRow("asset-3"), organizationId: "org-2" },
+      kit: null,
+    });
+
+    const { status, body } = await scan("abcdefghij");
+
+    expect(status).not.toBe(200);
+    expect(body.qr).toBeUndefined();
+  });
+
+  it("refuses a code whose linked kit is in another workspace", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: null,
+      kitId: "kit-3",
+      asset: null,
+      kit: { id: "kit-3", name: "A kit", organizationId: "org-2" },
+    });
+
+    const { status, body } = await scan("abcdefghij");
+
+    expect(status).not.toBe(200);
+    expect(body.qr).toBeUndefined();
+  });
+
+  it("resolves a code whose linked kit is in the caller's workspace", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: null,
+      kitId: "kit-4",
+      asset: null,
+      kit: { id: "kit-4", name: "A kit", organizationId: ORG_ID },
+    });
+
+    const { status, body } = await scan("abcdefghij");
+
+    expect(status).toBe(200);
+    expect(body.qr?.type).toBe("kit");
+  });
+});
+
+describe("GET /api/get-scanned-item/:qrId: custodian visibility", () => {
+  /** A custodian row as `CUSTODIAN_SELECT` returns it. */
+  function custodian(userId: string | null, name: string) {
+    return { userId, name, user: null };
+  }
+
+  /** Resolves `value` as a member without custody visibility. */
+  async function scanRestricted(value: string) {
+    mockRequirePermission.mockResolvedValue({
+      organizationId: ORG_ID,
+      canUseBarcodes: true,
+      access: accessFor(["SELF_SERVICE"]),
+    });
+    const result = await loader({
+      request: new Request(`http://localhost/api/get-scanned-item/${value}`),
+      params: { qrId: value },
+      context: { getSession: () => ({ userId: "user-1", email: "a@b.c" }) },
+    } as unknown as Parameters<typeof loader>[0]);
+
+    return result.data as {
+      qr: {
+        asset?: { custody: { custodian: ReturnType<typeof custodian> }[] };
+        kit?: {
+          custody: { custodian: ReturnType<typeof custodian> } | null;
+          assetKits: {
+            asset: {
+              custody: { custodian?: ReturnType<typeof custodian> }[];
+            };
+          }[];
+        };
+      };
+    };
+  }
+
+  const REDACTED = { userId: null, name: "", user: null };
+
+  it("redacts another holder on a QR-scanned asset and keeps the viewer's own", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: "asset-5",
+      kitId: null,
+      asset: {
+        ...assetRow("asset-5"),
+        custody: [
+          { quantity: 2, custodian: custodian("someone", "Sam") },
+          { quantity: 1, custodian: custodian("user-1", "Me") },
+        ],
+      },
+      kit: null,
+    });
+
+    const body = await scanRestricted("abcdefghij");
+
+    expect(body.qr.asset?.custody[0].custodian).toEqual(REDACTED);
+    expect(body.qr.asset?.custody[1].custodian.name).toBe("Me");
+  });
+
+  it("redacts another holder on a SAM-scanned asset", async () => {
+    mockAssetFindFirst.mockResolvedValue({
+      ...assetRow("asset-6"),
+      custody: [{ quantity: 1, custodian: custodian(null, "Nora NRM") }],
+    });
+
+    const body = await scanRestricted(SAM_SHAPED);
+
+    expect(body.qr.asset?.custody[0].custodian).toEqual(REDACTED);
+  });
+
+  it("redacts a kit's custodian and its members' custodians", async () => {
+    mockGetQr.mockResolvedValue({
+      id: "abcdefghij",
+      organizationId: ORG_ID,
+      assetId: null,
+      kitId: "kit-5",
+      asset: null,
+      kit: {
+        id: "kit-5",
+        name: "A kit",
+        organizationId: ORG_ID,
+        custody: { custodian: custodian("someone", "Sam") },
+        assetKits: [
+          {
+            id: "ak-1",
+            asset: {
+              id: "asset-7",
+              custody: [{ custodian: custodian("someone", "Sam") }],
+            },
+          },
+        ],
+      },
+    });
+
+    const body = await scanRestricted("abcdefghij");
+
+    expect(body.qr.kit?.custody?.custodian).toEqual(REDACTED);
+    expect(body.qr.kit?.assetKits[0].asset.custody[0].custodian).toEqual(
+      REDACTED
+    );
   });
 });

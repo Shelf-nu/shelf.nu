@@ -22,7 +22,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         id: true,
         name: true,
         color: true,
-        _count: { select: { assets: true } },
+        // Archived assets are out of service and not counted.
+        _count: { select: { assets: { where: { archivedAt: null } } } },
       },
       orderBy: { name: "asc" },
     });

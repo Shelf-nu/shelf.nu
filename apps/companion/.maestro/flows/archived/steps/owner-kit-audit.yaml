@@ -1,0 +1,29 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: a kit holding one archived and one active member, and an audit
+# expecting an archived asset. No login (see ../01-owner.yaml).
+
+# ── Kit ──────────────────────────────────────────────────────────────
+# The archived member is listed apart and counted nowhere: Assets reads 1, the
+# value is the active member's only (US$200, not US$700).
+- openLink: "shelf://kits/${SHELF_TEST_ARCHIVED_KIT_ID}"
+- extendedWaitUntil:
+    visible: "E2E Archive Kit"
+    timeout: 20000
+- assertVisible: "1 archived, not counted"
+- scrollUntilVisible:
+    element: "Archived assets stay in the kit but are not counted, booked or put in custody with it."
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "View asset E2E Archived Lens, archived"
+- assertVisible: "View asset E2E Active Light"
+- takeScreenshot: archived-owner-kit
+
+# ── Audit ────────────────────────────────────────────────────────────
+# The audit outcome keeps its badge; "Archived" leads the row's meta line.
+- openLink: "shelf://audits/${SHELF_TEST_ARCHIVED_AUDIT_ID}"
+- extendedWaitUntil:
+    visible: "E2E Archived Camera, .*, Archived.*"
+    timeout: 20000
+- assertNotVisible: "E2E Active Tripod, .*, Archived.*"
+- takeScreenshot: archived-owner-audit

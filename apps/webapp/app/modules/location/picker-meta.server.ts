@@ -153,6 +153,7 @@ export async function getLocationPickerMeta({
 
   const rows = await db.asset.findMany({
     where: {
+      archivedAt: null,
       id: { in: assetIds },
       organizationId,
       type: AssetType.QUANTITY_TRACKED,

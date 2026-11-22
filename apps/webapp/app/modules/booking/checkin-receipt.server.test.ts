@@ -22,7 +22,9 @@ vi.mock("~/database/db.server", () => ({
   db: {
     bookingAsset: { findMany: vi.fn() },
     consumptionLog: { findMany: vi.fn() },
-    partialBookingCheckin: { findMany: vi.fn() },
+    // why: the check-in events carry how each row came back; a case stages
+    // them to prove the method reaches the row, and defaults to none.
+    activityEvent: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
   },
 }));
@@ -86,6 +88,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
 
+import { ShelfError } from "~/utils/error";
 import { fetchCheckinReceiptData } from "./checkin-receipt.server";
 import type { PdfDbResult } from "./pdf-helpers";
 import { fetchAllPdfRelatedData } from "./pdf-helpers";
@@ -160,8 +163,8 @@ function run() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockOf(db.partialBookingCheckin.findMany).mockResolvedValue([]);
   mockOf(db.consumptionLog.findMany).mockResolvedValue([]);
+  mockOf(db.activityEvent.findMany).mockResolvedValue([]);
   mockOf(resolveCheckInTimes).mockResolvedValue(new Map());
 });
 
@@ -214,6 +217,706 @@ describe("fetchCheckinReceiptData", () => {
     expect(receipt.checkedInByNames).toEqual(["Ada Lovelace"]);
     expect(receipt.rows[0].checkedInByName).toBe("Ada Lovelace");
     expect(receipt.rows[0].title).toBe("Tripod");
+  });
+
+  it("prints every item of a finished booking returned when its markers date no return after the departure", async () => {
+    // Two loose items came back in a scan session, which dates their markers.
+    // The kit member carries no check-in marker at all. Every departure carries
+    // the booking's last update, later than the session, and names nobody.
+    const departure = new Date("2025-10-02T14:48:20.311Z");
+    const sessionAt = new Date("2025-09-26T11:45:52.688Z");
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tent"),
+          pdfRow("ba-2", "asset-2", "Stove"),
+          pdfRow("ba-3", "asset-3", "Headlamp"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2", "ba-3"].map((id, index) => {
+        const isKitMember = id === "ba-3";
+        return {
+          id,
+          assetId: `asset-${index + 1}`,
+          quantity: 1,
+          assetKitId: isKitMember ? "ak-1" : null,
+          checkedOutAt: departure,
+          checkedOutById: null,
+          checkedOutQuantity: 1,
+          checkedInAt: isKitMember ? null : sessionAt,
+          checkedInById: isKitMember ? null : "user-7",
+          asset: { type: AssetType.INDIVIDUAL },
+        };
+      })
+    );
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-7",
+        displayName: "Grace Hopper",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.state)).toEqual([
+      "RETURNED",
+      "RETURNED",
+      "RETURNED",
+    ]);
+    expect(receipt.stamp).toBe("All items returned");
+    expect(receipt.totals.stillOut).toBe(0);
+    expect(receipt.rows.map((row) => row.checkedInAt)).toEqual([
+      sessionAt,
+      sessionAt,
+      null,
+    ]);
+    expect(receipt.rows.map((row) => row.checkedInByName)).toEqual([
+      "Grace Hopper",
+      "Grace Hopper",
+      "",
+    ]);
+    // The kit member records no receiver, so the header names nobody above it.
+    expect(receipt.checkedInByNames).toEqual([]);
+    // The kit member came back at a moment nothing recorded, and no completion
+    // event dates the booking's return, so the latest dated row is not it.
+    expect(receipt.returnedAt).toBeNull();
+    expect(receipt.latenessNote).toBeNull();
+    // No slice names its dispatcher, so no departure is recorded.
+    expect(receipt.checkedOutAt).toBeNull();
+    expect(receipt.checkedOutByName).toBe("");
+  });
+
+  it("leaves out a departure no user is recorded making, even when it is dated with the return", async () => {
+    // Both markers carry the booking's last update and name nobody: the
+    // departure is a stand-in, so the sheet does not print it.
+    const lastUpdate = new Date("2025-06-12T16:20:00.000Z");
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith([pdfRow("ba-1", "asset-1", "Tent")], BookingStatus.ARCHIVED)
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: lastUpdate,
+        checkedOutById: null,
+        checkedOutQuantity: 0,
+        checkedInAt: lastUpdate,
+        checkedInById: null,
+        asset: { type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows[0].state).toBe("RETURNED");
+    expect(receipt.stamp).toBe("All items returned");
+    expect(receipt.checkedOutAt).toBeNull();
+    expect(receipt.checkedOutByName).toBe("");
+    // The row is dated, so its moment still stands in for the return.
+    expect(receipt.returnedAt).toEqual(lastUpdate);
+  });
+
+  it("keeps the departure on a live booking whose quantity slice went out again", async () => {
+    // Three units went out, came back, and went out again with the button,
+    // which refreshes the departure. The row is dated by the first trip's
+    // return log, older than the departure that is still on record.
+    const firstReturnAt = new Date("2026-09-02T09:00:00.000Z");
+    const secondDepartureAt = new Date("2026-09-02T15:00:00.000Z");
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-1", "XLR cable")],
+        BookingStatus.ONGOING
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 3,
+        assetKitId: null,
+        checkedOutAt: secondDepartureAt,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 6,
+        checkedInAt: null,
+        checkedInById: null,
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-1",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 3,
+        createdAt: firstReturnAt,
+        userId: "user-7",
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-1",
+        displayName: "Ada Lovelace",
+        firstName: null,
+        lastName: null,
+      },
+      {
+        id: "user-7",
+        displayName: "Grace Hopper",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    const row = receipt.rows[0];
+    expect(row.state).toBe("STILL_OUT");
+    expect(row.sent).toBe(6);
+    expect(row.returned).toBe(3);
+    expect(row.checkedInAt).toEqual(firstReturnAt);
+    expect(receipt.stamp).toBe("Partial return · 3 still out");
+    expect(receipt.checkedOutAt).toEqual(secondDepartureAt);
+    expect(receipt.checkedOutByName).toBe("Ada Lovelace");
+    // No completion event on a live booking: the dated row stands in, it names
+    // its receiver, and nothing is measured against the planned end yet.
+    expect(receipt.returnedAt).toEqual(firstReturnAt);
+    expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
+    expect(receipt.latenessNote).toBeNull();
+  });
+
+  it("returns a finished booking at its completion event when some rows carry no date", async () => {
+    // One item came back in a scan session and carries a marker. The other two
+    // were reconciled by the check-in that completed the booking and carry
+    // none, but their check-in events say how.
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tripod"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+          pdfRow("ba-3", "asset-3", "Cable"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2", "ba-3"].map((id, index) => ({
+        id,
+        assetId: `asset-${index + 1}`,
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 1,
+        checkedInAt: id === "ba-1" ? LOGGED_AT : null,
+        checkedInById: id === "ba-1" ? "user-1" : null,
+        asset: { type: AssetType.INDIVIDUAL },
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-1",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: LOGGED_AT,
+        meta: { method: "scanned", surface: "phone" },
+      },
+      ...["asset-2", "asset-3"].map((assetId) => ({
+        assetId,
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: COMPLETED_AT,
+        meta: { method: "quick", surface: "web" },
+      })),
+    ]);
+    mockOf(resolveCheckInTimes).mockResolvedValue(
+      new Map([["booking-1", COMPLETED_AT]])
+    );
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-1",
+        displayName: "Ada Lovelace",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.state)).toEqual([
+      "RETURNED",
+      "RETURNED",
+      "RETURNED",
+    ]);
+    expect(receipt.stamp).toBe("All items returned");
+    expect(receipt.returnedAt).toEqual(COMPLETED_AT);
+    expect(receipt.latenessNote).toEqual({ text: "early", isLate: false });
+    // The departure names who made it, so it stays on the sheet.
+    expect(receipt.checkedOutAt).toEqual(CHECKED_OUT_AT);
+    expect(receipt.checkedOutByName).toBe("Ada Lovelace");
+    // Two returned rows record no receiver, so the header names nobody; the
+    // dated row still names its own.
+    expect(receipt.checkedInByNames).toEqual([]);
+    expect(receipt.rows[0].checkedInByName).toBe("Ada Lovelace");
+    // Every returned row says how, dated or not. They disagree, so the header
+    // carries no single line.
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([
+      "Scanned on the phone",
+      "In one click on the web",
+      "In one click on the web",
+    ]);
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
+  it("says how each returned row came back, from its check-in event", async () => {
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tripod"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+          pdfRow("ba-3", "asset-3", "Cable"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2", "ba-3"].map((id, index) => ({
+        id,
+        assetId: `asset-${index + 1}`,
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 0,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.INDIVIDUAL },
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      // An earlier trip of asset-1: returned, sent out again, returned below.
+      // Only the events from the latest departure on describe the row.
+      {
+        assetId: "asset-1",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: new Date("2026-08-01T10:00:00.000Z"),
+        meta: { method: "selected", surface: "web" },
+      },
+      {
+        assetId: "asset-1",
+        action: "BOOKING_CHECKED_OUT",
+        occurredAt: new Date("2026-08-02T10:00:00.000Z"),
+        meta: {},
+      },
+      {
+        assetId: "asset-1",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-2",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { quantity: 1, method: "selected", surface: "web" },
+      },
+      // Written before methods were recorded: nothing to say for asset-3.
+      {
+        assetId: "asset-3",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: {},
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([
+      "Scanned on the phone",
+      "Selected on the web",
+      null,
+    ]);
+    // The rows disagree, so there is no single line for the header.
+    expect(receipt.checkedInHow).toBeNull();
+    expect(mockOf(db.activityEvent.findMany)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          action: {
+            in: [
+              "BOOKING_CHECKED_IN",
+              "BOOKING_PARTIAL_CHECKIN",
+              "BOOKING_CHECKED_OUT",
+              "BOOKING_PARTIAL_CHECKOUT",
+            ],
+          },
+        }),
+      })
+    );
+  });
+
+  it("leaves a multi-slice asset's rows blank when its check-in events disagree", async () => {
+    // A quantity asset booked loose and through a kit: two printed rows, one
+    // asset id on every event. Returned in two sessions by different methods,
+    // the events cannot be told apart by slice, so neither row claims one.
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-loose", "asset-qty", "XLR cable"),
+          pdfRow("ba-kit", "asset-qty", "XLR cable"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      ...["ba-loose", "ba-kit"].map((id) => ({
+        id,
+        assetId: "asset-qty",
+        quantity: 3,
+        assetKitId: id === "ba-kit" ? "ak-1" : null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 3,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      })),
+      {
+        id: "ba-2",
+        assetId: "asset-2",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 0,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // Both slices came back in full, so the sheet dates them as returned.
+    mockOf(db.consumptionLog.findMany).mockResolvedValue(
+      ["ba-loose", "ba-kit"].map((bookingAssetId) => ({
+        assetId: "asset-qty",
+        bookingAssetId,
+        category: "RETURN",
+        quantity: 3,
+        createdAt: CHECKED_IN_AT,
+        userId: "user-1",
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: new Date("2026-09-03T10:00:00.000Z"),
+        meta: { method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+      // The single-slice asset keeps its latest event's method.
+      {
+        assetId: "asset-2",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "scanned", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([
+      null,
+      null,
+      "Scanned on the web",
+    ]);
+    // A returned row without a phrase keeps the header line away too.
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
+  it("leaves a quantity slice blank when its units came back by different methods in one dispatch", async () => {
+    // Five rolls of tape on one slice: three scanned back first, the last two
+    // ticked back later. The row aggregates all five, so it cannot claim the
+    // last return's method for the lot, and the header stays away too.
+    const firstReturnAt = new Date(CHECKED_IN_AT.getTime() - 60 * 60 * 1000);
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-qty", "Gaffer tape")],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-qty",
+        quantity: 5,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 5,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 3,
+        createdAt: firstReturnAt,
+        userId: "user-1",
+      },
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 2,
+        createdAt: CHECKED_IN_AT,
+        userId: "user-1",
+      },
+    ]);
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_CHECKED_OUT",
+        occurredAt: CHECKED_OUT_AT,
+        meta: { quantity: 5, method: "quick", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: firstReturnAt,
+        meta: { method: "scanned", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([null]);
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
+  it("keeps every return of a multi-slice asset in view when one slice went out again later", async () => {
+    // The loose slice came back scanned, then the kit slice went out and came
+    // back selected. Events name the asset, not the slice, so a boundary at
+    // the kit slice's departure would discard the loose slice's return and
+    // lend both rows the later method. Instead every return counts, they
+    // disagree, and both rows stay blank.
+    const looseReturnAt = new Date(
+      CHECKED_IN_AT.getTime() - 2 * 60 * 60 * 1000
+    );
+    const kitDepartureAt = new Date(CHECKED_IN_AT.getTime() - 60 * 60 * 1000);
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-loose", "asset-qty", "XLR cable"),
+          pdfRow("ba-kit", "asset-qty", "XLR cable"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-loose", "ba-kit"].map((id) => ({
+        id,
+        assetId: "asset-qty",
+        quantity: 3,
+        assetKitId: id === "ba-kit" ? "ak-1" : null,
+        checkedOutAt: id === "ba-kit" ? kitDepartureAt : CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 3,
+        checkedInAt: id === "ba-kit" ? CHECKED_IN_AT : looseReturnAt,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      }))
+    );
+    mockOf(db.consumptionLog.findMany).mockResolvedValue(
+      ["ba-loose", "ba-kit"].map((bookingAssetId) => ({
+        assetId: "asset-qty",
+        bookingAssetId,
+        category: "RETURN",
+        quantity: 3,
+        createdAt: bookingAssetId === "ba-kit" ? CHECKED_IN_AT : looseReturnAt,
+        userId: "user-1",
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_CHECKED_OUT",
+        occurredAt: CHECKED_OUT_AT,
+        meta: { method: "quick", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: looseReturnAt,
+        meta: { method: "scanned", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKOUT",
+        occurredAt: kitDepartureAt,
+        meta: { method: "scanned", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([null, null]);
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
+  it("keeps every trip's return of a quantity slice that went out twice", async () => {
+    // One slice of five rolls: three went out and came back scanned on the
+    // phone, then the other two went out and came back ticked on the web. The
+    // row prints all five, so a boundary at the second departure would lend
+    // the three scanned rolls the later method. Both returns count, they
+    // disagree, and the row stays blank.
+    const firstDepartureAt = CHECKED_OUT_AT;
+    const firstReturnAt = new Date(
+      CHECKED_IN_AT.getTime() - 2 * 60 * 60 * 1000
+    );
+    const secondDepartureAt = new Date(
+      CHECKED_IN_AT.getTime() - 60 * 60 * 1000
+    );
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-qty", "Gaffer tape")],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-qty",
+        quantity: 5,
+        assetKitId: null,
+        checkedOutAt: firstDepartureAt,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 5,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 3,
+        createdAt: firstReturnAt,
+        userId: "user-1",
+      },
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 2,
+        createdAt: CHECKED_IN_AT,
+        userId: "user-1",
+      },
+    ]);
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKOUT",
+        occurredAt: firstDepartureAt,
+        meta: { quantity: 3, method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: firstReturnAt,
+        meta: { method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKOUT",
+        occurredAt: secondDepartureAt,
+        meta: { quantity: 2, method: "scanned", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([null]);
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
+  it("gives the header one method line when every returned row agrees", async () => {
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tripod"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2"].map((id, index) => ({
+        id,
+        assetId: `asset-${index + 1}`,
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 0,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.INDIVIDUAL },
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue(
+      ["asset-1", "asset-2"].map((assetId) => ({
+        assetId,
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "quick", surface: "web" },
+      }))
+    );
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.checkedInHow).toBe("In one click on the web");
   });
 
   it("dates a partly returned quantity slice from the log that recorded it", async () => {
@@ -398,5 +1101,22 @@ describe("fetchCheckinReceiptData", () => {
       expect(row.checkedInByName).toBe("");
     }
     expect(receipt.checkedInByNames).toEqual([]);
+  });
+});
+
+describe("fetchCheckinReceiptData — failures", () => {
+  it("keeps a refusal's 403 instead of reporting a server error", async () => {
+    // why: the shared PDF read raises the ownership refusal.
+    mockOf(fetchAllPdfRelatedData).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(run()).rejects.toMatchObject({ status: 403 });
   });
 });

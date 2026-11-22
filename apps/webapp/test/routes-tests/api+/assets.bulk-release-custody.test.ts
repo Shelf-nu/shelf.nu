@@ -12,6 +12,7 @@
  */
 import { AssetType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
 
@@ -127,7 +128,8 @@ describe("bulk release custody as SELF_SERVICE", () => {
       organizationId: "org-1",
       role: "SELF_SERVICE",
       canUseBarcodes: false,
-      canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
+      currentOrganization: { auditsEnabled: true },
     } as never);
     vi.mocked(bulkCheckInAssets).mockResolvedValue({
       skippedQuantityTracked: 1,
@@ -141,6 +143,18 @@ describe("bulk release custody as SELF_SERVICE", () => {
     expect(response.init?.status ?? 200).toBe(200);
     expect(response.data).toMatchObject({ success: true });
     expect(bulkCheckInAssets).toHaveBeenCalledOnce();
+  });
+
+  it("resolves a select-all within the caller's own list scope", async () => {
+    await submit(["asset-individual"]);
+
+    // A bookable-only list shows the caller's own holdings plus bookable
+    // assets, so select-all must carry the caller as the holder.
+    expect(bulkCheckInAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookableScope: { holderUserId: "user-self" },
+      })
+    );
   });
 
   it("does not judge quantity-tracked custody, which the release skips", async () => {

@@ -60,9 +60,6 @@ type TagPickerFieldProps = {
   onCreateTag?: (name: string) => Promise<Tag | null>;
 };
 
-/** Server-side minimum tag-name length (web `NewTagFormSchema` parity). */
-const MIN_TAG_NAME_LENGTH = 3;
-
 /**
  * Render the multi-select tag picker. See the file header for the controlled
  * open-state contract.
@@ -97,14 +94,15 @@ export function TagPickerField({
     ? tags.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
     : tags;
 
-  // Offer inline creation only for a typed name that (a) meets the server's
-  // minimum length and (b) doesn't already exist (case-insensitive) — an
-  // exact match should be selected, not duplicated.
+  // Offer inline creation only for a typed name that (a) is not blank (the
+  // server accepts any non-blank name, see `labelNameSchema` in the webapp)
+  // and (b) doesn't already exist (case-insensitive): an exact match should be
+  // selected, not duplicated.
   const trimmedSearch = search.trim();
   const showCreateRow =
     canCreate &&
     !!onCreateTag &&
-    trimmedSearch.length >= MIN_TAG_NAME_LENGTH &&
+    trimmedSearch.length > 0 &&
     !tags.some((t) => t.name.toLowerCase() === trimmedSearch.toLowerCase());
 
   // Create the typed tag, select it, and reset the search so the full list

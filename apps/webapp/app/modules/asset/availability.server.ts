@@ -78,6 +78,7 @@ import {
   checkoutSessionsToLogsByAsset,
   computeUnitsStillOutBySlice,
 } from "~/modules/booking/checkout-attribution";
+import { isReservationExpired } from "~/modules/booking/helpers";
 import {
   computeAvailableQuantity,
   type AvailableQuantityClient,
@@ -251,7 +252,8 @@ export type AssetAvailability = {
    * and are reported via `checkedOut` / "Checked out (bookings)", so they are
    * deliberately excluded here — otherwise a checked-out booking would both
    * inflate this "committed, still on the shelf" figure AND be miscounted as
-   * an "upcoming booking" in the tooltip.
+   * an "upcoming booking" in the tooltip. An expired reservation (RESERVED,
+   * end passed, never checked out) is not upcoming and is excluded too.
    */
   reservedTotal: number;
   /** Count of distinct UPCOMING (RESERVED) bookings contributing to `reservedTotal`. */
@@ -294,7 +296,7 @@ type GetAssetAvailabilityArgs = {
  * ```
  * physicalAvailable = total − inCustody − inKits − checkedOut
  * bookable           = total − inCustody − inKits − reserved
- * reservedTotal      = Σ(remaining across RESERVED-status bookings only)
+ * reservedTotal      = Σ(remaining across RESERVED bookings whose end is ahead)
  * ```
  *
  * `checkedOut` feeds ONLY `physicalAvailable` (the physical-now headline) —
@@ -438,8 +440,13 @@ export async function getAssetAvailability({
         // are physically out (or in progress) and surface via `checkedOut` /
         // "Checked out (bookings)"; counting them here would double-report and
         // inflate the booking count (e.g. show "2 upcoming bookings" when one
-        // is already checked out).
-        if (row.booking?.status === BookingStatus.RESERVED) {
+        // is already checked out). An expired reservation (end passed, never
+        // checked out) is not upcoming either, so it is left out, as on every
+        // other quantity surface (`isReservationExpired`).
+        if (
+          row.booking?.status === BookingStatus.RESERVED &&
+          !isReservationExpired(row.booking.status, row.booking.to)
+        ) {
           reservedTotal += remaining;
           reservingBookingIds.add(row.bookingId);
         }
@@ -717,6 +724,7 @@ export async function getAssetAvailabilityBatch(
     const [assetRows, custodyGroups, inKitsGroups, checkedOutBreakdownByAsset] =
       await Promise.all([
         client.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: id-keyed quantity read for the requested assets; callers choose the pool, and a booking holding an archived asset still needs its figures
           where: { id: { in: uniqueAssetIds }, organizationId },
           select: { id: true, quantity: true },
         }),
@@ -824,9 +832,13 @@ export async function getAssetAvailabilityBatch(
         );
 
         // Informational "Reserved (bookings)" = UPCOMING (RESERVED) bookings
-        // only — ONGOING/OVERDUE units surface via `checkedOut`. See the
-        // singular primitive's matching comment.
-        if (row.booking?.status === BookingStatus.RESERVED) {
+        // only. ONGOING/OVERDUE units surface via `checkedOut`, and an
+        // expired reservation is not upcoming. See the singular primitive's
+        // matching comment.
+        if (
+          row.booking?.status === BookingStatus.RESERVED &&
+          !isReservationExpired(row.booking.status, row.booking.to)
+        ) {
           reservedTotalByAsset.set(
             row.assetId,
             (reservedTotalByAsset.get(row.assetId) ?? 0) + remaining
@@ -925,7 +937,7 @@ export async function getAssetAvailabilityBatch(
 }
 
 /** Per-asset checked-out breakdown: full total + the standalone-only portion. */
-type CheckedOutBreakdown = { total: number; standalone: number };
+export type CheckedOutBreakdown = { total: number; standalone: number };
 
 /**
  * Batched `checkedOut` breakdown — reimplements
@@ -984,6 +996,42 @@ async function computeCheckedOutBreakdownBatch(
   const breakdownByAsset = new Map<string, CheckedOutBreakdown>(
     assetIds.map((id) => [id, { total: 0, standalone: 0 }])
   );
+  const byAssetByBooking = await computeCheckedOutByBookingBatch(
+    client,
+    assetIds,
+    organizationId
+  );
+  for (const [assetId, byBooking] of byAssetByBooking) {
+    const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
+    for (const booking of byBooking.values()) {
+      acc.total += booking.total;
+      acc.standalone += booking.standalone;
+    }
+    breakdownByAsset.set(assetId, acc);
+  }
+  return breakdownByAsset;
+}
+
+/**
+ * {@link computeCheckedOutBreakdownBatch}, kept per booking: for every
+ * requested asset, the units of it still off the shelf on each ONGOING /
+ * OVERDUE booking it is on, in the same fixed three queries. The batched
+ * sibling of `computeCheckedOutByBookingForAsset`, for list surfaces that show
+ * one line per booking (the asset index status badge).
+ *
+ * @param client - Batch Prisma surface (see {@link AvailabilityBatchClient}).
+ * @param assetIds - Assets to compute checked-out units for (already deduped).
+ * @param organizationId - Caller's organization. Scopes the active-booking lookup.
+ * @returns assetId → bookingId → {@link CheckedOutBreakdown}, for every active
+ *   booking holding a slice of the asset, including bookings with nothing out.
+ *   Assets on no active booking are absent.
+ */
+export async function computeCheckedOutByBookingBatch(
+  client: AvailabilityBatchClient,
+  assetIds: string[],
+  organizationId: string
+): Promise<Map<string, Map<string, CheckedOutBreakdown>>> {
+  const byAssetByBooking = new Map<string, Map<string, CheckedOutBreakdown>>();
 
   const pivots = await client.bookingAsset.findMany({
     where: {
@@ -1008,7 +1056,7 @@ async function computeCheckedOutBreakdownBatch(
     },
   });
 
-  if (pivots.length === 0) return breakdownByAsset;
+  if (pivots.length === 0) return byAssetByBooking;
 
   /** slices grouped: bookingId → assetId → its slices on that booking. */
   type Slice = {
@@ -1111,7 +1159,7 @@ async function computeCheckedOutBreakdownBatch(
           dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
       });
 
-      const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
+      const acc: CheckedOutBreakdown = { total: 0, standalone: 0 };
       for (const slice of slices) {
         const out = stillOutBySlice.get(slice.id) ?? 0;
         acc.total += out;
@@ -1121,11 +1169,16 @@ async function computeCheckedOutBreakdownBatch(
           acc.standalone += out;
         }
       }
-      breakdownByAsset.set(assetId, acc);
+      let byBooking = byAssetByBooking.get(assetId);
+      if (!byBooking) {
+        byBooking = new Map();
+        byAssetByBooking.set(assetId, byBooking);
+      }
+      byBooking.set(bookingId, acc);
     }
   }
 
-  return breakdownByAsset;
+  return byAssetByBooking;
 }
 
 /* -------------------------------------------------------------------------- */

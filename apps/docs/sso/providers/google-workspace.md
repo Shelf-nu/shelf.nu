@@ -65,9 +65,10 @@ In the meantime, you can continue with the next steps that will show you how to 
 
 ## Step 8: Create groups and assign users [#](#step-8-create-groups-and-assign-users)
 
-In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has three roles you can map a group to:
+In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has four roles you can map a group to:
 
 - Admin group
+- Manager group
 - Self service group
 - Base user group
 
@@ -111,9 +112,9 @@ Make sure to add all groups that you want to access Shelf. The **_App attribute_
 
 Once you have the groups ready, you need to add their **names** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
-Go to the workspace settings and place the **name** of each group next to its matching role (Administrator, Self service, Base). You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
+Go to the workspace settings and place the **name** of each group next to its matching role (Administrator, Manager, Self service, Base). You only need to fill in the roles you use: leave the others blank, but at least one group must be mapped.
 
-Each field also accepts **more than one group name, separated by commas** — anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Self service > Base).
+Each field also accepts **more than one group name, separated by commas**: anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Manager > Self service > Base).
 
 > [!IMPORTANT]
 > Enter each group name exactly as it appears in Google Workspace. Matching ignores letter case and surrounding spaces, but copying the exact name is the safest way to avoid a mismatch.
@@ -129,3 +130,7 @@ It often helps to ask them to log out of their Google account and log back in.
 Ask them to enter the domain of their in the Login in with SSO page.
 
 If sign in is not working correctly, reach out to your support contact at Shelf.
+
+## Moving existing Shelf users to SSO [#](#moving-existing-shelf-users-to-sso)
+
+If people on your domain already have standard (email/password) Shelf accounts, they do not need to be deleted or recreated. Shelf converts them to SSO, keeping their data and workspace memberships. The first SSO sign-in after conversion lands the user in their existing account, with all their data and workspaces, and no NameID change is needed. The one exception is a user who tried to sign in with SSO before their account was converted: their first SSO sign-in after conversion shows "Your account is now on single sign-on" and asks them to sign in with SSO once more. After that they sign in once, as usual. Convert accounts before announcing SSO to your team to avoid this extra step. Map your groups (Step 9) before the accounts are converted, because a converted user whose groups map to no role loses access to the workspace at their first SSO login (the workspace owner keeps their Owner role and access). See [Existing standard accounts on your domain](../index.md#existing-standard-accounts-on-your-domain) for the full rules.

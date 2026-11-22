@@ -28,9 +28,14 @@ import { bookingStatusColorMap } from "~/utils/bookings";
 import renderEventCard, { EventCardContent } from "./event-card";
 
 // why: DateS reads client hints from Remix context unavailable in the test;
-// stub to a plain node since date formatting is orthogonal to slice gating.
+// stub to a plain node that exposes whether the time was requested, so the
+// tests can check the card asks for a full date and time.
 vi.mock("~/components/shared/date", () => ({
-  DateS: () => <span>date</span>,
+  DateS: ({ includeTime }: { includeTime?: boolean }) => (
+    <span data-testid="date" data-include-time={String(Boolean(includeTime))}>
+      date
+    </span>
+  ),
 }));
 
 // why: TeamMemberBadge pulls roles/org/user from Remix loader data; the
@@ -59,8 +64,8 @@ function makeBooking(
     description: null,
     start: "2026-07-10T09:00:00.000Z",
     end: "2026-07-11T09:00:00.000Z",
-    custodian: { name: "Alice", user: null },
-    creator: { name: "Bob", user: null },
+    custodian: { id: "tm-alice", name: "Alice", user: null },
+    creator: { id: null, name: "Bob", user: null },
     tags: [],
     ...overrides,
   };
@@ -177,6 +182,18 @@ describe("EventCardContent — per-slice breakdown gating", () => {
   });
 });
 
+describe("EventCardContent: booking period", () => {
+  it("shows the full date and time for the start and end", () => {
+    render(<EventCardContent booking={makeBooking()} />);
+
+    const dates = screen.getAllByTestId("date");
+    expect(dates).toHaveLength(2);
+    for (const date of dates) {
+      expect(date).toHaveAttribute("data-include-time", "true");
+    }
+  });
+});
+
 describe("EventCardContent — returned asset", () => {
   it("adds a returned line under the period and keeps the real status badge", () => {
     render(
@@ -191,8 +208,11 @@ describe("EventCardContent — returned asset", () => {
 
     const line = screen.getByTestId("event-card-returned");
     expect(line).toHaveTextContent("Returned");
-    // The return instant is printed on the line (DateS is stubbed to "date").
-    expect(within(line).getByText("date")).toBeInTheDocument();
+    // The return instant is printed on the line with its full date and time.
+    expect(within(line).getByTestId("date")).toHaveAttribute(
+      "data-include-time",
+      "true"
+    );
     // The badge is the booking's own status, not the bar's display status.
     expect(screen.getByTestId("status-badge")).toHaveTextContent("ONGOING");
   });

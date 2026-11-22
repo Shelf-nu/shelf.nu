@@ -3,14 +3,20 @@ import { useAtomValue } from "jotai";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
+import { bookingsListEntries, useBookingsList } from "./bookings-list-fields";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
+/**
+ * Downloads the selected bookings as CSV: the ticked rows, or with "Select all"
+ * every booking the current list holds at its current filters.
+ */
 export function ExportBookingsButton() {
   const selectedBookings = useAtomValue(selectedBulkItemsAtom);
   const disabled = selectedBookings.length === 0;
   const [isDownloading, setIsDownloading] = useState(false);
   const [searchParams] = useSearchParams();
+  const list = useBookingsList();
 
   const allSelected = isSelectingAllItems(selectedBookings);
   const title = `Export selection ${
@@ -23,16 +29,17 @@ export function ExportBookingsButton() {
   const hasAllSelected = bookingsIds.includes(ALL_SELECTED_KEY);
   let fetchSearchParams = "";
   /**
-   * We have to check if ALL_SELECTED_KEY is included, and if it is, we need to strip the bookingsIds from the searchParams and send all the rest of the search params to the loader
-   * Then inside the bookings.export loader we can know how to query the bookings
-   * It is important to keep the ALL_SELECTED_KEY because that helps us know how to query
+   * "Select all" sends the page's filters, ALL_SELECTED_KEY in place of the
+   * ids, and the list the page shows (index, a kit's tab or an asset's tab).
+   * The export resolves the rows from those exactly as the list's loader does.
    */
   if (hasAllSelected) {
     const searchParamsCopy = new URLSearchParams(searchParams);
-    // Delete bookingsIds
     searchParamsCopy.delete("bookingsIds");
-    // Add back ALL_SELECTED_KEY to bookingsIds
     searchParamsCopy.append("bookingsIds", ALL_SELECTED_KEY);
+    for (const [name, value] of bookingsListEntries(list)) {
+      searchParamsCopy.set(name, value);
+    }
     fetchSearchParams = `?${searchParamsCopy.toString()}`;
   } else {
     // In this case only specific keys are selected so we dont need the filters, we just pass the ids of the selected bookings

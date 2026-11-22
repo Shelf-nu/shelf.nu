@@ -1,14 +1,17 @@
-/*
- * This file is used to create a global EventEmitter instance.
- * This is used to emit events from the action to the SSE route
- * so that the SSE route can send the event to the client.
+/**
+ * Local notification emitter
  *
- * This example uses the EventEmitter class from the events built-in module.
- * You can use any other event emitter you want. For example, you can use
- * Redis or any PubSub technology to implement the same.
+ * A process-wide EventEmitter that fans toast payloads out to the SSE streams
+ * open on THIS machine. Payloads arrive from the notification bus (which
+ * re-emits what every machine publishes through Postgres LISTEN/NOTIFY) or
+ * directly from `publishNotification` when the bus is unavailable. The SSE
+ * route subscribes to the "notification" event and forwards matching payloads
+ * to the browser.
  *
- * In a real app, you would probably want to use one of those because your app
- * will probably be running on multiple servers.
+ * The instance lives on `global` so dev hot reloads keep a single emitter.
+ *
+ * @see {@link file://./notification-bus.server.ts}
+ * @see {@link file://./../../routes/api+/sse.notification.ts}
  */
 import { EventEmitter } from "node:events";
 

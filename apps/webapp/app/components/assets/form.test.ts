@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { NewAssetBulkFormSchema, NewAssetFormSchema } from "./form";
+import {
+  NewAssetBulkFormSchema,
+  NewAssetFormSchema,
+  valuationInputDefault,
+} from "./form";
 
 describe("NewAssetFormSchema", () => {
   const baseValidData = {
@@ -15,6 +19,50 @@ describe("NewAssetFormSchema", () => {
     if (result.success) {
       expect(result.data.type).toBe("INDIVIDUAL");
     }
+  });
+
+  describe("description length", () => {
+    function descriptionErrors(description: string) {
+      const result = NewAssetFormSchema.safeParse({
+        ...baseValidData,
+        description,
+      });
+      return result.success
+        ? []
+        : result.error.issues
+            .filter((issue) => issue.path[0] === "description")
+            .map((issue) => issue.message);
+    }
+
+    it("accepts 4,999 and 5,000 characters", () => {
+      expect(descriptionErrors("a".repeat(4999))).toEqual([]);
+      expect(descriptionErrors("a".repeat(5000))).toEqual([]);
+    });
+
+    it("rejects 5,001 characters with the limit message", () => {
+      expect(descriptionErrors("a".repeat(5001))).toEqual([
+        "Description must be 5,000 characters or fewer",
+      ]);
+    });
+
+    it("counts a submitted line break as one character", () => {
+      // 2,500 lines of "a" joined the way a browser submits a textarea:
+      // 2,500 + 2,499 = 4,999 visible characters, 7,498 raw code units.
+      const browserSubmitted = Array(2500).fill("a").join("\r\n");
+
+      expect(descriptionErrors(browserSubmitted)).toEqual([]);
+    });
+
+    it("trims the description after the length check", () => {
+      const result = NewAssetFormSchema.safeParse({
+        ...baseValidData,
+        description: "  Spare charger in the drawer  ",
+      });
+
+      expect(result.success && result.data.description).toBe(
+        "Spare charger in the drawer"
+      );
+    });
   });
 
   it("parses a valid QUANTITY_TRACKED asset with all quantity fields", () => {
@@ -357,6 +405,37 @@ describe("NewAssetFormSchema - named messages for unreadable numbers", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0].message).toBe("Count must be a number");
+    }
+  });
+});
+
+describe("valuationInputDefault", () => {
+  it("shows a stored 0 as 0, not as a blank field", () => {
+    expect(valuationInputDefault(0)).toBe(0);
+  });
+
+  it("shows other stored values as they are", () => {
+    expect(valuationInputDefault(12.5)).toBe(12.5);
+    expect(valuationInputDefault(-3)).toBe(-3);
+  });
+
+  it("leaves the field blank when there is no valuation", () => {
+    expect(valuationInputDefault(null)).toBe("");
+    expect(valuationInputDefault(undefined)).toBe("");
+  });
+
+  it("round-trips a stored 0 through the form schema unchanged", () => {
+    // What the edit form submits when the user saves without touching Value.
+    const result = NewAssetFormSchema.safeParse({
+      title: "Test Asset",
+      description: "A description",
+      category: "cat-123",
+      valuation: String(valuationInputDefault(0)),
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.valuation).toBe(0);
     }
   });
 });

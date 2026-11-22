@@ -29,7 +29,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
@@ -37,9 +37,16 @@ import {
   getLocationKits,
   updateLocationKits,
 } from "~/modules/location/service.server";
-import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
+import {
+  getTeamMemberForCustodianFilter,
+  scopeCustodianFilterIdsWithoutCustodyKept,
+} from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -73,7 +80,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -92,6 +99,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
+    /**
+     * `?teamMember=` is raw request input. A member who may not see other
+     * people's custody could otherwise filter by a colleague's id and read
+     * which kits that person holds, so person ids are narrowed to the
+     * caller's own.
+     */
+    const custodianFilterIds = await scopeCustodianFilterIdsWithoutCustodyKept({
+      teamMemberIds,
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+      organizationId,
+    });
+
     const [{ kits, totalKits }, { teamMembers, totalTeamMembers }] =
       await Promise.all([
         getLocationKits({
@@ -102,7 +122,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           search,
           orderBy,
           orderDirection,
-          teamMemberIds,
+          teamMemberIds: custodianFilterIds,
         }),
         getTeamMemberForCustodianFilter({
           organizationId,
@@ -110,7 +130,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           selectedTeamMembers: teamMemberIds,
-          filterByUserId: !canSeeAllCustody, // When the user cannot see all custody, only return their own team member
+          filterByUserId: !access.custody.seeAll, // When the user cannot see all custody, only return their own team member
           userId,
         }),
       ]);
@@ -127,21 +147,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: locationId,
     };
 
-    return payload({
-      modelName,
-      // The custodian's name and user.email are on every row regardless of
-      // whether the UI draws them, so a viewer without custody visibility can
-      // read them straight out of the route's data payload. Redact here, not
-      // in the component.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
-      page,
-      totalItems: totalKits,
-      perPage,
-      totalPages,
-      header,
-      teamMembers,
-      totalTeamMembers,
-    });
+    // The page-size picker writes `?per_page=`; storing it here keeps the
+    // choice once the query parameter is gone.
+    return data(
+      payload({
+        modelName,
+        // The custodian's name and user.email are on every row regardless of
+        // whether the UI draws them, so a viewer without custody visibility can
+        // read them straight out of the route's data payload. Redact here, not
+        // in the component.
+        items: redactCustodianForViewer(kits, {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
+        page,
+        totalItems: totalKits,
+        perPage,
+        totalPages,
+        header,
+        teamMembers,
+        totalTeamMembers,
+      }),
+      { headers: [setCookie(await userPrefs.serialize(cookie))] }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw data(error(reason), { status: reason.status });
@@ -242,7 +270,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function LocationKits() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { locationId } = useParams<z.infer<typeof paramsSchema>>();
   const userRoleCanManageKits = userHasPermission({
     roles,
@@ -358,12 +386,19 @@ export default function LocationKits() {
               </When>
             </>
           }
-          customEmptyStateContent={{
-            title: "You haven't added any kits yet.",
-            text: "What are you waiting for? Add your first kit now!",
-            newButtonRoute: "manage-kits",
-            newButtonContent: "Add kit",
-          }}
+          customEmptyStateContent={
+            userRoleCanManageKits
+              ? {
+                  title: "You haven't added any kits yet.",
+                  text: "What are you waiting for? Add your first kit now!",
+                  newButtonRoute: "manage-kits",
+                  newButtonContent: "Add kit",
+                }
+              : {
+                  title: "There are currently no kits at the location",
+                  text: "Kits placed at this location will appear here.",
+                }
+          }
         />
       </div>
     </>
@@ -391,9 +426,9 @@ const Row = ({
   extraProps: { canReadCustody: boolean; userRoleCanManageKits: boolean };
 }) => {
   const { category, custody } = item;
-  // why: this is a kit-listing surface, and kits are code-bearing entities.
-  // It was the only one whose query did not even fetch the relations, so the
-  // chip could not be rendered here at all. See
+  // why: kits are code-bearing entities, so every kit list renders the
+  // workspace's display code. The loader must keep selecting `qrCodes` and
+  // `barcodes` for `resolveDisplayCode` to have something to show. See
   // `.claude/rules/code-bearing-entity-list-consistency.md`.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization

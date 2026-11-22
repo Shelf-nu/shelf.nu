@@ -24,10 +24,23 @@
 export const DRAWER_TOP_GAP = 80 + 53 + 8 + 16;
 
 /**
- * Space kept above the drawer while the scanner is running, sized so the
- * camera viewfinder and its framing guides stay visible above the drawer.
+ * Height of the scanner-mode code-entry panel (`ScannerMode` in
+ * `code-scanner.tsx`): its top padding, the labelled input and the one-line
+ * hint. Change it together with that markup, or the drawer either covers the
+ * input or wastes height the scanned rows need.
  */
-export const SCANNER_VIEWFINDER_GAP = 400;
+export const SCANNER_INPUT_PANEL_HEIGHT = 88;
+
+/**
+ * Space kept above the drawer in scanner mode: the page chrome plus the
+ * code-entry panel, and nothing more. Scanner mode is a barcode gun or typed
+ * code, so there is no viewfinder to keep in view, and every pixel reserved
+ * beyond the input comes out of the scanned-rows list.
+ */
+export const SCANNER_INPUT_GAP = DRAWER_TOP_GAP + SCANNER_INPUT_PANEL_HEIGHT;
+
+/** Space between the bottom of the measured code-entry panel and the drawer. */
+export const SCANNER_DRAWER_SPACING = 8;
 
 /**
  * Floor for the resolved height: enough for the drag handle and one line of
@@ -43,8 +56,15 @@ export const MIN_DRAWER_HEIGHT = 148;
 export type ResolveDrawerHeightArgs = {
   /** Whether the user has pulled the drawer open. */
   expanded: boolean;
-  /** Whether the live scanner is the active mode (the viewfinder needs room). */
+  /** Whether scanner (code-entry) mode is active; the input panel needs room. */
   isScannerMode: boolean;
+  /**
+   * Viewport-relative bottom of the code-entry panel (`data-scanner-input-panel`),
+   * or `null` before it has been measured. Pages place the input at different
+   * heights, so the drawer follows the real panel; {@link SCANNER_INPUT_GAP} is
+   * only the fallback for the first frame.
+   */
+  scannerInputBottom?: number | null;
   /** `window.innerHeight`, or `0` before the browser has reported one. */
   viewportHeight: number;
   /**
@@ -75,6 +95,7 @@ export type ResolveDrawerHeightArgs = {
 export function resolveDrawerHeight({
   expanded,
   isScannerMode,
+  scannerInputBottom = null,
   viewportHeight,
   chromeHeight,
   footerHeight,
@@ -88,15 +109,19 @@ export function resolveDrawerHeight({
   // always going to yield.
   //
   // An expanded drawer is never smaller than this. In scanner mode the gap
-  // reserved for the camera is a preference, not a guarantee: a viewfinder is
-  // worth less than a reachable action, and the footer is `shrink-0` precisely
-  // so the drawer's action never sits behind a scrollbar of its own.
+  // reserved for the input panel is a preference, not a guarantee: a visible
+  // input is worth less than a reachable action, and the footer is `shrink-0`
+  // precisely so the drawer's action never sits behind a scrollbar of its own.
   const unshrinkableChrome = MIN_DRAWER_HEIGHT + footerHeight;
 
   const natural = expanded
     ? Math.max(
         viewportHeight -
-          (isScannerMode ? SCANNER_VIEWFINDER_GAP : DRAWER_TOP_GAP),
+          (isScannerMode
+            ? scannerInputBottom === null
+              ? SCANNER_INPUT_GAP
+              : scannerInputBottom + SCANNER_DRAWER_SPACING
+            : DRAWER_TOP_GAP),
         unshrinkableChrome
       )
     : chromeHeight ??

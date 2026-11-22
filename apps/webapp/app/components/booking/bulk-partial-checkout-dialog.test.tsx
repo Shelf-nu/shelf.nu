@@ -31,11 +31,14 @@
 
 import type { ReactNode } from "react";
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useActionData, useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
+import { REVERT_TO_DRAFT_RESCHEDULE_HINT } from "./checkout-dialog";
+import type * as CheckoutDialogModule from "./checkout-dialog";
 
 // why: react-router hooks need a router context — stub them so we can drive
 // loader/action data per test. The dialog only reads `useLoaderData`,
@@ -61,16 +64,20 @@ vi.mock("~/components/custom-form", () => ({
 // why: the confirming branch renders CheckoutDialog, whose react-router
 // dependencies this harness does not mount. The stub renders a marker carrying
 // the unassigned units it would confirm, so a test can tell the confirming
-// branch from the plain submit button.
-vi.mock("./checkout-dialog", () => ({
+// branch from the plain submit button. The module's other exports stay real.
+vi.mock("./checkout-dialog", async (importOriginal) => ({
+  ...(await importOriginal<typeof CheckoutDialogModule>()),
   default: ({
     unassignedUnits,
+    expiredRescheduleHint,
   }: {
     unassignedUnits?: Array<{ name: string; count: number }>;
+    expiredRescheduleHint?: string;
   }) => (
     <div
       data-testid="checkout-dialog-mock"
       data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+      data-expired-hint={expiredRescheduleHint ?? ""}
     />
   ),
 }));
@@ -143,6 +150,7 @@ function makeLoaderData({
   status = BookingStatus.ONGOING,
   from = new Date("2024-01-01T10:00:00Z"),
   modelRequests = [],
+  checkoutSourceQuestions = [],
 }: {
   bookingAssets: Array<{
     id: string;
@@ -189,6 +197,8 @@ function makeLoaderData({
     fulfilledAt: Date | null;
     assetModel: { name: string };
   }>;
+  /** Pools at two or more locations still to go out, see the loader. */
+  checkoutSourceQuestions?: CheckoutSourceQuestion[];
 }) {
   return {
     booking: {
@@ -203,6 +213,7 @@ function makeLoaderData({
     checkedOutAssetIds,
     remainingToCheckOutByAsset,
     partialCheckinDetails,
+    checkoutSourceQuestions,
   };
 }
 
@@ -390,6 +401,134 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
     expect(submit).not.toBeDisabled();
   });
 
+  it("asks where a pool at two locations leaves from, pre-picking the one with most units", () => {
+    const batteries: SelectedAssetRow = {
+      id: "battery-id",
+      title: "Batteries",
+      status: AssetStatus.AVAILABLE,
+      type: AssetType.QUANTITY_TRACKED,
+      bookingAssetId: "ba-standalone",
+      bookedQuantity: 10,
+      kitId: null,
+      thumbnailImage: null,
+      mainImage: null,
+      mainImageExpiration: null,
+      category: null,
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [
+          {
+            id: "ba-standalone",
+            quantity: 10,
+            assetKitId: null,
+            asset: {
+              id: "battery-id",
+              title: "Batteries",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+            },
+          },
+        ],
+        checkedOutAssetIds: [],
+        remainingToCheckOutByAsset: { "battery-id": 10 },
+        checkoutSourceQuestions: [
+          {
+            sliceId: "ba-standalone",
+            assetId: "battery-id",
+            title: "Batteries",
+            unitOfMeasure: "pcs",
+            quantity: 10,
+            placements: [
+              {
+                locationId: "loc-store",
+                name: "Store Room",
+                placed: 60,
+                inCustody: 0,
+                onBooking: 0,
+                left: 60,
+              },
+              {
+                locationId: "loc-studio",
+                name: "Studio",
+                placed: 40,
+                inCustody: 0,
+                onBooking: 0,
+                left: 40,
+              },
+            ],
+            unplaced: 0,
+            defaultLocationId: "loc-store",
+          },
+        ],
+      })
+    );
+    seedSelection([batteries]);
+
+    renderDialog();
+
+    const picker = screen.getByRole("button", {
+      name: "From location for Batteries",
+    });
+    expect(picker).toHaveTextContent("Store Room · 60 pcs");
+    // Unchanged, it posts nothing and the server records its own default.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
+
+    fireEvent.click(picker);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent)
+    ).toEqual(["Store Room · 60 pcs", "Studio · 40 pcs"]);
+    fireEvent.click(screen.getByRole("option", { name: "Studio · 40 pcs" }));
+
+    // Once the operator picks, the answer is posted under the slice's key,
+    // inside the dialog's form so it posts with the check-out.
+    const answer = document.querySelector<HTMLInputElement>(
+      'input[name="sourceLocation.ba-standalone"]'
+    );
+    expect(answer?.value).toBe("loc-studio");
+    expect(answer?.form?.id).toBe("bulk-partial-checkout-form");
+  });
+
+  it("asks nothing for a pool the loader has no question for", () => {
+    const batteries: SelectedAssetRow = {
+      id: "battery-id",
+      title: "Batteries",
+      status: AssetStatus.AVAILABLE,
+      type: AssetType.QUANTITY_TRACKED,
+      bookingAssetId: "ba-standalone",
+      bookedQuantity: 10,
+      kitId: null,
+      thumbnailImage: null,
+      mainImage: null,
+      mainImageExpiration: null,
+      category: null,
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [
+          {
+            id: "ba-standalone",
+            quantity: 10,
+            assetKitId: null,
+            asset: {
+              id: "battery-id",
+              title: "Batteries",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+            },
+          },
+        ],
+        checkedOutAssetIds: [],
+        remainingToCheckOutByAsset: { "battery-id": 10 },
+      })
+    );
+    seedSelection([batteries]);
+
+    renderDialog();
+
+    expect(document.querySelector("select")).toBeNull();
+  });
+
   it("still filters INDIVIDUAL assets whose id appears in checkedOutAssetIds (unchanged)", () => {
     // Camera: INDIVIDUAL, already checked out (id in `checkedOutAssetIds`).
     // Even with a `remainingToCheckOutByAsset` map populated for unrelated
@@ -536,6 +675,10 @@ describe("BulkPartialCheckoutDialog — items that cannot go out again", () => {
     renderDialog();
 
     expect(screen.getByTestId("checkout-dialog-mock")).toBeInTheDocument();
+    // Nothing unassigned: the header's Check out can give new dates.
+    expect(screen.getByTestId("checkout-dialog-mock").dataset.expiredHint).toBe(
+      ""
+    );
     expect(
       document.querySelector(
         'button[type="submit"][name="intent"][value="partial-checkout"]'
@@ -584,6 +727,9 @@ describe("BulkPartialCheckoutDialog — unassigned model reservations", () => {
     expect(JSON.parse(dialog.dataset.unassigned ?? "[]")).toEqual([
       { name: "Dell Latitude", count: 2 },
     ]);
+    // Its header Check out leads to the fulfil flow, which sets no new end
+    // date, so an expired prompt points at reverting to draft instead.
+    expect(dialog.dataset.expiredHint).toBe(REVERT_TO_DRAFT_RESCHEDULE_HINT);
   });
 
   it("does not ask again once the booking is underway", () => {

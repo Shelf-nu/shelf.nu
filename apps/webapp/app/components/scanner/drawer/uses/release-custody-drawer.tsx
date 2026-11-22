@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
+import { useBulkSaveSettle } from "~/hooks/use-bulk-save-settle";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
@@ -41,6 +42,10 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
+import {
+  BULK_SAVE_NO_ANSWER_MESSAGE,
+  readBulkSaveAnswer,
+} from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import {
   assetLabelPresets,
@@ -102,7 +107,7 @@ export default function ReleaseCustodyDrawer({
 
   // Blockers live in `custody-blockers` so the list is a pure function of the
   // scanned rows and can be tested without mounting this drawer.
-  const { blockerConfigs, onResolveAll } = buildReleaseCustodyBlockers({
+  const { blockerConfigs } = buildReleaseCustodyBlockers({
     items,
     removeAssetsFromList,
     removeItemsFromList,
@@ -111,7 +116,6 @@ export default function ReleaseCustodyDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll,
   });
 
   // Render item row
@@ -168,9 +172,29 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
 
+  // What the list keeps once the save answers, and the draft's mark.
+  const bulkSave = useBulkSaveSettle({
+    statuses: {
+      assets: custodyState.assetStatus,
+      kits: custodyState.kitStatus,
+    },
+    dialogOpen,
+  });
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
+      const attempt = bulkSave.begin({
+        assetIds: e.data.assetIds ?? [],
+        kitIds: e.data.kitIds ?? [],
+      });
+      const setResult: typeof setCustodyState = (update) => {
+        if (attempt.isCurrent()) {
+          setCustodyState(update);
+        }
+      };
+      // No answer (the request failed, or the answer was a gateway's page):
+      // the server may have saved it anyway, so the mark must stay.
+      const markUnconfirmed = attempt.markUnanswered;
       setDialogOpen(true);
       const { assetIds, kitIds } = e.data;
 
@@ -198,27 +222,30 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           method: "POST",
           body: assetFormData,
         })
-          .then((response) => response.json())
+          .then((response) =>
+            readBulkSaveAnswer<{ error?: { message: string } }>(response)
+          )
           .then((data) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               assetStatus: data.error ? "error" : "success",
               ...(data.error && { assetErrorMessage: data.error.message }),
             }));
           })
           .catch((error) => {
-            setCustodyState((state) => ({
+            markUnconfirmed();
+            setResult((state) => ({
               ...state,
               assetStatus: "error",
               assetErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while releasing custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
         // No assets to process, mark as skipped
-        setCustodyState((state) => ({
+        setResult((state) => ({
           ...state,
           assetStatus: "skipped",
         }));
@@ -240,27 +267,30 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           method: "POST",
           body: kitFormData,
         })
-          .then((response) => response.json())
+          .then((response) =>
+            readBulkSaveAnswer<{ error?: { message: string } }>(response)
+          )
           .then((data) => {
-            setCustodyState((state) => ({
+            setResult((state) => ({
               ...state,
               kitStatus: data.error ? "error" : "success",
               ...(data.error && { kitErrorMessage: data.error.message }),
             }));
           })
           .catch((error) => {
-            setCustodyState((state) => ({
+            markUnconfirmed();
+            setResult((state) => ({
               ...state,
               kitStatus: "error",
               kitErrorMessage:
                 error instanceof ShelfError
                   ? error.message
-                  : "Something went wrong while releasing custody. Please try again.",
+                  : BULK_SAVE_NO_ANSWER_MESSAGE,
             }));
           });
       } else {
         // No kits to process, mark as skipped
-        setCustodyState((state) => ({
+        setResult((state) => ({
           ...state,
           kitStatus: "skipped",
         }));
@@ -268,14 +298,13 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     },
   });
 
-  const clearItems = useSetAtom(clearScannedItemsAtom);
-
   function cleanupState() {
+    // Empties the list only when the whole of it saved; see `dismissBulkSave`.
+    bulkSave.dismiss();
     setCustodyState({
       assetStatus: "processing",
       kitStatus: "processing",
     });
-    clearItems();
   }
 
   return (
@@ -306,7 +335,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className={tw("mb-4 flex gap-3")}>
+          <div className="my-2 flex gap-3">
             <Button
               type="submit"
               variant="primary"
@@ -336,6 +365,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const showStateBadges = shouldShowStateBadges(asset, inCustody);
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
+    assetLabelPresets.archivedReturning(!!asset.archivedAt),
     {
       condition: asset.status === AssetStatus.IN_CUSTODY,
       badgeText: `In custody of: ${getPrimaryCustody(asset.custody)?.custodian

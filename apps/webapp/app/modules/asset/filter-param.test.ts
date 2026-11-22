@@ -11,6 +11,8 @@
 import { describe, expect, it } from "vitest";
 
 import { splitFilterParam } from "./filter-param";
+import { parseFilters } from "./filter-parsing";
+import type { Column } from "../asset-index-settings/helpers";
 
 describe("splitFilterParam", () => {
   it("splits an ordinary operator and value", () => {
@@ -47,5 +49,26 @@ describe("splitFilterParam", () => {
 
   it("preserves a value that is only colons", () => {
     expect(splitFilterParam("is:::")).toEqual(["is", "::"]);
+  });
+});
+
+describe("isEmpty filter parameter", () => {
+  const columns = [
+    { name: "lastAuditDate", visible: true, position: 0 },
+  ] as unknown as Column[];
+
+  it("splits `isEmpty:` into the operator and an empty value", () => {
+    expect(splitFilterParam("isEmpty:")).toEqual(["isEmpty", ""]);
+  });
+
+  it("parses `lastAuditDate=isEmpty:` into one isEmpty filter", () => {
+    const filters = parseFilters("lastAuditDate=isEmpty:", columns);
+
+    expect(filters).toHaveLength(1);
+    expect(filters[0]).toMatchObject({
+      name: "lastAuditDate",
+      operator: "isEmpty",
+      value: "",
+    });
   });
 });

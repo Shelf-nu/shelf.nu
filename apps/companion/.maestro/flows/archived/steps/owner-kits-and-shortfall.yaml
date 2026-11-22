@@ -1,0 +1,119 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: a kit whose every asset is archived, a kit add that leaves its
+# archived member out, and a model reservation the booking's dates can no
+# longer fill. No login (see ../01-owner.yaml). Run before owner-reinstate.
+
+# ── Kit page: nothing to put into custody ──────────────────────────────
+- openLink: "shelf://kits/${SHELF_TEST_ONLY_ARCHIVED_KIT_ID}"
+- extendedWaitUntil:
+    visible: "This kit holds only archived assets. Add an active asset to assign custody."
+    timeout: 20000
+- assertVisible:
+    text: "Assign custody of kit"
+    enabled: false
+- takeScreenshot: followups-kit-only-archived
+
+# ── Scan tab, Assign: the kit is flagged before submit ─────────────────
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Scanner action: Assign.*"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Clear all scanned items"
+    optional: true
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ONLY_ARCHIVED_KIT_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- assertVisible: "1 kit holds only archived assets. There is nothing in it to put into custody."
+- assertVisible:
+    id: "batch-drawer-submit"
+    enabled: false
+- takeScreenshot: followups-scanner-assign-kit
+- tapOn: "Clear all scanned items"
+
+# ── A reservation the dates can no longer fill ─────────────────────────
+- openLink: "shelf://bookings/${SHELF_TEST_SHORT_BOOKING_ID}"
+- extendedWaitUntil:
+    visible: "E2E Short Reservation"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "Not enough units are free for this booking's dates. Reduce the reservation to what can be assigned."
+    direction: DOWN
+    timeout: 10000
+# The row is one button for screen readers, so its label carries the chip.
+- assertVisible: "E2E Short Model, 2 reserved and awaiting assignment, 1 short: only 1 free.*"
+- takeScreenshot: followups-short-reservation
+# Back to the bookings list, so the next link opens a fresh booking screen
+# rather than reusing this one.
+- tapOn: "Bookings"
+- waitForAnimationToEnd
+
+# ── Scan into a draft booking ──────────────────────────────────────────
+- openLink: "shelf://bookings/${SHELF_TEST_ARCHIVED_BOOKING_ID}"
+- extendedWaitUntil:
+    visible: "E2E Archived Camera.*"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "Scan assets or kits to add to this booking"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Scan assets or kits to add to this booking"
+- tapOn: "Enter a code manually"
+- waitForAnimationToEnd
+# The kit holding only archived assets is flagged here too.
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ONLY_ARCHIVED_KIT_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 kit holds only archived assets. There is nothing in it to book."
+    timeout: 15000
+- takeScreenshot: followups-scanner-booking-kit
+- tapOn: "Remove 1 blocked item from the list"
+# A kit with one archived and one active member books the active one and
+# says the other stayed out.
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ARCHIVED_KIT_QR_ID}
+- pressKey: Enter
+# The kit row counts its active member only.
+- extendedWaitUntil:
+    visible: "1 unit scanned"
+    timeout: 15000
+- assertVisible: "Kit • 1 asset.*"
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    id: "batch-drawer-submit"
+- extendedWaitUntil:
+    visible: "Add to Booking"
+    timeout: 10000
+- tapOn:
+    text: "^Add$"
+- extendedWaitUntil:
+    visible: ".*1 archived asset was left out\\..*"
+    timeout: 20000
+- takeScreenshot: followups-scan-add-left-out
+- tapOn: "OK"
+# OK returns to the booking; wait for it before opening the next one.
+- extendedWaitUntil:
+    visible: "E2E Archive Draft"
+    timeout: 20000

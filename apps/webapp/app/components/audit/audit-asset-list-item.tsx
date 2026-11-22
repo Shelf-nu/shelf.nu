@@ -12,10 +12,11 @@
  * @see {@link file://./../../routes/_layout+/audits.$auditId.overview.tsx}
  */
 
-import { isAuditCompleted } from "@shelf/labels";
+import { auditCountLabel, isAuditCompleted } from "@shelf/labels";
 import { ImageIcon, MessageSquare } from "lucide-react";
 import { useLoaderData } from "react-router";
 
+import { ArchivedBadge } from "~/components/assets/archived-badge";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
@@ -29,7 +30,7 @@ import { Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { getPrimaryCustody } from "~/modules/custody/utils";
@@ -71,6 +72,17 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
    * sheet has a notes section and a photo grid.
    */
   const noteCount = item.auditData?.auditNotesCount ?? 0;
+  // Units on a quantity-tracked row, e.g. "8 of 14 pcs"; null otherwise.
+  const countLabel = item.auditData
+    ? auditCountLabel(
+        {
+          status: item.auditData.auditStatus,
+          expectedQuantity: item.auditData.expectedQuantity,
+          foundQuantity: item.auditData.foundQuantity,
+        },
+        item.unitOfMeasure
+      )
+    : null;
   const photoCount = item.auditData?.auditImagesCount ?? 0;
   const hasEvidence = noteCount > 0 || photoCount > 0;
 
@@ -89,7 +101,7 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
   const custody = getPrimaryCustody(custodyArray);
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   // Resolve the asset's display code. Audits run on physical assets, so this
   // is the strongest case for the badge — the field worker matches the label
@@ -160,8 +172,14 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
                 column). Keeps composition consistent across surfaces per
                 `.claude/rules/code-bearing-entity-list-consistency.md`.
               */}
-              {displayCode || hasEvidence ? (
+              {displayCode || hasEvidence || item.archivedAt || countLabel ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  {item.archivedAt ? <ArchivedBadge /> : null}
+                  {countLabel ? (
+                    <span className="text-xs font-medium text-gray-700">
+                      {countLabel}
+                    </span>
+                  ) : null}
                   {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
                   {/*
                     why: the row is the only place someone looks when asking
@@ -237,10 +255,14 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
         </Td>
       )}
       <Td>
-        {category ? <CategoryBadge category={category} /> : <EmptyTableValue />}
+        {category ? (
+          <CategoryBadge category={category} linkToAssets />
+        ) : (
+          <EmptyTableValue />
+        )}
       </Td>
       <Td>
-        <ListItemTagsColumn tags={item.tags} />
+        <ListItemTagsColumn tags={item.tags} linkToAssets />
       </Td>
       {canRemoveAssets && (
         <Td className="text-right">

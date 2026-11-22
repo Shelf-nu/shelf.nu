@@ -18,7 +18,9 @@
  * @see {@link file://../../../app/modules/audit/note-content.server.ts}
  */
 
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -59,7 +61,7 @@ vi.mock("~/modules/audit/service.server", async (importOriginal) => {
   const actual = await importOriginal<typeof AuditService>();
   return {
     ...actual,
-    requireAuditAssigneeForBaseSelfService: vi.fn(),
+    requireAuditAssigneeForScopedViewer: vi.fn(),
     requireAuditAssignee: vi.fn(),
   };
 });
@@ -211,7 +213,7 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
     vi.clearAllMocks();
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
     dbNoteOps.findFirst.mockResolvedValue({ id: "note-1" });
     txNoteOps.findFirst.mockResolvedValue({ id: "note-1", content: "body" });
@@ -351,7 +353,7 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
     vi.clearAllMocks();
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
     (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
     // An audit still open, read once before the files are stored and again on
@@ -398,6 +400,15 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
 
     // The raw concat path must NOT be taken.
     expect(db.$transaction).toHaveBeenCalled();
+
+    // A browser upload is always WEB_UPLOAD, and the rebuilt request keeps
+    // the original hints so an offset-less date is read in the right zone.
+    expect(uploadAuditImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uploadedVia: "web",
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
+      })
+    );
   });
 
   it("does NOT inline-concat user content for upload-image (no raw string build in the route)", async () => {
@@ -454,6 +465,16 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
     // The shared helper should NOT be called for multi-file (it's used only
     // for the single-file path per the fix spec).
     expect(createAuditImageEvidenceNote).not.toHaveBeenCalled();
+
+    expect(uploadAuditImage).toHaveBeenCalledTimes(2);
+    for (const [args] of vi.mocked(uploadAuditImage).mock.calls) {
+      expect(args).toEqual(
+        expect.objectContaining({
+          uploadedVia: "web",
+          hints: expect.objectContaining({ timeZone: expect.any(String) }),
+        })
+      );
+    }
   });
 
   it("refuses an upload on a finished audit before storing the file", async () => {

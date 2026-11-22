@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { emailMatchesDomains, isValidImageUrl, parseDomains } from "./misc";
+import {
+  emailMatchesDomains,
+  formatEnum,
+  isValidImageUrl,
+  parseDomains,
+} from "./misc";
 
 /**
  * `isValidImageUrl` is a well-formedness pre-filter for the CSV-import image
@@ -69,5 +74,13 @@ describe("emailMatchesDomains", () => {
   it("returns false for empty domain or null list", () => {
     expect(emailMatchesDomains("", "example.com")).toBe(false);
     expect(emailMatchesDomains("example.com", null)).toBe(false);
+  });
+});
+
+describe("formatEnum", () => {
+  it("turns an enum case into title case", () => {
+    expect(formatEnum("SOME_ENUM_CASE")).toBe("Some Enum Case");
+    expect(formatEnum("IN_CUSTODY")).toBe("In Custody");
+    expect(formatEnum("AVAILABLE")).toBe("Available");
   });
 });

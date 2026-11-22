@@ -15,6 +15,8 @@
  * - `OPTION`          — tap-to-open dropdown picker over `field.options`.
  *                       Falls back to a plain text input when options are
  *                       missing (degraded but safe — see below).
+ * - Link-format TEXT: URL keyboard, and a hint on leaving the field when
+ *   the value is not a link (see `LinkFieldInput`).
  * - everything else   — plain single-line `TextInput`.
  *
  * @see {@link file://../../lib/api/types.ts MobileCustomFieldDefinition}
@@ -35,7 +37,8 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import type { MobileCustomFieldType } from "@/lib/api";
+import { parseLinkInput } from "@shelf/links";
+import type { MobileCustomFieldFormat, MobileCustomFieldType } from "@/lib/api";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -63,6 +66,8 @@ type CustomFieldInputProps = {
     helpText: string | null;
     required?: boolean;
     options?: string[] | null;
+    /** `LINK` gets the link input; absent reads as `PLAIN`. */
+    format?: MobileCustomFieldFormat;
   };
   value: string;
   onChange: (value: string) => void;
@@ -142,7 +147,6 @@ export function CustomFieldInput({
           placeholder={`Enter ${field.name.toLowerCase()}...`}
           placeholderTextColor={colors.placeholderText}
           multiline
-          numberOfLines={3}
           textAlignVertical="top"
           accessibilityLabel={accessibilityLabel}
           accessibilityHint={accessibilityHint}
@@ -187,6 +191,16 @@ export function CustomFieldInput({
         />
       );
     default: // TEXT and any unknown future types
+      if (field.format === "LINK") {
+        return (
+          <LinkFieldInput
+            value={value}
+            onChange={onChange}
+            accessibilityLabel={accessibilityLabel}
+            accessibilityHint={accessibilityHint}
+          />
+        );
+      }
       return (
         <TextInput
           style={styles.input}
@@ -202,11 +216,85 @@ export function CustomFieldInput({
 }
 
 /**
+ * Single-line input for a Link-format TEXT field.
+ *
+ * Opens the URL keyboard with auto-capitalisation and autocorrect off, so a
+ * pasted or typed link is not mangled. When the person leaves a non-empty
+ * field, `parseLinkInput` from `@shelf/links` checks it and a hint under the
+ * input says what is wrong; typing again clears it. The hint is cosmetic:
+ * the server applies the same rule on save and refuses a non-link with a
+ * message the screen shows.
+ */
+function LinkFieldInput({
+  value,
+  onChange,
+  accessibilityLabel,
+  accessibilityHint,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  accessibilityLabel: string;
+  accessibilityHint: string | undefined;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [hint, setHint] = useState<string | null>(null);
+
+  const checkLink = () => {
+    const result = value.trim() === "" ? null : parseLinkInput(value);
+    setHint(result && !result.ok ? result.message : null);
+  };
+
+  return (
+    <View>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={(next) => {
+          setHint(null);
+          onChange(next);
+        }}
+        onBlur={checkLink}
+        placeholder="https://"
+        placeholderTextColor={colors.placeholderText}
+        keyboardType="url"
+        textContentType="URL"
+        autoCapitalize="none"
+        autoCorrect={false}
+        spellCheck={false}
+        accessibilityLabel={
+          hint ? `${accessibilityLabel}, ${hint}` : accessibilityLabel
+        }
+        accessibilityHint={accessibilityHint}
+      />
+      {hint ? (
+        <Text style={styles.linkHint} accessibilityLiveRegion="polite">
+          {hint}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Option lists longer than this get a search box.
+ *
+ * MIRROR of `ENUM_SEARCH_THRESHOLD` and its case-insensitive substring filter in
+ * `apps/webapp/app/components/assets/assets-index/advanced-filters/value-field.tsx`.
+ * Cosmetic only: it changes which options are listed, never which value is
+ * valid, and the server checks a submitted option against the field's options.
+ * Extraction target: a pure `packages/*` custom-field module (none yet).
+ */
+const OPTION_SEARCH_THRESHOLD = 8;
+
+/**
  * Dropdown picker for `OPTION` custom fields.
  *
  * Matches the look-and-feel of the Category / Location pickers in `new.tsx`:
  * a `TouchableOpacity` showing the current selection that expands inline
- * into a scrollable list. If `field.options` is missing or empty (server
+ * into a scrollable list, in the order the field's options are saved. A list
+ * longer than {@link OPTION_SEARCH_THRESHOLD} gets a search box styled like the
+ * location picker's. If `field.options` is missing or empty (server
  * misconfiguration or older data), gracefully degrades to a plain text
  * input so the user is never locked out of editing the field.
  */
@@ -226,8 +314,20 @@ function OptionDropdown({
   const { colors } = useTheme();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const options = field.options ?? [];
+  const hasSearch = options.length > OPTION_SEARCH_THRESHOLD;
+  const needle = query.trim().toLowerCase();
+  // Each entry keeps its position in `field.options`, which keys its row.
+  const visibleOptions = options
+    .map((opt, index) => ({ opt, index }))
+    .filter(({ opt }) => !needle || opt.toLowerCase().includes(needle));
+
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
 
   // Degraded fallback: if no options are configured, render a plain text
   // input so the screen is still usable.
@@ -249,7 +349,7 @@ function OptionDropdown({
     <View>
       <TouchableOpacity
         style={styles.pickerButton}
-        onPress={() => setOpen((o) => !o)}
+        onPress={() => (open ? close() : setOpen(true))}
         accessibilityRole="button"
         accessibilityLabel={
           value
@@ -272,9 +372,46 @@ function OptionDropdown({
       </TouchableOpacity>
 
       {open && (
-        <View style={styles.pickerDropdown}>
+        <View
+          style={[
+            styles.pickerDropdown,
+            hasSearch && styles.pickerDropdownWithSearch,
+          ]}
+        >
+          {hasSearch && (
+            <View style={styles.optionSearch}>
+              <Ionicons name="search" size={18} color={colors.mutedLight} />
+              <TextInput
+                style={styles.optionSearchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search options..."
+                placeholderTextColor={colors.placeholderText}
+                autoCorrect={false}
+                accessibilityLabel={`Search ${field.name} options`}
+              />
+              {query.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setQuery("")}
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={18}
+                    color={colors.mutedLight}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
           <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-            {options.map((opt, index) => {
+            {visibleOptions.length === 0 && (
+              <Text style={styles.optionSearchEmpty}>
+                No options match your search
+              </Text>
+            )}
+            {visibleOptions.map(({ opt, index }) => {
               const selected = opt === value;
               return (
                 <TouchableOpacity
@@ -289,7 +426,7 @@ function OptionDropdown({
                   ]}
                   onPress={() => {
                     onChange(selected ? "" : opt);
-                    setOpen(false);
+                    close();
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -311,7 +448,7 @@ function OptionDropdown({
               style={styles.pickerClear}
               onPress={() => {
                 onChange("");
-                setOpen(false);
+                close();
               }}
               accessibilityRole="button"
               accessibilityLabel={`Clear ${field.name}`}
@@ -514,8 +651,16 @@ const useStyles = createStyles((colors, shadows) => ({
     ...shadows.sm,
   },
   textArea: {
+    // Grows with the text to about ten lines, then scrolls inside. A
+    // `numberOfLines` prop would cap it at that many lines on iOS.
     minHeight: 80,
+    maxHeight: 260,
     paddingTop: 12,
+  },
+  linkHint: {
+    fontSize: fontSize.sm,
+    color: colors.errorText,
+    marginTop: spacing.xs,
   },
   switchRow: {
     flexDirection: "row",
@@ -595,6 +740,35 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.error,
     fontWeight: "500",
+  },
+  // Room for the search box on top of about four rows.
+  pickerDropdownWithSearch: {
+    maxHeight: 280,
+  },
+  // Search box inside a long option list (mirrors the location picker's).
+  optionSearch: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    margin: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    gap: spacing.sm,
+    ...shadows.sm,
+  },
+  optionSearchInput: {
+    flex: 1,
+    fontSize: fontSize.lg,
+    color: colors.foreground,
+  },
+  optionSearchEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: fontSize.base,
+    color: colors.muted,
   },
 
   // Inline DateTimePicker (iOS) wrapper — gives the calendar room to

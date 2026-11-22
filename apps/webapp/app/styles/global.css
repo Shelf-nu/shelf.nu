@@ -68,21 +68,49 @@ p {
   @apply font-normal;
 }
 
-@keyframes spinner {
-  to {
-    transform: rotate(360deg);
+/*
+ * Diamond loader (components/shared/spinner.tsx). Each of the 8 pixels flashes
+ * on and fades out, staggered by 1/8 of the cycle so the light travels around
+ * the diamond. The delays are negative so every pixel is already mid-cycle on
+ * the first frame: a positive delay shows that pixel fully lit until it starts.
+ * Under reduced motion the global rule above stops the animation and the
+ * diamond rests fully drawn.
+ */
+@keyframes diamond-loader-pixel {
+  0% {
+    opacity: 0;
+  }
+  1% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
   }
 }
 
-.spinner:before {
-  content: "";
-  box-sizing: border-box;
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid #ccc;
-  @apply border-t-primary-500;
-  animation: spinner 0.6s linear infinite;
+.diamond-loader rect {
+  animation: diamond-loader-pixel 0.8s ease-in-out infinite;
+}
+.diamond-loader rect:nth-child(2) {
+  animation-delay: -0.7s;
+}
+.diamond-loader rect:nth-child(3) {
+  animation-delay: -0.6s;
+}
+.diamond-loader rect:nth-child(4) {
+  animation-delay: -0.5s;
+}
+.diamond-loader rect:nth-child(5) {
+  animation-delay: -0.4s;
+}
+.diamond-loader rect:nth-child(6) {
+  animation-delay: -0.3s;
+}
+.diamond-loader rect:nth-child(7) {
+  animation-delay: -0.2s;
+}
+.diamond-loader rect:nth-child(8) {
+  animation-delay: -0.1s;
 }
 
 .maplibregl-ctrl-bottom-right {
@@ -335,6 +363,31 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/*
+ * Bottom sheets (`data-mobile-sheet`, see
+ * `components/shared/mobile-dropdown-styles.tsx`) fade in instead of sliding
+ * below `md`. On a popover sheet the slide's `transform` lands on the element
+ * that wraps the fixed sheet and anchors the sheet to it for the length of the
+ * animation. The rule lives here, not in the styles injected while a menu is
+ * open, so the animation name stays the same when the menu closes: Radix reads
+ * a changed name as an exit animation and keeps the closed sheet on screen
+ * until it ends. The query is `SHEET_MEDIA_QUERY`.
+ */
+@media not all and (min-width: 768px) {
+  [data-mobile-sheet] {
+    animation-name: mobileSheetFadeIn !important;
+  }
+}
+
+@keyframes mobileSheetFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 

@@ -1,10 +1,13 @@
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
-// Mock the database and dependencies
+// why: these are unit tests of the service's control flow; the rename SQL and
+// counts need a real Postgres, so the client is replaced with spies.
 vi.mock("~/database/db.server", () => ({
   db: {
     $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
     customField: {
       findFirst: vi.fn(),
       delete: vi.fn(),
@@ -18,20 +21,42 @@ vi.mock("~/database/db.server", () => ({
       findMany: vi.fn(),
       update: vi.fn(),
     },
+    category: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
 const mockRemoveCustomFieldFromAssetIndexSettings = vi.fn();
+const mockUpdateAssetIndexSettingsAfterCfUpdate = vi.fn();
 
+// why: index-settings updates are their own module with their own tests; here
+// we only check that a field update hands them the old and new field.
 vi.mock("../asset-index-settings/service.server", () => ({
   removeCustomFieldFromAssetIndexSettings:
     mockRemoveCustomFieldFromAssetIndexSettings,
-  updateAssetIndexSettingsAfterCfUpdate: vi.fn(),
+  updateAssetIndexSettingsAfterCfUpdate:
+    mockUpdateAssetIndexSettingsAfterCfUpdate,
   updateAssetIndexSettingsWithNewCustomFields: vi.fn(),
 }));
 
+const mockRecordEvents = vi.fn();
+
+// why: activity events are their own module with their own tests; here we only
+// check which events a rename hands it, and that it writes through the tx.
+vi.mock("../activity-event/service.server", () => ({
+  recordEvents: mockRecordEvents,
+}));
+
 const { db } = await import("~/database/db.server");
-const { softDeleteCustomField } = await import("./service.server");
+const {
+  createCustomField,
+  createCustomFieldsIfNotExists,
+  getOptionUsageCounts,
+  softDeleteCustomField,
+  updateCustomField,
+  upsertCustomField,
+} = await import("./service.server");
 
 const dbTransactionMock = vi.mocked(db.$transaction);
 
@@ -286,5 +311,592 @@ describe("softDeleteCustomField", () => {
     // Verify that the name has a timestamp appended
     expect(capturedUpdateData.name).toMatch(/^Serial Number_\d+$/);
     expect(capturedUpdateData.deletedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("createCustomField", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("saves the format chosen for the field", async () => {
+    vi.mocked(db.customField.create).mockResolvedValue({
+      name: "Manual",
+      type: "TEXT",
+      active: false,
+    } as never);
+    vi.mocked(db.assetIndexSettings.findMany).mockResolvedValue([]);
+
+    await createCustomField({
+      name: "Manual",
+      helpText: null,
+      type: "TEXT",
+      format: "LINK",
+      required: false,
+      active: false,
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.customField.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: "Manual",
+        type: "TEXT",
+        format: "LINK",
+      }),
+    });
+  });
+
+  it("refuses with 400 and creates nothing when a category is not in the organization", async () => {
+    // Only one of the two requested categories is in org-1.
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-own" },
+    ] as never);
+
+    await expect(
+      createCustomField({
+        name: "Manual",
+        helpText: null,
+        type: "TEXT",
+        format: "PLAIN",
+        required: false,
+        active: false,
+        organizationId: "org-1",
+        userId: "user-1",
+        categories: ["cat-own", "cat-other-org"],
+      })
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+    expect(db.category.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["cat-own", "cat-other-org"] },
+        organizationId: "org-1",
+      },
+      select: { id: true },
+    });
+    expect(db.customField.create).not.toHaveBeenCalled();
+  });
+
+  it("connects categories that are all in the organization", async () => {
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-own" },
+    ] as never);
+    vi.mocked(db.customField.create).mockResolvedValue({
+      name: "Manual",
+      type: "TEXT",
+      active: false,
+    } as never);
+    vi.mocked(db.assetIndexSettings.findMany).mockResolvedValue([]);
+
+    await createCustomField({
+      name: "Manual",
+      helpText: null,
+      type: "TEXT",
+      format: "PLAIN",
+      required: false,
+      active: false,
+      organizationId: "org-1",
+      userId: "user-1",
+      categories: ["cat-own"],
+    });
+
+    expect(db.customField.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        categories: { connect: [{ id: "cat-own" }] },
+      }),
+    });
+  });
+});
+
+describe("upsertCustomField", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("looks a definition up by exact name regardless of case", async () => {
+    const existing = {
+      id: "cf-serial",
+      name: "SERIAL_NO",
+      type: "TEXT",
+      options: [],
+    };
+    vi.mocked(db.customField.findFirst).mockResolvedValue(existing as never);
+
+    const { customFields } = await upsertCustomField([
+      {
+        name: "Serial_No",
+        type: "TEXT",
+        format: "PLAIN",
+        helpText: null,
+        required: false,
+        active: true,
+        organizationId: "org-1",
+        userId: "user-1",
+      },
+    ]);
+
+    // `in` keeps `_` a plain character; `equals` + insensitive is an ILIKE,
+    // where it matches any one character.
+    expect(db.customField.findFirst).toHaveBeenCalledWith({
+      where: {
+        name: { in: ["Serial_No"], mode: "insensitive" },
+        organizationId: "org-1",
+        deletedAt: null,
+      },
+    });
+    expect(customFields.Serial_No.id).toBe("cf-serial");
+  });
+});
+
+describe("createCustomFieldsIfNotExists", () => {
+  const linkHeaderRow = {
+    key: "row-1",
+    title: "Camera",
+    "cf:Manual,type:text,format:link": "https://example.com/manual.pdf",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.assetIndexSettings.findMany).mockResolvedValue([]);
+  });
+
+  it("creates a field from a format:link header as a Link field", async () => {
+    vi.mocked(db.customField.findFirst).mockResolvedValue(null);
+    vi.mocked(db.customField.create).mockResolvedValue({
+      id: "cf-manual",
+      name: "Manual",
+      type: "TEXT",
+      format: "LINK",
+      active: true,
+    } as never);
+
+    await createCustomFieldsIfNotExists({
+      data: [linkHeaderRow],
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.customField.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: "Manual",
+        type: "TEXT",
+        format: "LINK",
+      }),
+    });
+  });
+
+  it("keeps an existing field's own format whatever the header says", async () => {
+    const existing = {
+      id: "cf-manual",
+      name: "Manual",
+      type: "TEXT",
+      format: "PLAIN",
+      options: [],
+    };
+    vi.mocked(db.customField.findFirst).mockResolvedValue(existing as never);
+
+    const { customFields } = await createCustomFieldsIfNotExists({
+      data: [linkHeaderRow],
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(customFields.Manual).toEqual(existing);
+    expect(db.customField.create).not.toHaveBeenCalled();
+    expect(db.customField.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateCustomField", () => {
+  const savedField = {
+    id: "cf-brand",
+    name: "Brand",
+    organizationId: "org-1",
+    type: "OPTION",
+    options: ["Sony ", "Canon", "sony"],
+  };
+
+  /** A value row the rename statement reports as changed. */
+  type Rewritten = { assetId: string; from: string; to: string };
+
+  // why: records which client the transaction callback writes through, so the
+  // tests can prove the lock, the field update, the value rewrite and the
+  // events share one transaction. The first raw query is the row lock; the
+  // second is the rename, which answers with `rewritten`.
+  function mockTransaction({
+    field = savedField as typeof savedField | null,
+    rewritten = [] as Rewritten[],
+    categoriesInOrg = [] as { id: string }[],
+  } = {}) {
+    const tx = {
+      category: {
+        findMany: vi.fn().mockResolvedValue(categoriesInOrg),
+      },
+      customField: {
+        findFirst: vi.fn().mockResolvedValue(field),
+        update: vi.fn().mockImplementation(({ data }) => ({
+          ...savedField,
+          options: data.options,
+        })),
+      },
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ id: "cf-brand" }])
+        .mockResolvedValueOnce(rewritten),
+      // The same rename applied to the defaults asset models hold.
+      $executeRaw: vi.fn().mockResolvedValue(0),
+    };
+    dbTransactionMock.mockImplementation(((
+      callback: (client: typeof tx) => unknown
+    ) => callback(tx)) as never);
+    return tx;
+  }
+
+  /** The rename statement the transaction ran, or undefined when it ran none. */
+  const renameStatement = (tx: ReturnType<typeof mockTransaction>) =>
+    tx.$queryRaw.mock.calls[1]?.[0] as
+      | { text: string; values: unknown[] }
+      | undefined;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("locks the field row before reading the saved options", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Sony ", "Canon", "sony"],
+    });
+
+    const lock = tx.$queryRaw.mock.calls[0][0];
+    expect(lock.text).toContain('FROM "CustomField"');
+    expect(lock.text).toContain("FOR UPDATE");
+    expect(lock.values).toEqual(["cf-brand", "org-1"]);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.customField.findFirst.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("rewrites renamed and merged values in the transaction that saves the options", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Sony", "Canon"],
+      optionRenames: [
+        { from: "Sony ", to: "Sony" },
+        { from: "sony", to: "Sony" },
+      ],
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith({
+      where: { id: "cf-brand", organizationId: "org-1" },
+      data: expect.objectContaining({ options: ["Sony", "Canon"] }),
+    });
+    expect(db.customField.update).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+
+    const statement = renameStatement(tx)!;
+    expect(statement.values).toEqual([
+      "Sony ",
+      "Sony",
+      "sony",
+      "Sony",
+      "cf-brand",
+    ]);
+    expect(statement.text).toContain('UPDATE "AssetCustomFieldValue" AS v');
+    expect(statement.text).toContain(`'{valueOption}'`);
+    expect(statement.text).toContain(`'{raw}'`);
+    expect(statement.text).toContain(`v."customFieldId" = $5`);
+    expect(statement.text).toContain('RETURNING v."assetId"');
+
+    expect(mockUpdateAssetIndexSettingsAfterCfUpdate).toHaveBeenCalledWith({
+      oldField: savedField,
+      newField: { ...savedField, options: ["Sony", "Canon"] },
+    });
+  });
+
+  it("rewrites asset model defaults that hold a renamed option, in the same transaction", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Sony", "Canon"],
+      optionRenames: [{ from: "sony", to: "Sony" }],
+    });
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    const statement = tx.$executeRaw.mock.calls[0][0] as {
+      text: string;
+      values: unknown[];
+    };
+    expect(statement.text).toContain(
+      'UPDATE "AssetModelCustomFieldDefault" AS d'
+    );
+    expect(statement.text).toContain(`d."customFieldId" = $3`);
+    expect(statement.values).toEqual(["sony", "Sony", "cf-brand"]);
+  });
+
+  it("saves without rewriting values when no spelling changes", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Canon", "Sony ", "sony"],
+      optionRenames: [{ from: "Canon", to: "Canon" }],
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith({
+      where: { id: "cf-brand", organizationId: "org-1" },
+      data: expect.objectContaining({ options: ["Canon", "Sony ", "sony"] }),
+    });
+    expect(renameStatement(tx)).toBeUndefined();
+    expect(mockRecordEvents).not.toHaveBeenCalled();
+  });
+
+  it("swaps two spellings in one statement, matching each row on its value before the update", async () => {
+    const tx = mockTransaction();
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Canon", "Sony ", "sony"],
+      optionRenames: [
+        { from: "Sony ", to: "sony" },
+        { from: "sony", to: "Sony " },
+      ],
+    });
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    const statement = renameStatement(tx)!;
+    expect(statement.values).toEqual([
+      "Sony ",
+      "sony",
+      "sony",
+      "Sony ",
+      "cf-brand",
+    ]);
+    // One UPDATE joined to every pair at once: a chain of per-pair UPDATEs
+    // would move the swapped assets twice and leave both sets on one spelling.
+    expect(statement.text.match(/UPDATE/g)).toHaveLength(1);
+    expect(statement.text).toContain(
+      'FROM (VALUES ($1::text, $2::text),($3::text, $4::text)) AS m("from", "to")'
+    );
+    expect(statement.text).toContain(`v."value"->>'valueOption' = m."from"`);
+  });
+
+  it("records one custom-field-changed event per rewritten asset, in the transaction", async () => {
+    const tx = mockTransaction({
+      rewritten: [
+        { assetId: "asset-1", from: "Sony ", to: "Sony" },
+        { assetId: "asset-2", from: "sony", to: "Sony" },
+      ],
+    });
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      options: ["Sony", "Canon"],
+      optionRenames: [
+        { from: "Sony ", to: "Sony" },
+        { from: "sony", to: "Sony" },
+      ],
+    });
+
+    expect(mockRecordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          organizationId: "org-1",
+          actorUserId: "user-1",
+          action: "ASSET_CUSTOM_FIELD_CHANGED",
+          entityType: "ASSET",
+          entityId: "asset-1",
+          assetId: "asset-1",
+          field: "Brand",
+          fromValue: "Sony ",
+          toValue: "Sony",
+        }),
+        expect.objectContaining({
+          entityId: "asset-2",
+          fromValue: "sony",
+          toValue: "Sony",
+        }),
+      ],
+      tx
+    );
+  });
+
+  it("switches a text field to the Link format", async () => {
+    const tx = mockTransaction({
+      field: { ...savedField, type: "TEXT", options: [] },
+    });
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      format: "LINK",
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith({
+      where: { id: "cf-brand", organizationId: "org-1" },
+      data: expect.objectContaining({ format: "LINK" }),
+    });
+  });
+
+  it("refuses the Link format on a field that is not text, whatever type was posted", async () => {
+    const tx = mockTransaction();
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        userId: "user-1",
+        type: "TEXT",
+        format: "LINK",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Only single-line text fields can be Link fields",
+    });
+    expect(tx.customField.update).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when the field is not in the organization", async () => {
+    const tx = mockTransaction({ field: null });
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        userId: "user-1",
+        options: ["Sony"],
+      })
+    ).rejects.toMatchObject({ status: 404, shouldBeCaptured: false });
+    expect(tx.customField.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 400 and writes nothing when a category is not in the organization", async () => {
+    const tx = mockTransaction({ categoriesInOrg: [{ id: "cat-own" }] });
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        userId: "user-1",
+        categories: ["cat-own", "cat-other-org"],
+      })
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+
+    // The check reads through the transaction client.
+    expect(tx.category.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["cat-own", "cat-other-org"] },
+        organizationId: "org-1",
+      },
+      select: { id: true },
+    });
+    expect(tx.customField.update).not.toHaveBeenCalled();
+  });
+
+  it("sets categories that are all in the organization", async () => {
+    const tx = mockTransaction({ categoriesInOrg: [{ id: "cat-own" }] });
+
+    await updateCustomField({
+      id: "cf-brand",
+      organizationId: "org-1",
+      userId: "user-1",
+      categories: ["cat-own"],
+    });
+
+    expect(tx.customField.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          categories: { set: [{ id: "cat-own" }] },
+        }),
+      })
+    );
+  });
+
+  it.each([
+    {
+      case: "a from that is not a saved option",
+      options: ["Sony", "Canon", "sony"],
+      optionRenames: [{ from: "Sony", to: "Canon" }],
+    },
+    {
+      case: "a to that is not one of the new options",
+      options: ["Sony", "Canon"],
+      optionRenames: [{ from: "Sony ", to: "Sony Pictures" }],
+    },
+    {
+      case: "moving assets off an option that stays selectable",
+      options: ["Sony ", "Canon", "sony", "Sony"],
+      optionRenames: [{ from: "Sony ", to: "Sony" }],
+    },
+    {
+      case: "two renames from the same spelling",
+      options: ["Sony", "Canon", "SONY"],
+      optionRenames: [
+        { from: "sony", to: "Sony" },
+        { from: "sony", to: "SONY" },
+      ],
+    },
+  ])("refuses $case without writing", async ({ options, optionRenames }) => {
+    const tx = mockTransaction();
+
+    await expect(
+      updateCustomField({
+        id: "cf-brand",
+        organizationId: "org-1",
+        userId: "user-1",
+        options,
+        optionRenames,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The options of this field changed since you opened it. Reload the page and try again.",
+    });
+    expect(tx.customField.update).not.toHaveBeenCalled();
+    expect(renameStatement(tx)).toBeUndefined();
+  });
+});
+
+describe("getOptionUsageCounts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("counts stored values of one field in one organization", async () => {
+    vi.mocked(db.$queryRaw).mockResolvedValue([
+      { option: "Sony", count: 4 },
+      { option: "sony", count: 1 },
+    ] as never);
+
+    const counts = await getOptionUsageCounts({
+      customFieldId: "cf-brand",
+      organizationId: "org-1",
+    });
+
+    expect(counts).toEqual({ Sony: 4, sony: 1 });
+    const query = vi.mocked(db.$queryRaw).mock
+      .calls[0][0] as unknown as Prisma.Sql;
+    expect(query.values).toEqual(["cf-brand", "org-1"]);
+    expect(query.text).toContain(`cf."organizationId" = $2`);
+    expect(query.text).toContain(`v."value"->>'valueOption'`);
+    expect(query.text).toContain(`COUNT(DISTINCT v."assetId")`);
   });
 });

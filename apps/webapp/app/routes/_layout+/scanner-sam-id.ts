@@ -22,7 +22,11 @@ export async function resolveAssetIdFromSamId({
   samId,
   fetcher = fetch,
 }: ResolveAssetIdFromSamIdOptions): Promise<string> {
-  const url = `/api/get-scanned-item/${encodeURIComponent(samId)}`;
+  // `source=scanner` tells the resolver this is the scanner's "View asset",
+  // so the scan is recorded with a note on the asset (a drawer's is not).
+  const url = `/api/get-scanned-item/${encodeURIComponent(
+    samId
+  )}?source=scanner`;
 
   let response: Response;
 

@@ -21,6 +21,7 @@ export const filterOperatorSchema = z.enum([
   "inDates",
   "excludeAny",
   "withinHierarchy",
+  "isEmpty",
 ]);
 
 export const filterFieldTypeSchema = z.enum([

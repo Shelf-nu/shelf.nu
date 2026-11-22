@@ -7,9 +7,12 @@
  * `/assets/new` (no regression for users who don't engage the menu);
  * the caret button next to it opens a Popover with shortcuts to:
  *
- *   - Bulk create from model  → `/assets/new?bulk=1`
+ *   - Bulk create from model  → `/assets/new?bulk=1` (gated on
+ *     `canBulkCreate`, the matrix answer without workspace switches)
  *   - Import from CSV         → `/assets/import` (gated on
  *     `canImportAssets`, mirroring the existing ImportButton gate)
+ *
+ * With neither shortcut available it renders the plain "New asset" button.
  *
  * Uses Radix Popover (per CLAUDE.md, DropdownMenu is deprecated for
  * new features). Visual styles mirror the existing booking
@@ -34,13 +37,30 @@ import { Button } from "../shared/button";
 /**
  * @param canImportAssets - Workspace permission flag for CSV import;
  *   when false, the "Import from CSV" menu item is hidden.
+ * @param canBulkCreate - Whether the member may bulk create assets from a
+ *   model; when false, the "Bulk create from model" menu item is hidden.
  */
 export function NewAssetDropdown({
   canImportAssets,
+  canBulkCreate,
 }: {
   canImportAssets: boolean;
+  canBulkCreate: boolean;
 }) {
   const [open, setOpen] = useState(false);
+
+  if (!canImportAssets && !canBulkCreate) {
+    return (
+      <Button
+        to="/assets/new"
+        role="link"
+        aria-label="new asset"
+        data-test-id="createNewAsset"
+      >
+        New asset
+      </Button>
+    );
+  }
 
   return (
     <div className="flex items-stretch" data-test-id="newAssetDropdown">
@@ -83,12 +103,14 @@ export function NewAssetDropdown({
             // matching the rest of the app's popover menus.
             className="z-[100] w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-md"
           >
-            <DropdownLink
-              to="/assets/new?bulk=1"
-              label="Bulk create from model"
-              description="Create multiple assets at once from a model"
-              onClose={() => setOpen(false)}
-            />
+            {canBulkCreate ? (
+              <DropdownLink
+                to="/assets/new?bulk=1"
+                label="Bulk create from model"
+                description="Create multiple assets at once from a model"
+                onClose={() => setOpen(false)}
+              />
+            ) : null}
             {canImportAssets ? (
               <DropdownLink
                 to="/assets/import"

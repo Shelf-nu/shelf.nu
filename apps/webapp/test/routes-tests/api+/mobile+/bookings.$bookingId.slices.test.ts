@@ -85,10 +85,42 @@ vi.mock("~/modules/booking/service.server", async () => {
   const actual = await vi.importActual<typeof BookingServiceServer>(
     "~/modules/booking/service.server"
   );
+  const computeBookingAssetRemaining = vi.fn().mockResolvedValue(0);
+  const computeBookingAssetRemainingToCheckOut = vi.fn().mockResolvedValue(0);
+  /** Answers a batched read one asset at a time, from a per-asset mock. */
+  const perAsset =
+    (single: typeof computeBookingAssetRemaining) =>
+    async (client: unknown, bookingId: string, assetIds: string[]) =>
+      new Map(
+        await Promise.all(
+          assetIds.map(
+            async (assetId): Promise<[string, number]> => [
+              assetId,
+              await single(client, bookingId, assetId),
+            ]
+          )
+        )
+      );
   return {
     ...actual,
-    computeBookingAssetRemaining: vi.fn().mockResolvedValue(0),
-    computeBookingAssetRemainingToCheckOut: vi.fn().mockResolvedValue(0),
+    computeBookingAssetRemaining,
+    computeBookingAssetRemainingToCheckOut,
+    // why: the loader reads every asset's remaining units in one batched call
+    // each. These answer from the per-asset mocks above, so a test sets an
+    // asset's remaining the same way whichever helper the loader calls.
+    computeBookingCheckinRemaining: vi.fn(
+      async (client: unknown, bookingId: string, assetIds: string[]) => ({
+        byAsset: await perAsset(computeBookingAssetRemaining)(
+          client,
+          bookingId,
+          assetIds
+        ),
+        bySlice: new Map<string, number>(),
+      })
+    ),
+    computeBookingAssetsRemainingToCheckOut: vi.fn(
+      perAsset(computeBookingAssetRemainingToCheckOut)
+    ),
     getDetailedPartialCheckinData: vi
       .fn()
       .mockResolvedValue({ checkedInAssetIds: [], partialCheckinDetails: {} }),
@@ -265,6 +297,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
             quantity: number;
             assetKitId: string | null;
             kit: { id: string; name: string } | null;
+            sourceLocation: { id: string; name: string } | null;
           }>;
         }>;
       };
@@ -282,9 +315,27 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
     expect(assetA?.kitId).toBeNull();
     expect(assetA?.slices).toHaveLength(3);
     expect(assetA?.slices).toEqual([
-      { bookingAssetId: "ba0", quantity: 4, assetKitId: null, kit: null },
-      { bookingAssetId: "ba1", quantity: 3, assetKitId: "ak1", kit: K1 },
-      { bookingAssetId: "ba2", quantity: 3, assetKitId: "ak2", kit: K2 },
+      {
+        bookingAssetId: "ba0",
+        quantity: 4,
+        assetKitId: null,
+        kit: null,
+        sourceLocation: null,
+      },
+      {
+        bookingAssetId: "ba1",
+        quantity: 3,
+        assetKitId: "ak1",
+        kit: K1,
+        sourceLocation: null,
+      },
+      {
+        bookingAssetId: "ba2",
+        quantity: 3,
+        assetKitId: "ak2",
+        kit: K2,
+        sourceLocation: null,
+      },
     ]);
 
     // Asset B: single standalone slice → 1 slice, null kit throughout.
@@ -294,7 +345,13 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
     expect(assetB?.kit).toBeNull();
     expect(assetB?.slices).toHaveLength(1);
     expect(assetB?.slices).toEqual([
-      { bookingAssetId: "bb0", quantity: 2, assetKitId: null, kit: null },
+      {
+        bookingAssetId: "bb0",
+        quantity: 2,
+        assetKitId: null,
+        kit: null,
+        sourceLocation: null,
+      },
     ]);
 
     // Asset C: unanimous single kit → merged kit MUST still be K3 (this is
@@ -307,7 +364,13 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
     expect(assetC?.kitId).toBe(K3.id);
     expect(assetC?.slices).toHaveLength(1);
     expect(assetC?.slices).toEqual([
-      { bookingAssetId: "cc0", quantity: 5, assetKitId: "ak3", kit: K3 },
+      {
+        bookingAssetId: "cc0",
+        quantity: 5,
+        assetKitId: "ak3",
+        kit: K3,
+        sourceLocation: null,
+      },
     ]);
   });
 });

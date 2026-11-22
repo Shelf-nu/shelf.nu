@@ -158,12 +158,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSesssion;
 
   try {
-    const { assetId, mainImage } = parseData(
-      url.searchParams,
-      z.object({
-        assetId: z.string(),
-        mainImage: z.string(),
-      })
+    // Only `assetId` is read from the query, and only it reaches the parser
+    // and the error log. The file to sign always comes from the asset row
+    // below, never from the request.
+    const { assetId } = parseData(
+      { assetId: url.searchParams.get("assetId") ?? undefined },
+      z.object({ assetId: z.string() })
     );
 
     // Validate user has permission to access assets in their organization
@@ -177,6 +177,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // Get asset details with organization scoping to prevent cross-tenant access
     // Use findUnique instead of findUniqueOrThrow to handle deleted assets gracefully
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: image refresh for the asset's own pages, which stay visible for archived assets
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -191,8 +192,18 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       return data(payload({ asset: null }));
     }
 
-    // Extract the path from the URL using the consistent function
-    const mainImagePath = extractStoragePath(mainImage, "assets");
+    // Nothing stored means nothing to re-sign. Writing anyway would put `null`
+    // over an image uploaded since this row was read.
+    if (!asset.mainImage && !asset.thumbnailImage) {
+      return data(payload({ asset }));
+    }
+
+    // Sign the file the asset row names, scoped to the caller's organization
+    // above. The bucket is signed with the service-role client, so a path
+    // taken from anywhere else would grant access to any workspace's files.
+    const mainImagePath = asset.mainImage
+      ? extractStoragePath(asset.mainImage, "assets")
+      : null;
 
     let newMainImageUrl = asset.mainImage; // Default to existing URL
 
@@ -321,7 +332,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         additionalData: {
           userId,
           assetId: url.searchParams.get("assetId"),
-          mainImage: url.searchParams.get("mainImage"),
         },
       })
     );

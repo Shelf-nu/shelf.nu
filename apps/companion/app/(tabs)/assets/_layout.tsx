@@ -1,4 +1,5 @@
 import { Stack } from "expo-router";
+import { contentColumnLayout } from "@/components/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { fontSize } from "@/lib/constants";
 
@@ -9,11 +10,15 @@ import { fontSize } from "@/lib/constants";
  */
 export const unstable_settings = { initialRouteName: "index" };
 
+/** Every asset and kit screen sits in the content column on wide windows. */
+const ASSETS_SCREEN_LAYOUT = contentColumnLayout({});
+
 export default function AssetsLayout() {
   const { colors } = useTheme();
 
   return (
     <Stack
+      screenLayout={ASSETS_SCREEN_LAYOUT}
       screenOptions={{
         headerStyle: { backgroundColor: colors.white },
         headerTitleStyle: {

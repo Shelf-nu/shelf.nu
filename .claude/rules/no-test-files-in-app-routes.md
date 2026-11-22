@@ -1,11 +1,9 @@
 ---
 description: Route tests belong in apps/webapp/test/routes-tests/ — NEVER in app/routes/. Vite warms every file under app/routes/ as a client module, so a co-located test importing a *.server module breaks the dev server, and validate/CI stay green
-globs:
-  [
-    "apps/webapp/app/routes/**",
-    "apps/webapp/test/routes-tests/**",
-    "apps/webapp/vite.config.ts",
-  ]
+paths:
+  - "apps/webapp/app/routes/**"
+  - "apps/webapp/test/routes-tests/**"
+  - "apps/webapp/vite.config.ts"
 ---
 
 # Never Put Test Files in `app/routes/`

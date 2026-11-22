@@ -34,7 +34,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   });
 
   if (!user.sso) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   // Check if user now has team orgs
@@ -42,7 +42,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const teamOrgs = userOrgs.filter((uo) => uo.organization.type !== "PERSONAL");
 
   if (teamOrgs.length > 0) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   return null;

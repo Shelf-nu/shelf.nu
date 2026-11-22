@@ -1,9 +1,13 @@
 import { useRef, useEffect, useCallback } from "react";
-import { PanResponder, Animated, Dimensions, Platform } from "react-native";
+import {
+  PanResponder,
+  Animated,
+  Platform,
+  useWindowDimensions,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { useReducedMotion } from "@/lib/a11y";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
 const SWIPE_THRESHOLD = 50;
 const VELOCITY_THRESHOLD = 0.3;
 
@@ -33,6 +37,10 @@ export function useSwipeFilters(
   const isSwipingRef = useRef(false);
   const enabledRef = useRef(enabled);
   const onFilterChangeRef = useRef(onFilterChange);
+  // Read from the live window, not a value captured at import: a tablet
+  // rotates and an iPad window resizes, and the slide distance follows.
+  const { width: windowWidth } = useWindowDimensions();
+  const windowWidthRef = useRef(windowWidth);
 
   // Keep refs in sync
   useEffect(() => {
@@ -41,6 +49,9 @@ export function useSwipeFilters(
   useEffect(() => {
     onFilterChangeRef.current = onFilterChange;
   }, [onFilterChange]);
+  useEffect(() => {
+    windowWidthRef.current = windowWidth;
+  }, [windowWidth]);
 
   // Animated values for content slide transition
   const translateX = useRef(new Animated.Value(0)).current;
@@ -81,7 +92,7 @@ export function useSwipeFilters(
       // Phase 1: Slide content out
       Animated.parallel([
         Animated.timing(translateX, {
-          toValue: direction * SCREEN_WIDTH * 0.25,
+          toValue: direction * windowWidthRef.current * 0.25,
           duration: 140,
           useNativeDriver: Platform.OS !== "web",
         }),
@@ -96,7 +107,7 @@ export function useSwipeFilters(
         activeIndexRef.current = nextIndex;
 
         // Phase 2: Slide new content in from opposite side
-        translateX.setValue(-direction * SCREEN_WIDTH * 0.25);
+        translateX.setValue(-direction * windowWidthRef.current * 0.25);
 
         Animated.parallel([
           Animated.timing(translateX, {

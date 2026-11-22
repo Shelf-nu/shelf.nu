@@ -25,7 +25,7 @@ export const meta = () => [{ title: appendToMetaTitle("Add team member") }];
 /**
  * Opens the add-member modal for callers who may create team members.
  *
- * @throws {ShelfError} 403 when the caller lacks `teamMember: create`
+ * @throws {ShelfError} 403 when the caller lacks `nonRegisteredMember: create`
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -35,7 +35,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: PermissionAction.create,
     });
 
@@ -68,7 +68,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: PermissionAction.create,
     });
 

@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AppStoreID</key>
+	<string>6765639874</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -19,7 +21,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.5.0</string>
+	<string>1.8.0</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
@@ -55,6 +57,10 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Shelf needs camera access to scan QR codes and barcodes on your assets.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Shelf does not record audio. iOS asks for this text because the library that plays the scan sound can also record.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Shelf does not use motion data. iOS asks for this text because the location library Shelf uses can also read motion activity.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Shelf records where assets were scanned so your team can see each item's last known location.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -65,6 +71,23 @@
 	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

@@ -30,6 +30,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   getMobileUserContext,
@@ -99,10 +100,11 @@ const ORG_ID = "org-1";
  * Points the stubbed mobile-auth helpers at a caller holding `role`.
  *
  * @param role - The caller's role in `ORG_ID`
+ * @param options.canSeeAllBookings - Switch on both booking visibility toggles
  */
 function actAs(
   role: OrganizationRoles,
-  overrides: { canSeeAllBookings?: boolean } = {}
+  { canSeeAllBookings = false }: { canSeeAllBookings?: boolean } = {}
 ) {
   requireMobileAuthMock.mockResolvedValue({
     user: {
@@ -119,8 +121,15 @@ function actAs(
     // The guard reads the full array, not roles[0].
     mobileUserContext({
       roles: [role],
-      canSeeAllCustody: role !== OrganizationRoles.SELF_SERVICE,
-      ...overrides,
+      workspace: {
+        // Custody visibility on for every role but SELF_SERVICE.
+        ...(role !== OrganizationRoles.SELF_SERVICE
+          ? { selfServiceCanSeeCustody: true, baseUserCanSeeCustody: true }
+          : {}),
+        ...(canSeeAllBookings
+          ? { selfServiceCanSeeBookings: true, baseUserCanSeeBookings: true }
+          : {}),
+      },
     })
   );
 }
@@ -244,4 +253,112 @@ describe("GET /api/mobile/dashboard — booking visibility", () => {
       }
     }
   );
+});
+
+describe("GET /api/mobile/dashboard — active audits", () => {
+  /** Runs the loader and returns the `where` handed to the audit query. */
+  async function captureAuditWhere() {
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/dashboard?orgId=${ORG_ID}`
+        ),
+      })
+    );
+    const call = vi.mocked(db.auditSession.findMany).mock.calls[0];
+    return (call[0] as { where: Prisma.AuditSessionWhereInput }).where;
+  }
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lists only the audits assigned to %s",
+    async (role) => {
+      actAs(role);
+
+      const where = await captureAuditWhere();
+
+      expect(where.assignments).toEqual({
+        some: { userId: CALLER_USER_ID },
+      });
+    }
+  );
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "lists every active audit for %s",
+    async (role) => {
+      actAs(role);
+
+      const where = await captureAuditWhere();
+
+      expect(where.assignments).toBeUndefined();
+    }
+  );
+});
+
+describe("GET /api/mobile/dashboard — asset list scope", () => {
+  /**
+   * Runs the dashboard loader and returns the `where` of every asset query,
+   * grouped by what the Home tab draws from it.
+   */
+  async function captureAssetWheres() {
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/dashboard?orgId=${ORG_ID}`
+        ),
+      })
+    );
+
+    const countWheres = vi
+      .mocked(db.asset.count)
+      .mock.calls.map((call) => call[0]!.where as Prisma.AssetWhereInput);
+    return {
+      total: countWheres.find((where) => !where.custody),
+      myCustody: countWheres.find((where) => where.custody),
+      byStatus: vi.mocked(db.asset.groupBy).mock.calls[0]![0]!
+        .where as Prisma.AssetWhereInput,
+      newest: vi.mocked(db.asset.findMany).mock.calls[0]![0]!
+        .where as Prisma.AssetWhereInput,
+    };
+  }
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "counts and lists bookable assets and the ones %s holds, as the Assets tab does",
+    async (role) => {
+      actAs(role);
+
+      const { total, byStatus, newest } = await captureAssetWheres();
+
+      for (const where of [total, byStatus, newest]) {
+        expect(where).toEqual({
+          organizationId: ORG_ID,
+          archivedAt: null,
+          // The scope's own shape is pinned in list-scope.server.test.ts.
+          AND: [bookableListScopeWhere({ holderUserId: CALLER_USER_ID })],
+        });
+      }
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "still counts every asset %s holds, like the custody tab",
+    async (role) => {
+      actAs(role);
+
+      const { myCustody } = await captureAssetWheres();
+
+      expect(myCustody).toBeDefined();
+      expect(myCustody).not.toHaveProperty("availableToBook");
+      expect(myCustody).not.toHaveProperty("AND");
+    }
+  );
+
+  it("counts and lists every asset for ADMIN", async () => {
+    actAs(OrganizationRoles.ADMIN);
+
+    const { total, byStatus, newest } = await captureAssetWheres();
+
+    for (const where of [total, byStatus, newest]) {
+      expect(where).toEqual({ organizationId: ORG_ID, archivedAt: null });
+    }
+  });
 });

@@ -1,11 +1,13 @@
 import type { MetaFunction } from "react-router";
 import { data, type LoaderFunctionArgs } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
+import { bookingStatusFilterWhereParams } from "~/modules/booking/constants";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { redirectFromStalePendingApprovalFilter } from "~/modules/booking/stale-pending-filter.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -37,6 +39,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
+
+    // A "Pending approval" filter left over from before approval was turned
+    // off lands on the unfiltered list instead of an empty one.
+    const stalePendingRedirect = await redirectFromStalePendingApprovalFilter({
+      request,
+      organizationId,
+      searchParams,
+    });
+    if (stalePendingRedirect) return stalePendingRedirect;
     const {
       page,
       perPageParam,
@@ -64,10 +75,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         search,
         userId,
         custodianScope,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
-        }),
+        // The picked status, if any ("Expired" = RESERVED past its end).
+        ...bookingStatusFilterWhereParams(status),
         tags: filterTags,
         // PERF: the list renders booking-level fields plus an asset COUNT. The
         // per-booking `bookingAssets` payload existed only for the assets

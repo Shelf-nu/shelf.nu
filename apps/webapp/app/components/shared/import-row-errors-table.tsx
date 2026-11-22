@@ -17,6 +17,11 @@ type ImportRowErrorsTableProps = {
   rowErrors: ImportRowError[];
   /** How many problems the file really had, when more were found than sent. */
   totalRowErrors: number | null;
+  /**
+   * "error" (default) for problems that refuse the file; "warning" for
+   * findings that do not block the import.
+   */
+  tone?: "error" | "warning";
 };
 
 /**
@@ -28,17 +33,21 @@ type ImportRowErrorsTableProps = {
 export function ImportRowErrorsTable({
   rowErrors,
   totalRowErrors,
+  tone = "error",
 }: ImportRowErrorsTableProps) {
+  const isWarning = tone === "warning";
   return (
     <>
       <table className="mt-4 w-full rounded-md border text-left text-sm">
-        <thead className="bg-error-100 text-xs">
+        <thead
+          className={`${isWarning ? "bg-amber-100" : "bg-error-100"} text-xs`}
+        >
           <tr>
             <th scope="col" className="px-2 py-1">
               Row
             </th>
             <th scope="col" className="px-2 py-1">
-              Problem
+              {isWarning ? "Check" : "Problem"}
             </th>
           </tr>
         </thead>

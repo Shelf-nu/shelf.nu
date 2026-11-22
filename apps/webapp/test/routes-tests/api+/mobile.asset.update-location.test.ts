@@ -51,7 +51,32 @@ const dbMocks = vi.hoisted(() => ({
   location: {
     findFirst: vi.fn(),
   },
+  // why: the route writes the location activity log lines through this
+  // delegate; the rows handed over are asserted below.
+  locationNote: {
+    createMany: vi.fn(),
+  },
+  // why: the collapse reads the operator custody rows to re-home custody
+  // taken from a dropped placement; none are out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
+  // why: the same read also counts units out on bookings per location; none
+  // are out in these tests.
+  bookingAsset: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   $transaction: vi.fn(),
+}));
+
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/database/db.server", () => ({
@@ -69,6 +94,13 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 // stock decrease cannot interleave. The lock issues a raw
 // `SELECT ... FOR UPDATE`, which a mocked tx client cannot execute — stub it
 // to return the row the write should be based on.
+// why: the archived freeze reads the asset's archive state through the
+// database; none of these fixtures are archived (issue #382).
+vi.mock("~/utils/org-validation.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/org-validation.server")>()),
+  assertAssetsAreNotArchived: vi.fn(),
+}));
+
 vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vi.fn(),
 }));
@@ -79,7 +111,8 @@ vi.mock("~/modules/note/service.server", () => ({
 }));
 
 // why: utility functions used for note formatting — we mock to avoid internal dependencies
-vi.mock("~/utils/markdoc-wrappers", () => ({
+vi.mock("~/utils/markdoc-wrappers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/markdoc-wrappers")>()),
   wrapUserLinkForNote: vi.fn(
     ({ firstName, lastName }: any) => `[${firstName} ${lastName}]`
   ),
@@ -232,6 +265,24 @@ describe("POST /api/mobile/asset/update-location", () => {
         assetId: "asset-1",
       })
     );
+    // Both locations' activity logs record the move.
+    expect(
+      dbMocks.locationNote.createMany.mock.calls[0][0].data.map(
+        (row: { locationId: string; content: string }) => [
+          row.locationId,
+          row.content,
+        ]
+      )
+    ).toEqual([
+      [
+        "loc-new",
+        '[Test User] added {% link to="/assets/asset-1" text="Test Laptop" /%} to [New Office]. Moved from [Old Office].',
+      ],
+      [
+        "loc-old",
+        '[Test User] removed {% link to="/assets/asset-1" text="Test Laptop" /%} from [Old Office]. Moved to [New Office].',
+      ],
+    ]);
   });
 
   it("places the quantity from the locked row, not the pre-transaction read", async () => {

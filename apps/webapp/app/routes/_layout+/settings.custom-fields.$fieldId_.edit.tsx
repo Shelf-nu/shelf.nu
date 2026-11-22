@@ -1,3 +1,4 @@
+import { CustomFieldType } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -18,10 +19,11 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getCustomField,
+  getOptionUsageCounts,
   updateCustomField,
 } from "~/modules/custom-field/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import { fieldTypeLabel } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -63,17 +65,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: { categories: { select: { id: true } } },
     });
 
-    const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
-      {
+    const [{ categories, totalCategories }, optionUsage] = await Promise.all([
+      getCategoriesForCreateAndEdit({
         organizationId,
         request,
         defaultCategory: customField.categories.map((c) => c.id),
-      }
-    );
+      }),
+      customField.type === CustomFieldType.OPTION
+        ? getOptionUsageCounts({
+            customFieldId: customField.id,
+            organizationId,
+          })
+        : {},
+    ]);
 
     const header: HeaderData = {
       title: `Edit | ${customField.name}`,
-      subHeading: FIELD_TYPE_NAME[customField.type],
+      subHeading: fieldTypeLabel(customField),
     };
 
     return payload({
@@ -81,6 +89,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       categories,
       totalCategories,
+      optionUsage,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -108,8 +117,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       CustomFieldSubmissionSchema
     );
 
-    const { name, helpText, active, required, options, categories } =
-      parsedData;
+    const {
+      name,
+      helpText,
+      format,
+      active,
+      required,
+      options,
+      optionRenames,
+      categories,
+    } = parsedData;
 
     const field = await getCustomField({ organizationId, id });
 
@@ -146,11 +163,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id,
       name,
       helpText,
+      format,
       active,
       required,
       options,
+      optionRenames,
       categories,
       organizationId,
+      userId,
     });
 
     sendNotification({
@@ -170,7 +190,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function CustomFieldEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { customField } = useLoaderData<typeof loader>();
+  const { customField, optionUsage } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -180,14 +200,20 @@ export default function CustomFieldEditPage() {
         classNames="-mt-5"
       />
       <div className=" items-top flex justify-between">
+        {/* Keyed by the save time so a successful save restarts the form
+            from what was stored: the option builder's rows remember the
+            saved spelling each one came from. */}
         <CustomFieldForm
+          key={String(customField.updatedAt)}
           isEdit
           name={customField.name || name}
           helpText={customField.helpText}
           required={customField.required}
           type={customField.type}
+          format={customField.format}
           active={customField.active}
           options={customField.options}
+          optionUsage={optionUsage}
           categories={customField.categories.map((c) => c.id)}
         />
       </div>

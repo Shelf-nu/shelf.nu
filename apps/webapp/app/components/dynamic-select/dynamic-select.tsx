@@ -90,8 +90,13 @@ type Props = ModelFilterProps & {
    */
   resetSearchOnClose?: boolean;
   excludeItems?: string[];
-  /** Allow undefined for deselection cases */
-  onChange?: ((value: string | undefined) => void) | null /**
+  /**
+   * Called with the picked id, and the picked item (from the loader's list or
+   * search results), or `undefined` for both on deselection.
+   */
+  onChange?:
+    | ((value: string | undefined, item?: ModelFilterItem) => void)
+    | null /**
    * Allow item to unselect on clicking again
    */;
   allowClear?: boolean;
@@ -290,17 +295,16 @@ export default function DynamicSelect({
     // item object (e.g. inline creation) pass it as `knownItem`; the freshly
     // created item is not yet in `allItemsToRender` in this tick, so the
     // lookup would miss it.
-    setSelectedItemCache(
-      isDeselecting
-        ? undefined
-        : knownItem ?? allItemsToRender.find((i) => i.id === id)
-    );
+    const pickedItem = isDeselecting
+      ? undefined
+      : knownItem ?? allItemsToRender.find((i) => i.id === id);
+    setSelectedItemCache(pickedItem);
 
     // Always update URL params and parent state
     handleSelectItemChange(id);
 
     // Notify parent with the new value
-    onChange?.(isDeselecting ? undefined : id);
+    onChange?.(isDeselecting ? undefined : id, pickedItem);
 
     if (closeOnSelect) {
       setIsPopoverOpen(false);
@@ -420,7 +424,16 @@ export default function DynamicSelect({
             <PopoverContent
               className={tw(
                 popoverZIndexClassName ?? "z-[100]",
-                "overflow-y-auto rounded-md border border-gray-300 bg-white",
+                "flex flex-col overflow-y-auto rounded-md border border-gray-300 bg-white",
+                // Fit the room left on the side Radix placed it, so the footer
+                // and the create entry stay on screen: the option list is the
+                // part that shrinks. On phones the panel is pinned 20px from
+                // the top (MOBILE_POPPER_CSS), so it caps against the viewport:
+                // `vh` for browsers in the support floor without `dvh` (Chrome
+                // and Edge before 108, Firefox before 101), `dvh` where it works.
+                // The `dvh` cap is a variant, not a second plain class, because
+                // `tw` merges two plain `max-h-*` classes down to the last one.
+                "max-h-[calc(100vh-40px)] supports-[height:100dvh]:max-sm:max-h-[calc(100dvh-40px)] sm:max-h-[var(--radix-popover-content-available-height)]",
                 className
               )}
               style={{
@@ -429,6 +442,7 @@ export default function DynamicSelect({
               }}
               align="center"
               sideOffset={5}
+              collisionPadding={8}
               // A modal Radix Dialog — every `Sheet`, so every route rendered
               // through `ContextualSidebar` — mounts `react-remove-scroll`,
               // which cancels any `wheel` whose target sits outside the dialog
@@ -498,7 +512,7 @@ export default function DynamicSelect({
                 </div>
               </When>
 
-              <div className="max-h-[320px] divide-y overflow-y-auto">
+              <div className="max-h-[320px] min-h-24 divide-y overflow-y-auto">
                 {searchQuery !== "" && items.length === 0 && (
                   <EmptyState
                     searchQuery={searchQuery}
@@ -636,7 +650,9 @@ export default function DynamicSelect({
               </When>
 
               <When truthy={typeof extraContentNode !== "undefined"}>
-                <div className="border-t px-3 pb-3">{extraContentNode}</div>
+                <div className="border-t px-3 pb-3 empty:hidden">
+                  {extraContentNode}
+                </div>
               </When>
             </PopoverContent>
           </PopoverPortal>
@@ -655,14 +671,26 @@ export default function DynamicSelect({
 }
 
 /**
+ * Phone widths: every width below Tailwind's `sm` breakpoint (640px), written
+ * as the exact complement of `sm` like `SHEET_MEDIA_QUERY` is of `md`. From
+ * `sm` up, tablets included, the panel is a regular dropdown under its field.
+ */
+export const PICKER_PHONE_MEDIA_QUERY = "not all and (min-width: 640px)";
+
+/**
  * Mobile-specific CSS overrides for the Radix popper used by this select.
+ *
+ * Lifts the panel above the dim overlay `MobileStyles` renders and pins it to
+ * the top of the screen. The overlay shows below `sm` (`sm:hidden`) and sits
+ * above the panel's own z-index, so this rule must cover the same widths
+ * (`PICKER_PHONE_MEDIA_QUERY`): wherever the overlay shows without it, the
+ * overlay covers the options and a tap on one only closes the select.
  *
  * Uses React's native `<style>{css}</style>` child form (safe text child)
  * instead of an injected-HTML approach, so there is no XSS concern and the
  * `react/no-danger` rule stays clean.
- * PR history: https://github.com/Shelf-nu/shelf.nu/pull/304
  */
-const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
+const MOBILE_POPPER_CSS = `@media ${PICKER_PHONE_MEDIA_QUERY} {
   body {
     overflow: hidden;
   }
@@ -679,13 +707,19 @@ const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
   }
 }`;
 
+/**
+ * Dim overlay plus {@link MOBILE_POPPER_CSS}, rendered while a `DynamicSelect`
+ * or `DynamicDropdown` panel is open.
+ *
+ * @param props.open - Whether the panel is open; nothing renders while closed.
+ */
 export const MobileStyles = ({ open }: { open: boolean }) =>
   open && (
     <>
       <div
         // eslint-disable-next-line tailwindcss/migration-from-tailwind-2
         className={tw(
-          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out md:hidden",
+          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out sm:hidden",
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>

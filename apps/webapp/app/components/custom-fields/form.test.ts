@@ -87,6 +87,24 @@ describe("CustomFieldSubmissionSchema", () => {
     }
   });
 
+  it("keeps the option renames a save sends", () => {
+    // `updateCustomField` moves assets only along these pairs, so a schema
+    // that stripped them would rename options and strand their assets.
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "OPTION",
+      options: ["Extra large"],
+      optionRenames: [{ from: "Large", to: "Extra large" }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.optionRenames).toEqual([
+        { from: "Large", to: "Extra large" },
+      ]);
+    }
+  });
+
   it("accepts a non-OPTION field with no options", () => {
     const result = CustomFieldSubmissionSchema.safeParse({
       ...base,
@@ -107,5 +125,41 @@ describe("CustomFieldSubmissionSchema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it("gives a field the Plain text format when none is posted", () => {
+    // The Format picker renders for TEXT only, so every other type posts none.
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "DATE",
+    });
+
+    expect(result.success && result.data.format).toBe("PLAIN");
+  });
+
+  it("accepts the Link format on a single-line text field", () => {
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "TEXT",
+      format: "LINK",
+    });
+
+    expect(result.success && result.data.format).toBe("LINK");
+  });
+
+  it("refuses the Link format on any other type", () => {
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "MULTILINE_TEXT",
+      format: "LINK",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({
+        path: ["format"],
+        message: "Only single-line text fields can be Link fields",
+      }),
+    ]);
   });
 });

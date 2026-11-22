@@ -66,3 +66,42 @@ export function buildUnavailableAssets(
 
   return unavailable;
 }
+
+/** A booking row with the asset's archive state, for {@link buildArchivedAssets}. */
+type BookingAssetArchiveRow = {
+  id: string;
+  title: string;
+  archivedAt?: Date | string | null;
+  kit: { name: string } | null;
+};
+
+/**
+ * Names every archived asset on the booking.
+ *
+ * An archived asset can sit in a DRAFT booking (archiving is refused only for
+ * reserved and checked-out ones), and the booking is then refused at Reserve
+ * and check-out until it is removed or reinstated. Same shape and order rules
+ * as {@link buildUnavailableAssets}; `getBookingFlags` reads the same
+ * `archivedAt` for `hasArchivedAssets`.
+ *
+ * @param rows - The booking's asset rows, one per `BookingAsset` slice.
+ * @returns The archived assets in the order they appear, each at most once.
+ */
+export function buildArchivedAssets(
+  rows: BookingAssetArchiveRow[]
+): UnavailableAssetRow[] {
+  const seen = new Set<string>();
+  const archived: UnavailableAssetRow[] = [];
+
+  for (const row of rows) {
+    if (!row.archivedAt || seen.has(row.id)) continue;
+    seen.add(row.id);
+    archived.push({
+      id: row.id,
+      title: row.title,
+      kitName: row.kit?.name ?? null,
+    });
+  }
+
+  return archived;
+}

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -7,11 +7,14 @@ import type { AssetWithResolvableImage } from "~/modules/asset/image-resolution"
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { getQr } from "~/modules/qr/service.server";
+import type { RecordScanArgs } from "~/modules/scan/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import {
   getScannerPickerMeta,
   ScannerPickerContextSchema,
   type ScannerPickerMeta,
 } from "~/modules/scanner/picker-meta.server";
+import { redactScannedItemForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -24,11 +27,11 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
 import {
-  sanitizeAssetExtraInclude,
-  sanitizeKitExtraInclude,
-} from "~/utils/scanner-extra-include.server";
+  isRestoredLookup,
+  RESTORED_LOOKUP_PARAM,
+} from "~/utils/restored-scan-lookup";
+import { requirePermission } from "~/utils/roles.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
@@ -53,6 +56,7 @@ export type KitFromQr = KitFromScanner;
  * from the loaded asset or kit, the same way the QR branch does.
  */
 type ScannedBarcodeMatch = {
+  id: string;
   asset: (AssetWithResolvableImage & { id: string }) | null;
   kit: KitFromScanner | null;
 };
@@ -67,9 +71,11 @@ type ScannedBarcodeMatch = {
  * manage-assets picker shows.
  *
  * Shared by all three lookups (SAM id, QR code, SAM-shaped barcode) so a
- * scanned asset carries identical fields whichever one matched.
+ * scanned asset carries identical fields whichever one matched. Custodians
+ * the viewer may not see are redacted (`redactScannedItemForViewer`).
  *
  * @param args.asset - The asset row, fetched with `ASSET_INCLUDE`.
+ * @param args.visibility - The viewer and their `access.custody.seeAll`.
  * @param args.organizationId - The caller's workspace, for the picker bound.
  * @param args.auditSessionId - Audit session to count notes and images against.
  * @param args.pickerContext - Destination the scanner is filling, if any.
@@ -82,8 +88,10 @@ async function serializeScannedAsset<
   organizationId,
   auditSessionId,
   pickerContext,
+  visibility,
 }: {
   asset: T;
+  visibility: { canSeeAllCustody: boolean; userId: string };
   organizationId: string;
   auditSessionId?: string;
   pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
@@ -118,7 +126,7 @@ async function serializeScannedAsset<
     : null;
 
   return {
-    ...serializeAssetImage(asset),
+    ...serializeAssetImage(redactScannedItemForViewer(asset, visibility)),
     auditAssetId,
     auditNotesCount,
     auditImagesCount,
@@ -126,18 +134,42 @@ async function serializeScannedAsset<
   };
 }
 
+/**
+ * GET /api/get-scanned-item/:qrId
+ *
+ * Resolves a scanned QR id or SAM ID (with a SAM-shaped barcode fallback) to
+ * its asset or kit in the caller's workspace. Every web scanner drawer calls
+ * it once per scanned code, and the web scanner's SAM "View asset" calls it
+ * with `?source=scanner`.
+ *
+ * Each resolve records the scan: `WEB_SCANNER` with a note on the asset when
+ * `source=scanner` (the scanner opens the asset), `WEB_DRAWER` without one
+ * otherwise (any other `source` value counts as a drawer). A resolve carrying
+ * `auditSessionId` records nothing, because the audit's own writer
+ * (`recordAuditScan`) records that scan. Neither does one carrying
+ * `restored=1`: the row was put back from a scan draft, so no one scanned the
+ * code just now (see {@link RESTORED_LOOKUP_PARAM}).
+ *
+ * @see {@link file://./get-scanned-barcode.$value.ts} the camera-barcode twin
+ */
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
       action: PermissionAction.read,
     });
+
+    /** Whose custody this viewer may see named in the response. */
+    const visibility = {
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+    };
 
     const { qrId } = getParams(params, z.object({ qrId: z.string() }), {
       additionalData: {
@@ -145,37 +177,14 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       },
     });
 
-    const {
-      assetExtraInclude,
-      kitExtraInclude,
-      auditSessionId,
-      pickerContext,
-    } = parseData(
+    const { auditSessionId, pickerContext, source, restored } = parseData(
       searchParams,
       z.object({
-        assetExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for assetExtraInclude");
-            }
-          }),
-        kitExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for kitExtraInclude");
-            }
-          }),
         auditSessionId: z.string().optional(),
+        /** `1` when a restored scan draft row looks the code up again. */
+        [RESTORED_LOOKUP_PARAM]: z.string().optional(),
+        /** `scanner` from the web scanner's SAM "View asset"; see above. */
+        source: z.string().optional(),
         /**
          * JSON-encoded `{ type: "location" | "kit" | "booking", id }`.
          * When present, the loader attaches a normalised picker MAX
@@ -202,37 +211,63 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           }),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
+      source?: string;
+      restored?: string;
     };
 
-    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
-    // user-controlled JSON. Allowlist them before merging into the Prisma
-    // include so relation traversal / deep nesting cannot be injected.
-    const assetInclude: Prisma.AssetInclude = {
-      ...ASSET_INCLUDE,
-      ...(sanitizeAssetExtraInclude(assetExtraInclude) ?? {}),
-    };
+    // Allowlisted: only the exact value opens the asset and notes it; any
+    // other value counts as a drawer.
+    const isScannerView = source === "scanner";
 
-    const kitInclude: Prisma.KitInclude = {
-      ...KIT_INCLUDE,
-      ...(sanitizeKitExtraInclude(kitExtraInclude) ?? {}),
+    /**
+     * Records this resolve as a scan, unless an audit is scanning (its writer
+     * records instead) or a restored draft row is looking the code up again
+     * (nobody scanned it). Non-fatal: a failed record never fails the resolve.
+     *
+     * A drawer row does not wait for the record: a scanner list resolves one
+     * code per scan, and the row needs only the resolved item. The scanner's
+     * "View asset" waits, so its note is on the asset page it opens.
+     */
+    const recordResolvedScan = async (
+      resolved: Pick<
+        RecordScanArgs,
+        "codeType" | "qrId" | "barcodeId" | "assetId" | "kitId"
+      >
+    ) => {
+      if (auditSessionId || isRestoredLookup(restored)) return;
+      const recording = recordScanNonFatal({
+        ...resolved,
+        code: qrId,
+        source: isScannerView ? ScanSource.WEB_SCANNER : ScanSource.WEB_DRAWER,
+        userAgent: request.headers.get("user-agent"),
+        userId,
+        organizationId,
+        writeNote: isScannerView,
+      });
+      if (isScannerView) {
+        await recording;
+      }
     };
 
     const sequentialId = parseSequentialId(qrId);
 
     if (sequentialId) {
       const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned physical label must still resolve an archived asset
         where: {
           organizationId,
           sequentialId,
         },
-        include: assetInclude,
+        include: ASSET_INCLUDE,
       });
 
       if (asset) {
+        await recordResolvedScan({
+          codeType: ScanCodeType.SAM_ID,
+          assetId: asset.id,
+        });
         return data(
           payload({
             qr: {
@@ -242,6 +277,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               }),
             },
           })
@@ -266,11 +302,20 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             value: qrId,
             organizationId,
             include: {
-              asset: { include: assetInclude },
-              kit: { include: kitInclude },
+              asset: { include: ASSET_INCLUDE },
+              kit: { include: KIT_INCLUDE },
             },
           })
         : null;
+
+      if (barcode?.asset || barcode?.kit) {
+        await recordResolvedScan({
+          codeType: ScanCodeType.BARCODE,
+          barcodeId: barcode.id,
+          assetId: barcode.asset?.id ?? null,
+          kitId: barcode.asset ? null : barcode.kit?.id ?? null,
+        });
+      }
 
       if (barcode?.asset) {
         return data(
@@ -282,6 +327,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               }),
             },
           })
@@ -290,7 +336,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
       if (barcode?.kit) {
         return data(
-          payload({ qr: { type: "kit" as const, kit: barcode.kit } })
+          payload({
+            qr: {
+              type: "kit" as const,
+              kit: redactScannedItemForViewer(barcode.kit, visibility),
+            },
+          })
         );
       }
 
@@ -305,21 +356,24 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { sequentialId, shouldSendNotification: false },
         label: "Scan",
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
       });
     }
 
-    const include = {
-      ...QR_INCLUDE,
-      asset: { include: assetInclude },
-      kit: { include: kitInclude },
-    };
-
     const qr = await getQr({
       id: qrId,
-      include,
+      include: QR_INCLUDE,
     });
 
-    if (qr.organizationId !== organizationId) {
+    // The code and the item it is linked to must both be in the caller's
+    // workspace: a code row carries its own organizationId, independent of
+    // the asset's or kit's.
+    if (
+      qr.organizationId !== organizationId ||
+      (qr.asset && qr.asset.organizationId !== organizationId) ||
+      (qr.kit && qr.kit.organizationId !== organizationId)
+    ) {
       throw new ShelfError({
         cause: null,
         message:
@@ -327,6 +381,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { qrId, shouldSendNotification: false },
         label: "QR",
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
       });
     }
 
@@ -336,21 +392,32 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         message: "QR code is not linked to any asset or kit",
         additionalData: { qrId, shouldSendNotification: false },
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
         label: "QR",
       });
     }
+
+    await recordResolvedScan({
+      codeType: ScanCodeType.QR,
+      qrId: qr.id,
+      assetId: qr.assetId,
+      kitId: qr.kitId,
+    });
 
     return data(
       payload({
         qr: {
           ...qr,
           type: qr.asset ? "asset" : qr.kit ? "kit" : undefined,
+          kit: qr.kit ? redactScannedItemForViewer(qr.kit, visibility) : qr.kit,
           asset: qr.asset
             ? await serializeScannedAsset({
                 asset: qr.asset,
                 organizationId,
                 auditSessionId,
                 pickerContext,
+                visibility,
               })
             : undefined,
         },

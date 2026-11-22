@@ -8,6 +8,7 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import {
+  ASSET_QUANTITY_FIGURE_LABELS,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
@@ -27,18 +28,30 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetEditLoaderData,
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  assetDescriptionSchema,
+} from "~/utils/asset-description";
 import { resolveCancelTo } from "~/utils/cancel-destination";
-import type { CustomFieldZodSchema } from "~/utils/custom-fields";
-import { mergedSchema } from "~/utils/custom-fields";
+import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
+import {
+  mergedSchema,
+  storedCustomFieldTexts,
+  toCustomFieldZodSchema,
+} from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
+import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 import {
   optionalNumberFromString,
@@ -51,6 +64,15 @@ import {
   type BulkCreateSuccess,
 } from "./bulk-create-success-modal";
 import AssetCustomFields from "./custom-fields-inputs";
+import type { ModelPrefill } from "./model-default-prefill";
+import {
+  EMPTY_MODEL_PREFILL,
+  VALUATION_PREFILL_KEY,
+  planModelPrefill,
+  prefillVersion,
+} from "./model-default-prefill";
+import type { FormAssetModel } from "./picked-asset-model";
+import { findFormModel, resolveModelPick } from "./picked-asset-model";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
@@ -63,6 +85,7 @@ import {
 } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -88,7 +111,7 @@ export const NewAssetFormSchema = z.object({
     .min(2, "Name is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
-  description: z.string().transform((val) => val.trim()),
+  description: assetDescriptionSchema.transform((val) => val.trim()),
   category: z.string(),
   assetModelId: z.string().optional(),
 
@@ -202,6 +225,20 @@ export const NewAssetFormSchema = z.object({
 });
 
 /**
+ * Whether a `bulk` query param or form field asks for bulk create from a
+ * model. The page link sends `1`; `true` is accepted too. The new-asset
+ * loader, its action and the page all decide through this one function, so
+ * the bulk gate (`matrixOnly: true`) and the bulk schema can never disagree
+ * about what counts as bulk.
+ *
+ * @param value - The raw `bulk` value, `null` when absent
+ * @returns `true` for `"1"` or `"true"`
+ */
+export function isBulkCreate(value: FormDataEntryValue | null): boolean {
+  return value === "1" || value === "true";
+}
+
+/**
  * Bulk-create variant of `NewAssetFormSchema`. Extends the base shape
  * (via Zod's `.extend()` which keeps the result as a `ZodObject`, so
  * `mergedSchema` still accepts it) and tightens the fields the bulk
@@ -231,6 +268,22 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
       .max(100, "Count must be at most 100")
   ),
 });
+
+/**
+ * Starting value of the Value input for a stored valuation.
+ *
+ * Zero is a real valuation and must show as 0. Only a missing valuation
+ * leaves the field blank, because the form schema reads a blank field as
+ * "no value" and saving it would clear the stored 0.
+ *
+ * @param valuation - The asset's stored valuation, if any.
+ * @returns The number to show, or `""` for no valuation.
+ */
+export function valuationInputDefault(
+  valuation: Asset["valuation"] | undefined
+): number | "" {
+  return valuation ?? "";
+}
 
 /** Pass props of the values to be used as default for the form fields */
 
@@ -292,8 +345,28 @@ type Props = Partial<
   bulkMode?: boolean;
 };
 
+/**
+ * Create and edit form for assets, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
+ *
+ * @param props - Current values when editing; omit them to create an asset
+ */
+export function AssetForm(props: Props) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <AssetFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
-export const AssetForm = ({
+const AssetFormInner = ({
   id,
   sequentialId,
   title,
@@ -319,7 +392,14 @@ export const AssetForm = ({
   preferredBarcodeId,
   referer,
   bulkMode = false,
-}: Props) => {
+  onDiscard,
+  autoFocusName,
+}: Props & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
   // Workspace's current code-display preference — used by PreferredBarcodeSelector
@@ -363,17 +443,16 @@ export const AssetForm = ({
     { id?: string; type: Barcode["type"]; value: string }[]
   >(barcodes ?? []);
 
-  const customFields = useLoaderData<typeof loader>().customFields.map(
-    (cf) =>
-      cf.active && {
-        id: cf.id,
-        name: cf.name,
-        helpText: cf?.helpText || "",
-        required: cf.required,
-        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        options: cf.options,
-      }
-  ) as CustomFieldZodSchema[];
+  const loaderData = useLoaderData<typeof loader>();
+  const customFields = loaderData.customFields
+    .filter((cf) => cf.active)
+    .map(toCustomFieldZodSchema);
+  // When editing, what the asset stores now: a Link field accepts its stored
+  // value unchanged, as the edit action does.
+  const storedValues = useMemo(
+    () => storedCustomFieldTexts(loaderData.asset?.customFields ?? []),
+    [loaderData.asset?.customFields]
+  );
 
   // Bulk mode tightens a few fields (assetModelId, nameTemplate,
   // count). Same `mergedSchema` pipeline either way — both base
@@ -388,19 +467,27 @@ export const AssetForm = ({
           ? NewAssetBulkFormSchema
           : NewAssetFormSchema) as typeof NewAssetFormSchema,
         customFields,
+        storedValues,
       }),
-    [bulkMode, customFields]
+    [bulkMode, customFields, storedValues]
   );
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);
+  /** "Create new" shortcuts show only to members who may create that entity. */
+  const canCreateInline = useInlineCreatePermissions();
   const disabled = isFormProcessing(navigation.state);
   // Only the Save action needs to wait on the attachment widget - `disabled`
   // above stays untouched since ~20 other fields in this form share it.
   const submitDisabled = disabled || attachmentPending;
 
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
+
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
-  const titleInputRef = useAutoFocus<HTMLInputElement>();
+  const titleInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   // Extract custom field errors into a plain object to pass to AssetCustomFields
   // This avoids passing the complex zo object which causes React 19 issues
@@ -453,6 +540,13 @@ export const AssetForm = ({
 
   /** Whether we are in edit mode (asset already exists). */
   const isEditMode = Boolean(id);
+
+  /** Sub-heading for the tracking-method row; repeated under the cards on
+   * narrow viewports because FormRow hides its label column there. */
+  const trackingMethodHint = isEditMode
+    ? "Tracking method cannot be changed after creation."
+    : "Choose how this asset is tracked. This cannot be changed later.";
+
   /** Track the selected asset type for conditional field rendering. */
   const [selectedAssetType, setSelectedAssetType] = useState<AssetType>(
     bulkMode ? AssetType.INDIVIDUAL : assetType ?? AssetType.INDIVIDUAL
@@ -539,29 +633,26 @@ export const AssetForm = ({
   /**
    * Snapshot of the referer as it was when this form first mounted.
    *
-   * Deliberately ignores later updates to the `referer` prop — this is not a
+   * Deliberately ignores later updates to the `referer` prop: this is not a
    * stale-state bug. The Referer header is only meaningful at the moment the
-   * user arrives. Any in-route navigation re-runs the loader and overwrites it
-   * with this page's own URL: picking a Category navigates to
-   * `/assets/new?category=<id>` (see the effect below), so the prop becomes
-   * `/assets/new` and "where I came from" is lost. ~93% of assets carry a
-   * category, so that is the normal path, not an edge case.
+   * user arrives. Any in-route navigation re-runs the loader with this page's
+   * own URL as the Referer: picking an asset model navigates to
+   * `?category=<id>` (see `handleAssetModelChange`), so the loader's referer
+   * becomes `null` (it drops self-references) and "where I came from" is lost.
    *
-   * Capturing once keeps Cancel pointing at the user's real origin (including
-   * its filters) for the whole life of the form.
+   * Capturing once keeps Cancel and the post-save redirect pointing at the
+   * user's real origin (including its filters) for the whole life of the form.
    */
   const [initialReferer] = useState(referer);
 
   /**
    * Where Cancel goes. The referer is best-effort and unusable in three
    * separate cases (absent prop, no Referer header, and self-reference).
-   * `resolveCancelTo` owns all three — see its JSDoc.
+   * `resolveCancelTo` owns all three, see its JSDoc.
    *
-   * The self-reference guard is still load-bearing even with the snapshot
-   * above: if this form ever mounts *after* an in-route navigation, the very
-   * first value it captures is already self-referential. Worst case it falls
-   * back to the index, which is exactly the pre-snapshot behaviour, so the
-   * snapshot can only ever improve the destination, never worsen it.
+   * The asset loaders already drop a self-referer, so the guard here is a
+   * fallback for any caller that passes one: the destination becomes the
+   * asset (or the index), never the form itself.
    */
   const cancelTo = resolveCancelTo({
     referer: initialReferer,
@@ -571,19 +662,31 @@ export const AssetForm = ({
 
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<{
-      id: string;
-      name?: string;
-      defaultCategoryId?: string | null;
-      image?: string | null;
-      thumbnailImage?: string | null;
-    }>;
+    assetModels?: FormAssetModel[];
   }>()?.assetModels;
 
+  /**
+   * Rows of models picked from search results outside the loader's page. The
+   * picker hands over the row (with its defaults) at the moment of the pick.
+   */
+  const [pickedModels, setPickedModels] = useState<
+    Record<string, FormAssetModel>
+  >({});
+
+  /**
+   * Valuation and custom field values the picked model filled into empty
+   * inputs. Without it a required custom field the model covers would block
+   * the save on the client before the server fill could run.
+   */
+  const [modelPrefill, setModelPrefill] =
+    useState<ModelPrefill>(EMPTY_MODEL_PREFILL);
+
   /** The chosen model's row, used for the inherited-image preview + copy. */
-  const selectedAssetModel = selectedAssetModelId
-    ? assetModelsData?.find((m) => m.id === selectedAssetModelId)
-    : undefined;
+  const selectedAssetModel = findFormModel(
+    selectedAssetModelId,
+    assetModelsData,
+    pickedModels
+  );
 
   /**
    * Intent to drop this asset's own image so it falls back down the cascade —
@@ -633,12 +736,18 @@ export const AssetForm = ({
     : null;
 
   /**
-   * When a model is selected, apply its default category by updating
-   * the search params. When cleared, remove the category param.
-   * This triggers a revalidation so the Category DynamicSelect
-   * picks up the new default.
+   * When a model is selected and the asset has no category yet, show the
+   * model's default category by updating the search params, which
+   * revalidates so the Category selector and the category's custom fields
+   * follow. A category the asset already has, or one the user picked, is
+   * never replaced. Clearing the model takes back only the category it put
+   * there. The server fills every empty field the same way on save (see
+   * `fillAssetFormDataFromModel`).
    */
-  const handleAssetModelChange = (modelId: string | undefined) => {
+  const handleAssetModelChange = (
+    modelId: string | undefined,
+    picked?: FormAssetModel
+  ) => {
     // Mirror the DynamicSelect's current selection so the row's error
     // display can suppress the Zorm "required" message once the user
     // picks something. Zorm only re-validates on submit by default,
@@ -648,15 +757,64 @@ export const AssetForm = ({
     setHasPickedAssetModel(Boolean(modelId));
     setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
-
-    if (!modelId) {
-      // Model was cleared — remove the category param
+    const pick = resolveModelPick({
+      pickedId: modelId,
+      pickedRow: picked,
+      previousId: selectedAssetModelId,
+      loaded: assetModelsData,
+      pickedModels,
+    });
+    const { previousModel, model } = pick;
+    if (pick.pickedModels !== pickedModels) {
+      setPickedModels(pick.pickedModels);
+    }
+    if (
+      previousModel?.defaultCategoryId &&
+      params.get("category") === previousModel.defaultCategoryId
+    ) {
       params.delete("category");
-    } else if (assetModelsData) {
-      const model = assetModelsData.find((m) => m.id === modelId);
-      if (model?.defaultCategoryId) {
-        params.set("category", model.defaultCategoryId);
-      }
+    }
+
+    // Fill the empty valuation and custom field inputs with the model's
+    // defaults, and take back the untouched ones the previous model filled.
+    const form = formRef.current;
+    const formData = form ? new FormData(form) : null;
+    const savedKeys = new Set<string>(
+      (asset?.customFields ?? []).map((cfv) => cfv.customFieldId)
+    );
+    if (valuation !== null && valuation !== undefined) {
+      savedKeys.add(VALUATION_PREFILL_KEY);
+    }
+    setModelPrefill(
+      planModelPrefill({
+        previous: modelPrefill,
+        model,
+        readCurrent: (key) => {
+          const entry = formData?.get(
+            key === VALUATION_PREFILL_KEY ? key : `cf-${key}`
+          );
+          return typeof entry === "string" ? entry : null;
+        },
+        savedKeys,
+      })
+    );
+
+    // The Category select keeps its pick in a hidden input, not in the URL.
+    // A value the previous model put there does not count as the user's pick.
+    const categoryInput = formRef.current?.elements.namedItem("category");
+    const pickedCategory =
+      categoryInput instanceof HTMLInputElement ? categoryInput.value : "";
+    const userPickedCategory =
+      pickedCategory !== "" &&
+      pickedCategory !== previousModel?.defaultCategoryId;
+    // On the edit form `categoryId` is the asset's saved category, which is
+    // never replaced. On the create form it only mirrors the URL, which the
+    // lines above already account for.
+    const savedCategory = id ? categoryId : null;
+    const formHasCategory =
+      userPickedCategory || Boolean(params.get("category") ?? savedCategory);
+    if (model?.defaultCategoryId && !formHasCategory) {
+      params.set("category", model.defaultCategoryId);
     }
 
     void navigate(`${location.pathname}?${params.toString()}`, {
@@ -710,8 +868,16 @@ export const AssetForm = ({
         success={actionData?.bulkSuccess}
         sampleTitles={bulkPreviewTitles}
       />
+      {/* Bulk create has its own success modal flow, so it is not tracked. */}
+      {bulkMode ? null : (
+        <UnsavedChangesGuard
+          formRef={formRef}
+          actionData={actionData}
+          onDiscard={onDiscard}
+        />
+      )}
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         action="."
         className="flex w-full flex-col gap-2"
@@ -730,18 +896,25 @@ export const AssetForm = ({
               setConsumptionTypeError("Please select a consumption type");
               e.preventDefault();
               e.stopPropagation();
-              return false;
             } else {
               setConsumptionTypeError(undefined);
             }
           }
 
           // If there are barcode errors, prevent submission
-          // Zorm will handle its own validation and prevent submission if needed
           if (hasBarcodeErrors) {
             e.preventDefault();
             e.stopPropagation();
-            return false;
+          }
+
+          // A Save can be rejected by Zorm (its submit listener runs before
+          // this handler and cancels the event), by the consumption type
+          // check, or by the barcode check. Every one of them leaves the
+          // event cancelled, so this single check brings the first message
+          // into view. Without it, a Save pressed far above the failing field
+          // looks like it did nothing.
+          if (e.defaultPrevented) {
+            scrollToFirstErrorOnNextFrame(e.currentTarget);
           }
         }}
       >
@@ -750,7 +923,7 @@ export const AssetForm = ({
         {qrId && !bulkMode ? (
           <input type="hidden" name="qrId" value={qrId} />
         ) : null}
-        <RefererRedirectInput fieldName="redirectTo" referer={referer} />
+        <RefererRedirectInput fieldName="redirectTo" referer={initialReferer} />
 
         {/* Bulk-mode discriminator + synthetic title (satisfies the
             shared schema's title.min(2) check; the action ignores it
@@ -902,9 +1075,10 @@ export const AssetForm = ({
             rowLabel={"Tracking method"}
             className="border-b-0 pb-[10px]"
             subHeading={
-              isEditMode
-                ? "Tracking method cannot be changed after creation."
-                : "Choose how this asset is tracked. This cannot be changed later."
+              <p>
+                {trackingMethodHint}{" "}
+                <TrackingMethodGuideLink isEditMode={isEditMode} />
+              </p>
             }
             required={true}
           >
@@ -915,6 +1089,13 @@ export const AssetForm = ({
               disabled={disabled || isEditMode}
               isEditMode={isEditMode}
             />
+            {/* FormRow hides the label column below `lg`, so the hint and
+                guide link are repeated here for narrow viewports — same
+                pattern as the main-image row's format note. */}
+            <p className="mt-2 text-[13px] text-gray-600 lg:hidden">
+              {trackingMethodHint}{" "}
+              <TrackingMethodGuideLink isEditMode={isEditMode} />
+            </p>
           </FormRow>
         </When>
 
@@ -926,14 +1107,14 @@ export const AssetForm = ({
         <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
             <FormRow
-              rowLabel="Quantity"
+              rowLabel={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
               className="border-b-0 pb-[10px]"
               subHeading="Total number of items in this pool."
               required={true}
             >
               <Input
                 type="number"
-                label="Quantity"
+                label={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
                 hideLabel
                 name="quantity"
                 disabled={disabled}
@@ -1268,18 +1449,22 @@ export const AssetForm = ({
             subHeading={
               <p>
                 This is the initial object description. It will be shown on the
-                asset’s overview page. You can always change it. Maximum 1000
-                characters.
+                asset’s overview page. You can always change it. Maximum{" "}
+                {ASSET_DESCRIPTION_MAX_LENGTH_LABEL} characters.
               </p>
             }
             className="border-b-0"
           >
             <Input
               inputType="textarea"
-              maxLength={1000}
+              characterLimit={ASSET_DESCRIPTION_MAX_LENGTH}
               label={"Description"}
-              name="description"
+              name={zo.fields.description()}
               defaultValue={description || ""}
+              error={
+                validationErrors?.description?.message ||
+                zo.errors.description()?.message
+              }
               hideLabel
               placeholder="Add a description for your asset."
               disabled={disabled}
@@ -1302,14 +1487,16 @@ export const AssetForm = ({
             <p>
               Make it unique. Each asset can have 1 category. It will show on
               your index.{" "}
-              <Button
-                to="/categories/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create categories
-              </Button>
+              {canCreateInline.category ? (
+                <Button
+                  to="/categories/new"
+                  variant="link-gray"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                >
+                  Create categories
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -1357,14 +1544,16 @@ export const AssetForm = ({
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
-              <Button
-                to="/tags/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create tags
-              </Button>
+              {canCreateInline.tag ? (
+                <Button
+                  to="/tags/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create tags
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -1383,14 +1572,16 @@ export const AssetForm = ({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Button
-                to="/locations/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create locations
-              </Button>
+              {canCreateInline.location ? (
+                <Button
+                  to="/locations/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create locations
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"
@@ -1487,6 +1678,8 @@ export const AssetForm = ({
         >
           <div className="relative w-full">
             <Input
+              // Remounts when a picked model changes the pre-filled value.
+              key={prefillVersion(modelPrefill, VALUATION_PREFILL_KEY)}
               type="number"
               label="Value"
               inputClassName="pl-[70px] valuation-input"
@@ -1496,7 +1689,10 @@ export const AssetForm = ({
               step="any"
               min={0}
               className="w-full"
-              defaultValue={valuation || ""}
+              defaultValue={
+                modelPrefill.values[VALUATION_PREFILL_KEY] ??
+                valuationInputDefault(valuation)
+              }
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}
@@ -1553,6 +1749,7 @@ export const AssetForm = ({
         <AssetCustomFields
           currency={currency}
           fieldErrors={customFieldErrors}
+          modelPrefill={modelPrefill}
         />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
@@ -1654,6 +1851,35 @@ function BulkCreatePreview({ titles }: { titles: string[] }) {
         <span className="text-gray-500"> …and {remaining} more</span>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Knowledge-base guide behind the tracking-method row: the individual /
+ * model / quantity decision, and what can still change after creation.
+ */
+const TRACKING_METHOD_KB_URL =
+  "https://www.shelf.nu/knowledge-base/how-to-choose-a-tracking-method";
+
+/**
+ * Link into that guide. Create mode opens the decision guide itself; edit
+ * mode opens its "what you can and cannot change later" section, since the
+ * method is locked by then and the question is what to do about it.
+ */
+function TrackingMethodGuideLink({ isEditMode }: { isEditMode: boolean }) {
+  return (
+    <Button
+      to={
+        isEditMode
+          ? `${TRACKING_METHOD_KB_URL}#what-you-can-and-cannot-change-later`
+          : TRACKING_METHOD_KB_URL
+      }
+      variant="link-gray"
+      className="text-gray-600 underline"
+      target="_blank"
+    >
+      {isEditMode ? "Picked the wrong one?" : "Which should I pick?"}
+    </Button>
   );
 }
 

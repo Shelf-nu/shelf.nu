@@ -1,17 +1,25 @@
 /**
- * Scan feedback module — plays a short bleep + haptic burst on successful scan.
- * Respects user preference stored in AsyncStorage.
- * Can be toggled in Settings.
+ * Scan feedback module: plays a short bleep and a haptic burst on a successful
+ * scan. Respects the user preference stored in AsyncStorage, which Settings
+ * toggles.
+ *
+ * @see {@link file://./scan-sound.test.ts}
  */
-import { Audio } from "expo-av";
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  type AudioPlayer,
+} from "expo-audio";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const SOUND_KEY = "shelf_scan_sound_enabled";
 
-let soundObject: Audio.Sound | null = null;
+let soundObject: AudioPlayer | null = null;
 let isEnabled = true; // default ON
 let loaded = false;
+/** The load in flight, shared so concurrent callers create one player. */
+let loading: Promise<void> | null = null;
 
 /** Load persisted preference (call once on app start) */
 export async function loadScanSoundPreference(): Promise<boolean> {
@@ -40,20 +48,29 @@ export function isScanSoundEnabled(): boolean {
 }
 
 /** Pre-load the sound for instant playback */
-async function ensureLoaded(): Promise<void> {
-  if (loaded && soundObject) return;
+function ensureLoaded(): Promise<void> {
+  if (loaded && soundObject) return Promise.resolve();
+  loading ??= loadSound().finally(() => {
+    loading = null;
+  });
+  return loading;
+}
+
+async function loadSound(): Promise<void> {
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
+    // The bleep plays with the ringer silenced and mixes with other audio,
+    // so music or a call on the device is never paused or lowered by a scan.
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: "mixWithOthers",
     });
 
-    const { sound } = await Audio.Sound.createAsync(
+    const player = createAudioPlayer(
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require("@/assets/sounds/scan-bleep.wav"),
-      { shouldPlay: false, volume: 0.6 }
+      require("@/assets/sounds/scan-bleep.wav")
     );
-    soundObject = sound;
+    player.volume = 0.6;
+    soundObject = player;
     loaded = true;
   } catch {
     // Audio not available — haptics will still work
@@ -80,9 +97,13 @@ export async function playScanSound(): Promise<void> {
 async function playAudio(): Promise<void> {
   try {
     await ensureLoaded();
-    if (soundObject) {
-      await soundObject.setPositionAsync(0);
-      await soundObject.playAsync();
+    // Held locally: an unload while the seek is pending clears soundObject.
+    const player = soundObject;
+    if (player) {
+      // A seek on a player that is still loading can reject; play anyway, the
+      // player starts once the sound is ready.
+      await player.seekTo(0).catch(() => {});
+      player.play();
     }
   } catch {
     // Silent degradation
@@ -116,10 +137,14 @@ export async function preloadScanSound(): Promise<void> {
   }
 }
 
-/** Cleanup (call on app unmount if needed) */
+/**
+ * Releases the player. Waits for a load that is still running first, so that
+ * load cannot set the player again after it was released.
+ */
 export async function unloadScanSound(): Promise<void> {
+  if (loading) await loading;
   if (soundObject) {
-    await soundObject.unloadAsync();
+    soundObject.remove();
     soundObject = null;
     loaded = false;
   }

@@ -23,10 +23,22 @@ vi.mock("~/utils/logger", () => ({
   Logger: { error: mockLoggerError },
 }));
 
-// why: env vars are read at import time; shelf.config.ts also imports from this module
+/** Recipient env values, mutable so each test can configure them */
+const mockEnv = vi.hoisted(() => ({
+  SUPPORT_EMAIL: "support@shelf.nu" as string | undefined,
+  FEEDBACK_EMAIL: undefined as string | undefined,
+}));
+
+// why: env vars are read at import time; shelf.config.ts also imports from this module.
+// The recipient values are getters so a test can change them after import.
 vi.mock("~/utils/env", () => ({
   SERVER_URL: "https://app.shelf.nu",
-  SUPPORT_EMAIL: "support@shelf.nu",
+  get SUPPORT_EMAIL() {
+    return mockEnv.SUPPORT_EMAIL;
+  },
+  get FEEDBACK_EMAIL() {
+    return mockEnv.FEEDBACK_EMAIL;
+  },
   SEND_ONBOARDING_EMAIL: false,
   ENABLE_PREMIUM_FEATURES: false,
   FREE_TRIAL_DAYS: "7",
@@ -41,6 +53,7 @@ vi.mock("~/utils/env", () => ({
 import {
   feedbackEmailText,
   feedbackEmailHtml,
+  resolveFeedbackRecipients,
   sendFeedbackEmail,
 } from "./feedback-email";
 
@@ -183,6 +196,38 @@ describe("feedbackEmailHtml", () => {
 describe("sendFeedbackEmail", () => {
   beforeEach(() => {
     mockSendEmail.mockClear();
+    mockLoggerError.mockClear();
+    mockEnv.SUPPORT_EMAIL = "support@shelf.nu";
+    mockEnv.FEEDBACK_EMAIL = undefined;
+  });
+
+  it("sends to every FEEDBACK_EMAIL inbox when it is set", async () => {
+    mockEnv.FEEDBACK_EMAIL = "support@shelf.nu, product@shelf.nu";
+
+    await sendFeedbackEmail(BASE_PROPS);
+
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "support@shelf.nu, product@shelf.nu",
+        replyTo: "alice@example.com",
+      })
+    );
+  });
+
+  it("logs a config error and sends nothing when no recipient is configured", async () => {
+    mockEnv.SUPPORT_EMAIL = undefined;
+    mockEnv.FEEDBACK_EMAIL = undefined;
+
+    await sendFeedbackEmail(BASE_PROPS);
+
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: expect.objectContaining({
+          message: expect.stringContaining("No feedback recipient configured"),
+        }),
+      })
+    );
   });
 
   it("sends to support with reply-to set to the submitter", async () => {
@@ -203,5 +248,52 @@ describe("sendFeedbackEmail", () => {
         subject: expect.stringContaining("New feedback [Error report]:"),
       })
     );
+  });
+});
+
+describe("resolveFeedbackRecipients", () => {
+  it("falls back to the support inbox when FEEDBACK_EMAIL is not set", () => {
+    expect(resolveFeedbackRecipients(undefined, "support@shelf.nu")).toBe(
+      "support@shelf.nu"
+    );
+    expect(resolveFeedbackRecipients("", "support@shelf.nu")).toBe(
+      "support@shelf.nu"
+    );
+    // A variable set to whitespace is a misconfiguration, not an override
+    expect(resolveFeedbackRecipients("   ", "support@shelf.nu")).toBe(
+      "support@shelf.nu"
+    );
+  });
+
+  it("delivers to every address of a comma separated list", () => {
+    expect(
+      resolveFeedbackRecipients(
+        "support@shelf.nu, product@shelf.nu",
+        "support@shelf.nu"
+      )
+    ).toBe("support@shelf.nu, product@shelf.nu");
+  });
+
+  it("trims addresses and drops empty entries", () => {
+    expect(
+      resolveFeedbackRecipients(
+        "  support@shelf.nu ,, product@shelf.nu ,",
+        "support@shelf.nu"
+      )
+    ).toBe("support@shelf.nu, product@shelf.nu");
+  });
+
+  it("de-duplicates repeated addresses regardless of case", () => {
+    // Otherwise the same person gets the same report twice
+    expect(
+      resolveFeedbackRecipients(
+        "support@shelf.nu,Support@Shelf.nu,product@shelf.nu",
+        "support@shelf.nu"
+      )
+    ).toBe("support@shelf.nu, product@shelf.nu");
+  });
+
+  it("returns an empty string when nothing is configured", () => {
+    expect(resolveFeedbackRecipients(undefined, undefined)).toBe("");
   });
 });

@@ -33,6 +33,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
+import { redirectFromStalePendingApprovalFilter } from "~/modules/booking/stale-pending-filter.server";
 import { getMemberCalendarFeedUrl } from "~/modules/calendar-subscription/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
@@ -41,6 +42,7 @@ import {
 } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import {
   getCalendarTitleAndSubtitle,
   getStatusClasses,
@@ -87,6 +89,13 @@ export type AvailabilitySlice = {
 export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
+  /**
+   * True while the booking is a reservation request waiting for a decision
+   * (workspace requires approval, nothing approved yet). The bar is drawn in
+   * the pending palette and the popover badge says so. Absent on surfaces
+   * that do not derive it.
+   */
+  isPendingApproval?: boolean;
   name: string;
   description: string | null;
   start: string;
@@ -121,18 +130,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const {
-      isSelfServiceOrBase,
-      currentOrganization,
-      organizationId,
-      canSeeAllBookings,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { currentOrganization, organizationId, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -150,6 +154,16 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     };
 
     const searchParams = getCurrentSearchParams(request);
+
+    // A "Pending approval" filter left over from before approval was turned
+    // off shows every booking instead of a blank calendar.
+    const stalePendingRedirect = await redirectFromStalePendingApprovalFilter({
+      request,
+      organizationId,
+      searchParams,
+    });
+    if (stalePendingRedirect) return stalePendingRedirect;
+
     const { teamMemberIds } = getParamsValues(searchParams);
     const [
       teamMembersData,
@@ -158,27 +172,29 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       calendarFeedUrl,
     ] = await Promise.all([
-      // Team members for filters - when canSeeAllCustody is false, only current user's team member
+      // Team members for filters: when custody is not visible to the caller,
+      // only the caller's own team member
       getTeamMemberForCustodianFilter({
         organizationId,
         selectedTeamMembers: teamMemberIds,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
-      // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
-      isSelfServiceOrBase
+      // Team members for CreateBookingDialog: a member whose booking custodian
+      // is fixed to themself always gets their own team member.
+      bookingCustodianIsSelf(access)
         ? getTeamMemberForForm({
             organizationId,
             userId,
-            isSelfServiceOrBase,
+            access,
             getAll:
               searchParams.has("getAll") &&
               hasGetAllValue(searchParams, "teamMember"),
           })
-        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        : Promise.resolve(null), // Everyone else reuses teamMembersData
       getTagsForBookingTagsFilter({
         organizationId,
       }),
@@ -186,8 +202,8 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         request,
         organizationId,
         userId,
-        canSeeAllBookings,
-        canSeeAllCustody,
+        canSeeAllBookings: access.bookings.seeAll,
+        canSeeAllCustody: access.custody.seeAll,
       }),
       getMemberCalendarFeedUrl({ organizationId, userId }),
     ]);
@@ -202,14 +218,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       organizationId,
       ...teamMembersData,
-      // For BASE/SELF_SERVICE users, provide dedicated form team members
-      // For ADMIN users, reuse the filter team members
+      // Members fixed to themselves get dedicated form team members;
+      // everyone else reuses the filter team members.
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       currentOrganization,
       ...tagsData,
       modelName,
-      isSelfServiceOrBase,
       userId,
       calendarFeedUrl,
       searchFieldTooltip: {
@@ -432,7 +447,11 @@ export default function Calendar() {
                 return getStatusClasses(
                   eventInfo.event.extendedProps.status,
                   isOneDay,
-                  viewType
+                  viewType,
+                  {
+                    pendingApproval:
+                      eventInfo.event.extendedProps.isPendingApproval === true,
+                  }
                 );
               }}
             />

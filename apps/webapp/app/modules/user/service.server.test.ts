@@ -31,7 +31,8 @@ import {
   findUserByEmail,
   findUserById,
 } from "./service.server";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
+import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -288,7 +289,10 @@ describe(createUserAccountForTesting.name, () => {
               assetIndexSettings: {
                 create: {
                   mode: AssetIndexMode.ADVANCED,
-                  columns: defaultFields,
+                  // A brand-new personal workspace has no quantity-tracked assets.
+                  columns: defaultColumnsForWorkspace({
+                    hasQuantityAssets: false,
+                  }),
                   user: {
                     connect: {
                       id: USER_ID,
@@ -315,6 +319,27 @@ describe(createUserAccountForTesting.name, () => {
     expect(result).toEqual(authSession);
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     expect(fetchAuthTokenAPI.size).toEqual(1);
+  });
+
+  it("creates a personal workspace without PDF templates", async () => {
+    //@ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue({
+      id: USER_ID,
+      email: USER_EMAIL,
+      username,
+      organizations: [{ id: "org-id" }],
+    });
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementationOnce((callback) => callback(db));
+
+    await createUserAccountForTesting(USER_EMAIL, USER_PASSWORD, username);
+
+    const { data } = vi.mocked(db.user.create).mock.calls.at(-1)![0];
+    const [personal] = (
+      data.organizations as { create: Record<string, unknown>[] }
+    ).create;
+    expect(personal.name).toBe("Personal");
+    expect(personal).not.toHaveProperty("pdfTemplates");
   });
 });
 
@@ -462,6 +487,37 @@ describe(createUserOrAttachOrg.name, () => {
     expect(result.id).toBe(USER_ID);
     expect(db.userOrganization.upsert).toHaveBeenCalled();
     expect(db.user.create).not.toHaveBeenCalled();
+  });
+
+  /** The seeded index mode follows the invite's highest role, whatever its order */
+  it.each([
+    [[OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]],
+    [[OrganizationRoles.ADMIN, OrganizationRoles.SELF_SERVICE]],
+  ])("seeds the index mode from the effective role of %j", async (roles) => {
+    const existingUser = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      firstName: "Existing",
+      lastName: "User",
+      sso: false,
+      userOrganizations: [],
+    };
+
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([existingUser]);
+
+    await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles,
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(ensureAssetIndexModeForRole).toHaveBeenCalledWith(
+      expect.objectContaining({ role: OrganizationRoles.ADMIN })
+    );
   });
 
   /** An address that differs only in letter case is the same person */

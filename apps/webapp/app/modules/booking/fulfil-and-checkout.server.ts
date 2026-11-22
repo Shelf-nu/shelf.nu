@@ -35,15 +35,18 @@
  * @see {@link file://./service.server.ts}
  * @see {@link file://./../booking-settings/explicit-checkout.ts}
  */
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus, type Booking } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestApprovedWithinTx,
+  assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
+  resolveExpiredCheckoutState,
 } from "~/modules/booking/service.server";
 import type {
   CheckoutDispositionInput,
@@ -101,6 +104,15 @@ export async function fulfilAndCheckOut({
   // them are resolved here rather than trusted from the client, so every
   // surface — web drawer, mobile endpoint, companion — books a kit the same
   // org-scoped way. See `.claude/rules/kit-members-via-kit-slices.md`.
+  // Before anything is written: the scanned-only path below commits the
+  // assignment of scanned units before its check-out, so a pending request
+  // must be refused here, not after. A pending request is never checked out,
+  // by anyone: it is approved first.
+  await assertRequestMayBeCheckedOut({
+    bookingId: args.bookingId,
+    organizationId: args.organizationId,
+  });
+
   const scannedKits = await resolveScannedKits(args);
   await assertScannedUnitsAreNotKitMembers({
     bookingId: args.bookingId,
@@ -111,10 +123,11 @@ export async function fulfilAndCheckOut({
 
   // Under the requirement the flow is known up front, so the scan is judged
   // before anything is read. Without it the booking's status decides.
-  let status: BookingStatus | undefined;
+  let known: BookingWindowRow | undefined;
   if (!requireExplicitCheckout) {
-    status = await readBookingStatus(args);
-    if (status === BookingStatus.RESERVED) {
+    known = await readBookingStatus(args);
+    assertExpiredChoiceMade(known, args.checkoutIntentChoice);
+    if (known.status === BookingStatus.RESERVED) {
       const booking = await fulfilModelRequestsAndCheckout({
         ...args,
         assetIds: scannedKits.looseAssetIds,
@@ -127,7 +140,35 @@ export async function fulfilAndCheckOut({
     }
   }
 
-  return checkOutScannedUnits(args, scannedKits, status);
+  return checkOutScannedUnits(args, scannedKits, known);
+}
+
+/** The booking's status and window, as {@link readBookingStatus} reads them. */
+type BookingWindowRow = Pick<Booking, "status" | "from" | "to">;
+
+/**
+ * Answers the expired-reservation gate before anything is written, so a scan
+ * of an expired reservation that made no choice is refused while the booking
+ * is still exactly as it was (see `resolveExpiredCheckoutState`). This path
+ * never reschedules. The check-out services ask the same question again on
+ * the row they lock.
+ *
+ * @param booking - The booking's status and window
+ * @param intentChoice - The operator's answer, if any
+ * @throws {ShelfError} 400 when the reservation is expired and no usable
+ *   choice was made
+ */
+function assertExpiredChoiceMade(
+  booking: BookingWindowRow,
+  intentChoice: FulfilAndCheckOutArgs["checkoutIntentChoice"]
+) {
+  resolveExpiredCheckoutState({
+    status: booking.status,
+    from: booking.from,
+    to: booking.to,
+    intentChoice,
+    allowReschedule: false,
+  });
 }
 
 /** A scanned kit's memberships, split by what this booking already holds. */
@@ -219,7 +260,7 @@ async function readBookingStatus({
 }: Pick<FulfilAndCheckOutArgs, "bookingId" | "organizationId">) {
   const booking = await db.booking.findFirst({
     where: { id: bookingId, organizationId },
-    select: { status: true },
+    select: { status: true, from: true, to: true },
   });
   if (!booking) {
     throw new ShelfError({
@@ -230,7 +271,7 @@ async function readBookingStatus({
       shouldBeCaptured: false,
     });
   }
-  return booking.status;
+  return booking;
 }
 
 /**
@@ -247,7 +288,7 @@ async function readBookingStatus({
 async function checkOutScannedUnits(
   args: Omit<FulfilAndCheckOutArgs, "requireExplicitCheckout">,
   scannedKits: ScannedKits,
-  knownStatus?: BookingStatus
+  known?: BookingWindowRow
 ): Promise<FulfilAndCheckOutResult> {
   const { bookingId, organizationId, userId, assetIds, kitIds = [] } = args;
 
@@ -263,7 +304,8 @@ async function checkOutScannedUnits(
     });
   }
 
-  const status = knownStatus ?? (await readBookingStatus(args));
+  const booking = known ?? (await readBookingStatus(args));
+  const { status } = booking;
   // Checked before anything is assigned, so a booking that cannot be checked
   // out is left exactly as it was.
   if (!CHECKOUT_STATUSES.includes(status)) {
@@ -276,6 +318,7 @@ async function checkOutScannedUnits(
       shouldBeCaptured: false,
     });
   }
+  assertExpiredChoiceMade(booking, args.checkoutIntentChoice);
 
   // A refused check-out leaves the scanned units assigned, and the booking
   // allows one standalone row per asset, so a retry of the same scan assigns
@@ -333,6 +376,14 @@ async function checkOutScannedUnits(
       bookingId,
       organizationId,
       userId,
+      // The route authorized this flow under the check-out rule, which lets a
+      // caller fulfil a RESERVED booking; the add-items rule would refuse it.
+      access: null,
+      // A scanned extra that asks for more than was approved is refused here,
+      // with the add rolled back, rather than left as a pending request.
+      atCheckout: true,
+      hints: args.hints,
+      seesAllBookings: args.seesAllBookings,
     });
   }
 
@@ -363,6 +414,14 @@ async function checkOutScannedUnits(
   if (assetIdsAlreadyOnBooking.length > 0) {
     await db.$transaction(async (tx) => {
       await lockBookingForStatusCheck(tx, bookingId, organizationId);
+      // The preflight ran before this transaction: a request that is pending
+      // again since (a requester's change cleared its approval) is refused
+      // under the lock, before the claim stamps or fulfils anything.
+      await assertRequestApprovedWithinTx(tx, {
+        bookingId,
+        organizationId,
+        actorUserId: userId,
+      });
       await claimUnstampedBookingRows(
         {
           bookingId,
@@ -465,6 +524,8 @@ async function checkOutScannedUnits(
     userId,
     hints: args.hints,
     intentChoice: args.checkoutIntentChoice,
+    provenance: args.provenance,
+    sourceLocations: args.sourceLocations,
   });
 
   return {

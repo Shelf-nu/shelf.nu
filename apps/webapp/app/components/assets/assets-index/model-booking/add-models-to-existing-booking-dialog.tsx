@@ -52,6 +52,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { modelReservationsField } from "~/modules/asset-model/model-reservations-schema";
 import type { BookingModelAvailabilityRow } from "~/routes/api+/bookings.$bookingId.model-availability";
 import { canEditModelReservations } from "~/utils/booking-model-requests";
+import { sortPickerBookings } from "~/utils/booking-picker-order";
 import { getValidationErrors } from "~/utils/http";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -458,35 +459,28 @@ export default function AddModelsToExistingBookingDialog() {
   });
 
   /**
-   * The bookings offered in the picker, soonest first.
+   * The bookings offered in the picker, in picker order.
    *
    * Eligibility is asked of the shared predicate rather than matched against a
    * list spelled out here: the statuses that still accept a reservation are
    * the service's rule, and a second copy of it drifts.
    *
-   * Sorted here rather than in `/api/bookings/get-all`, which orders by start
-   * date ascending and is shared with the asset index's dialog. That ordering
-   * opens the picker on the oldest booking in the workspace and pushes the one
-   * a user is most likely to want to the bottom. "Soonest first" is not
-   * expressible as a single column sort anyway: a booking that has already
-   * ended belongs last, whatever its start date, and that is a comparison
-   * against the current time.
+   * Ordering is the shared `sortPickerBookings`, which both "add to an existing
+   * booking" dialogs use so the two pickers present the same list the same way.
+   * `Date.now()` is read once per recompute: the ordering only has to be right
+   * for the bookings the user is looking at now, and re-ordering the popover
+   * under a moving clock would be worse than a timestamp a few minutes old.
    */
-  const bookings = useMemo(() => {
-    const now = Date.now();
-    const hasEnded = (booking: PickerBooking) =>
-      new Date(booking.to).getTime() < now;
-
-    return (bookingsData?.bookings ?? [])
-      .filter((booking) => canEditModelReservations(booking.status))
-      .sort((a, b) => {
-        const aEnded = hasEnded(a);
-        if (aEnded !== hasEnded(b)) {
-          return aEnded ? 1 : -1;
-        }
-        return new Date(a.from).getTime() - new Date(b.from).getTime();
-      });
-  }, [bookingsData]);
+  const bookings = useMemo(
+    () =>
+      sortPickerBookings(
+        (bookingsData?.bookings ?? []).filter((booking) =>
+          canEditModelReservations(booking.status)
+        ),
+        Date.now()
+      ),
+    [bookingsData]
+  );
 
   const availabilityParams = useMemo(() => {
     const params = new URLSearchParams();

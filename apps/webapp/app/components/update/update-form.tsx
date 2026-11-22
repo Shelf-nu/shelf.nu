@@ -1,4 +1,5 @@
-import { UpdateStatus, OrganizationRoles } from "@prisma/client";
+import { UpdateStatus } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
@@ -6,7 +7,9 @@ import { Button } from "~/components/shared/button";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { targetRoleField } from "~/modules/update/audience";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
+import { ROLE_LABELS, ROLES_BY_RANK } from "~/utils/permissions/role-access";
 
 /** Stable module-scoped default to avoid new array identity on each render */
 const EMPTY_TARGET_ROLES: OrganizationRoles[] = [];
@@ -111,57 +114,27 @@ export function UpdateForm({
         />
       </div>
 
-      <div>
-        <label
-          className="mb-3 block text-sm font-medium text-gray-700"
-          htmlFor="targetAdmin"
-        >
+      <fieldset>
+        <legend className="mb-3 block text-sm font-medium text-gray-700">
           Target Roles
-        </label>
+        </legend>
         <div className="space-y-2">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              name="targetAdmin"
-              defaultChecked={targetRoles.includes(OrganizationRoles.ADMIN)}
-              className="rounded"
-            />
-            <span className="text-sm">Admin</span>
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              name="targetOwner"
-              defaultChecked={targetRoles.includes(OrganizationRoles.OWNER)}
-              className="rounded"
-            />
-            <span className="text-sm">Owner</span>
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              name="targetSelfService"
-              defaultChecked={targetRoles.includes(
-                OrganizationRoles.SELF_SERVICE
-              )}
-              className="rounded"
-            />
-            <span className="text-sm">Self Service</span>
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              name="targetBase"
-              defaultChecked={targetRoles.includes(OrganizationRoles.BASE)}
-              className="rounded"
-            />
-            <span className="text-sm">Base</span>
-          </label>
+          {ROLES_BY_RANK.map((role) => (
+            <label key={role} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name={targetRoleField(role)}
+                defaultChecked={targetRoles.includes(role)}
+                className="rounded"
+              />
+              <span className="text-sm">{ROLE_LABELS[role]}</span>
+            </label>
+          ))}
           <p className="text-xs text-gray-500">
             Leave all unchecked to make the update visible to all users
           </p>
         </div>
-      </div>
+      </fieldset>
 
       <div>
         <label

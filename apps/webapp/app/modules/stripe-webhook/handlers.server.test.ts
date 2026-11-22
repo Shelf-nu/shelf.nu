@@ -1,5 +1,6 @@
 /**
- * Stripe webhook handlers — add-ons bundled on a tier subscription.
+ * Stripe webhook handlers: add-ons bundled on a tier subscription, and the
+ * plan a tier subscription grants when it changes.
  *
  * A Team trial or checkout can carry the Audits and Barcodes add-ons as extra
  * line items on the tier subscription. Once workspace creation has linked that
@@ -161,6 +162,7 @@ import {
 import type { WebhookUser } from "./helpers.server";
 
 const TEAM_PRODUCT = "prod_team";
+const PLUS_PRODUCT = "prod_plus";
 const BARCODES_PRODUCT = "prod_barcodes";
 const BARCODES_PRODUCT_V2 = "prod_barcodes_v2";
 const AUDITS_PRODUCT = "prod_audits";
@@ -171,6 +173,7 @@ const PRODUCTS: Record<
   { id: string; metadata: Record<string, string> }
 > = {
   [TEAM_PRODUCT]: { id: TEAM_PRODUCT, metadata: { shelf_tier: "tier_2" } },
+  [PLUS_PRODUCT]: { id: PLUS_PRODUCT, metadata: { shelf_tier: "tier_1" } },
   [AUDITS_PRODUCT]: {
     id: AUDITS_PRODUCT,
     metadata: { product_type: "addon", addon_type: "audits" },
@@ -198,6 +201,7 @@ const user = {
   email: "owner@example.com",
   tierId: TierId.tier_2,
   warnForNoPaymentMethod: false,
+  skipSubscriptionCheck: false,
   firstName: "Alice",
   lastName: "Owner",
 } as WebhookUser;
@@ -558,6 +562,380 @@ describe("handleSubscriptionUpdated", () => {
     ).rejects.toBeInstanceOf(Stripe.errors.StripeConnectionError);
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  describe("plan changes", () => {
+    /** An update that swapped the Team item for a Plus item, as the billing portal does. */
+    function teamToPlusEvent() {
+      return buildEvent(
+        "customer.subscription.updated",
+        buildSubscription({ productIds: [PLUS_PRODUCT], metadata: {} }),
+        {
+          items: {
+            data: buildSubscription({ productIds: [TEAM_PRODUCT] }).items.data,
+          },
+        }
+      );
+    }
+
+    /** The event's subscription as Stripe holds it now, products expanded. */
+    function liveSubscription(
+      productId: string,
+      { id = "sub_1", status = "active" }: { id?: string; status?: string } = {}
+    ) {
+      return {
+        id,
+        status,
+        metadata: {},
+        items: { data: [{ price: { product: PRODUCTS[productId] } }] },
+      };
+    }
+
+    /** The customer's subscriptions as Stripe lists them now. */
+    function customerHolds(
+      ...subscriptions: { id: string; [key: string]: unknown }[]
+    ) {
+      mockSubscriptionsList.mockResolvedValue({
+        data: subscriptions.map(({ id }) => ({ id })),
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockImplementation((id: string) =>
+        Promise.resolve(subscriptions.find((sub) => sub.id === id))
+      );
+    }
+
+    /** An update that moved the plan item from one product to another. */
+    function planSwitchEvent({
+      from,
+      to,
+      status = "active",
+      metadata = {},
+    }: {
+      from: string;
+      to: string;
+      status?: Stripe.Subscription.Status;
+      metadata?: Record<string, string>;
+    }) {
+      return buildEvent(
+        "customer.subscription.updated",
+        buildSubscription({ productIds: [to], status, metadata }),
+        {
+          items: {
+            data: buildSubscription({ productIds: [from] }).items.data,
+          },
+        }
+      );
+    }
+
+    it("lowers the plan when the subscription moved from Team to Plus", async () => {
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: "sub_1" }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        liveSubscription(PLUS_PRODUCT)
+      );
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith({
+        where: { customerId: "cus_1" },
+        data: { tierId: TierId.tier_1 },
+        select: { id: true },
+      });
+    });
+
+    it("ignores a late Team to Plus event once the subscription is back on Team", async () => {
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: "sub_1" }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        liveSubscription(TEAM_PRODUCT)
+      );
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it("lowers to Free when a late Team to Plus event finds the subscription cancelled since", async () => {
+      // The customer holds no live subscription any more (the default list).
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith({
+        where: { customerId: "cus_1" },
+        data: { tierId: TierId.free },
+        select: { id: true },
+      });
+    });
+
+    it("looks the removed plan product up once when the subscription is linked to a workspace", async () => {
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: "sub_1" }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        liveSubscription(PLUS_PRODUCT)
+      );
+
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({ productIds: [PLUS_PRODUCT] }),
+          {
+            items: {
+              data: buildSubscription({ productIds: [TEAM_PRODUCT] }).items
+                .data,
+            },
+          }
+        ),
+        user
+      );
+
+      // The parser resolves the plan now, then the add-on and plan checks
+      // share one lookup of the plan that was removed.
+      expect(productLookups()).toEqual([PLUS_PRODUCT, TEAM_PRODUCT]);
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_1 } })
+      );
+    });
+
+    it("leaves a Custom plan alone when its subscription moves down", async () => {
+      await handleSubscriptionUpdated(teamToPlusEvent(), {
+        ...user,
+        tierId: TierId.custom,
+      });
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it("keeps Team while another live subscription still pays for it", async () => {
+      const secondTeam = {
+        id: "sub_second_team",
+        status: "active",
+        metadata: { organizationId: "org-2" },
+        items: { data: [{ price: { product: PRODUCTS[TEAM_PRODUCT] } }] },
+      };
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: secondTeam.id }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(secondTeam);
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockSubscriptionsList).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: "cus_1" })
+      );
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it("does not touch the plan when the update kept the plan item", async () => {
+      const subscription = buildSubscription({ productIds: [TEAM_PRODUCT] });
+
+      await handleSubscriptionUpdated(
+        buildEvent("customer.subscription.updated", subscription, {
+          items: { data: subscription.items.data },
+        }),
+        user
+      );
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+      expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    });
+
+    it("leaves a plan support manages by hand alone when its subscription moves down", async () => {
+      await handleSubscriptionUpdated(teamToPlusEvent(), {
+        ...user,
+        skipSubscriptionCheck: true,
+      });
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+      expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    });
+
+    it.each(["trialing", "past_due"] as const)(
+      "lowers the plan for a %s subscription that moved from Team to Plus",
+      async (status) => {
+        customerHolds(liveSubscription(PLUS_PRODUCT, { status }));
+
+        await handleSubscriptionUpdated(
+          planSwitchEvent({ from: TEAM_PRODUCT, to: PLUS_PRODUCT, status }),
+          user
+        );
+
+        expect(mockUserUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({ data: { tierId: TierId.tier_1 } })
+        );
+      }
+    );
+
+    it.each(["canceled", "unpaid", "incomplete_expired", "paused"] as const)(
+      "leaves the plan to the lifecycle handlers when the moved subscription is %s",
+      async (status) => {
+        await handleSubscriptionUpdated(
+          planSwitchEvent({ from: TEAM_PRODUCT, to: PLUS_PRODUCT, status }),
+          user
+        );
+
+        expect(mockUserUpdate).not.toHaveBeenCalled();
+        expect(mockSubscriptionsList).not.toHaveBeenCalled();
+      }
+    );
+
+    it("does not count a live Team subscription that grants no plan", async () => {
+      customerHolds(
+        liveSubscription(PLUS_PRODUCT),
+        liveSubscription(TEAM_PRODUCT, {
+          id: "sub_unpaid_team",
+          status: "incomplete",
+        })
+      );
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_1 } })
+      );
+    });
+
+    it("does not count an add-on product as a plan, even one carrying a tier", async () => {
+      customerHolds({
+        id: "sub_1",
+        status: "active",
+        metadata: {},
+        items: {
+          data: [
+            { price: { product: PRODUCTS[PLUS_PRODUCT] } },
+            {
+              price: {
+                product: {
+                  id: "prod_tagged_addon",
+                  metadata: {
+                    product_type: "addon",
+                    addon_type: "audits",
+                    shelf_tier: "tier_2",
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_1 } })
+      );
+    });
+
+    it("reads the customer's subscriptions once when an update drops an add-on and lowers the plan", async () => {
+      customerHolds(liveSubscription(PLUS_PRODUCT));
+
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({ productIds: [PLUS_PRODUCT] }),
+          {
+            items: {
+              data: buildSubscription({
+                productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+              }).items.data,
+            },
+          }
+        ),
+        user
+      );
+
+      expect(mockOrgUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { auditsEnabled: false } })
+      );
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_1 } })
+      );
+      expect(mockSubscriptionsList).toHaveBeenCalledTimes(1);
+    });
+
+    it("looks nothing up for an update of a subscription with no workspace that cannot lower the plan", async () => {
+      await handleSubscriptionUpdated(
+        planSwitchEvent({ from: TEAM_PRODUCT, to: PLUS_PRODUCT }),
+        { ...user, tierId: TierId.tier_1 }
+      );
+
+      // Only the event parser's lookup of the plan the subscription has now.
+      expect(productLookups()).toEqual([PLUS_PRODUCT]);
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it("raises the plan when an active subscription moved from Plus to Team", async () => {
+      customerHolds(liveSubscription(TEAM_PRODUCT));
+
+      await handleSubscriptionUpdated(
+        planSwitchEvent({ from: PLUS_PRODUCT, to: TEAM_PRODUCT }),
+        { ...user, tierId: TierId.tier_1 }
+      );
+
+      expect(mockUserUpdate).toHaveBeenCalledWith({
+        where: { customerId: "cus_1" },
+        data: { tierId: TierId.tier_2 },
+        select: { id: true },
+      });
+    });
+
+    it("raises the plan no further than the event's tier", async () => {
+      customerHolds(liveSubscription(TEAM_PRODUCT), {
+        id: "sub_custom",
+        status: "active",
+        metadata: {},
+        items: {
+          data: [
+            {
+              price: {
+                product: {
+                  id: "prod_custom",
+                  metadata: { shelf_tier: "custom" },
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      await handleSubscriptionUpdated(
+        planSwitchEvent({ from: PLUS_PRODUCT, to: TEAM_PRODUCT }),
+        { ...user, tierId: TierId.tier_1 }
+      );
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_2 } })
+      );
+    });
+
+    it("ignores a late Plus to Team event once the subscription is back on Plus", async () => {
+      customerHolds(liveSubscription(PLUS_PRODUCT));
+
+      await handleSubscriptionUpdated(
+        planSwitchEvent({ from: PLUS_PRODUCT, to: TEAM_PRODUCT }),
+        { ...user, tierId: TierId.tier_1 }
+      );
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it.each(["trialing", "past_due"] as const)(
+      "does not raise the plan for a %s subscription that moved from Plus to Team",
+      async (status) => {
+        await handleSubscriptionUpdated(
+          planSwitchEvent({ from: PLUS_PRODUCT, to: TEAM_PRODUCT, status }),
+          { ...user, tierId: TierId.tier_1 }
+        );
+
+        expect(mockUserUpdate).not.toHaveBeenCalled();
+        expect(mockSubscriptionsList).not.toHaveBeenCalled();
+      }
+    );
   });
 });
 

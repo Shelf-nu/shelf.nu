@@ -6,7 +6,7 @@ import { db } from "~/database/db.server";
 import { createAuditNote } from "~/modules/audit/note-service.server";
 import {
   createWhileAuditAcceptsComments,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -38,7 +38,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const { organizationId, isSelfServiceOrBase } = permissionResult;
+    const { organizationId, access } = permissionResult;
 
     // Validate that the audit belongs to the user's organization.
     // Scope the lookup by organizationId so a cross-org auditId can never
@@ -64,10 +64,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 

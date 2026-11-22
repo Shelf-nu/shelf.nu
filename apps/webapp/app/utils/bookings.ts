@@ -1,35 +1,117 @@
 import type { Booking, Currency } from "@prisma/client";
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
+import type { RolePolicy } from "@shelf/permissions";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
+import { canRemoveBookingItems } from "./permissions/role-access";
+import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
 import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
-export function canUserManageBookingAssets(
-  booking: Pick<Booking, "status" | "from" | "to">,
-  isSelfService: boolean
-) {
-  const isCompleted = booking.status === BookingStatus.COMPLETE;
-  const isArchived = booking.status === BookingStatus.ARCHIVED;
-  const isCancelled = booking.status === BookingStatus.CANCELLED;
+/** The workspace's booking approval switches, one per requesting role. */
+export type BookingApprovalSwitches = {
+  requireApprovalForBase: boolean;
+  requireApprovalForSelfService: boolean;
+};
 
-  const cantManageAssetsAsSelfService =
-    isSelfService && booking.status !== BookingStatus.DRAFT;
+/** Prisma `select` for the two approval switches. */
+export const BOOKING_APPROVAL_SWITCHES_SELECT = {
+  requireApprovalForBase: true,
+  requireApprovalForSelfService: true,
+} as const;
 
-  return (
-    !isCompleted &&
-    !isArchived &&
-    !isCancelled &&
-    !cantManageAssetsAsSelfService
+/**
+ * Prisma `where` on `BookingSettings` for "approval is on for at least one
+ * role", the condition under which a RESERVED booking with no `approvedAt`
+ * reads as pending.
+ */
+export const BOOKING_APPROVAL_ENABLED_WHERE: {
+  OR: Partial<BookingApprovalSwitches>[];
+} = {
+  OR: [
+    { requireApprovalForBase: true },
+    { requireApprovalForSelfService: true },
+  ],
+};
+
+/**
+ * The `status` an activity note's `booking_status` tag carries for a
+ * reservation request that is waiting for approval. Not a `BookingStatus`: the
+ * booking is stored as RESERVED, but the person who requested it does not hold
+ * a reservation yet, so the note names the state they see.
+ */
+export const PENDING_APPROVAL_NOTE_STATUS = "PENDING_APPROVAL";
+
+/**
+ * Whether booking approval is on for any role in the workspace. This is the
+ * switch the pending derivation reads: a request made under either switch is
+ * pending while either is still on.
+ *
+ * @param settings - The workspace's switches; absent reads as all off
+ */
+export function isBookingApprovalEnabled(
+  settings: Partial<BookingApprovalSwitches> | null | undefined
+): boolean {
+  return Boolean(
+    settings?.requireApprovalForBase || settings?.requireApprovalForSelfService
   );
 }
 
 /**
- * The statuses a booking is still open to item removal in — every status that
- * is not a closed record (COMPLETE, ARCHIVED, CANCELLED).
+ * Whether a reservation made by a member whose policy names `approvalSetting`
+ * lands as a request that waits for approval. The role policy table says which
+ * switch (if any) gates a role: Base and Self service each have one, everyone
+ * else reserves approved.
  *
- * Spelled as an explicit list so {@link REMOVABLE_STATUSES_BY_ROLE} can say
- * "unrestricted" by reference instead of restating it and drifting from it.
+ * @param args.approvalSetting - `access.policy.bookings.approvalSetting`
+ * @param args.settings - The workspace's switches; absent reads as all off
+ */
+export function roleReservesAsRequest({
+  approvalSetting,
+  settings,
+}: {
+  approvalSetting: RolePolicy["bookings"]["approvalSetting"] | null | undefined;
+  settings: Partial<BookingApprovalSwitches> | null | undefined;
+}): boolean {
+  if (approvalSetting === "base") {
+    return Boolean(settings?.requireApprovalForBase);
+  }
+  if (approvalSetting === "selfService") {
+    return Boolean(settings?.requireApprovalForSelfService);
+  }
+  return false;
+}
+
+/**
+ * Whether a booking is a reservation request still waiting for an approver's
+ * approval. Derived, since there is no PENDING status: a RESERVED booking with no
+ * `approvedAt` in an org with approval on for any role is pending (see
+ * `isBookingApprovalEnabled`). Client-safe; the
+ * server-side checkout guard (`assertBookingIsApproved`) derives from this
+ * same function so UI and service can never disagree.
+ *
+ * @param args.approvedAt - `null` is an undecided request; `undefined` means
+ *   the caller did not load the field, which reads as settled
+ */
+export function isBookingPendingApproval({
+  status,
+  approvedAt,
+  requireBookingApproval,
+}: {
+  status: BookingStatus;
+  approvedAt: Date | string | null | undefined;
+  requireBookingApproval: boolean;
+}): boolean {
+  return (
+    requireBookingApproval &&
+    status === BookingStatus.RESERVED &&
+    approvedAt === null
+  );
+}
+
+/**
+ * The statuses a booking is still open to item removal in: every status that
+ * is not a closed record (COMPLETE, ARCHIVED, CANCELLED).
  */
 const REMOVABLE_STATUSES: BookingStatus[] = [
   BookingStatus.DRAFT,
@@ -41,14 +123,13 @@ const REMOVABLE_STATUSES: BookingStatus[] = [
 /**
  * Whether items may still be REMOVED from a booking in its current status.
  *
- * Removal stays open until the booking is finished — a booking that is
+ * Removal stays open until the booking is finished: a booking that is
  * COMPLETE, ARCHIVED or CANCELLED is a closed record and its contents must not
  * change.
  *
- * Status-only, unlike {@link canUserManageBookingAssets}: this is the
- * closed-record half of the rule and every remove path needs it, including the
- * services, which have no role in scope. Callers acting on behalf of a user
- * want {@link canRoleRemoveBookingAssets}, which adds the role half.
+ * Status-only: every remove path needs it, including services with no caller
+ * in scope. Surfaces acting for a user add the caller's policy through
+ * `canRemoveBookingItems` / `mayRemoveBookingItems`.
  *
  * Ownership remains the caller's to enforce either way.
  *
@@ -60,76 +141,72 @@ export function canUserRemoveBookingAssets(booking: Pick<Booking, "status">) {
 }
 
 /**
- * Statuses in which a restricted role may still remove items from a booking
- * it owns.
+ * Whether a surface should offer removing items from a booking in this status.
  *
- * BASE stops at DRAFT: once a booking is reserved, a BASE custodian is already
- * refused the ADD half of the same operation (`canUserManageBookingAssets`,
- * and the DRAFT-only gate in the manage-assets / manage-kits routes), which
- * tells them to cancel and recreate the booking instead. SELF_SERVICE keeps
- * RESERVED because that role is trusted to adjust its own reservation before
- * pickup.
+ * Every remove path is gated on `booking:update`, which BASE holds, so the
+ * matrix grant alone does not settle it: the status half comes from the
+ * caller's policy (`canRemoveBookingItems`). The grant is passed in rather than
+ * derived here so this stays pure; callers compute it with `userHasPermission`,
+ * which denies while the session's roles are still loading.
  *
- * Neither role reaches ONGOING or OVERDUE. Removing an asset from a live
- * booking reconciles that asset's status back to available (see `removeAssets`
- * in `booking/service.server.ts`), which is a return — and returns are
- * `booking:checkin`, an action neither role holds on its own booking.
+ * Ownership is still the caller's to enforce.
+ *
+ * @param args.canUpdateBooking - The caller holds `booking:update`
+ * @param args.access - The caller's access
+ * @param args.bookingStatus - The booking's status
+ * @returns `true` when removal may be offered
  */
-const REMOVABLE_STATUSES_BY_ROLE: Record<OrganizationRoles, BookingStatus[]> = {
-  [OrganizationRoles.BASE]: [BookingStatus.DRAFT],
-  [OrganizationRoles.SELF_SERVICE]: [
-    BookingStatus.DRAFT,
-    BookingStatus.RESERVED,
-  ],
-  // Unrestricted beyond the closed-record rule, mirroring the ADMIN/OWNER
-  // allow-all short-circuit in `@shelf/permissions`.
-  [OrganizationRoles.ADMIN]: REMOVABLE_STATUSES,
-  [OrganizationRoles.OWNER]: REMOVABLE_STATUSES,
-};
+export function mayRemoveBookingItems({
+  canUpdateBooking,
+  access,
+  bookingStatus,
+}: {
+  canUpdateBooking: boolean;
+  access: RoleAccess;
+  bookingStatus: BookingStatusName;
+}): boolean {
+  return canUpdateBooking && canRemoveBookingItems({ access, bookingStatus });
+}
 
 /**
- * Whether the acting user's roles may remove items from a booking in its
- * current status.
+ * Whether the booking custodian is fixed to the caller themself: the booking
+ * form's custodian picker, its seed, and the server guards on create and edit.
  *
- * The role half of the question {@link canUserRemoveBookingAssets} leaves open.
- * `booking:update` is the permission every remove path checks and BASE holds
- * it, so the permission matrix alone does not answer this — every surface that
- * offers or performs a removal has to ask here.
- *
- * Takes an ARRAY and resolves it with `.some()`, matching `roleHasPermission`
- * in `@shelf/permissions`: a membership carries a role list, and reading
- * `roles[0]` for an authorization decision resolves `[SELF_SERVICE, ADMIN]` to
- * the restricted answer.
- *
- * Ownership is still the caller's to enforce: this answers "may these roles act
- * at this status", not "is this their booking".
- *
- * @param roles - The acting user's roles in the booking's organization. Empty
- *   or `undefined` denies, the safe direction while a session is still loading.
- * @param booking - The booking being modified; only `status` is consulted
- * @returns `true` when those roles may remove items at this status
+ * @param access - The caller's access
+ * @returns `true` when the caller may only book for themself
  */
-export function canRoleRemoveBookingAssets({
-  roles,
+export function bookingCustodianIsSelf(
+  access: Pick<RoleAccess, "policy">
+): boolean {
+  return access.policy.bookings.custodianPicker === "self";
+}
+
+/**
+ * Whether the caller may write to this booking: every booking for roles with
+ * `bookings.writeAll`, otherwise only ones they created or hold through the
+ * user custody link. The non-throwing form of `validateBookingOwnership`
+ * (`~/utils/booking-authorization.server`), for surfaces that decide which
+ * actions to offer. Pure and client-safe, so the server guard and the UI that
+ * hides what it refuses share one rule.
+ *
+ * @param params.booking - The booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @returns `true` when writes to this booking are allowed
+ */
+export function canWriteBooking({
   booking,
+  userId,
+  access,
 }: {
-  roles: OrganizationRoles[] | undefined;
-  booking: Pick<Booking, "status">;
-}) {
-  if (!roles?.length) {
-    return false;
-  }
-
-  if (!canUserRemoveBookingAssets(booking)) {
-    return false;
-  }
-
-  // ALLOW-list, not a deny-list, and typed as a total `Record` so a role added
-  // to the enum later fails to compile in the map instead of silently
-  // inheriting unrestricted removal. Same discipline as
-  // `bookingWriteScopeFilter` in `booking-authorization.server.ts`.
-  return roles.some(
-    (role) => REMOVABLE_STATUSES_BY_ROLE[role]?.includes(booking.status)
+  booking: { creatorId: string | null; custodianUserId: string | null };
+  userId: string;
+  access: Pick<RoleAccess, "bookings">;
+}): boolean {
+  return (
+    access.bookings.writeAll ||
+    booking.creatorId === userId ||
+    booking.custodianUserId === userId
   );
 }
 

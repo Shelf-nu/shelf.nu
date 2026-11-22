@@ -4,7 +4,13 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useActionData, useFetcher } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -12,7 +18,12 @@ import { ShelfOTP } from "~/components/forms/otp-input";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
-import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import {
+  endSessionByRefreshToken,
+  verifyOtpAndSignin,
+} from "~/modules/auth/service.server";
+import { assertSignupEnabled } from "~/modules/auth/signup-gate.server";
+import { isSsoDomainEmail } from "~/modules/auth/sso-enforcement.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -25,7 +36,8 @@ import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
-import { setCookie } from "~/utils/cookies.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
+import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -40,16 +52,26 @@ import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
 import type { action as resendOtpAction } from "./resend-otp";
 
-export function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") as OtpVerifyMode;
   const title = getOtpPageData(mode).title;
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
-  return payload({ title });
+  /**
+   * An address that must use SSO is sent no code, and the send answers as if
+   * it were. This page tells everyone on an SSO domain where to go instead. It
+   * depends only on the domain, so it says nothing about any one account.
+   */
+  const email = searchParams.get("email") ?? "";
+  const ssoDomainHint = validEmail(email)
+    ? await isSsoDomainEmail(email).catch(() => false)
+    : false;
+
+  return payload({ title, ssoDomainHint });
 }
 
 const OtpSchema = z.object({
@@ -91,7 +113,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
           shouldBeCaptured: false,
         });
 
-        const authSession = await verifyOtpAndSignin(email, otp);
+        const authSession = await verifyOtpAndSignin(email, otp, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
         // Whether this person already has an account is decided by the
         // authenticated id, never by the address typed: the same person can
         // type it with different capitals, and each spelling must reach the
@@ -109,6 +133,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const signupIntent = isLogin ? null : await readSignupIntent(request);
 
         if (!userExists) {
+          // A verified code with no Shelf account behind it is a signup, so it
+          // obeys the same switch as `/join`. Invited and SSO users get their
+          // account from their own flows, not from here. A refused signup
+          // asks for the session the code just opened to be ended (best
+          // effort), and its tokens never reach the browser.
+          try {
+            assertSignupEnabled();
+          } catch (refusal) {
+            await endSessionByRefreshToken(authSession.refreshToken);
+            throw refusal;
+          }
+
           try {
             const username = await generateUniqueUsername(authSession.email);
             // Detect the caller's date/time/week/timezone prefs from browser
@@ -136,7 +172,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         }
 
-        // Setting the auth session and redirecting user to assets page
+        // Setting the auth session and redirecting to the role's landing page
         context.setSession(authSession);
 
         const { organizationId } = await getSelectedOrganization({
@@ -145,16 +181,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         // The link's `redirectTo` is followed only by an account that has
-        // already onboarded. Everyone else lands on `/assets`, whose layout
-        // sends them to onboarding: `redirectTo` can name a page outside that
+        // already onboarded. Everyone else lands on `/`, whose role landing page
+        // sits inside the layout that sends them to onboarding: `redirectTo` can name a page outside that
         // layout (the QR pages have no onboarding check), and following it
         // would skip onboarding altogether.
         const landing = existingUser?.onboarded
-          ? safeRedirect(signupIntent?.redirectTo, "/assets")
-          : "/assets";
+          ? safeRedirect(signupIntent?.redirectTo, "/")
+          : "/";
 
         return redirect(landing, {
           headers: [
+            ...(await expireListPreferenceCookies(request, {
+              event: "sign-in",
+            })),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
             ...(await signupIntentHeaders(signupIntent)),
           ],
@@ -181,6 +220,7 @@ export default function OtpPage() {
     type: "success" | "error";
   }>();
   const data = useActionData<typeof action>();
+  const { ssoDomainHint } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const fetcher = useFetcher<resendAction>();
 
@@ -227,13 +267,10 @@ export default function OtpPage() {
           type: "error",
         });
       } else {
-        setMessage({
-          message: "Email sent successfully. Please check your inbox.",
-          type: "success",
-        });
+        setMessage({ message: pageData.resentMessage, type: "success" });
       }
     }
-  }, [fetcher]);
+  }, [fetcher, pageData.resentMessage]);
 
   return (
     <>
@@ -252,6 +289,17 @@ export default function OtpPage() {
               name="email"
               value={searchParams.get("email") || ""}
             />
+
+            {ssoDomainHint ? (
+              <p className="text-sm text-gray-600">
+                If your organization uses single sign-on, you may not receive a
+                code. Use{" "}
+                <Button variant="link" to="/sso-login">
+                  Login with SSO
+                </Button>{" "}
+                instead.
+              </p>
+            ) : null}
 
             {message?.message && (
               <p

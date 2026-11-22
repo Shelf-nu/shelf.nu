@@ -30,7 +30,6 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -40,13 +39,33 @@ import {
   type Tag,
   type MobileCustomFieldDefinition,
 } from "@/lib/api";
+import { ValuationField } from "@/components/asset-edit/valuation-field";
+import { valuationFromInput } from "@/lib/asset-valuation";
+import { useAllLocations } from "@/hooks/use-all-locations";
+import {
+  DROPDOWN_MAX_HEIGHT,
+  incompleteListNotice,
+  moreRowsHint,
+  searchRows,
+  visibleRows,
+} from "@/lib/visible-rows";
+import { IncompleteListNotice } from "@/components/asset-edit/incomplete-list-notice";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
+import { CharacterCount } from "@/components/shared/character-count";
+import { LinkedText } from "@/components/links/linked-text";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
+  ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
+  countCharacters,
+  isAssetDescriptionTooLong,
+} from "@/lib/asset-description";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -76,6 +95,9 @@ export default function CreateAssetScreen() {
   // ── Form state ──────────────────────────────────
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // Held as the raw string the field produces, not a number: an empty box
+  // means "not set", which is different from a deliberate 0.
+  const [valuation, setValuation] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(
     null
   );
@@ -92,10 +114,8 @@ export default function CreateAssetScreen() {
 
   // ── Picker data ─────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
-  const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
   // Server-computed from GET /api/mobile/tags: whether the caller may mint
   // tags inline (admins/owners). Gates the picker's "create tag" row.
@@ -149,15 +169,27 @@ export default function CreateAssetScreen() {
   }, [currentOrg]);
 
   // ── Load locations ──────────────────────────────
-  const loadLocations = useCallback(async () => {
-    if (!currentOrg) return;
-    setIsLocationsLoading(true);
-    const { data } = await api.locations(currentOrg.id);
-    if (data?.locations) {
-      setLocations(data.locations);
-    }
-    setIsLocationsLoading(false);
-  }, [currentOrg]);
+  // Every page of locations: the field searches only what it holds. See
+  // useAllLocations for how loads, workspace switches and failures are handled.
+  const fetchLocationsPage = useCallback(
+    (orgId: string, page: number, perPage: number) =>
+      api.locations(orgId, undefined, { page, perPage }),
+    []
+  );
+  const {
+    locations,
+    isLocationsLoading,
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loadLocations,
+  } = useAllLocations(currentOrg?.id, fetchLocationsPage);
+  // Set when the list is missing rows: a page failed, or the load hit its limit.
+  const locationsNotice = incompleteListNotice({
+    noun: "locations",
+    error: locationsError,
+    truncated: isLocationsTruncated,
+    loaded: locations.length,
+  });
 
   // ── Load tags ───────────────────────────────────
   // Guards against a stale response winning after an org switch: each call gets
@@ -273,40 +305,23 @@ export default function CreateAssetScreen() {
   // ── Unsaved changes guard ─────────────────────
   // Track whether the form was submitted successfully (skip guard on success)
   const didSubmitRef = useRef(false);
-  const navigation = useNavigation();
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
+    valuation.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
     selectedTags.length > 0 ||
     !!imageUri ||
     Object.values(customFieldValues).some((v) => v.trim() !== "");
 
-  useEffect(() => {
-    if (!hasUnsavedChanges || didSubmitRef.current) return;
-
-    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
-      // If nothing changed or already submitted, allow navigation
-      if (!hasUnsavedChanges || didSubmitRef.current) return;
-
-      e.preventDefault();
-      Alert.alert(
-        "Discard changes?",
-        "You have unsaved changes. Are you sure you want to leave?",
-        [
-          { text: "Keep Editing", style: "cancel" },
-          {
-            text: "Discard",
-            style: "destructive",
-            onPress: () => navigation.dispatch(e.data.action),
-          },
-        ]
-      );
-    });
-
-    return unsubscribe;
-  }, [navigation, hasUnsavedChanges]);
+  useDiscardGuard({
+    active: hasUnsavedChanges,
+    // A submitted form leaves freely
+    decide: () => (didSubmitRef.current ? "leave" : "prompt"),
+    title: "Discard changes?",
+    message: "You have unsaved changes. Are you sure you want to leave?",
+  });
 
   // ── Filtered picker lists ───────────────────────
   const filteredCategories = categorySearch
@@ -315,11 +330,11 @@ export default function CreateAssetScreen() {
       )
     : categories;
 
-  const filteredLocations = locationSearch
-    ? locations.filter((l) =>
-        l.name.toLowerCase().includes(locationSearch.toLowerCase())
-      )
-    : locations;
+  // Closest matches first, so the cap below never hides the row being typed.
+  const filteredLocations = searchRows(locations, locationSearch);
+  // Draw at most a page of rows, led by the selected one when it sorts after
+  // them; the search box reaches the rest.
+  const shownLocations = visibleRows(filteredLocations, selectedLocation?.id);
 
   // ── Image Picker ───────────────────────────────
   const pickImage = async (source: "camera" | "library") => {
@@ -425,11 +440,17 @@ export default function CreateAssetScreen() {
       .filter((cf): cf is { id: string; value: string } => cf !== null);
   }, [customFieldDefs, customFieldValues]);
 
+  const descriptionTooLong = isAssetDescriptionTooLong(description);
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
+      return;
+    }
+    if (descriptionTooLong) {
+      Alert.alert("Validation", ASSET_DESCRIPTION_TOO_LONG_MESSAGE);
       return;
     }
     if (!currentOrg) return;
@@ -483,6 +504,9 @@ export default function CreateAssetScreen() {
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
       qrId: qrId || undefined,
+      // Same rule as the edit screen: a blank box is no value and is left
+      // out, while a typed 0 is a real value and is sent.
+      valuation: valuationFromInput(valuation) ?? undefined,
     });
 
     setIsSubmitting(false);
@@ -532,6 +556,7 @@ export default function CreateAssetScreen() {
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
+          setValuation("");
           setQrId(undefined);
           // The route still carries the old qrId; clear it too, or a screen
           // remount would re-seed the state and resurrect the banner.
@@ -543,6 +568,7 @@ export default function CreateAssetScreen() {
 
   const canSubmit =
     title.trim().length >= 2 &&
+    !descriptionTooLong &&
     !isSubmitting &&
     !isCustomFieldsLoading &&
     !customFieldsError;
@@ -651,12 +677,30 @@ export default function CreateAssetScreen() {
             placeholder="Optional description..."
             placeholderTextColor={colors.placeholderText}
             multiline
-            numberOfLines={3}
             textAlignVertical="top"
-            maxLength={500}
             accessibilityLabel="Description"
           />
+          <CharacterCount
+            count={countCharacters(description)}
+            max={ASSET_DESCRIPTION_MAX_LENGTH}
+          />
+          {descriptionTooLong && (
+            <Text
+              style={styles.errorHint}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {ASSET_DESCRIPTION_TOO_LONG_MESSAGE}
+            </Text>
+          )}
         </View>
+
+        {/* ── Value (optional) ─────────────────────── */}
+        <ValuationField
+          value={valuation}
+          onChange={setValuation}
+          currency={currentOrg?.currency ?? "USD"}
+        />
 
         {/* ── Category Picker ──────────────────────── */}
         <View style={styles.field}>
@@ -835,7 +879,7 @@ export default function CreateAssetScreen() {
                   nestedScrollEnabled
                   keyboardShouldPersistTaps="handled"
                 >
-                  {filteredLocations.map((loc) => (
+                  {shownLocations.rows.map((loc) => (
                     <TouchableOpacity
                       key={loc.id}
                       style={[
@@ -866,6 +910,16 @@ export default function CreateAssetScreen() {
                       )}
                     </TouchableOpacity>
                   ))}
+                  {/* Last row of the list, so it scrolls with the rows instead
+                      of taking fixed height from them. */}
+                  {shownLocations.hiddenCount > 0 && (
+                    <Text style={styles.pickerHint}>
+                      {moreRowsHint(
+                        shownLocations.rows.length,
+                        filteredLocations.length
+                      )}
+                    </Text>
+                  )}
                 </ScrollView>
               )}
               {selectedLocation && (
@@ -881,6 +935,13 @@ export default function CreateAssetScreen() {
                 </TouchableOpacity>
               )}
             </View>
+          )}
+          {showLocationPicker && !isLocationsLoading && locationsNotice && (
+            <IncompleteListNotice
+              notice={locationsNotice}
+              onRetry={loadLocations}
+              retryLabel="Retry loading locations"
+            />
           )}
         </View>
 
@@ -952,7 +1013,10 @@ export default function CreateAssetScreen() {
                     <Text style={styles.required}> *</Text>
                   ) : null}
                   {def.helpText ? (
-                    <Text style={styles.helpText}> — {def.helpText}</Text>
+                    <LinkedText
+                      text={` - ${def.helpText}`}
+                      style={styles.helpText}
+                    />
                   ) : null}
                 </Text>
                 <CustomFieldInput
@@ -963,6 +1027,7 @@ export default function CreateAssetScreen() {
                     helpText: def.helpText,
                     required: def.required,
                     options: def.options,
+                    format: def.format,
                   }}
                   value={customFieldValues[def.id] ?? ""}
                   onChange={customFieldChangeHandlers[def.id]}
@@ -1119,7 +1184,10 @@ const useStyles = createStyles((colors, shadows) => ({
     ...shadows.sm,
   },
   textArea: {
+    // Grows with the text to about ten lines, then scrolls inside. A
+    // `numberOfLines` prop would cap it at that many lines on iOS.
     minHeight: 80,
+    maxHeight: 260,
     paddingTop: 12,
   },
   errorHint: {
@@ -1161,7 +1229,7 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.gray300,
     borderRadius: borderRadius.sm,
     marginTop: spacing.xs,
-    maxHeight: 220,
+    maxHeight: DROPDOWN_MAX_HEIGHT,
     ...shadows.md,
   },
   pickerSearch: {
@@ -1174,6 +1242,13 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   pickerLoading: {
     padding: spacing.lg,
+  },
+  pickerHint: {
+    paddingHorizontal: 14,
+    paddingVertical: spacing.sm,
+    textAlign: "center",
+    color: colors.mutedLight,
+    fontSize: fontSize.sm,
   },
   pickerEmpty: {
     padding: spacing.lg,

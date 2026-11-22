@@ -11,6 +11,11 @@
  * describe what the server currently owes, and holding them frozen lets the
  * drawer credit a scan the server will refuse.
  *
+ * The scanned codes are also mirrored into a draft that outlives the page, so
+ * a reload, a closed tab or an error page does not cost the operator their
+ * scans. The draft is read back right after the entry clear and removed once a
+ * save is accepted. See {@link file://./use-scan-draft.ts}.
+ *
  * @see {@link file://./use-booking-fulfil-session-initialization.ts} for the
  *   Check Out equivalent. Its seed is one atomic atom write that clears the
  *   scan list as a side effect, so it cannot make this split without
@@ -24,10 +29,13 @@ import { useSetAtom } from "jotai";
 import {
   type AlreadyIncludedRow,
   type ExpectedModelRequest,
+  type ReservedModel,
   assignAlreadyIncludedAtom,
+  assignReservedModelsAtom,
   expectedModelRequestsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { useScanDraft } from "~/hooks/use-scan-draft";
 
 /**
  * Reservation context for the Scan to Assign session, or null when the
@@ -35,6 +43,7 @@ import {
  */
 export type AssignSessionInfo = {
   expectedModelRequests: ExpectedModelRequest[];
+  reservedModels: ReservedModel[];
   alreadyIncluded: AlreadyIncludedRow[];
 } | null;
 
@@ -44,16 +53,17 @@ export type AssignSessionInfo = {
  *
  * `scannedItemsAtom` is cleared once per `bookingId`, tracked by a ref, so a
  * prior flow's scans never surface here and an operator's in-progress scans
- * survive a revalidation for the same booking.
+ * survive a revalidation for the same booking. A list parked in this
+ * booking's draft is put back straight after that clear.
  *
- * `expectedModelRequestsAtom` and `assignAlreadyIncludedAtom` follow
- * `session` itself, emptying when it is null so a booking with no
- * reservations renders exactly as the screen always has. They must stay
- * current: the drawer decides from them which scans count toward a
+ * `expectedModelRequestsAtom`, `assignReservedModelsAtom` and
+ * `assignAlreadyIncludedAtom` follow `session` itself, emptying when it is
+ * null so a booking with no reservations renders as a plain scan list. They
+ * must stay current: the drawer decides from them which scans count toward a
  * reservation and which are refused as duplicates, so stale context reports
  * a claim the server will not make.
  *
- * The cleanup function reverses all three atoms so leaving the scanner does
+ * The cleanup function reverses all four atoms so leaving the scanner does
  * not leak state into whichever flow the operator opens next.
  *
  * @param args.session - Reservation context to seed the atoms with, or null.
@@ -69,12 +79,20 @@ export function useBookingAssignSessionInitialization({
 }): void {
   const setExpectedModelRequests = useSetAtom(expectedModelRequestsAtom);
   const setAlreadyIncluded = useSetAtom(assignAlreadyIncludedAtom);
+  const setReservedModels = useSetAtom(assignReservedModelsAtom);
   const setScannedItems = useSetAtom(scannedItemsAtom);
 
   // Tracks which bookingId the scan list was last cleared for, so a render
   // carrying a fresh `session` object for the same booking does not wipe
   // scans the operator is part way through.
   const initializedBookingIdRef = useRef<string | null>(null);
+
+  // Keeps the scanned codes through a reload, a closed tab or an error page.
+  const { restoreDraft } = useScanDraft({
+    scope: "assign",
+    targetId: bookingId,
+    seededTargetIdRef: initializedBookingIdRef,
+  });
 
   useEffect(() => {
     if (initializedBookingIdRef.current === bookingId) {
@@ -83,15 +101,23 @@ export function useBookingAssignSessionInitialization({
     initializedBookingIdRef.current = bookingId;
 
     setScannedItems({});
-  }, [bookingId, setScannedItems]);
+    // After the clear above, so a parked list is what the operator sees.
+    restoreDraft();
+  }, [bookingId, setScannedItems, restoreDraft]);
 
   // Deliberately not guarded by the ref above: every revalidation carries
   // the server's current view of what the booking still owes, and that is
   // what the drawer classifies scans against.
   useEffect(() => {
     setExpectedModelRequests(session?.expectedModelRequests ?? []);
+    setReservedModels(session?.reservedModels ?? []);
     setAlreadyIncluded(session?.alreadyIncluded ?? []);
-  }, [session, setExpectedModelRequests, setAlreadyIncluded]);
+  }, [
+    session,
+    setExpectedModelRequests,
+    setReservedModels,
+    setAlreadyIncluded,
+  ]);
 
   useEffect(() => {
     const currentBookingId = bookingId;
@@ -99,6 +125,7 @@ export function useBookingAssignSessionInitialization({
       if (initializedBookingIdRef.current === currentBookingId) {
         initializedBookingIdRef.current = null;
         setExpectedModelRequests([]);
+        setReservedModels([]);
         setAlreadyIncluded([]);
         setScannedItems({});
       }
@@ -106,6 +133,7 @@ export function useBookingAssignSessionInitialization({
   }, [
     bookingId,
     setExpectedModelRequests,
+    setReservedModels,
     setAlreadyIncluded,
     setScannedItems,
   ]);

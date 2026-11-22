@@ -51,6 +51,19 @@ describe("validateImportUserRows", () => {
     ]);
   });
 
+  it("reads a role written as the label the app shows", () => {
+    const result = validate([
+      { role: "Manager", email: "manager@school.org" },
+      { role: "Self service", email: "self@school.org" },
+    ]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.validRows.map((row) => row.role)).toEqual([
+      "MANAGER",
+      "SELF_SERVICE",
+    ]);
+  });
+
   it("refuses a row whose email is not an address", () => {
     const result = validate([{ role: "BASE", email: "Evan Williams" }]);
 

@@ -1,4 +1,8 @@
+import type { ApproveBookingBody } from "../booking-approval-view";
+import type { BookingMethod } from "../booking-method";
+import { withBookingMethod } from "../booking-method";
 import { apiFetch } from "./client";
+import { mobilePaths } from "./paths";
 import type {
   BookingsResponse,
   BookingDetailResponse,
@@ -11,8 +15,12 @@ import type {
   BookingMutationResponse,
   CreateBookingPayload,
   UpdateBookingPayload,
+  ExtendBookingPayload,
+  ExtendBookingResponse,
   RemoveBookingAssetsResponse,
   AvailableAssetsResponse,
+  BookingAssetAvailabilityResponse,
+  AdjustBookingAssetQuantityResponse,
   AvailableKitsResponse,
   AvailableModelsResponse,
   ModelRequestMutationResponse,
@@ -62,36 +70,95 @@ export const bookingsApi = {
 
   /** Get full booking details with assets */
   booking: (bookingId: string, orgId: string) =>
-    apiFetch<BookingDetailResponse>(
-      `/api/mobile/bookings/${bookingId}?orgId=${orgId}`
-    ),
+    apiFetch<BookingDetailResponse>(mobilePaths.booking(bookingId, orgId)),
 
   /**
    * Add scanned assets and/or kits to a booking (scan-to-build flow).
    * Kits expand to their contained assets server-side, mirroring the web
    * scanner's add-to-booking drawer.
+   *
+   * `quantities` is how many units to book per QUANTITY_TRACKED asset id, the
+   * twin of the web drawer's per-row quantity input. An asset missing from the
+   * map books one unit. The server caps every entry at what the booking's
+   * window has free.
    */
   addScannedToBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    kitIds: string[]
+    kitIds: string[],
+    quantities: Record<string, number> = {}
   ) =>
-    apiFetch<{ success: boolean }>(
-      `/api/mobile/bookings/add-scanned-assets?orgId=${orgId}`,
+    apiFetch<{
+      success: boolean;
+      /**
+       * Archived members of the kits that stayed out of the booking. Absent
+       * from servers that predate it, and then read as none.
+       */
+      archivedKitMembersLeftOut?: number;
+    }>(`/api/mobile/bookings/add-scanned-assets?orgId=${orgId}`, {
+      method: "POST",
+      body: JSON.stringify({ bookingId, assetIds, kitIds, quantities }),
+    }),
+
+  /**
+   * Free units of the given quantity-tracked assets over a booking's window,
+   * with the booking itself excluded. The cap for a quantity prompt: the
+   * scanner asks it the moment a quantity-tracked asset is scanned, the
+   * booking screen before a booked quantity is edited.
+   */
+  bookingAssetAvailability: (
+    orgId: string,
+    bookingId: string,
+    assetIds: string[]
+  ) => {
+    const sp = new URLSearchParams({ orgId, bookingId });
+    sp.set("assetIds", assetIds.join(","));
+    return apiFetch<BookingAssetAvailabilityResponse>(
+      `/api/mobile/bookings/asset-availability?${sp}`
+    );
+  },
+
+  /**
+   * Change how many units of one quantity-tracked asset a booking holds (the
+   * standalone slice). A reduction always passes; an increase is checked
+   * against the window's free units server-side, same as the web dialog.
+   */
+  adjustBookingAssetQuantity: (
+    orgId: string,
+    bookingId: string,
+    assetId: string,
+    quantity: number
+  ) =>
+    apiFetch<AdjustBookingAssetQuantityResponse>(
+      `/api/mobile/bookings/adjust-asset-quantity?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds }),
+        body: JSON.stringify({ bookingId, assetId, quantity }),
       }
     ),
 
   /** Check out a booking (RESERVED -> ONGOING) */
-  checkoutBooking: (orgId: string, bookingId: string, timeZone?: string) =>
+  checkoutBooking: (
+    orgId: string,
+    bookingId: string,
+    timeZone?: string,
+    /**
+     * Answers to the booking's `checkoutSourceQuestions`, keyed by slice id:
+     * the location the units leave from, or `null` for the unplaced units.
+     * Left out, the server records its own default for each pool.
+     */
+    sourceLocations?: Record<string, string | null>
+  ) =>
     apiFetch<BookingActionResponse>(
       `/api/mobile/bookings/checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
       }
     ),
 
@@ -107,19 +174,36 @@ export const bookingsApi = {
    * server refuses only a check-out that sends nothing out: without the
    * explicit requirement it needs a scanned unit or an asset already on the
    * booking, and under it a scanned unit.
+   *
+   * `method` says how the units were collected; the server records it on the
+   * booking's activity and prints it on the receipt. See `lib/booking-method`.
    */
   fulfilAndCheckoutBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
     kitIds: string[] = [],
-    timeZone?: string
+    timeZone?: string,
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>,
+    method?: BookingMethod
   ) =>
     apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds, timeZone }),
+        body: JSON.stringify(
+          withBookingMethod(
+            {
+              bookingId,
+              assetIds,
+              kitIds,
+              timeZone,
+              ...(sourceLocations ? { sourceLocations } : {}),
+            },
+            method
+          )
+        ),
       }
     ),
 
@@ -133,19 +217,26 @@ export const bookingsApi = {
       }
     ),
 
-  /** Partial check-in: check in specific assets */
+  /**
+   * Partial check-in: check in specific assets. `method` says how the app
+   * collected them (scanned or selected); the server records it on the
+   * booking's activity and prints it on the receipt. See `lib/booking-method`.
+   */
   partialCheckinBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
     timeZone?: string,
-    checkins?: CheckinDisposition[]
+    checkins?: CheckinDisposition[],
+    method?: BookingMethod
   ) =>
     apiFetch<PartialCheckinResponse>(
       `/api/mobile/bookings/partial-checkin?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
+        body: JSON.stringify(
+          withBookingMethod({ bookingId, assetIds, checkins, timeZone }, method)
+        ),
         // why: non-idempotent — per-unit dispositions carry no request key, so
         // a timed-out-but-landed request re-sent would return the units twice.
         retry: false,
@@ -156,20 +247,34 @@ export const bookingsApi = {
    * Partial check-out: check out a subset of a booking's assets (progressive
    * check-out — "take some now"). The first checkout transitions the booking to
    * ONGOING; the rest stay reserved until checked out. Mirrors
-   * {@link partialCheckinBooking}.
+   * {@link partialCheckinBooking}, `method` included.
    */
   partialCheckoutBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
     timeZone?: string,
-    checkouts?: CheckoutDisposition[]
+    checkouts?: CheckoutDisposition[],
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>,
+    method?: BookingMethod
   ) =>
     apiFetch<PartialCheckoutResponse>(
       `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        body: JSON.stringify(
+          withBookingMethod(
+            {
+              bookingId,
+              assetIds,
+              checkouts,
+              timeZone,
+              ...(sourceLocations ? { sourceLocations } : {}),
+            },
+            method
+          )
+        ),
         // why: non-idempotent — per-unit quantities carry no request key, so a
         // timed-out-but-landed request re-sent would check the units out twice.
         retry: false,
@@ -196,6 +301,22 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+      }
+    ),
+
+  /**
+   * Move an ONGOING/OVERDUE booking's end later (conflict-checked server-side).
+   */
+  extendBooking: (orgId: string, payload: ExtendBookingPayload) =>
+    apiFetch<ExtendBookingResponse>(
+      `/api/mobile/bookings/extend?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        // why: not retried. A timed-out request the server already applied
+        // would come back refused (the end is no longer after the current
+        // one) and send the extension emails a second time.
+        retry: false,
       }
     ),
 
@@ -242,6 +363,24 @@ export const bookingsApi = {
     ),
 
   /**
+   * Approve a pending reservation request. The booking stays RESERVED and
+   * becomes checkout-able; who may approve is enforced server-side.
+   */
+  approveBooking: (orgId: string, body: ApproveBookingBody) =>
+    apiFetch<BookingMutationResponse>(
+      `/api/mobile/bookings/approve?orgId=${orgId}`,
+      {
+        method: "POST",
+        // Built by `approveBookingBody`: the request version on screen, so the
+        // server refuses to approve a request that changed since it loaded.
+        body: JSON.stringify(body),
+        // A retried approval after a lost response would be refused as
+        // already approved and read as a failure.
+        retry: false,
+      }
+    ),
+
+  /**
    * Cancel a booking (RESERVED/ONGOING/OVERDUE -> CANCELLED). Frees the
    * assets/kits; status guard + ownership enforced server-side.
    */
@@ -258,7 +397,10 @@ export const bookingsApi = {
       }
     ),
 
-  /** Archive a COMPLETE booking (-> ARCHIVED). COMPLETE-only, enforced server-side. */
+  /**
+   * Archive a finished booking (-> ARCHIVED): COMPLETE, or RESERVED past its
+   * end. The status rule is enforced server-side.
+   */
   archiveBooking: (orgId: string, bookingId: string) =>
     apiFetch<BookingMutationResponse>(
       `/api/mobile/bookings/archive?orgId=${orgId}`,
@@ -268,13 +410,34 @@ export const bookingsApi = {
       }
     ),
 
-  /** Permanently delete a booking (ownership + BASE-only-DRAFT enforced server-side). */
-  deleteBooking: (orgId: string, bookingId: string) =>
+  /**
+   * Discard a draft: archive a DRAFT booking (-> ARCHIVED). The record stays
+   * in the workspace history; the server refuses any other status.
+   */
+  discardDraftBooking: (orgId: string, bookingId: string) =>
+    apiFetch<BookingMutationResponse>(
+      `/api/mobile/bookings/archive?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, discardDraft: true }),
+        // why: non-idempotent; a timed-out-but-landed discard re-sent finds
+        // the booking ARCHIVED and is refused. The screen reconciles instead.
+        retry: false,
+      }
+    ),
+
+  /**
+   * Permanently delete a booking. The server requires `booking:delete` (Base
+   * and Self Service hold none; they use `discardDraftBooking` for drafts) and
+   * ownership. `confirmation` is the name the user typed in the delete
+   * sheet; the server checks it once every supported build sends it (#3175).
+   */
+  deleteBooking: (orgId: string, bookingId: string, confirmation: string) =>
     apiFetch<{ success: boolean }>(
       `/api/mobile/bookings/delete?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId }),
+        body: JSON.stringify({ bookingId, confirmation }),
       }
     ),
 
@@ -391,7 +554,7 @@ export const bookingsApi = {
     quantity: number
   ) =>
     apiFetch<ModelRequestMutationResponse>(
-      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      mobilePaths.bookingModelRequests(bookingId, orgId),
       {
         method: "POST",
         body: JSON.stringify({ assetModelId, quantity }),
@@ -409,7 +572,7 @@ export const bookingsApi = {
     assetModelId: string
   ) =>
     apiFetch<ModelRequestMutationResponse>(
-      `/api/mobile/bookings/${bookingId}/model-requests?orgId=${orgId}`,
+      mobilePaths.bookingModelRequests(bookingId, orgId),
       {
         method: "DELETE",
         body: JSON.stringify({ assetModelId }),

@@ -3,7 +3,6 @@ import type { LoaderFunctionArgs } from "react-router";
 import { data, Outlet, useLoaderData, useParams } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
-import type { Item } from "~/components/layout/horizontal-tabs/types";
 import { TeamUpgradeBanner } from "~/components/settings/team-upgrade-banner";
 import When from "~/components/when/when";
 import { getUserTierLimit } from "~/modules/tier/service.server";
@@ -13,10 +12,10 @@ import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+  TEAM_LAYOUT_GATES,
+  visibleTeamTabs,
+} from "~/utils/permissions/settings-tabs";
+import { requireAnyPermission } from "~/utils/roles.server";
 import { premiumIsEnabled } from "~/utils/subscription.server";
 import { resolveTeamUpgradeCta } from "~/utils/team-upgrade-cta";
 
@@ -26,11 +25,12 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    const { currentOrganization } = await requirePermission({
+    // Admits a member who can see at least one Team tab. Each Team page keeps
+    // its own gate, so this layout grants nothing by itself.
+    const { currentOrganization, roles } = await requireAnyPermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.read,
+      anyOf: TEAM_LAYOUT_GATES,
     });
 
     const isPersonalOrg = currentOrganization.type === "PERSONAL";
@@ -82,6 +82,9 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       upgradeCtaTo: upgradeCta.to,
       upgradeCtaLabel: upgradeCta.label,
       upgradeBannerCollapsed: !!userPrefsCookie.teamUpgradeBannerCollapsed,
+      tabs: visibleTeamTabs({ roles, isPersonalOrg }).map(
+        ({ to, content }) => ({ to, content })
+      ),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -96,17 +99,8 @@ export default function TeamSettings() {
     upgradeCtaTo,
     upgradeCtaLabel,
     upgradeBannerCollapsed,
+    tabs,
   } = useLoaderData<typeof loader>();
-
-  const TABS: Item[] = [
-    ...(!isPersonalOrg
-      ? [
-          { to: "users", content: "Users" },
-          { to: "invites", content: "Invites" },
-        ]
-      : []),
-    { to: "nrm", content: "Non-registered members" },
-  ];
 
   const params = useParams();
 
@@ -134,7 +128,7 @@ export default function TeamSettings() {
               collapsed={upgradeBannerCollapsed}
             />
           ) : null}
-          <HorizontalTabs items={TABS} />
+          <HorizontalTabs items={tabs} />
           <Outlet />
         </div>
       </When>

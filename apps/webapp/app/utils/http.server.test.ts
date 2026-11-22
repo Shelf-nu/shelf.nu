@@ -7,6 +7,7 @@ import {
   getCurrentPath,
   getRedirectTo,
   getRefererPath,
+  getRefererPathExcludingSelf,
   makeRedirectToFromHere,
   isPost,
   safeRedirect,
@@ -118,6 +119,42 @@ describe(getRefererPath.name, () => {
       headers: { referer: `${BASE_URL}/assets/123/edit` },
     });
     expect(getRefererPath(request)).toBe("/assets/123/edit");
+  });
+});
+
+describe(getRefererPathExcludingSelf.name, () => {
+  const EDIT_URL = `${BASE_URL}/assets/123/edit`;
+
+  it("returns null when the referer is the requested page with a query", () => {
+    const request = new Request(`${EDIT_URL}?category=cat-1`, {
+      headers: { referer: `${EDIT_URL}?category=cat-1` },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe(null);
+  });
+
+  it("returns null when only the query string differs", () => {
+    const request = new Request(`${EDIT_URL}?category=cat-2`, {
+      headers: { referer: EDIT_URL },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe(null);
+  });
+
+  it("keeps a filtered list the user came from", () => {
+    const request = new Request(EDIT_URL, {
+      headers: { referer: `${BASE_URL}/assets?search=laptop` },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe("/assets?search=laptop");
+  });
+
+  it("returns null when the referer header is missing", () => {
+    expect(getRefererPathExcludingSelf(new Request(EDIT_URL))).toBe(null);
+  });
+
+  it("returns null for an invalid referer header", () => {
+    const request = new Request(EDIT_URL, {
+      headers: { referer: "not-a-valid-url" },
+    });
+    expect(getRefererPathExcludingSelf(request)).toBe(null);
   });
 });
 

@@ -1,6 +1,9 @@
 import { Close } from "@radix-ui/react-dialog";
 import type { LucideIcon } from "lucide-react";
 import { ArrowLeft, ArrowRight, ClockIcon, InfoIcon } from "lucide-react";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { useRoleAccess } from "~/hooks/use-role-access";
+import { roleReservesAsRequest } from "~/utils/bookings";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -30,9 +33,9 @@ const ITEMS: Array<ProcessItem> = [
   {
     id: "admin-review",
     icon: InfoIcon,
-    title: "Admin Review",
+    title: "Review",
     description:
-      "Your booking will be shown as reserved, however the admin can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
+      "Your booking will be shown as reserved, however an administrator or manager can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
     iconClassName: "bg-warning-100 text-warning-500",
   },
   {
@@ -40,7 +43,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowRight,
     title: "Check-Out",
     description:
-      "On the start date of your booking, an administrator will check out the equipment on your behalf. You'll be responsible for the equipment during your booking period.",
+      "On the start date of your booking, an administrator or manager will check out the equipment on your behalf. You'll be responsible for the equipment during your booking period.",
     iconClassName: "bg-violet-100 text-violet-500",
   },
   {
@@ -48,14 +51,36 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowLeft,
     title: "Check-In",
     description:
-      "At the end of you booking period, return the equipment to the administrator who will perform the check in action.",
+      "At the end of your booking period, return the equipment to the administrator or manager who will perform the check in action.",
     iconClassName: "bg-indigo-100 text-indigo-500",
   },
 ];
 
+/**
+ * Copy for the Admin Review step when the workspace requires explicit
+ * approval: the reservation is a REQUEST until staff approve it, and the
+ * user is told by email either way, so the sidebar must describe that, not
+ * the softer review-at-will flow.
+ */
+const ADMIN_REVIEW_WITH_APPROVAL =
+  "Your booking is a request until an administrator or manager approves it. You will receive an email when it is approved, or when it is sent back to draft for changes. It cannot be checked out before approval, by anyone.";
+
 export default function BookingProcessSidebar({
   className,
 }: BookingProcessSidebarProps) {
+  // The viewer's own switch: with only the other role's switch on, their
+  // reservation is final and the softer review copy is the true one.
+  const requireBookingApproval = roleReservesAsRequest({
+    approvalSetting: useRoleAccess().policy.bookings.approvalSetting,
+    settings: useBookingSettings(),
+  });
+
+  const items = ITEMS.map((item) =>
+    item.id === "admin-review" && requireBookingApproval
+      ? { ...item, description: ADMIN_REVIEW_WITH_APPROVAL }
+      : item
+  );
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -85,13 +110,14 @@ export default function BookingProcessSidebar({
 
         <div className="p-4">
           <p className="mb-8 border-b-2 border-blue-500 bg-blue-50 p-2 text-blue-500">
-            Base users reserve bookings that require admin approval and can be
-            cancelled at any time if there are conflicts with other bookings.
-            Admins handle equipment check-out and check-in.
+            {requireBookingApproval
+              ? "Base users reserve bookings that require approval and can be cancelled at any time if there are conflicts with other bookings."
+              : "Base users reserve bookings that can be cancelled at any time if there are conflicts with other bookings."}{" "}
+            Administrators and managers handle equipment check-out and check-in.
           </p>
 
           <div className="mb-8 flex flex-col gap-4">
-            {ITEMS.map((item, i) => (
+            {items.map((item, i) => (
               <div key={item.id} className="flex items-start gap-4">
                 <div
                   className={tw(
@@ -122,12 +148,12 @@ export default function BookingProcessSidebar({
                 out.
               </li>
               <li>
-                If you need to extend your booking, contact an administrator
-                before your booking end date.
+                If you need to change the end date of your booking, contact an
+                administrator or manager before your booking end date.
               </li>
               <li>
-                Administrators have final say on booking approvals based on
-                equipment availability and priorities.
+                Administrators and managers have final say on booking approvals
+                based on equipment availability and priorities.
               </li>
             </ul>
           </div>

@@ -103,8 +103,9 @@ vi.mock("~/hooks/search-params", () => ({
 
 // why: useNavigation/useActionData require a data router (RouterProvider),
 // which is unnecessary ceremony for this effect-focused test; stub them.
-// useLocation and the plain <Form> are overridden too so no data-router
-// context is needed at all — only `MemoryRouter` (for the real `Link` inside
+// useLocation, useLoaderData (the route's recurring-reminder tier flag) and
+// the plain <Form> are overridden too so no data-router context is needed at
+// all: only `MemoryRouter` (for the real `Link` inside
 // the "See a sample" Button) is required.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
@@ -113,6 +114,7 @@ vi.mock("react-router", async () => {
     useNavigation: () => ({ state: "idle" as const }),
     useActionData: () => undefined,
     useLocation: () => ({ pathname: "/assets/asset-1" }),
+    useLoaderData: () => ({ canUseRecurringReminders: false }),
     Form: (props: ComponentProps<"form">) => <form {...props} />,
   };
 });

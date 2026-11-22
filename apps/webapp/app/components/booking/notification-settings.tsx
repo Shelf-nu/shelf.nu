@@ -5,7 +5,7 @@
  * who receives email notifications for bookings across the entire workspace:
  *
  * 1. **Notify booking creator** — auto-submit toggle
- * 2. **Notify admins on new booking requests** — auto-submit toggle
+ * 2. **Notify on new booking requests**: auto-submit toggle
  * 3. **Always notify these users** — DynamicDropdown picker with explicit save
  *
  * @module
@@ -19,10 +19,15 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import FormRow from "~/components/forms/form-row";
 import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
-import { Card } from "~/components/shared/card";
+import { Card, CardTitle } from "~/components/shared/card";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
+import {
+  PICKABLE_RECIPIENT_AUDIENCE,
+  RESERVATION_AUDIENCE,
+} from "~/utils/permissions/role-audience";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "./notification-preview";
 
@@ -131,11 +136,12 @@ export function NotificationSettings({
   );
 
   return (
-    <Card className="mt-0 overflow-visible">
+    <Card
+      id={BOOKING_SETTINGS_ANCHORS.notifications}
+      className="mt-0 overflow-visible"
+    >
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">
-          Email Notification Recipients
-        </h3>
+        <CardTitle>Email Notification Recipients</CardTitle>
         <p className="text-sm text-gray-600">
           The booking custodian always receives all notifications. These
           settings control who else gets notified. You can also add per-booking
@@ -173,7 +179,7 @@ export function NotificationSettings({
         <input type="hidden" value="updateNotifyBookingCreator" name="intent" />
       </creatorFetcher.Form>
 
-      {/* Toggle: Notify all admins on new booking requests */}
+      {/* Toggle: notify the reservation audience on new booking requests */}
       <adminsFetcher.Form
         ref={adminsZo.ref}
         method="post"
@@ -182,13 +188,14 @@ export function NotificationSettings({
         }}
       >
         <FormRow
-          rowLabel="Notify all admins on new booking requests"
+          rowLabel={`Notify all ${RESERVATION_AUDIENCE} on new booking requests`}
           subHeading={
             <div>
-              When a booking is reserved, all workspace admins receive a
-              notification so someone can review and handle the request. Admins
-              will not receive subsequent updates (checkout, checkin, etc.)
-              unless they are added as a notification recipient on the booking.
+              When a booking is reserved, all workspace {RESERVATION_AUDIENCE}{" "}
+              receive a notification so someone can review and handle the
+              request. They will not receive subsequent updates (checkout,
+              checkin, etc.) unless they are added as a notification recipient
+              on the booking.
             </div>
           }
           className="border-b-0 pb-[10px] pt-0"
@@ -198,7 +205,7 @@ export function NotificationSettings({
               name={adminsZo.fields.notifyAdminsOnNewBooking()}
               disabled={adminsDisabled}
               defaultChecked={bookingSettings.notifyAdminsOnNewBooking}
-              title="Notify all admins on new booking requests"
+              title={`Notify all ${RESERVATION_AUDIENCE} on new booking requests`}
             />
           </div>
         </FormRow>
@@ -245,14 +252,15 @@ export function NotificationSettings({
                 name: "teamMember",
                 queryKey: "name",
                 deletedAt: null,
-                userWithAdminAndOwnerOnly: true,
+                selectableRecipientsOnly: true,
                 usersOnly: true,
-                // why: no `custodyPurpose` on purpose. This picks admins to
-                // notify — neither custody nor a booking custodian — and
-                // `userWithAdminAndOwnerOnly` already does the narrowing. The
-                // endpoint's assignment fallback resolves to "all" for the
-                // ADMIN/OWNER users this is rendered for, and fails closed for
-                // anyone else, which is what we want here.
+                // why: no `custodyPurpose` on purpose. This picks members to
+                // notify (neither custody nor a booking custodian), and
+                // `selectableRecipientsOnly` already narrows to members who
+                // may be picked as recipients. The endpoint's assignment
+                // fallback resolves to "all" for the members who reach this
+                // settings page, and fails closed for anyone else, which is
+                // what we want here.
               }}
               initialDataKey="teamMembersForNotify"
               countKey="totalTeamMembersForNotify"
@@ -265,7 +273,7 @@ export function NotificationSettings({
             />
 
             <p className="mt-1.5 text-[13px] text-gray-500">
-              Only administrators can be added.
+              Only {PICKABLE_RECIPIENT_AUDIENCE} can be added.
             </p>
 
             {hasUnsavedChanges ? (

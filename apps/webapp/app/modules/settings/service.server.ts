@@ -12,10 +12,7 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
-import {
-  organizationRolesMap,
-  type UserFriendlyRoles,
-} from "~/utils/organization-roles";
+import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
 
 const label = "Settings";
 
@@ -25,8 +22,12 @@ export interface TeamMembersWithUserOrInvite {
   img: string;
   email: string;
   status: InviteStatuses;
-  role: UserFriendlyRoles;
+  /** The member's effective role, as its human label. */
+  role: string;
+  /** The member's effective (highest-rank) role. */
   roleEnum: OrganizationRoles;
+  /** Every role the membership (or invite) holds, for the change-role preview. */
+  roles: OrganizationRoles[];
   userId: string | null;
   sso: boolean;
   custodies?: number;
@@ -99,26 +100,33 @@ export async function getPaginatedAndFilterableSettingUsers({
      * Create a structure for the users org members and merge it with invites
      */
     const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
-      userMembers.map((um) => ({
-        id: um.user.id,
-        name: (() => {
-          const baseName = `${um.user.firstName || ""} ${
-            um.user.lastName || ""
-          }`.trim();
-          if (!baseName && um.user.displayName) return um.user.displayName;
-          return (
-            baseName + (um.user.displayName ? ` (${um.user.displayName})` : "")
-          );
-        })(),
-        img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
-        email: um.user.email,
-        status: "ACCEPTED",
-        role: organizationRolesMap[um.roles[0]],
-        roleEnum: um.roles[0],
-        userId: um.user.id,
-        sso: um.user.sso,
-        custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
-      }));
+      userMembers.map((um) => {
+        // A membership can hold several roles; the row shows the one every
+        // policy decision reads, never whichever happens to be stored first.
+        const roleEnum = resolveRole(um.roles);
+        return {
+          id: um.user.id,
+          name: (() => {
+            const baseName = `${um.user.firstName || ""} ${
+              um.user.lastName || ""
+            }`.trim();
+            if (!baseName && um.user.displayName) return um.user.displayName;
+            return (
+              baseName +
+              (um.user.displayName ? ` (${um.user.displayName})` : "")
+            );
+          })(),
+          img: um.user.profilePicture ?? "/static/images/default_pfp.jpg",
+          email: um.user.email,
+          status: "ACCEPTED",
+          role: ROLE_LABELS[roleEnum],
+          roleEnum,
+          roles: um.roles,
+          userId: um.user.id,
+          sso: um.user.sso,
+          custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
+        };
+      });
 
     const totalPages = Math.ceil(totalItems / perPage);
 

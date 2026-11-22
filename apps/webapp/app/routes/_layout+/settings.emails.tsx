@@ -12,6 +12,7 @@ import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
+import { CardTitle } from "~/components/shared/card";
 import { useDisabled } from "~/hooks/use-disabled";
 import { EMAIL_FOOTER_MAX_LENGTH } from "~/modules/email-footer/constants";
 import { processEmailFooter } from "~/modules/email-footer/email-footer-validator.server";
@@ -27,6 +28,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { SECTION_ANCHOR_ATTRIBUTE } from "~/utils/section-anchor";
+import { EMAIL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 
 export const emailFooterSchema = z.object({
   customEmailFooter: z.string().max(500).optional().default(""),
@@ -158,9 +161,15 @@ export default function EmailSettingsPage() {
   return (
     <div className="flex flex-col gap-8 xl:flex-row">
       {/* Left column: Form */}
-      <div className="flex flex-1 flex-col gap-4">
+      <div
+        id={EMAIL_SETTINGS_ANCHORS.customEmailFooter}
+        {...{ [SECTION_ANCHOR_ATTRIBUTE]: "" }}
+        className="flex flex-1 scroll-mt-4 flex-col gap-4"
+      >
         <div>
-          <h3 className="text-text-lg font-semibold">Custom email footer</h3>
+          <CardTitle anchorId={EMAIL_SETTINGS_ANCHORS.customEmailFooter}>
+            Custom email footer
+          </CardTitle>
           <p className="text-sm text-gray-600">
             Add a custom message that appears at the bottom of all workspace
             emails sent to team members.
@@ -387,6 +396,12 @@ function EmailPreview({
               >
                 Booking reservation for Jane Doe
               </h1>
+              <p style={{ fontSize: "16px", color: "#344054" }}>
+                <span style={{ color: "#101828", fontWeight: "600" }}>
+                  Reserved by:
+                </span>{" "}
+                John Smith on 01/14/26, 3:30 PM
+              </p>
               <h2
                 style={{
                   fontSize: "16px",

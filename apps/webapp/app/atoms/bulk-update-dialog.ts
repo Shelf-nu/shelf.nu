@@ -18,7 +18,10 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   activate: false,
   deactivate: false,
   archive: false,
+  reinstate: false,
   cancel: false,
+  checkout: false,
+  checkin: false,
   available: false,
   unavailable: false,
   bookings: false,
@@ -32,6 +35,8 @@ const DEFAULT_STATE: Record<BulkDialogType, boolean> = {
   "start-audit": false,
   "add-to-audit": false,
   "delete-audit": false,
+  "reorder-point": false,
+  "custom-field": false,
 };
 
 export const bulkDialogAtom =

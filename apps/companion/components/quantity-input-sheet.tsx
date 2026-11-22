@@ -24,14 +24,16 @@
  * @see {@link file://../app/(tabs)/bookings/add-assets.tsx} the reserve-model consumer
  * @see {@link file://./team-member-picker.tsx} the modal contract this mirrors
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   View,
   Text,
   Modal,
+  ScrollView,
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  type TextInputInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -39,6 +41,8 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
+import type { SourcePickerOption } from "@/lib/custody-source-options";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -56,8 +60,24 @@ type Props = {
    * reservation cannot drop below the units already assigned to the booking.
    */
   min?: number;
-  /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
-  defaultValue?: number;
+  /**
+   * A reference amount for a count that may go past it, such as an audit's
+   * expected units. When set, the echo reads "16 pcs of 14 pcs (+2)" and the
+   * placeholder and accessible label name the target, while `max` stays only
+   * the validation ceiling. Callers that move units leave it unset.
+   */
+  target?: number;
+  /**
+   * Placeholder for an empty field when `target` does not name one, e.g.
+   * "Units found" for a count whose ceiling is only a validation bound. With
+   * it and no `target`, the echo and accessible label leave the ceiling out.
+   */
+  placeholder?: string;
+  /**
+   * Initial value when the sheet opens (clamped to [min, max]). Defaults to
+   * `min`; `null` opens the field blank, so the operator must type a number.
+   */
+  defaultValue?: number | null;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
   /**
@@ -72,6 +92,25 @@ type Props = {
     /** Initial value when the sheet opens (clamped to [0, primary]). */
     defaultValue?: number;
   };
+  /**
+   * Optional "From location" picker rendered above the quantity: one row per
+   * source the units can come from. Only a pool placed at two or more
+   * locations gets one. The caller owns the selection so it can tie `max`
+   * to the picked row.
+   */
+  source?: {
+    /** Section label, e.g. "From location". */
+    label: string;
+    options: SourcePickerOption[];
+    value: string;
+    onChange: (value: string) => void;
+  };
+  /**
+   * Optional explanation shown under the source picker, e.g. why the cap is
+   * 0 ("Nothing left at Studio. Pick another location."). Purely
+   * informational: the picker stays usable so the operator can switch rows.
+   */
+  notice?: string;
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
   /**
@@ -116,9 +155,13 @@ export function QuantityInputSheet({
   subtitle,
   max,
   min = 1,
+  target,
+  placeholder,
   defaultValue,
   unitOfMeasure,
   secondary,
+  source,
+  notice,
   confirmLabel,
   destructive,
   isSubmitting = false,
@@ -127,45 +170,50 @@ export function QuantityInputSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
 
   const [value, setValue] = useState("1");
   const [secondaryValue, setSecondaryValue] = useState("0");
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
-  // The secondary field's presence and seed are read out as primitives so the
-  // re-seed effect below can depend on THEM rather than on the `secondary`
-  // object. Callers build that object inline, giving it a fresh identity on
-  // every parent render — as a dependency it would turn "re-seed on open" into
-  // "re-seed on every parent render", silently discarding a split the operator
-  // had already typed.
   const hasSecondaryField = secondary != null;
-  const secondaryDefaultValue = secondary?.defaultValue;
 
-  // Re-seed the inputs every time the sheet opens: each open targets a fresh
-  // action (different member/holder), so stale values must not leak across.
-  useEffect(() => {
+  // The inputs are seeded on the closed-to-open transition only. Each open
+  // targets a fresh action (a different member or holder), so stale values
+  // must not leak across opens. While the sheet is open, `max` follows the
+  // picked source and background refetches, and neither may wipe what the
+  // operator typed. Both transitions are detected during render (React's
+  // "adjust state when a prop changes" pattern), so no effect writes state.
+  const [seededOpen, setSeededOpen] = useState(false);
+  const [seenMax, setSeenMax] = useState(max);
+  if (visible !== seededOpen) {
+    setSeededOpen(visible);
+    setSeenMax(max);
     if (visible) {
       const seed = Math.min(
         Math.max(defaultValue ?? min, min),
         Math.max(max, min)
       );
-      setValue(String(seed));
+      setValue(defaultValue === null ? "" : String(seed));
       if (hasSecondaryField) {
-        // Clamp the secondary seed to the primary seed — the two fields move
-        // together and the secondary can never exceed the units being released.
+        // The secondary seed is clamped to the primary seed: the two fields
+        // move together and the secondary never exceeds the units released.
         setSecondaryValue(
-          String(Math.min(Math.max(secondaryDefaultValue ?? 0, 0), seed))
+          String(Math.min(Math.max(secondary?.defaultValue ?? 0, 0), seed))
         );
       }
     }
-  }, [
-    visible,
-    defaultValue,
-    max,
-    min,
-    hasSecondaryField,
-    secondaryDefaultValue,
-  ]);
+  } else if (visible && max !== seenMax) {
+    // `max` moved while open: keep the typed value, pulled down to the new
+    // cap when it is now above it. A raised cap leaves the value alone.
+    setSeenMax(max);
+    const cap = Math.max(max, min);
+    const typed = value ? parseInt(value, 10) : NaN;
+    if (Number.isFinite(typed) && typed > cap) {
+      setValue(String(cap));
+      clampSecondaryTo(cap);
+    }
+  }
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
@@ -196,7 +244,7 @@ export function QuantityInputSheet({
    * used-up count keeps it when they raise the primary again. The webapp's
    * counterpart already does this in its reducer.
    */
-  const clampSecondaryTo = (nextPrimary: number) => {
+  function clampSecondaryTo(nextPrimary: number) {
     if (!hasSecondaryField) return;
     setSecondaryValue((prev) => {
       const prevParsed = prev ? parseInt(prev, 10) : NaN;
@@ -204,7 +252,7 @@ export function QuantityInputSheet({
         return prev;
       return String(nextPrimary);
     });
-  };
+  }
 
   /** Step the current value by `delta`, clamped to [min, max]. */
   const step = (delta: number) => {
@@ -217,6 +265,12 @@ export function QuantityInputSheet({
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
   const minLabel = formatQuantity(min, unitOfMeasure) ?? String(min);
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
+  const targetLabel =
+    target === undefined
+      ? null
+      : formatQuantity(target, unitOfMeasure) ?? String(target);
+  const surplus =
+    target !== undefined && hasValue && parsed > target ? parsed - target : 0;
 
   /**
    * Every dismissal path goes through here. A request in flight decides
@@ -239,7 +293,10 @@ export function QuantityInputSheet({
       // keyboard (and jsx-a11y/no-autofocus flags it).
       onShow={() => inputRef.current?.focus()}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{title}</Text>
@@ -255,8 +312,59 @@ export function QuantityInputSheet({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.body}>
+        <ScrollView
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+        >
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+
+          {/* "From location": one tappable row per source. The picked row
+              drives `max`, so the quantity echo and the cap follow it. */}
+          {source ? (
+            <View style={styles.sourceSection}>
+              <Text style={styles.sourceLabel}>{source.label}</Text>
+              {source.options.map((option) => {
+                const selected = option.value === source.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.sourceRow,
+                      selected && styles.sourceRowSelected,
+                    ]}
+                    onPress={() => source.onChange(option.value)}
+                    disabled={isSubmitting}
+                    activeOpacity={0.7}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected, disabled: isSubmitting }}
+                    accessibilityLabel={
+                      option.hint
+                        ? `${option.label}, ${option.hint}`
+                        : option.label
+                    }
+                  >
+                    <Ionicons
+                      name={selected ? "radio-button-on" : "radio-button-off"}
+                      size={20}
+                      color={selected ? colors.primary : colors.muted}
+                    />
+                    <View style={styles.sourceText}>
+                      <Text style={styles.sourceRowLabel}>{option.label}</Text>
+                      {option.hint ? (
+                        <Text style={styles.sourceRowHint}>{option.hint}</Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {notice ? (
+            <Text style={styles.notice} accessibilityLiveRegion="polite">
+              {notice}
+            </Text>
+          ) : null}
 
           {/* Quantity row: [-] [input] [+] */}
           <View style={styles.quantityRow}>
@@ -289,13 +397,25 @@ export function QuantityInputSheet({
                 const next = cleaned ? parseInt(cleaned, 10) : NaN;
                 if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
-              placeholder={min > 1 ? `${min}–${max}` : `Max: ${max}`}
+              placeholder={
+                target !== undefined
+                  ? `Expected: ${target}`
+                  : placeholder !== undefined
+                  ? placeholder
+                  : min > 1
+                  ? `${min} to ${max}`
+                  : `Max: ${max}`
+              }
               placeholderTextColor={colors.placeholderText}
               editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
               accessibilityLabel={
-                min > 1
+                targetLabel
+                  ? `Quantity counted, ${targetLabel} expected`
+                  : placeholder !== undefined
+                  ? "Quantity counted"
+                  : min > 1
                   ? `Quantity, between ${minLabel} and ${maxLabel}`
                   : `Quantity, maximum ${maxLabel}`
               }
@@ -316,14 +436,25 @@ export function QuantityInputSheet({
             </TouchableOpacity>
           </View>
 
-          {/* Echo / bounds hint under the input */}
-          {overMax ? (
+          {/* Echo / bounds hint under the input. A notice already explains
+              an empty source, so the over-cap line would repeat it. */}
+          {overMax && notice ? null : overMax ? (
             <Text style={styles.errorHint}>Only {maxLabel} available.</Text>
           ) : underMin ? (
             <Text style={styles.errorHint}>At least {minLabel}.</Text>
           ) : (
             <Text style={styles.echoHint}>
-              {echo ? `${echo} of ${maxLabel}` : `Up to ${maxLabel}`}
+              {targetLabel
+                ? echo
+                  ? `${echo} of ${targetLabel}${
+                      surplus > 0 ? ` (+${surplus})` : ""
+                    }`
+                  : `${targetLabel} expected`
+                : placeholder !== undefined
+                ? echo ?? ""
+                : echo
+                ? `${echo} of ${maxLabel}`
+                : `Up to ${maxLabel}`}
             </Text>
           )}
 
@@ -378,7 +509,7 @@ export function QuantityInputSheet({
               <Text style={styles.confirmText}>{confirmLabel}</Text>
             )}
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
@@ -418,6 +549,51 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  sourceSection: {
+    gap: spacing.xs,
+  },
+  sourceLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foregroundSecondary,
+    marginBottom: spacing.xs,
+  },
+  sourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.white,
+  },
+  sourceRowSelected: {
+    borderColor: colors.primary,
+  },
+  sourceText: {
+    flex: 1,
+    gap: 2,
+  },
+  sourceRowLabel: {
+    fontSize: fontSize.md,
+    fontWeight: "500",
+    color: colors.foreground,
+  },
+  sourceRowHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  notice: {
+    fontSize: fontSize.sm,
+    color: colors.warningText,
+    backgroundColor: colors.warningBg,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    overflow: "hidden",
   },
   quantityRow: {
     flexDirection: "row",

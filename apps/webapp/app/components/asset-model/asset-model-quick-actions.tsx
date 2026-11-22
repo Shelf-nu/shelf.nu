@@ -3,7 +3,7 @@ import type { AssetModel } from "@prisma/client";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -15,7 +15,10 @@ import { DeleteAssetModel } from "./delete-asset-model";
 type AssetModelQuickActionsProps = {
   className?: string;
   style?: CSSProperties;
-  assetModel: Pick<AssetModel, "id" | "name">;
+  /** `_count` lets the delete dialog say how many assets lose the model. */
+  assetModel: Pick<AssetModel, "id" | "name"> & {
+    _count?: { assets: number };
+  };
 };
 
 export default function AssetModelQuickActions({
@@ -23,7 +26,7 @@ export default function AssetModelQuickActions({
   style,
   assetModel,
 }: AssetModelQuickActionsProps) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   return (
     <div className={tw("flex items-center gap-2", className)} style={style}>

@@ -1,0 +1,431 @@
+/**
+ * Path-scoped guards match every spelling of the route they protect.
+ *
+ * React Router serves `/API/Mobile/me` and `/api/mobile/me/` from the same
+ * route as `/api/mobile/me`, so each guard must count and bound all of them
+ * together. The apps here mount the production guard builders exactly as
+ * `server/index.ts` does.
+ *
+ * @see {@link file://./path-guards.ts}
+ * @see {@link file://./request-path.ts}
+ */
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+  SENTRY_TUNNEL_PATH,
+} from "~/utils/constants";
+import {
+  calendarFeedGuard,
+  contactOwnerGuard,
+  mobileApiGuard,
+  sentryTunnelGuard,
+} from "./path-guards";
+import { CONTACT_OWNER_LIMITED_KEY } from "./rate-limit";
+import {
+  getContactOwnerQrId,
+  normalizeRequestPath,
+  normalizeRoutePath,
+} from "./request-path";
+
+// @vitest-environment node
+
+// why: the limiters emit their 429 trail through Logger.handledClientError,
+// which talks to Sentry's structured-log API.
+vi.mock("~/utils/logger", () => ({
+  Logger: {
+    handledClientError: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    log: vi.fn(),
+  },
+}));
+
+/** Mobile limiter ceiling per minute, from `mobileIpRateLimit`. */
+const MOBILE_LIMIT = 30;
+
+/** Calendar feed ceiling per minute, from `calendarFeedRateLimit`. */
+const CALENDAR_LIMIT = 60;
+
+/** Low tunnel ceiling so the rate tests stay short. */
+const TUNNEL_LIMIT = 5;
+
+/** Low contact-owner ceilings: per (address, QR), and per address. */
+const CONTACT_PER_QR_LIMIT = 2;
+const CONTACT_PER_IP_LIMIT = 4;
+
+/**
+ * An app with the four guards mounted on `*`, as in `server/index.ts`, and a
+ * handler that answers 200 for anything that gets past them (429 for a
+ * contact-owner submission the guard marked, as the route's action does).
+ */
+function buildApp() {
+  const app = new Hono();
+  app.use("*", mobileApiGuard());
+  app.use("*", calendarFeedGuard());
+  app.use("*", sentryTunnelGuard(TUNNEL_LIMIT));
+  app.use("*", contactOwnerGuard(CONTACT_PER_QR_LIMIT, CONTACT_PER_IP_LIMIT));
+  // Stands in for the contact-owner action, which refuses a submission the
+  // guard marked as over its limit.
+  app.all("*", (c) =>
+    c.get(CONTACT_OWNER_LIMITED_KEY) === true
+      ? c.text("limited", 429)
+      : c.text("ok")
+  );
+  return app;
+}
+
+/**
+ * Sends a request as a given client address.
+ *
+ * @param app - The app under test
+ * @param path - Request path
+ * @param ip - Address the Fly edge would stamp
+ * @param init - Extra request options (method, body)
+ */
+function send(app: Hono, path: string, ip: string, init: RequestInit = {}) {
+  return app.request(path, {
+    ...init,
+    headers: { "Fly-Client-IP": ip, ...(init.headers ?? {}) },
+  });
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  // why: getClientIp only trusts Fly-Client-IP when running on Fly.
+  vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
+
+describe("normalizeRequestPath", () => {
+  it.each([
+    ["/api/mobile/me", "/api/mobile/me"],
+    ["/API/Mobile/Me", "/api/mobile/me"],
+    ["/api/mobile/me/", "/api/mobile/me"],
+    ["/api/mobile/me///", "/api/mobile/me"],
+    ["//api//mobile/me", "/api/mobile/me"],
+    ["/", "/"],
+    ["//", "/"],
+  ])("normalises %s to %s", (input, expected) => {
+    expect(normalizeRequestPath(input)).toBe(expected);
+  });
+});
+
+describe("normalizeRoutePath", () => {
+  it.each([
+    ["/api/mobile/me.data", "/api/mobile/me"],
+    ["/API/Mobile/Me.DATA", "/api/mobile/me"],
+    ["/api/mobile.data", "/api/mobile"],
+    ["/_root.data", "/"],
+    ["/api/mobile/me", "/api/mobile/me"],
+    ["/api/mobile/me.ics", "/api/mobile/me.ics"],
+  ])("normalises %s to %s", (input, expected) => {
+    expect(normalizeRoutePath(input)).toBe(expected);
+  });
+});
+
+describe("mobileApiGuard", () => {
+  it("counts every spelling of the mobile prefix in one bucket", async () => {
+    const app = buildApp();
+    const spellings = [
+      "/api/mobile/me",
+      "/API/MOBILE/me",
+      "/api/Mobile/me/",
+      "/api/mobile/me.data",
+    ] as const;
+
+    for (let i = 0; i < MOBILE_LIMIT; i++) {
+      const res = await send(app, spellings[i % spellings.length], "1.1.1.1");
+      expect(res.status).toBe(200);
+    }
+
+    for (const path of spellings) {
+      expect((await send(app, path, "1.1.1.1")).status).toBe(429);
+    }
+  });
+
+  it("leaves paths that only share a prefix string alone", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < MOBILE_LIMIT + 5; i++) {
+      const res = await send(app, "/api/mobile-other", "1.1.1.2");
+      expect(res.status).toBe(200);
+    }
+  });
+});
+
+describe("calendarFeedGuard", () => {
+  it("counts a feed's spellings against that feed's budget", async () => {
+    const app = buildApp();
+    const spellings = [
+      "/api/calendar/feed/token-a.ics",
+      "/api/Calendar/feed/token-a.ics",
+      "/API/CALENDAR/FEED/token-a.ics/",
+      "/api/calendar/feed/token-a.ics.data",
+    ] as const;
+
+    for (let i = 0; i < CALENDAR_LIMIT; i++) {
+      const res = await send(app, spellings[i % spellings.length], "2.2.2.2");
+      expect(res.status).toBe(200);
+    }
+
+    for (const path of spellings) {
+      expect((await send(app, path, "2.2.2.2")).status).toBe(429);
+    }
+
+    // A different feed keeps its own budget.
+    expect(
+      (await send(app, "/api/calendar/feed/token-b.ics", "2.2.2.2")).status
+    ).toBe(200);
+  });
+});
+
+describe("sentryTunnelGuard", () => {
+  const oversized = "x".repeat(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES + 1);
+
+  it.each([
+    ["POST", SENTRY_TUNNEL_PATH],
+    ["POST", `${SENTRY_TUNNEL_PATH}/`],
+    ["POST", SENTRY_TUNNEL_PATH.toUpperCase()],
+    ["PUT", SENTRY_TUNNEL_PATH],
+    ["PATCH", SENTRY_TUNNEL_PATH],
+    ["DELETE", `${SENTRY_TUNNEL_PATH}/`],
+    ["POST", `${SENTRY_TUNNEL_PATH}.data`],
+  ])("refuses an oversized %s to %s", async (method, path) => {
+    const app = buildApp();
+
+    const res = await send(app, path, "3.3.3.3", { method, body: oversized });
+
+    expect(res.status).toBe(413);
+  });
+
+  it("answers an address over its budget with 429 before reading the body", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < TUNNEL_LIMIT; i++) {
+      await send(app, SENTRY_TUNNEL_PATH, "3.3.3.9", {
+        method: "POST",
+        body: "{}",
+      });
+    }
+
+    const res = await send(app, SENTRY_TUNNEL_PATH, "3.3.3.9", {
+      method: "POST",
+      body: oversized,
+    });
+
+    expect(res.status).toBe(429);
+  });
+
+  it("accepts an envelope at the ceiling", async () => {
+    const app = buildApp();
+
+    const res = await send(app, SENTRY_TUNNEL_PATH, "3.3.3.4", {
+      method: "POST",
+      body: "x".repeat(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("counts every method and spelling that reaches the action in one bucket", async () => {
+    const app = buildApp();
+    const attempts = [
+      ["POST", SENTRY_TUNNEL_PATH],
+      ["PUT", SENTRY_TUNNEL_PATH],
+      ["POST", `${SENTRY_TUNNEL_PATH}/`],
+      ["PATCH", SENTRY_TUNNEL_PATH.toUpperCase()],
+      ["POST", `${SENTRY_TUNNEL_PATH}.data`],
+    ] as const;
+
+    for (const [method, path] of attempts.slice(0, TUNNEL_LIMIT)) {
+      const res = await send(app, path, "3.3.3.5", { method, body: "{}" });
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await send(app, `${SENTRY_TUNNEL_PATH}/`, "3.3.3.5", {
+      method: "PUT",
+      body: "{}",
+    });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("does not spend the budget on methods that carry no envelope", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < TUNNEL_LIMIT * 3; i++) {
+      for (const method of ["GET", "HEAD", "OPTIONS"]) {
+        const res = await send(app, SENTRY_TUNNEL_PATH, "3.3.3.6", { method });
+        expect(res.status).toBe(200);
+      }
+    }
+
+    const envelope = await send(app, SENTRY_TUNNEL_PATH, "3.3.3.6", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(envelope.status).toBe(200);
+  });
+});
+
+describe("getContactOwnerQrId", () => {
+  it.each([
+    ["/qr/abc123/contact-owner", "abc123"],
+    ["/qr/abc123", null],
+    ["/qr/abc123/contact-owner/extra", null],
+    ["/qr//contact-owner", null],
+    ["/api/qr/abc123/contact-owner", null],
+  ])("reads %s as %s", (path, expected) => {
+    expect(getContactOwnerQrId(path)).toBe(expected);
+  });
+});
+
+describe("contactOwnerGuard", () => {
+  /** A form submission to a QR's contact-owner action. */
+  function submit(app: Hono, path: string, ip: string, method = "POST") {
+    return send(app, path, ip, {
+      method,
+      body: new URLSearchParams({ email: "a@example.com", content: "found" }),
+    });
+  }
+
+  it("counts every spelling of one QR's action in one bucket", async () => {
+    const app = buildApp();
+    const spellings = [
+      "/qr/qr-a/contact-owner",
+      "/QR/qr-a/Contact-Owner/",
+      "/qr/qr-a/contact-owner.data",
+    ];
+
+    for (const path of spellings.slice(0, CONTACT_PER_QR_LIMIT)) {
+      expect((await submit(app, path, "4.4.4.1")).status).toBe(200);
+    }
+
+    expect((await submit(app, spellings[2], "4.4.4.1")).status).toBe(429);
+    // Another visitor reporting the same QR keeps their own budget.
+    expect((await submit(app, spellings[0], "4.4.4.2")).status).toBe(200);
+  });
+
+  it("caps one address across QR ids, so rotating QRs keeps no fresh budget", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      const res = await submit(app, `/qr/qr-${i}/contact-owner`, "4.4.4.3");
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await submit(app, "/qr/qr-new/contact-owner", "4.4.4.3");
+    expect(blocked.status).toBe(429);
+  });
+
+  it("opens again once the per-QR window has passed", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4");
+    }
+    expect(
+      (await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4")).status
+    ).toBe(429);
+
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+
+    expect(
+      (await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4")).status
+    ).toBe(200);
+  });
+
+  it("does not spend the budget on opening the form", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT * 3; i++) {
+      const res = await send(app, "/qr/qr-c/contact-owner", "4.4.4.5");
+      expect(res.status).toBe(200);
+    }
+
+    expect(
+      (await submit(app, "/qr/qr-c/contact-owner", "4.4.4.5")).status
+    ).toBe(200);
+  });
+
+  it("reopens the per-address budget after an hour, and a refused request creates no per-QR count", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      await submit(app, `/qr/qr-h${i}/contact-owner`, "4.4.4.7");
+    }
+    // Refused by the per-address bucket; the per-QR bucket must not count it.
+    expect(
+      (await submit(app, "/qr/qr-fresh/contact-owner", "4.4.4.7")).status
+    ).toBe(429);
+
+    vi.advanceTimersByTime(60 * 60_000 + 1);
+
+    // A full per-QR budget remains for the QR the refused request named.
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      const res = await submit(app, "/qr/qr-fresh/contact-owner", "4.4.4.7");
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("caps the QR id kept in a bucket key, so a long id is still one bucket", async () => {
+    const app = buildApp();
+    const longId = "a".repeat(5_000);
+
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      await submit(app, `/qr/${longId}${i}/contact-owner`, "4.4.4.8");
+    }
+
+    // Ids differing only past the cap share one per-QR bucket.
+    expect(
+      (await submit(app, `/qr/${longId}x/contact-owner`, "4.4.4.8")).status
+    ).toBe(429);
+  });
+
+  it("reports only the per-address budget in the RateLimit headers", async () => {
+    const app = buildApp();
+
+    const res = await submit(app, "/qr/qr-hdr/contact-owner", "4.4.4.9");
+
+    expect(res.headers.get("RateLimit-Policy")).toBe(
+      `${CONTACT_PER_IP_LIMIT};w=3600`
+    );
+  });
+
+  it("off Fly without trusted proxies, a rotated X-Forwarded-For buys no fresh budget", async () => {
+    // why: self-hosted with no TRUSTED_PROXY_HOPS. X-Forwarded-For is written
+    // by the caller there, so the contact-owner buckets must not key on it.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      const res = await app.request(`/qr/qr-x${i}/contact-owner`, {
+        method: "POST",
+        headers: { "X-Forwarded-For": `7.7.7.${i}` },
+        body: "content=found",
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await app.request("/qr/qr-x9/contact-owner", {
+      method: "POST",
+      headers: { "X-Forwarded-For": "7.7.7.99" },
+      body: "content=found",
+    });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("leaves the QR's other public pages alone", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT * 3; i++) {
+      const res = await submit(app, "/qr/qr-d", "4.4.4.6");
+      expect(res.status).toBe(200);
+    }
+  });
+});

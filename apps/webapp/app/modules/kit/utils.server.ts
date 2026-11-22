@@ -1,3 +1,4 @@
+import { AssetType } from "@prisma/client";
 import type { Kit, KitStatus, Prisma } from "@prisma/client";
 import type { AllowedCustodianFilterIds } from "~/modules/asset/utils.server";
 import { applyCustodianAllowList } from "~/modules/asset/utils.server";
@@ -48,11 +49,19 @@ export function getKitsWhereInput({
     allowedTeamMemberIds
   );
 
+  // Same predicate as the kits index (`getPaginatedAndFilterableKits`): a
+  // "select all" must act on exactly the kits the list shows, including those
+  // found by a barcode value.
   if (search) {
-    where.name = {
-      contains: search.toLowerCase().trim(),
-      mode: "insensitive",
-    };
+    const searchTerm = search.toLowerCase().trim();
+    where.OR = [
+      { name: { contains: searchTerm, mode: "insensitive" } },
+      {
+        barcodes: {
+          some: { value: { contains: searchTerm, mode: "insensitive" } },
+        },
+      },
+    ];
   }
 
   if (status) {
@@ -66,4 +75,52 @@ export function getKitsWhereInput({
   }
 
   return where;
+}
+
+/**
+ * Whether a storage path in the `kits` bucket is an image of `kitId`'s own.
+ *
+ * `updateKitImage` writes kit images to `<uploaderUserId>/<kitId>/<file>`, so
+ * a kit's own image has exactly three non-empty segments with `kitId` in the
+ * middle. Any other path names a file that belongs to a different kit, or to
+ * a different workspace, and must never be signed for this kit or removed
+ * with it. Callers check the same string they then sign or remove.
+ *
+ * @param path - A path from `extractStoragePath(url, "kits")`
+ * @param kitId - The kit the image is stored on
+ * @returns `true` only for a file directly inside the kit's own folder
+ */
+export function isOwnKitImagePath(path: string, kitId: Kit["id"]): boolean {
+  const segments = path.split("/");
+  return (
+    segments.length === 3 &&
+    segments[1] === kitId &&
+    segments.every(
+      (segment) => segment !== "" && segment !== "." && segment !== ".."
+    )
+  );
+}
+
+/**
+ * The kit an asset leaves when it is added to another kit.
+ *
+ * An INDIVIDUAL asset belongs to one kit at a time, so joining a kit moves it
+ * out of the kit it was in. A QUANTITY_TRACKED asset keeps its other kits
+ * (their units can sit in several), so it leaves none. The answer names the
+ * kit in the asset's "changed kit from A to B" activity note and is the
+ * `fromValue` of its `ASSET_KIT_CHANGED` event.
+ *
+ * @param asset - The asset being added, with its current kit memberships
+ * @param kitId - The kit it is being added to
+ * @returns The kit it leaves, or `null` for a plain add
+ */
+export function getKitAnAssetLeaves(
+  asset: {
+    type: AssetType;
+    assetKits: { kitId: string; kit: Pick<Kit, "id" | "name"> }[];
+  },
+  kitId: Kit["id"]
+): Pick<Kit, "id" | "name"> | null {
+  if (asset.type !== AssetType.INDIVIDUAL) return null;
+  return asset.assetKits.find((ak) => ak.kitId !== kitId)?.kit ?? null;
 }

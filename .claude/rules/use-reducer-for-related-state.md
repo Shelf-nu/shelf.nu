@@ -1,6 +1,8 @@
 ---
 description: Use useReducer when multiple useState values change together or form a single state machine
-globs: ["apps/webapp/**/*.tsx", "apps/webapp/**/*.ts"]
+paths:
+  - "apps/webapp/**/*.tsx"
+  - "apps/webapp/**/*.ts"
 ---
 
 When a component has multiple `useState` calls that mutate together or

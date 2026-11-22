@@ -11,11 +11,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 import {
   processBooking,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import * as rolesServer from "~/utils/roles.server";
 
 import { action } from "~/routes/api+/assets.add-to-booking";
@@ -78,10 +80,9 @@ async function submit(fields: Record<string, string>) {
 describe("add assets to an existing booking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-    } as never);
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({ roles: ["ADMIN"], organizationId: "org-1" }) as never
+    );
     vi.mocked(processBooking).mockResolvedValue({
       finalAssetIds: ["asset-1", "asset-2"],
       bookingInfo: BOOKING_WITH_BOTH,
@@ -105,5 +106,49 @@ describe("add assets to an existing booking", () => {
 
     expect(result.status).toBe(400);
     expect(updateBookingAssets).not.toHaveBeenCalled();
+  });
+  it("hands the add the caller's access and client hints, for the pool guard's refusal", async () => {
+    expect.assertions(1);
+    // why: a booking that holds neither asset, so the add goes through.
+    vi.mocked(processBooking).mockResolvedValue({
+      finalAssetIds: ["asset-1", "asset-2"],
+      bookingInfo: { bookingAssets: [] },
+    } as never);
+    // why: the add's result feeds the note and the response only.
+    vi.mocked(updateBookingAssets).mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+    } as never);
+    // why: the actor named in the note, read after the add.
+    vi.mocked(getUserByID).mockResolvedValue({
+      id: "user-1",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      displayName: "Ada",
+    } as never);
+
+    const body = new URLSearchParams({ id: "booking-1" });
+    body.append("assetsIds[]", "asset-1");
+    body.append("assetsIds[]", "asset-2");
+    await action(
+      createActionArgs({
+        request: new Request("http://localhost/api/assets/add-to-booking", {
+          method: "POST",
+          body,
+        }),
+        context: { getSession: () => ({ userId: "user-1" }) } as never,
+      })
+    );
+
+    // `bookings.seeAll` decides whether a pool refusal names other members'
+    // bookings; the hints carry the time zone its day is written in.
+    expect(updateBookingAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ seeAll: true }),
+        }),
+        hints: expect.objectContaining({ timeZone: expect.any(String) }),
+      })
+    );
   });
 });

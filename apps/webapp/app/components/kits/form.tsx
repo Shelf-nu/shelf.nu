@@ -8,6 +8,9 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, assetImageValidateFileAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useDiscardRemount } from "~/hooks/use-discard-remount";
+import { useInlineCreatePermissions } from "~/hooks/use-inline-create-permissions";
+import { useTrackedFormRef } from "~/hooks/use-unsaved-changes";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
 import { resolveCancelTo } from "~/utils/cancel-destination";
@@ -27,6 +30,7 @@ import {
 } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
+import { UnsavedChangesGuard } from "../forms/unsaved-changes-bar";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
 import { Button } from "../shared/button";
@@ -64,11 +68,26 @@ type KitFormProps = Partial<
 
 /**
  * Create and edit form for kits: name, description, category, location,
- * image and barcodes.
+ * image and barcodes, with the unsaved-changes bar.
+ *
+ * Discard remounts the inner form (see `useDiscardRemount`), which resets
+ * every widget that keeps its value in React state.
  *
  * @param props - Current values when editing; omit them to create a kit
  */
-export default function KitsForm({
+export default function KitsForm(props: KitFormProps) {
+  const { key, discard, discarded } = useDiscardRemount();
+  return (
+    <KitsFormInner
+      key={key}
+      {...props}
+      onDiscard={discard}
+      autoFocusName={!discarded}
+    />
+  );
+}
+
+function KitsFormInner({
   className,
   id,
   name,
@@ -80,7 +99,14 @@ export default function KitsForm({
   image,
   imageExpiration,
   referer,
-}: KitFormProps) {
+  onDiscard,
+  autoFocusName,
+}: KitFormProps & {
+  /** Resets the form to the loaded values (remounts it). */
+  onDiscard: () => void;
+  /** Focus the Name field on mount; false after a Discard. */
+  autoFocusName: boolean;
+}) {
   const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
@@ -107,7 +133,9 @@ export default function KitsForm({
 
   // Focus the Name field on mount so create/edit pages start the user
   // typing immediately instead of relying on a removed autoFocus prop.
-  const nameInputRef = useAutoFocus<HTMLInputElement>();
+  const nameInputRef = useAutoFocus<HTMLInputElement>({
+    when: autoFocusName,
+  });
 
   const actionData = useActionData<
     typeof createKitAction | typeof editKitAction
@@ -117,6 +145,11 @@ export default function KitsForm({
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
+  /** "Create new" shortcuts show only to members who may create that entity. */
+  const canCreateInline = useInlineCreatePermissions();
+
+  /** The form element, shared by Zorm and the unsaved-changes tracking. */
+  const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
 
   const serverValidationErrors = getValidationErrors(actionData?.error);
   const nameErrorMessage =
@@ -131,8 +164,13 @@ export default function KitsForm({
 
   return (
     <Card className={tw("w-full md:w-min", className)}>
+      <UnsavedChangesGuard
+        formRef={formRef}
+        actionData={actionData}
+        onDiscard={onDiscard}
+      />
       <Form
-        ref={zo.ref}
+        ref={setFormRef}
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
@@ -206,14 +244,16 @@ export default function KitsForm({
             <p>
               Make it unique. Each kit can have 1 category. It will show on your
               index.{" "}
-              <Button
-                to="/categories/new"
-                variant="link-gray"
-                className="text-gray-600 underline"
-                target="_blank"
-              >
-                Create categories
-              </Button>
+              {canCreateInline.category ? (
+                <Button
+                  to="/categories/new"
+                  variant="link-gray"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                >
+                  Create categories
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 pb-[10px]"
@@ -259,14 +299,16 @@ export default function KitsForm({
             <p>
               A location is a place where an item is supposed to be located.
               This is different than the last scanned location{" "}
-              <Button
-                to="/locations/new"
-                className="text-gray-600 underline"
-                target="_blank"
-                variant="link-gray"
-              >
-                Create locations
-              </Button>
+              {canCreateInline.location ? (
+                <Button
+                  to="/locations/new"
+                  className="text-gray-600 underline"
+                  target="_blank"
+                  variant="link-gray"
+                >
+                  Create locations
+                </Button>
+              ) : null}
             </p>
           }
           className="border-b-0 py-[10px]"

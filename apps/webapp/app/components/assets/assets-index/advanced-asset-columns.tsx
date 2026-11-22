@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -8,10 +8,14 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import { RepeatIcon } from "lucide-react";
 import { Link, useLoaderData } from "react-router";
+import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
+import { TextWithLinks } from "~/components/links/text-with-links";
 import { LocationBadge } from "~/components/location/location-badge";
+import { MoreLocationsChip } from "~/components/location/more-locations-chip";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -34,24 +38,30 @@ import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { ListContextLinkState } from "~/hooks/use-list-context";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ColumnLabelKey } from "~/modules/asset-index-settings/helpers";
+import { describeRecurrence } from "~/modules/asset-reminder/recurrence";
 import { formatCustodyList } from "~/modules/custody/utils";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
-import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
-import { isLink } from "~/utils/misc";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
@@ -59,6 +69,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BarcodeCell } from "./advanced-columns/barcode-cell";
@@ -66,8 +77,11 @@ import { QrIdCell } from "./advanced-columns/qr-id-cell";
 import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
+import { resolveFreeNowText } from "./free-now-display";
 import { freezeColumnClassNames } from "./freeze-column-classes";
+import { LastAuditDateCell } from "./last-audit-date-cell";
 import { ListItemTagsColumn } from "./list-item-tags-column";
+import { resolveReservedDisplay } from "./reserved-display";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { CategoryBadge } from "../category-badge";
@@ -75,11 +89,15 @@ import { CategoryBadge } from "../category-badge";
 export function AdvancedIndexColumn({
   column,
   item,
+  linkState,
 }: {
   column: ColumnLabelKey;
   item: AdvancedIndexAsset;
+  /** History state for the name link, so the asset page can step through this list. */
+  linkState?: ListContextLinkState;
 }) {
-  const { locale, currentOrganization } = useLoaderData<AssetIndexLoaderData>();
+  const { locale, currentOrganization, lastAuditDateAccess, linkTitles } =
+    useLoaderData<AssetIndexLoaderData>();
   const { prefs } = useDateFormatter();
   const showAssetImage = useAssetIndexShowImage();
   const freezeColumn = useAssetIndexFreezeColumn();
@@ -132,16 +150,14 @@ export function AdvancedIndexColumn({
               </PopoverContent>
             </PopoverPortal>
           </Popover>
-        ) : isLink(customFieldDisplayValue as string) ? (
-          <Button
-            role="link"
-            variant="link"
-            className="text-gray text-end font-normal underline hover:text-gray-600"
-            target="_blank"
-            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
-          >
-            {customFieldDisplayValue as string}
-          </Button>
+        ) : field.customField.type === CustomFieldType.TEXT ||
+          field.customField.type === CustomFieldType.OPTION ? (
+          // An option is free text an admin typed, so it can hold a link too.
+          <TextWithLinks
+            value={String(fieldValue.raw)}
+            titles={linkTitles}
+            compact
+          />
         ) : field.customField.type === CustomFieldType.AMOUNT ? (
           formatCurrency({
             value: fieldValue.raw as number,
@@ -182,7 +198,8 @@ export function AdvancedIndexColumn({
               <div className="min-w-0 flex-1 truncate">
                 <div className="flex items-center gap-1.5">
                   <Link
-                    to={item.id}
+                    to={LIST_DETAIL_PATH.asset(item.id)}
+                    state={linkState}
                     className="truncate font-medium underline hover:text-gray-600"
                     title={item.title}
                   >
@@ -228,6 +245,7 @@ export function AdvancedIndexColumn({
           status={item.status}
           availableToBook={item.availableToBook}
           asset={item}
+          isArchived={!!item.archivedAt}
         />
       );
 
@@ -290,13 +308,33 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      // An archived asset can't be booked, whatever its stored setting.
+      return (
+        <TextColumn
+          value={
+            item.archivedAt
+              ? "No (archived)"
+              : item.availableToBook
+              ? "Yes"
+              : "No"
+          }
+        />
+      );
 
     case "upcomingReminder":
       return (
         <UpcomingReminderColumn
           assetId={item.id}
           upcomingReminder={item.upcomingReminder}
+        />
+      );
+
+    case "lastAuditDate":
+      return (
+        <LastAuditDateCell
+          assetId={item.id}
+          lastAuditDate={item.lastAuditDate}
+          access={lastAuditDateAccess ?? "hidden"}
         />
       );
 
@@ -341,20 +379,13 @@ export function AdvancedIndexColumn({
       );
 
     case "quantity":
-      return (
-        <Td className="w-full max-w-none whitespace-nowrap">
-          {isQuantityTracked(item) && item.quantity != null ? (
-            `${item.quantity}${
-              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
-            }`
-          ) : (
-            <EmptyTableValue />
-          )}
-        </Td>
-      );
+      return <QuantityColumn item={item} />;
+
+    case "unitOfMeasure":
+      return <UnitOfMeasureColumn item={item} />;
 
     case "minQuantity":
-      // Low-stock reorder threshold — only meaningful for QUANTITY_TRACKED
+      // Low-stock reorder threshold, only meaningful for QUANTITY_TRACKED
       // assets. Plain number, mirroring the "quantity" cell above.
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
@@ -363,6 +394,88 @@ export function AdvancedIndexColumn({
           ) : (
             <EmptyTableValue />
           )}
+        </Td>
+      );
+
+    case "available":
+      // Units free to hand over right now: total minus custody, kits and
+      // checked-out. Deliberately NOT reduced by future reservations: those
+      // units are still physically on the shelf.
+      //
+      // Reads "14 of 20 pcs", see `resolveFreeNowText`.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.available != null ? (
+            <span className="tabular-nums">
+              {resolveFreeNowText({
+                available: item.available,
+                total: item.quantity,
+                unitOfMeasure: item.unitOfMeasure,
+              })}
+            </span>
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
+    case "reserved":
+      // Units promised to future RESERVED bookings.
+      //
+      // NOT gated on quantity-tracking, unlike the two columns either side of
+      // it. An individually-tracked asset is a pool of one, and it can be
+      // reserved exactly like a pool can, so a booked camera reads 1 here.
+      // Gating it produced the worst outcome in the whole change: a user booked
+      // an asset, looked at a column headed "Reserved", and saw a dash. The
+      // number was already in the query; the cell was throwing it away.
+      //
+      // It is also the only one of the three new columns that says anything to
+      // a workspace with no quantity assets at all, and it says something the
+      // row could not say before: `AssetStatus` has no RESERVED member, so a
+      // booked-but-not-yet-collected asset reads "Available" in the Status
+      // badge and only confesses in "Upcoming Bookings", eighteen columns to
+      // the right.
+      return <ReservedCell item={item} />;
+
+    case "stockStatus":
+      // Derived verdict. The badge owns the "no reorder point renders blank"
+      // and "INDIVIDUAL renders blank" rules, so this cell stays a pass-through
+      // and every surface showing the verdict agrees.
+      //
+      // The breakdown makes the badge hoverable with THIS row's figures, so
+      // "how bad is it" no longer means opening the asset page. Passed only for
+      // quantity assets: an individual asset has no pool, and the values would
+      // all be null.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          <StockStatusBadge
+            status={item.stockStatus}
+            breakdown={
+              isQuantityTracked(item) && item.available != null
+                ? {
+                    total: item.quantity ?? 0,
+                    available: item.available,
+                    inCustody: item.inCustody ?? 0,
+                    inKits: item.inKits ?? 0,
+                    checkedOut: item.checkedOut ?? 0,
+                    peakBooked: item.peakBooked ?? 0,
+                    minQuantity: item.minQuantity,
+                    unitOfMeasure: item.unitOfMeasure,
+                    // The biggest booking in the peak, so a SHORT hover can
+                    // link somewhere instead of leaving the reader to search.
+                    topBooking:
+                      item.topBookingId && item.topBookingName
+                        ? {
+                            id: item.topBookingId,
+                            name: item.topBookingName,
+                            units: item.topBookingUnits ?? 0,
+                          }
+                        : null,
+                    assetId: item.id,
+                  }
+                : null
+            }
+          />
         </Td>
       );
 
@@ -376,6 +489,71 @@ export function AdvancedIndexColumn({
         </Td>
       );
   }
+}
+
+/**
+ * The `Reserved` cell.
+ *
+ * Split out of the switch because it is the only new cell that has to render a
+ * state the rest of the row cannot express: **more units promised than the
+ * workspace owns**.
+ *
+ * That state is why this component exists. A row reading `Free now 10 pcs ·
+ * Total quantity 10 pcs · Reserved 12 · Short` is self-contradicting on its
+ * face, three cells look healthy and only the pill objects. The cause is that
+ * `Free now` answers "on the shelf today" while `Short` answers "when that
+ * booking starts", and nothing marked the two apart. The cell that actually
+ * holds the contradiction, `Reserved 12` against a total of 10, was rendered in
+ * the same grey as a harmless `0`.
+ *
+ * So when the claim exceeds the pool it is drawn in the SAME violet as the
+ * `Short` badge and names the shortfall: `12 pcs · 2 short`.
+ *
+ * **Never "12 of 10".** That was the first attempt and it is unreadable: "of"
+ * asks to be read as part-of-whole, which has no meaning once the first number
+ * exceeds the second. The gap is also the number somebody can act on, nobody
+ * orders "12 of 10", they order 2. Reserve "X of Y" for surfaces where X is
+ * genuinely capped by Y, like the booking quantity dialogs.
+ *
+ * @param props.item - The row.
+ * @returns The table cell.
+ */
+function ReservedCell({ item }: { item: AdvancedIndexAsset }) {
+  if (item.reserved == null) {
+    return (
+      <Td className="w-full max-w-none whitespace-nowrap">
+        <EmptyTableValue />
+      </Td>
+    );
+  }
+
+  // The rule itself lives in `resolveReservedDisplay`, pure and unit-tested,
+  // the sum-vs-pool trap it guards against is invisible to both the compiler
+  // and a glance at this file.
+  const { text, isOversold, title } = resolveReservedDisplay({
+    reserved: item.reserved,
+    quantity: isQuantityTracked(item) ? item.quantity ?? null : null,
+    stockStatus: item.stockStatus ?? null,
+    peakBooked: item.peakBooked ?? 0,
+    inCustody: item.inCustody ?? 0,
+    inKits: item.inKits ?? 0,
+    unitOfMeasure: item.unitOfMeasure,
+  });
+
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {/* Tailwind class, not an inline hex. `BADGE_COLORS` is the palette for
+          Badge components (see the repo rule); reaching into it for the colour
+          of a bare table cell was borrowing a token for something it does not
+          govern, and it hard-codes a value the design system cannot restyle. */}
+      <span
+        className={tw(isOversold && "font-medium text-violet-700")}
+        title={title ?? undefined}
+      >
+        {text}
+      </span>
+    </Td>
+  );
 }
 
 function TextColumn({
@@ -419,12 +597,82 @@ function StatusColumn({
   status,
   availableToBook,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: AssetStatus;
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
+  isArchived?: boolean;
 }) {
+  /**
+   * The index query already computed every claim on the pool, so hand the badge
+   * those numbers rather than letting it re-derive from row relations it does
+   * not carry. Deriving locally produced reserved/checkedOut = 0, which made
+   * the badge render the raw status and then silently rewrite itself on hover
+   * once the lazy per-row fetch landed.
+   *
+   * `available` is the server's figure, so this badge, the `Available` column
+   * and the `Stock status` column are three renderings of ONE calculation.
+   * Null for INDIVIDUAL assets, which fall through to the plain status shell.
+   */
+  const quantityBreakdown = useMemo(() => {
+    if (!asset || !isQuantityTracked(asset) || asset.available == null) {
+      return null;
+    }
+    /**
+     * The `_all` figures on purpose. The badge picks a WORD, and for a member
+     * of a kit that is in custody or out on a booking the right word is still
+     * "In custody" / "Checked out", those units left with the kit. The
+     * arithmetic figures (`inCustody`, `checkedOut`) exclude kit-driven units
+     * so `Free now` counts them once; using them here would label such a row
+     * "Available" beside a `Free now` of 0. This mirrors what the asset page
+     * feeds `getQuantityData`, which reads every custody and booking row.
+     */
+    return {
+      total: asset.quantity ?? 0,
+      inCustody: asset.inCustodyAll ?? asset.inCustody ?? 0,
+      inKits: asset.inKits ?? 0,
+      reserved: asset.reservedAll ?? asset.reserved ?? 0,
+      checkedOut: asset.checkedOutAll ?? asset.checkedOut ?? 0,
+      /**
+       * **Not the `Free now` figure.** `available` feeds only the label choice
+       * in `getQuantityBadgeLabelAndColor` ("Reserved" vs "Partially
+       * reserved"), which asks *is there anything left to PROMISE*, so it has
+       * to subtract reservations, and it is allowed to go negative.
+       *
+       * Passing the server's free-now number here instead made the index badge
+       * read "Partially reserved" while the asset page, which derives the same
+       * label through `getQuantityData`, read "Reserved", the same asset
+       * described two different ways at the same moment. So this reproduces
+       * `getQuantityData`'s formula exactly, field for field, rather than
+       * substituting a number that merely looks similar.
+       */
+      available:
+        (asset.quantity ?? 0) -
+        (asset.inCustodyAll ?? asset.inCustody ?? 0) -
+        (asset.reservedAll ?? asset.reserved ?? 0) -
+        (asset.checkedOutAll ?? asset.checkedOut ?? 0),
+      /**
+       * The DISPLAY figure, and the server's own, so the tooltip footer, the
+       * `Free now` column and the `Stock status` pill are three renderings of
+       * ONE calculation and cannot drift apart.
+       */
+      freeNow: asset.available,
+      /**
+       * The index row carries no per-booking or per-kit lists: an asset can
+       * hold hundreds of future bookings, too many to ship for every row. The
+       * badge is told so through `quantityListsDeferred` and fetches the lists
+       * on first hover; until then the card shows totals plus the
+       * `nextReservedFrom` scalar below, which reconciles "12 reserved" with
+       * "10 free right now".
+       */
+      bookingAssets: [],
+      assetKits: [],
+      nextReservedFrom: asset.nextReservedFrom ?? null,
+    };
+  }, [asset]);
+
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
       <AssetStatusBadge
@@ -432,20 +680,74 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        quantityBreakdown={quantityBreakdown}
+        quantityListsDeferred
+        isArchived={isArchived}
       />
     </Td>
   );
 }
 
+/** The asset fields the Quantity and Unit of measure cells read. */
+type QuantityCellAsset = Pick<
+  AdvancedIndexAsset,
+  "type" | "quantity" | "unitOfMeasure"
+>;
+
+/**
+ * Quantity cell of the advanced index: the bare stock number of a
+ * QUANTITY_TRACKED asset, so the column reads and sorts as a number. The unit
+ * has its own {@link UnitOfMeasureColumn}. Individual assets show the
+ * empty-value dash.
+ *
+ * @param props.item - The asset row
+ */
+export function QuantityColumn({ item }: { item: QuantityCellAsset }) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {isQuantityTracked(item) && item.quantity != null ? (
+        item.quantity
+      ) : (
+        <EmptyTableValue />
+      )}
+    </Td>
+  );
+}
+
+/**
+ * Unit of measure cell of the advanced index: the free-text unit ("pcs",
+ * "kg") of a QUANTITY_TRACKED asset. Individual assets, and quantity-tracked
+ * assets without a unit, show the empty-value dash.
+ *
+ * @param props.item - The asset row
+ */
+export function UnitOfMeasureColumn({ item }: { item: QuantityCellAsset }) {
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {isQuantityTracked(item) && item.unitOfMeasure ? (
+        item.unitOfMeasure
+      ) : (
+        <EmptyTableValue />
+      )}
+    </Td>
+  );
+}
+
+/** The most description characters the index tooltip shows. */
+const DESCRIPTION_TOOLTIP_MAX_LENGTH = 600;
+
 /**
  * Displays a truncated plain-text preview of the asset description and shows
- * the full markdown-rendered content inside a tooltip on hover.
+ * the markdown-rendered content inside a tooltip on hover. The tooltip shows
+ * at most {@link DESCRIPTION_TOOLTIP_MAX_LENGTH} characters and points to the
+ * asset page for the rest.
  * Description column component - exported for reuse in other index pages
  */
 export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
+  const isTooltipTruncated = value.length > DESCRIPTION_TOOLTIP_MAX_LENGTH;
 
   return (
     <Td className="max-w-62 min-w-60 whitespace-pre-wrap">
@@ -460,11 +762,20 @@ export function DescriptionColumn({ value }: { value: string }) {
 
             <TooltipContent side="top" className="max-w-[400px]">
               <h5>Asset description</h5>
-              {/* No `allowExternalLinks`: descriptions are authored in a plain
-                  textarea and rendered as plain text on the asset page, so
-                  they are not a markdown surface. Links here would also be
-                  unreachable — Radix tooltip content is not interactive. */}
-              <MarkdownViewer content={value} className="mt-2 text-sm" />
+              {/* Descriptions are typed in a plain textarea, so they get no
+                  external links (tooltip content is not interactive anyway)
+                  and no Markdoc tags: a tag a member types here must not
+                  render as a badge or a component. */}
+              <MarkdownViewer
+                content={truncateText(value, DESCRIPTION_TOOLTIP_MAX_LENGTH)}
+                className="mt-2 text-sm"
+                withTags={false}
+              />
+              {isTooltipTruncated ? (
+                <p className="mt-2 text-xs text-gray-500">
+                  Open the asset to read the full description
+                </p>
+              ) : null}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -499,7 +810,7 @@ function CategoryColumn({
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
-      <CategoryBadge category={category} />
+      <CategoryBadge category={category} linkToAssets />
     </Td>
   );
 }
@@ -507,7 +818,7 @@ function CategoryColumn({
 function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
   return (
     <Td className="text-left">
-      <ListItemTagsColumn tags={tags} />
+      <ListItemTagsColumn tags={tags} linkToAssets />
     </Td>
   );
 }
@@ -529,7 +840,7 @@ export function CustodyColumn({
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
@@ -761,32 +1072,7 @@ function LocationColumnContent({
   return (
     <span className="flex min-w-0 items-center gap-x-1.5 whitespace-nowrap">
       {primaryButton}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
-              data-testid="location-more-chip"
-              aria-label={`+${others.length} more location${
-                others.length === 1 ? "" : "s"
-              }`}
-            >
-              +{others.length}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent
-            className="max-w-xs"
-            data-testid="location-more-tooltip"
-          >
-            <ul className="flex flex-col gap-1 text-sm">
-              {[primary, ...others].map((entry) => (
-                <li key={entry.id}>{entry.name}</li>
-              ))}
-            </ul>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <MoreLocationsChip primary={primary} others={others} />
     </span>
   );
 }
@@ -802,18 +1088,31 @@ function UpcomingReminderColumn({
     return <Td>No upcoming reminder</Td>;
   }
 
+  const recurrenceLabel = describeRecurrence(upcomingReminder);
+
   return (
     <Td>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="link-gray" to={`/assets/${assetId}/reminders`}>
-            <DateS date={upcomingReminder.alertDateTime} includeTime />
+            <span className="flex items-center gap-1">
+              <DateS date={upcomingReminder.alertDateTime} includeTime />
+              {recurrenceLabel ? (
+                <RepeatIcon
+                  className="size-3 text-gray-400"
+                  aria-label="Recurring reminder"
+                />
+              ) : null}
+            </span>
           </Button>
         </TooltipTrigger>
 
         <TooltipContent className="max-w-[400px]">
           <p className="mb-1 font-bold">{upcomingReminder.name}</p>
           <p>{upcomingReminder.message.substring(0, 1000)}</p>
+          {recurrenceLabel ? (
+            <p className="mt-1 text-gray-500">Repeats: {recurrenceLabel}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
     </Td>
@@ -825,8 +1124,12 @@ function UpcomingBookingsColumn({
 }: {
   bookings: AdvancedIndexAsset["bookings"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
+  // A reservation request still waiting for a decision is drawn in the
+  // pending palette here as on the calendar, so the asset index tells staff
+  // the booking is not settled without opening it.
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
     organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
@@ -862,6 +1165,11 @@ function UpcomingBookingsColumn({
               if (canSeeAllCustody) {
                 title += ` | ${custodianName}`;
               }
+              const isPendingApproval = isBookingPendingApproval({
+                status: booking.status,
+                approvedAt: booking.approvedAt,
+                requireBookingApproval,
+              });
 
               return (
                 <HoverCard key={booking.id} openDelay={0} closeDelay={0}>
@@ -869,7 +1177,9 @@ function UpcomingBookingsColumn({
                     className={tw(
                       getStatusClasses(
                         booking.status,
-                        isOneDayEvent(booking.from, booking.to)
+                        isOneDayEvent(booking.from, booking.to),
+                        undefined,
+                        { pendingApproval: isPendingApproval }
                       ),
                       "min-w-48 border px-2 py-1 text-left"
                     )}
@@ -888,14 +1198,17 @@ function UpcomingBookingsColumn({
                         name: booking.name,
                         description: booking.description,
                         status: booking.status,
+                        isPendingApproval,
                         tags: booking.tags,
                         start: booking.from,
                         end: booking.to,
                         custodian: {
+                          id: booking.custodianTeamMember?.id ?? null,
                           name: custodianName ?? "",
                           user: booking.custodianUser ?? null,
                         },
                         creator: {
+                          id: null,
                           name: booking.creator
                             ? resolveUserDisplayName(booking.creator)
                             : "Unknown",

@@ -1,5 +1,11 @@
+import Markdoc from "@markdoc/markdoc";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import type { CustomField, CustomFieldType } from "@prisma/client";
+import type {
+  CustomField,
+  CustomFieldFormat,
+  CustomFieldType,
+} from "@prisma/client";
+import { parseLinkInput } from "@shelf/links";
 import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
@@ -10,7 +16,7 @@ import {
   parseDateOnlyString,
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
-import { parseMarkdownToReact } from "./md";
+import { linkifyBareUrls } from "./markdoc-linkify";
 import {
   optionalNumberFromString,
   requiredNumberFromString,
@@ -25,6 +31,7 @@ const getSchema = ({
   field_name,
   required = false,
   options,
+  storedValue,
 }: {
   id: string;
   params: {
@@ -35,10 +42,19 @@ const getSchema = ({
   field_name?: string | undefined;
   required?: boolean;
   options?: CustomField["options"];
+  /** The text the asset stores for this field now, when editing an asset. */
+  storedValue?: string;
 }) => {
-  /** If the field is required, we set the correct field type using zod */
+  /**
+   * Text-shaped value (text, Link, multi-line text, date). A required one must
+   * hold more than whitespace: `buildCustomFieldValue` treats a whitespace-only
+   * value as blank and stores nothing, so accepting it would let a required
+   * field be saved empty. The check refines rather than trims, so the schema
+   * passes accepted input on unchanged; `buildCustomFieldValue` still applies
+   * its own per-type handling (it trims a date and normalizes a link).
+   */
   const text = required
-    ? z.string(params).min(1, {
+    ? z.string(params).refine((value) => value.trim().length > 0, {
         message: field_name
           ? `${field_name} is required`
           : `This field is required`,
@@ -53,6 +69,16 @@ const getSchema = ({
 
   return {
     text,
+    // Blank stays allowed (or refused by `required` above), and so does the
+    // value the asset already stores, which may predate the Link format;
+    // anything else must pass the rule `buildCustomFieldValue` applies.
+    link: text.superRefine((value, ctx) => {
+      if (!value?.trim() || value === storedValue) return;
+      const input = parseLinkInput(value);
+      if (!input.ok) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: input.message });
+      }
+    }),
     multiline_text: text,
     date: text,
     boolean: z
@@ -79,7 +105,7 @@ const getSchema = ({
     number: required
       ? requiredNumberFromString({ fieldName: field_name })
       : optionalNumberFromString({ blank: null, fieldName: field_name }),
-  } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
+  } satisfies Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
 export type CustomFieldZodSchema = {
@@ -87,6 +113,7 @@ export type CustomFieldZodSchema = {
   name: string;
   type:
     | "text"
+    | "link"
     | "number"
     | "date"
     | "boolean"
@@ -98,7 +125,36 @@ export type CustomFieldZodSchema = {
   options?: CustomField["options"];
 };
 
-function buildSchema(fields: CustomFieldZodSchema[]) {
+/**
+ * Describes one custom field definition for `mergedSchema`, the asset form's
+ * validation. A Link-format TEXT field validates as a web link.
+ *
+ * @param def - An active custom field definition
+ * @returns The field's entry for `mergedSchema({ customFields })`
+ */
+export function toCustomFieldZodSchema(
+  def: Pick<
+    CustomField,
+    "id" | "name" | "helpText" | "required" | "type" | "format" | "options"
+  >
+): CustomFieldZodSchema {
+  return {
+    id: def.id,
+    name: def.name,
+    helpText: def.helpText ?? "",
+    required: def.required,
+    type:
+      def.format === "LINK"
+        ? "link"
+        : (def.type.toLowerCase() as CustomFieldZodSchema["type"]),
+    options: def.options,
+  };
+}
+
+function buildSchema(
+  fields: CustomFieldZodSchema[],
+  storedValues: StoredCustomFieldTexts | undefined
+) {
   let schema = z.object({});
 
   fields.forEach((field) => {
@@ -114,6 +170,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
         field_name: field.name,
         required: field.required,
         options: field.options,
+        storedValue: storedValues?.get(field.id),
       })[field.type],
     });
 
@@ -123,58 +180,95 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   return schema;
 }
 
+/**
+ * The text an asset stores for each of its custom fields, by field id: the
+ * `raw` of every value whose `raw` is a string.
+ *
+ * Passed as `storedValues` to `mergedSchema` and
+ * `extractCustomFieldValuesFromPayload` when an asset is edited, so a Link
+ * field that still holds a value saved before it became a Link field does
+ * not block saving the asset's other changes.
+ */
+export type StoredCustomFieldTexts = ReadonlyMap<string, string>;
+
+/**
+ * Reads {@link StoredCustomFieldTexts} from an asset's stored values.
+ *
+ * @param values - `AssetCustomFieldValue` rows (or their JSON) of one asset
+ * @returns The stored text by custom field id
+ */
+export function storedCustomFieldTexts(
+  values: readonly { customFieldId: string; value: unknown }[]
+): StoredCustomFieldTexts {
+  const texts = new Map<string, string>();
+  for (const { customFieldId, value } of values) {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "raw" in value &&
+      typeof value.raw === "string"
+    ) {
+      texts.set(customFieldId, value.raw);
+    }
+  }
+  return texts;
+}
+
+/**
+ * The asset form's schema: `baseSchema` plus one `cf-<id>` entry per custom
+ * field.
+ *
+ * @param args.storedValues - When editing an asset, what it stores now; a
+ *   Link field accepts its stored value unchanged
+ */
 export const mergedSchema = <T extends ZodRawShape>({
   baseSchema,
   customFields,
+  storedValues,
 }: {
   baseSchema: z.ZodObject<T, any>;
   customFields: CustomFieldZodSchema[];
+  storedValues?: StoredCustomFieldTexts;
 }) => {
-  const CustomSchema = buildSchema(customFields);
+  const CustomSchema = buildSchema(customFields, storedValues);
 
   return baseSchema.merge(CustomSchema);
 };
 
 /** Takes the result of zod's safeParseAsync and extracts custom fields values from it
  * Custom fields need to be prefixed with `cf-`
+ *
+ * With `storedValues` (when editing an asset), a Link field whose submitted
+ * value equals what the asset stores is left out, so its stored value stays
+ * as it is and is never run through the Link rule.
  */
 export const extractCustomFieldValuesFromPayload = ({
   payload,
   customFieldDef,
-  isDuplicate,
+  storedValues,
 }: {
   payload: { [key: string]: any };
   customFieldDef: CustomField[];
-  isDuplicate?: boolean;
+  storedValues?: StoredCustomFieldTexts;
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
   const customFieldsKeys = Object.keys(payload).filter((key) =>
     key.startsWith("cf-")
   );
 
-  return customFieldsKeys
-    .map((key) => {
-      const id = key.split("-")[1];
-      const fieldDef = customFieldDef.find((v) => v.id === id)!;
-      //making sure that duplicate creation is handled.
-      if (!fieldDef && isDuplicate) {
-        return null;
-      }
-      const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef!);
-      return { id, value } as ShelfAssetCustomFieldValueType;
-    })
-    .filter((v) => v !== null) as ShelfAssetCustomFieldValueType[];
+  return customFieldsKeys.flatMap((key) => {
+    const id = key.split("-")[1];
+    const fieldDef = customFieldDef.find((v) => v.id === id)!;
+    const unchangedLink =
+      fieldDef.format === "LINK" &&
+      storedValues?.has(id) === true &&
+      payload[key] === storedValues.get(id);
+    if (unchangedLink) return [];
+    const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef);
+    return [{ id, value } as ShelfAssetCustomFieldValueType];
+  });
 };
 
-/**
- * Builds a custom field value based on the field definition and raw input
- * For date fields, ensures dates are stored in ISO format required by DB constraints
- * while preserving the intended date regardless of timezone
- *
- * @param value - The raw value and any additional field-specific values
- * @param def - The custom field definition
- * @returns Formatted custom field value or undefined if no valid value
- */
 const NUMERIC_VALUE_GUIDANCE =
   "Expected format: Plain numbers with optional decimal separator (e.g., 600, 600.50, or 600,50). Currency symbols will be automatically removed.";
 
@@ -205,10 +299,14 @@ function formatInvalidNumericMessage(
  * (`getDefinitionFromCsvHeader`) has no database row behind it, so it carries
  * no `id`. A persisted `CustomField` satisfies this shape too, and its `id`
  * travels to Sentry when a numeric value is rejected.
+ *
+ * `format` is required so every hand-written select that feeds
+ * `buildCustomFieldValue` must fetch it: a select without it would skip the
+ * Link rule.
  */
 export type CustomFieldDefinitionForValue = Pick<
   CustomField,
-  "name" | "type"
+  "name" | "type" | "format"
 > & {
   id?: string;
 };
@@ -355,6 +453,76 @@ function sanitizeNumericInput(
   return throwInvalid();
 }
 
+/** The only date format a custom field import accepts: YYYY-MM-DD. */
+export const CUSTOM_FIELD_DATE_FORMAT = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * UTC midnight of a calendar day, so the date stays the same in every time
+ * zone.
+ *
+ * @param year - Full year
+ * @param month - Month, 1 to 12
+ * @param day - Day of the month
+ * @returns The date, or `null` when the parts are not a real day: `Date`
+ *   rolls 2026-02-31 over to 2026-03-03, which must never be stored
+ */
+export function utcCalendarDate(
+  year: number,
+  month: number,
+  day: number
+): Date | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
+}
+
+/**
+ * Whether a value is a date a custom field import accepts: YYYY-MM-DD and a
+ * real calendar day. The caller decides whether to trim first.
+ *
+ * @param value - A CSV cell
+ * @returns `true` when the importer would store it
+ */
+export function isImportableCustomFieldDate(value: string): boolean {
+  const match = CUSTOM_FIELD_DATE_FORMAT.exec(value);
+  return (
+    match !== null &&
+    utcCalendarDate(Number(match[1]), Number(match[2]), Number(match[3])) !==
+      null
+  );
+}
+
+/**
+ * Reads a yes/no cell the way imports do. Case-insensitive, trims whitespace.
+ *
+ * @param value - Raw string from a CSV cell
+ * @returns `true` for "yes", `false` for "no", `undefined` for anything else
+ */
+export function parseYesNo(value: string): boolean | undefined {
+  const lower = value.trim().toLowerCase();
+  if (lower === "yes") return true;
+  if (lower === "no") return false;
+  return undefined;
+}
+
+/**
+ * Builds the stored value for one custom field from raw input. Every write
+ * path (forms, inline edit, imports, the mobile API) goes through here, so a
+ * type's rule holds everywhere.
+ *
+ * DATE values are stored with an ISO `valueDate` at UTC midnight, keeping the
+ * intended day in every time zone. A Link-format TEXT field stores the
+ * normalized link (`www.x.com/a.pdf` becomes `https://www.x.com/a.pdf`).
+ *
+ * @param value - The raw value and any additional field-specific values
+ * @param def - The custom field definition
+ * @returns The value to store, or undefined when the input is blank
+ * @throws {ShelfError} When the input does not fit the field: not a number,
+ *   not a YYYY-MM-DD day, or (400) not a web link for a Link field
+ */
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomFieldDefinitionForValue
@@ -375,15 +543,10 @@ export const buildCustomFieldValue = (
       case "BOOLEAN": {
         let finalValue: boolean;
         if (typeof raw === "string") {
-          const normalized = raw.trim().toLowerCase();
-          if (normalized === "yes") {
-            finalValue = true;
-          } else if (normalized === "no") {
-            finalValue = false;
-          } else {
-            // Unrecognized boolean string — skip instead of coercing
-            return undefined;
-          }
+          const parsed = parseYesNo(raw);
+          // An unrecognized string is skipped instead of coerced.
+          if (parsed === undefined) return undefined;
+          finalValue = parsed;
         } else {
           finalValue = Boolean(raw);
         }
@@ -395,14 +558,13 @@ export const buildCustomFieldValue = (
         // while ensuring the date remains the same in all timezones.
         const dateOnly = (raw as string).trim(); // expected: YYYY-MM-DD
 
-        // why: without a strict format guard, the positional split below silently
-        // mis-parses non-ISO input. e.g. "03-04-2026" → split → [3, 4, 2026] →
-        // Date.UTC(3, 3, 2026) rolls over to ~Oct 1908 — a VALID Date, so it is
-        // stored with no error while the UI keeps showing the raw string, poisoning
-        // the queryable valueDate (sort/filter/reports/reminders) invisibly.
-        // This mirrors the strict guard already used on the bulk-update import path
-        // (see compareCustomField's DATE case in ~/utils/import-update-diff).
-        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+        // why: a stored date must be a real YYYY-MM-DD day. Any other shape is
+        // refused, because Date.UTC turns "03-04-2026" into a valid but wrong
+        // date that would then drive sorting, filters, reports and reminders;
+        // utcCalendarDate refuses a day Date.UTC would roll over (2026-02-31).
+        // The bulk-update diff applies the same rule via
+        // isImportableCustomFieldDate.
+        const match = CUSTOM_FIELD_DATE_FORMAT.exec(dateOnly);
         if (!match) {
           throw new ShelfError({
             cause: null,
@@ -413,21 +575,12 @@ export const buildCustomFieldValue = (
           });
         }
 
-        const year = Number(match[1]);
-        const month = Number(match[2]);
-        const day = Number(match[3]);
-
-        // Create date at UTC midnight to preserve the date across all timezones.
-        const utcDate = new Date(Date.UTC(year, month - 1, day));
-
-        // why: new Date normalizes overflow (e.g. 2026-02-31 → 2026-03-03), so we
-        // must confirm the components round-trip — otherwise impossible calendar
-        // dates would be silently stored as a different (shifted) date.
-        if (
-          utcDate.getUTCFullYear() !== year ||
-          utcDate.getUTCMonth() !== month - 1 ||
-          utcDate.getUTCDate() !== day
-        ) {
+        const utcDate = utcCalendarDate(
+          Number(match[1]),
+          Number(match[2]),
+          Number(match[3])
+        );
+        if (!utcDate) {
           throw new ShelfError({
             cause: null,
             title: "Invalid date",
@@ -453,6 +606,23 @@ export const buildCustomFieldValue = (
       case "NUMBER": {
         const { numericValue, normalizedText } = sanitizeNumericInput(raw, def);
         return { raw: numericValue, valueText: normalizedText };
+      }
+      case "TEXT": {
+        if (def.format !== "LINK") break;
+        const input = parseLinkInput(String(raw));
+        if (!input.ok) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not a link",
+            message: `Custom field '${def.name}': ${
+              input.message
+            }. The value we found is: '${String(raw)}'.`,
+            label: "Custom fields",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+        return { raw: input.url, valueText: input.url };
       }
     }
 
@@ -490,14 +660,17 @@ export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage }
  * @param prefs - Optional resolved format prefs; when supplied, DATE values
  *   render in the user's configured order (absolute, no tz conversion).
  *   When omitted, falls back to `PPP` (server / prefs-less contexts).
- * @returns A string or renderable Markdoc node
+ * @returns A string, or for MULTILINE_TEXT a renderable Markdoc node with
+ *   bare URLs linked
  */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   prefs?: ResolvedFormatPrefs
 ): string | RenderableTreeNode => {
   if (value.valueMultiLineText) {
-    return parseMarkdownToReact(value.raw as string);
+    return Markdoc.transform(
+      linkifyBareUrls(Markdoc.parse(value.raw as string))
+    );
   }
 
   if (Object.hasOwnProperty.call(value, "valueBoolean")) {
@@ -527,6 +700,7 @@ export type CustomFieldDefinitionForDisplay = {
   id: string;
   name: string;
   type: CustomFieldType;
+  format: CustomFieldFormat;
   options: string[];
 };
 
@@ -610,10 +784,25 @@ export function buildAssetOverviewCustomFields<
   );
 }
 
-//header = "cf:name,type:text"
+/**
+ * Reads the field definition a CSV column header declares, e.g.
+ * `cf:Serial number,type:text` or `cf:Manual,type:text,format:link`.
+ *
+ * The type defaults to text. A `format:link` segment makes a text column a
+ * Link field; on any other type it is ignored, since only text fields can
+ * hold the Link format. The type is not checked here (see the import
+ * preflight).
+ *
+ * @param header - A column header starting with `cf:`
+ * @returns The definition to create the field with when it does not exist
+ * @see {@link customFieldCsvHeader} for the header written for a field
+ */
 export const getDefinitionFromCsvHeader = (
   header: string
-): Pick<CustomField, "helpText" | "name" | "type" | "required" | "active"> => {
+): Pick<
+  CustomField,
+  "helpText" | "name" | "type" | "format" | "required" | "active"
+> => {
   const defArr = header.split(",").map((e) => e.trim()); //["cf:name","type:text"]
   const name = defArr
     .find((e: string) => e.toLowerCase().startsWith("cf:"))!
@@ -622,16 +811,37 @@ export const getDefinitionFromCsvHeader = (
   let type =
     defArr.find((e) => e.toLowerCase().startsWith("type:"))?.substring(5) ||
     "text"; //"text"
-
   type = type.trim().replace(/\s+/g, "_").toUpperCase();
+  const format = defArr
+    .find((e) => e.toLowerCase().startsWith("format:"))
+    ?.substring(7)
+    .trim()
+    .toUpperCase();
+
   return {
     name,
     active: true,
     helpText: "",
     required: false,
     type: type as CustomFieldType,
+    format: type === "TEXT" && format === "LINK" ? "LINK" : "PLAIN",
   };
 };
+
+/**
+ * The CSV column header for a field, in the form `getDefinitionFromCsvHeader`
+ * reads: `cf:Manual,type:TEXT,format:LINK` for a Link field,
+ * `cf:Serial number,type:TEXT` otherwise.
+ *
+ * @param def - The field's name, type and format
+ * @returns The header text
+ */
+export function customFieldCsvHeader(
+  def: Pick<CustomField, "name" | "type" | "format">
+): string {
+  const header = `cf:${def.name},type:${def.type}`;
+  return def.format === "LINK" ? `${header},format:${def.format}` : header;
+}
 
 // order of the keys control the UI form dorpdown order, so dont change unless u know what you are doing
 export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
@@ -643,3 +853,19 @@ export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
   AMOUNT: "Amount",
   NUMBER: "Number",
 };
+
+/**
+ * The type of a field as the settings pages name it, with "(link)" added for a
+ * Link-format text field.
+ *
+ * @param def - The field's type and format
+ * @returns e.g. "Single-line text (link)"
+ */
+export function fieldTypeLabel(def: Pick<CustomField, "type" | "format">) {
+  const name = FIELD_TYPE_NAME[def.type];
+  return def.format === "LINK" ? `${name} (link)` : name;
+}
+
+/** Refusal for a Link format on a field that is not single-line text. */
+export const LINK_FORMAT_NEEDS_TEXT_MESSAGE =
+  "Only single-line text fields can be Link fields";

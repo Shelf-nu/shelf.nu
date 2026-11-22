@@ -15,6 +15,7 @@ import type {
 import { z } from "zod";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import Header from "~/components/layout/header";
+import { RecordNavigation } from "~/components/layout/header/record-navigation";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ActionsDropdown } from "~/components/location/actions-dropdown";
@@ -25,7 +26,10 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
+import { useRecordNavigation } from "~/hooks/use-list-context";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
+  assertLocationDeleteConfirmed,
   deleteLocation,
   getLocation,
   getLocationDescendantsTree,
@@ -34,25 +38,16 @@ import {
 import type { RouteHandleWithName } from "~/modules/types";
 import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import {
-  setCookie,
-  updateCookieWithPerPage,
-  userPrefs,
-} from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
-import {
-  payload,
-  error,
-  getCurrentSearchParams,
-  getParams,
-} from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
@@ -69,22 +64,16 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const searchParams = getCurrentSearchParams(request);
-    const { page, perPageParam, search, orderBy, orderDirection } =
-      getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
-
     const [{ location, totalAssetsWithinLocation }, hierarchy, childLocations] =
       await Promise.all([
         getLocation({
           organizationId,
           id: locationId,
-          page,
-          perPage,
-          search,
-          orderBy,
-          orderDirection,
+          // The header's asset count (the start-audit dialog reads it) is the
+          // location's total, so no search, custodian filter or archived view
+          // is passed, whatever the Assets tab is showing. The Assets tab
+          // loads its own page of rows.
+          withAssetsPage: false,
           userOrganizations,
           request,
         }),
@@ -119,19 +108,14 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       }
     }
 
-    return data(
-      payload({
-        location,
-        header,
-        mapData,
-        breadcrumbs: parentBreadcrumbs,
-        childLocations,
-        totalAssetsWithinLocation,
-      }),
-      {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
-      }
-    );
+    return payload({
+      location,
+      header,
+      mapData,
+      breadcrumbs: parentBreadcrumbs,
+      childLocations,
+      totalAssetsWithinLocation,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, locationId });
     throw data(error(reason), { status: reason.status });
@@ -169,6 +153,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
+    // The dialog asks for the location's name; refuse a request that skipped it.
+    const { confirmation } = parseData(
+      await request.formData(),
+      DeleteConfirmationSchema
+    );
+    await assertLocationDeleteConfirmed({ id, organizationId, confirmation });
+
     await deleteLocation({ id, organizationId });
 
     sendNotification({
@@ -202,17 +193,33 @@ export default function LocationPage() {
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
+  const roles = useOrganizationRoles();
+  // The Activity tab is the location's notes, a separate grant from reading it.
+  const canReadActivity = userHasPermission({
+    roles,
+    entity: PermissionEntity.locationNote,
+    action: PermissionAction.read,
+  });
+
   const items = [
     { to: "overview", content: "Overview" },
     { to: "assets", content: "Assets" },
     { to: "kits", content: "Kits" },
-    { to: "activity", content: "Activity" },
+    ...(canReadActivity ? [{ to: "activity", content: "Activity" }] : []),
   ];
 
   /**
    * When we are on the location.scan-assets route, we render an outlet on the whole layout.
    */
-  if (currentRoute?.handle?.name === "location.scan-assets-kits") {
+  const isScanRoute =
+    currentRoute?.handle?.name === "location.scan-assets-kits";
+  const recordNavigation = useRecordNavigation({
+    entity: "location",
+    id: location.id,
+    enabled: !isScanRoute,
+  });
+
+  if (isScanRoute) {
     return <Outlet />;
   }
 
@@ -240,6 +247,7 @@ export default function LocationPage() {
           location={{ ...location, childCount: childLocations?.length }}
           assetCount={totalAssetsWithinLocation}
         />
+        <RecordNavigation navigation={recordNavigation} />
       </Header>
 
       <HorizontalTabs items={items} />

@@ -11,12 +11,16 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
+  assertRequestApprovedWithinTx,
+  assertRequestMayBeCheckedOut,
   buildKitSlicesForBooking,
   computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
+  resolveExpiredCheckoutState,
 } from "~/modules/booking/service.server";
 import { claimUnstampedBookingRows } from "~/modules/booking-model-request/service.server";
+import { ShelfError } from "~/utils/error";
 
 import { fulfilAndCheckOut } from "./fulfil-and-checkout.server";
 
@@ -53,6 +57,12 @@ vi.mock("~/modules/booking/utils.server", () => ({
 // their own suites in service.server.test.ts; this module only chooses and
 // sequences them, which is what these tests pin.
 vi.mock("~/modules/booking/service.server", () => ({
+  // why: the pending-approval preflight reads the booking and the approval
+  // switches; its own suite covers that, here only whether it refused.
+  assertRequestMayBeCheckedOut: vi.fn().mockResolvedValue(undefined),
+  // why: the same gate under the booking lock, inside the claim's own
+  // transaction; its suite covers the reads, here only whether it refused.
+  assertRequestApprovedWithinTx: vi.fn().mockResolvedValue(undefined),
   fulfilModelRequestsAndCheckout: vi.fn(),
   addScannedAssetsToBooking: vi.fn(),
   partialCheckoutBooking: vi.fn(),
@@ -64,6 +74,13 @@ vi.mock("~/modules/booking/service.server", () => ({
   // checkout sessions and is covered where that math lives; this module only
   // has to ask for it per kit-driven row and pass the answer through.
   computeBookingAssetSliceRemainingToCheckOut: vi.fn(),
+  // why: the expired-reservation gate is a pure function with its own suite
+  // in the service tests; here it must only let the fixtures through, which
+  // all carry a future window or no dates.
+  resolveExpiredCheckoutState: vi.fn(() => ({
+    isExpired: false,
+    rescheduledWindow: null,
+  })),
 }));
 
 // why: the claim step has its own suite next to the helper it wraps; here only
@@ -187,6 +204,27 @@ function primeRulePath() {
 }
 
 describe("fulfilAndCheckOut", () => {
+  it.each([true, false])(
+    "writes nothing for a pending request the caller may not approve (explicit check-out %s)",
+    async (requireExplicitCheckout) => {
+      vi.mocked(assertRequestMayBeCheckedOut).mockRejectedValueOnce(
+        new Error("This booking request has not been approved yet.")
+      );
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        status: BookingStatus.RESERVED,
+      } as never);
+
+      await expect(
+        fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout })
+      ).rejects.toThrow(/not been approved yet/);
+
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+      expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+      expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+      expect(partialCheckoutBooking).not.toHaveBeenCalled();
+    }
+  );
+
   it("runs the full fulfil-and-check-out when the rule does not apply", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       status: BookingStatus.RESERVED,
@@ -239,6 +277,7 @@ describe("fulfilAndCheckOut", () => {
 
     const result = await fulfilAndCheckOut({
       ...baseArgs,
+      seesAllBookings: true,
       requireExplicitCheckout: true,
     });
 
@@ -249,6 +288,15 @@ describe("fulfilAndCheckOut", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      // Fulfil is authorized by the check-out rule, so it skips the add rule.
+      access: null,
+      // A scanned extra that asks for more than was approved is refused in the
+      // add's own transaction.
+      atCheckout: true,
+      // With no access to ask, the caller's reach and client hints travel
+      // explicitly, for the model-pool refusal the add may raise.
+      hints,
+      seesAllBookings: true,
     });
     expect(partialCheckoutBooking).toHaveBeenCalledWith({
       id: "booking-1",
@@ -378,6 +426,34 @@ describe("fulfilAndCheckOut", () => {
       }),
       expect.anything()
     );
+  });
+
+  it("claims nothing when the request is pending again by the time the claim locks the booking", async () => {
+    // The preflight passed, then a requester's change cleared the approval.
+    // The claim re-checks under the booking lock and writes nothing.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+    vi.mocked(assertRequestApprovedWithinTx).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message: "This booking request has not been approved yet.",
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true })
+    ).rejects.toThrow(/not been approved yet/);
+    expect(assertRequestApprovedWithinTx).toHaveBeenCalledWith(
+      expect.anything(),
+      { bookingId: "booking-1", organizationId: "org-1", actorUserId: "user-1" }
+    );
+    expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+    expect(partialCheckoutBooking).not.toHaveBeenCalled();
   });
 
   it("offers the claim step only the units it did not add", async () => {
@@ -810,6 +886,73 @@ describe("fulfilAndCheckOut", () => {
     );
   });
 
+  it.each([BookingStatus.RESERVED, BookingStatus.ONGOING])(
+    "refuses an expired %s booking with no usable choice before assigning or checking out anything",
+    async (status) => {
+      primeRulePath();
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        status,
+        from: new Date("2026-01-01T09:00:00Z"),
+        to: new Date("2026-01-02T17:00:00Z"),
+      } as never);
+      // why: the gate's own rules are pinned in the service suite; here it only
+      // has to refuse, so this module's ordering around it is what is tested.
+      vi.mocked(resolveExpiredCheckoutState).mockImplementationOnce(() => {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label: "Booking",
+          message: "This reservation has expired.",
+          shouldBeCaptured: false,
+        });
+      });
+
+      await expect(
+        fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: false })
+      ).rejects.toMatchObject({ status: 400 });
+
+      // Called exactly once, so the refusal staged above was consumed here and
+      // cannot answer a later case.
+      expect(resolveExpiredCheckoutState).toHaveBeenCalledTimes(1);
+      // Nothing is written: no assign, no claim, no check-out of either flow.
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+      expect(claimUnstampedBookingRows).not.toHaveBeenCalled();
+      expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+      expect(partialCheckoutBooking).not.toHaveBeenCalled();
+    }
+  );
+
+  it("asks the expired-reservation gate with the operator's choice and no reschedule", async () => {
+    const from = new Date("2026-01-01T09:00:00Z");
+    const to = new Date("2026-01-02T17:00:00Z");
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      from,
+      to,
+    } as never);
+    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      checkoutIntentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      requireExplicitCheckout: false,
+    });
+
+    // A scan never reschedules: only the header's full check-out may move the
+    // planned period of an expired reservation.
+    expect(resolveExpiredCheckoutState).toHaveBeenCalledWith({
+      status: BookingStatus.RESERVED,
+      from,
+      to,
+      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      allowReschedule: false,
+    });
+  });
+
   it("scopes every read of a request-supplied id to the workspace", async () => {
     primeRulePath();
 
@@ -829,5 +972,83 @@ describe("fulfilAndCheckOut", () => {
         },
       })
     );
+  });
+});
+
+/**
+ * The flow each booking status takes through `fulfilAndCheckOut`, with and
+ * without the explicit check-out requirement.
+ *
+ * Neither fulfil guard (web action, mobile endpoint) reads the booking's
+ * status, so this table is what refuses a DRAFT or a closed booking on those
+ * paths. It also decides which flow a status takes: this is the service half
+ * of the check-out/check-in contract, the counterpart to the route guards in
+ * `checkinout-service-status.test.ts`.
+ */
+describe("fulfilAndCheckOut, the flow each booking status takes", () => {
+  type Flow = "full" | "scanned-only" | "refused";
+
+  const FLOWS: Record<"rule off" | "rule on", Record<BookingStatus, Flow>> = {
+    "rule off": {
+      DRAFT: "refused",
+      RESERVED: "full",
+      ONGOING: "scanned-only",
+      OVERDUE: "scanned-only",
+      COMPLETE: "refused",
+      ARCHIVED: "refused",
+      CANCELLED: "refused",
+    },
+    "rule on": {
+      DRAFT: "refused",
+      RESERVED: "scanned-only",
+      ONGOING: "scanned-only",
+      OVERDUE: "scanned-only",
+      COMPLETE: "refused",
+      ARCHIVED: "refused",
+      CANCELLED: "refused",
+    },
+  };
+
+  const cases = (Object.keys(FLOWS) as (keyof typeof FLOWS)[]).flatMap((rule) =>
+    Object.values(BookingStatus).map(
+      (status) => [rule, status, FLOWS[rule][status]] as const
+    )
+  );
+
+  it.each(cases)("%s, %s booking -> %s", async (rule, status, expected) => {
+    primeRulePath();
+    vi.mocked(db.booking.findFirst).mockResolvedValue({ status } as never);
+    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    const flow = await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: rule === "rule on",
+    }).then(
+      (): Flow =>
+        vi.mocked(fulfilModelRequestsAndCheckout).mock.calls.length > 0
+          ? "full"
+          : "scanned-only",
+      (cause: unknown): Flow => {
+        expect(cause).toMatchObject({
+          status: 400,
+          message: expect.stringMatching(
+            /can't be checked out in its current status/
+          ),
+        });
+        return "refused";
+      }
+    );
+
+    expect(flow).toBe(expected);
+    if (flow === "refused") {
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+    }
+    if (flow === "scanned-only") {
+      expect(partialCheckoutBooking).toHaveBeenCalledTimes(1);
+    }
   });
 });

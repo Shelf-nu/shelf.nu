@@ -19,6 +19,8 @@
  * @see {@link file://./../../../app/routes/api+/asset-models.unassigned-assets.ts}
  * @see {@link file://./asset-models.$assetModelId.assets.test.ts} The per-model route
  */
+import type { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { loader } from "~/routes/api+/asset-models.unassigned-assets";
 
@@ -60,9 +62,13 @@ vitest.mock("~/modules/asset/service.server", () => ({
 }));
 // why: present so the "no model lookup happens" assertion below has a spy to
 // read. This route must never reach for an `AssetModel` row, because the
-// bucket it serves is the absence of one.
+// bucket it serves is the absence of one. `asset.count` is the seam for the
+// unfiltered count, whose WHERE clause is asserted below.
 vitest.mock("~/database/db.server", () => ({
-  db: { assetModel: { findFirst: vitest.fn() } },
+  db: {
+    assetModel: { findFirst: vitest.fn() },
+    asset: { count: vitest.fn() },
+  },
 }));
 
 import { db } from "~/database/db.server";
@@ -104,6 +110,49 @@ function queryArgs() {
   return args;
 }
 
+/**
+ * A `requirePermission` result for `role`, built from the real policy.
+ * `custodySeeAll` defaults to hidden: the workspace toggles that widen custody
+ * visibility default to off in production, so the redaction cases exercise
+ * the common case.
+ */
+function caller(
+  role: string,
+  {
+    organizationId,
+    custodySeeAll = false,
+  }: { organizationId: string; custodySeeAll?: boolean }
+) {
+  const ctx = permissionContext({
+    roles: [role as OrganizationRoles],
+    organizationId,
+  });
+  return {
+    ...ctx,
+    canUseBarcodes: false,
+    access: {
+      ...ctx.access,
+      custody: { ...ctx.access.custody, seeAll: custodySeeAll },
+    },
+  };
+}
+
+/**
+ * The WHERE clause the unfiltered count ran with, or `undefined` when it never
+ * ran.
+ *
+ * Read through a declared shape rather than off the Prisma delegate's own
+ * generic signature, so a renamed field in the clause is a failing assertion
+ * here instead of an `unknown` the compiler waves through.
+ */
+function unfilteredCountWhere(): Record<string, unknown> | undefined {
+  const calls = vitest.mocked(db.asset.count).mock.calls as unknown as Array<
+    [{ where?: Record<string, unknown> }]
+  >;
+
+  return calls[0]?.[0]?.where;
+}
+
 describe("unassigned assets endpoint", () => {
   beforeEach(() => {
     // Call history, not just return values: every assertion below reads
@@ -115,15 +164,12 @@ describe("unassigned assets endpoint", () => {
       timeZone: "Asia/Tokyo",
     } as never);
 
-    vitest.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-      canUseBarcodes: false,
-      // Restricted-by-default: `baseUserCanSeeCustody` /
-      // `selfServiceCanSeeCustody` both default to `false` in production, so
-      // the redaction test below exercises the common case, not an edge one.
-      canSeeAllCustody: false,
-    } as never);
+    vitest.mocked(requirePermission).mockResolvedValue(
+      caller("ADMIN", {
+        organizationId: "org-1",
+        custodySeeAll: false,
+      }) as never
+    );
     vitest.mocked(getAssetIndexSettings).mockResolvedValue({
       mode: "ADVANCED",
       columns: [],
@@ -135,6 +181,7 @@ describe("unassigned assets endpoint", () => {
       perPage: 20,
       totalPages: 0,
     } as never);
+    vitest.mocked(db.asset.count).mockResolvedValue(0 as never);
   });
 
   it("scopes the query to the caller's own organization, never one named by the request", async () => {
@@ -246,23 +293,23 @@ describe("unassigned assets endpoint", () => {
     expect(filters?.match(/(^|&)type=/g)).toHaveLength(1);
   });
 
-  it("restricts to bookable assets for a SELF_SERVICE caller, matching the index loader", async () => {
-    vitest.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "SELF_SERVICE",
-      canUseBarcodes: false,
-      canSeeAllCustody: false,
-    } as never);
+  it("restricts to bookable and held assets for a SELF_SERVICE caller, matching the index loader", async () => {
+    vitest.mocked(requirePermission).mockResolvedValue(
+      caller("SELF_SERVICE", {
+        organizationId: "org-1",
+        custodySeeAll: false,
+      }) as never
+    );
 
     await loader({ context, request: request(), params: {} } as never);
 
-    expect(queryArgs().availableToBookOnly).toBe(true);
+    expect(queryArgs().bookableScope).toEqual({ holderUserId: "user-1" });
   });
 
   it("leaves an ADMIN caller's query unrestricted, matching the index loader", async () => {
     await loader({ context, request: request(), params: {} } as never);
 
-    expect(queryArgs().availableToBookOnly).toBe(false);
+    expect(queryArgs().bookableScope).toBeNull();
   });
 
   it("redacts a foreign custodian's identity when the viewer cannot see all custody", async () => {
@@ -325,6 +372,74 @@ describe("unassigned assets endpoint", () => {
     expect(body.assets[0].custody[0].name).toBe("");
   });
 
+  /** One row naming its biggest upcoming booking, as the advanced query does. */
+  function mockShortRow() {
+    vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
+      assets: [
+        {
+          id: "asset-1",
+          custody: [],
+          topBookingId: "booking-of-user-2",
+          topBookingName: "Jane's offsite",
+          topBookingUnits: 6,
+        },
+      ],
+      totalAssets: 1,
+      page: 1,
+      perPage: 20,
+      totalPages: 1,
+    } as never);
+  }
+
+  /** The response body's rows, typed to the top-booking fields under test. */
+  async function topBookingRows(response: Response) {
+    const body = (await response.json()) as {
+      assets: Array<{
+        topBookingId: string | null;
+        topBookingName: string | null;
+        topBookingUnits: number | null;
+      }>;
+    };
+    return body.assets;
+  }
+
+  it("withholds the top booking's id and name from a viewer who may not see every booking", async () => {
+    // BASE with every workspace toggle off: `access.bookings.seeAll` is false,
+    // so the booking (someone else's) must not be named in the response.
+    vitest
+      .mocked(requirePermission)
+      .mockResolvedValue(caller("BASE", { organizationId: "org-1" }) as never);
+    mockShortRow();
+
+    const response = (await loader({
+      context,
+      request: request(),
+      params: {},
+    } as never)) as unknown as Response;
+
+    const [row] = await topBookingRows(response.clone());
+    expect(row.topBookingId).toBeNull();
+    expect(row.topBookingName).toBeNull();
+    // The shortfall is a fact about the asset, so its units still arrive.
+    expect(row.topBookingUnits).toBe(6);
+    expect(await response.text()).not.toContain("Jane's offsite");
+  });
+
+  it("names the top booking to a viewer who may see every booking", async () => {
+    mockShortRow();
+
+    const response = (await loader({
+      context,
+      request: request(),
+      params: {},
+    } as never)) as unknown as Response;
+
+    const [row] = await topBookingRows(response);
+    expect(row.topBookingId).toBe("booking-of-user-2");
+    expect(row.topBookingName).toBe("Jane's offsite");
+    expect(row.topBookingUnits).toBe(6);
+  });
+
   it("drops view-scoped params that do not apply to an asset list", async () => {
     await loader({
       context,
@@ -337,6 +452,30 @@ describe("unassigned assets endpoint", () => {
     expect(filters).not.toContain("modelSortBy=");
     // A page number counted in models would page a list of assets.
     expect(filters).not.toContain("page=");
+  });
+
+  it("counts the model-less assets unfiltered when nothing matched, individually tracked only", async () => {
+    vitest.mocked(db.asset.count).mockResolvedValue(9 as never);
+
+    const response = (await loader({
+      context,
+      request: request("status=is:AVAILABLE"),
+      params: {},
+    } as never)) as unknown as Response;
+
+    expect(unfilteredCountWhere()).toEqual({
+      // From `requirePermission`, never from the request.
+      organizationId: "org-1",
+      // Every quantity-tracked asset has no model, and none of them appears in
+      // this view, so counting them would describe a set the sheet never lists.
+      type: "INDIVIDUAL",
+      assetModelId: null,
+      // The default Active view hides archived assets (issue #382).
+      archivedAt: null,
+    });
+
+    const body = (await response.json()) as { unfilteredAssets: number | null };
+    expect(body.unfilteredAssets).toBe(9);
   });
 
   it("passes the viewer's timezone so date filters truncate the same day as the row's count", async () => {

@@ -1,6 +1,21 @@
+/**
+ * Blockers for the scanner drawers.
+ *
+ * A blocker is a reason the drawer's action cannot run yet, with a fix that
+ * removes the offending rows. Every scanner drawer builds its list with
+ * {@link createBlockers}; `ConfigurableDrawer` then shows it in two places:
+ * - a "Needs attention" card at the top of the scrolling list, one line per
+ *   blocker with its fix, and "Resolve all" in the card header;
+ * - a one-line note above the footer's buttons, so the reason the action is
+ *   disabled stays visible after the card scrolls away.
+ *
+ * @see {@link file://./configurable-drawer.tsx}
+ * @see {@link file://./scan-item-group.tsx} the card
+ */
+
 import type { ReactNode } from "react";
-import { m } from "framer-motion";
 import { Button } from "~/components/shared/button";
+import { ScanItemGroup } from "./scan-item-group";
 
 // Generic blocker configuration type
 export type BlockerConfig = {
@@ -28,98 +43,123 @@ export type BlockerConfig = {
 // Type for the createBlockers arguments
 type CreateBlockersArgs = {
   blockerConfigs: BlockerConfig[];
-  onResolveAll: () => void;
 };
 
+/** One active blocker, tagged with its position in the caller's array. */
+type ActiveBlocker = { blocker: BlockerConfig; originalIndex: number };
+
+/** Where a {@link createBlockers} result renders. */
+export type BlockersVariant = "card" | "note";
+
 /**
- * Creates a Blockers component configured with the provided blockers
- * @param args Configuration for the blockers component
- * @returns A tuple containing hasBlockers and the Blockers component
+ * The "Needs attention" card: one row per active blocker, "Resolve all" in the
+ * header. Module-level so its identity is stable: the drawers create their
+ * blockers during render, and a component defined there would remount (and
+ * forget whether it was folded) on every render.
  */
-export function createBlockers({
-  blockerConfigs,
+function BlockersCard({
+  activeBlockers,
+  total,
   onResolveAll,
-}: CreateBlockersArgs) {
-  // Tag each config with its position in the original array before filtering
-  // so we can use that position as a stable React `key` fallback — callers
-  // that don't provide an explicit `id` still get a non-index key that
-  // survives condition changes (unlike the filtered-array index).
-  const activeBlockers = blockerConfigs
+}: {
+  activeBlockers: ActiveBlocker[];
+  total: number;
+  onResolveAll: () => void;
+}) {
+  return (
+    <ScanItemGroup
+      label="Needs attention"
+      count={total}
+      tone="attention"
+      openWhenCountGrows
+      headerAction={
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          className="whitespace-nowrap text-[12px] leading-3"
+          onClick={onResolveAll}
+          title="Removes all conflicting items from the list"
+        >
+          Resolve all ({total})
+        </Button>
+      }
+    >
+      {activeBlockers.map(({ blocker, originalIndex }) => (
+        // Prefer the blocker's own `id`; fall back to its position in the
+        // caller's (unfiltered) array, which is stable because callers declare
+        // the array once per render in a fixed order.
+        <tr
+          key={blocker.id ?? `blocker-${originalIndex}`}
+          className="border-t border-warning-100"
+        >
+          <td className="px-4 py-2 text-[12px] text-gray-700">
+            <span>{blocker.message(blocker.count)}</span>{" "}
+            <Button
+              variant="link"
+              type="button"
+              className="inline text-[12px] font-normal text-gray-700 underline"
+              onClick={blocker.onResolve}
+            >
+              Remove from list
+            </Button>
+            {blocker.description ? (
+              <p className="text-[11px] text-gray-500">{blocker.description}</p>
+            ) : null}
+          </td>
+        </tr>
+      ))}
+    </ScanItemGroup>
+  );
+}
+
+/**
+ * Creates the blockers for a scanner drawer.
+ *
+ * @param args.blockerConfigs - Every blocker the drawer declares; only those
+ *   whose `condition` holds are shown
+ * "Resolve all" runs the `onResolve` of every shown blocker, and nothing else.
+ * It is derived here rather than passed in, so it can never remove a row no
+ * shown blocker named.
+ * @returns `[hasBlockers, Blockers]`. `Blockers({ variant })` returns the card
+ *   (default) or the footer note, or `null` when nothing is blocking. Call it
+ *   as a function rather than rendering it as `<Blockers />`: it is recreated
+ *   on every render, and rendering it as a component would remount the card.
+ */
+export function createBlockers({ blockerConfigs }: CreateBlockersArgs) {
+  const activeBlockers: ActiveBlocker[] = blockerConfigs
     .map((blocker, originalIndex) => ({ blocker, originalIndex }))
     .filter(({ blocker }) => blocker.condition);
   const hasBlockers = activeBlockers.length > 0;
 
-  // Calculate total unresolved conflicts
-  const totalUnresolvedConflicts = activeBlockers.reduce(
+  // Items across every active blocker: what "Resolve all" removes.
+  const total = activeBlockers.reduce(
     (sum, { blocker }) => sum + blocker.count,
     0
   );
 
-  // Create the blockers component
-  function Blockers() {
+  // Exactly the fixes the operator can see, one per shown blocker.
+  const onResolveAll = () => {
+    for (const { blocker } of activeBlockers) blocker.onResolve();
+  };
+
+  function Blockers({ variant = "card" }: { variant?: BlockersVariant } = {}) {
     if (!hasBlockers) return null;
 
+    if (variant === "note") {
+      return (
+        <p className="px-3 pt-2 text-[12px] text-warning-700">
+          Resolve {total} {total === 1 ? "issue" : "issues"} above to continue.
+        </p>
+      );
+    }
+
     return (
-      <m.div
-        className="bg-gray-25 p-4 text-[12px]"
-        transition={{ duration: 0.2 }}
-        exit={{ opacity: 0 }}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[14px] font-semibold">
-              ⚠️ Unresolved blockers ({totalUnresolvedConflicts})
-            </p>
-            <p className="leading-4">
-              Resolve the issues below to continue. They are currently blocking
-              you from being able to confirm.
-            </p>
-          </div>
-
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            className="whitespace-nowrap text-[12px] leading-3"
-            onClick={onResolveAll}
-            title="Removes all conflicting items from the list"
-          >
-            Resolve all ({totalUnresolvedConflicts})
-          </Button>
-        </div>
-
-        <hr className="my-2" />
-        {/* The blocker list renders in the drawer's pinned footer, which does
-            not shrink — so its height is taken straight from the action button
-            below it. Drawers declare up to nine blocker categories, each able
-            to carry a description, and in scanner mode the whole drawer is only
-            `viewport - 400`. The cap is viewport-relative for that reason: a
-            fixed pixel cap that fits a laptop still buries the button on a
-            phone. The heading and "Resolve all" stay outside it, so the count
-            and the escape hatch are legible however long the list runs. */}
-        <ul className="max-h-[20vh] list-inside list-disc overflow-y-auto text-[12px] text-gray-500">
-          {activeBlockers.map(({ blocker, originalIndex }) => (
-            // Prefer an explicit `id` when provided; otherwise fall back to
-            // the blocker's position in the original (unfiltered) config
-            // array — stable because callers declare the array once per
-            // render with a fixed order.
-            <li key={blocker.id ?? `blocker-${originalIndex}`}>
-              {blocker.message(blocker.count)}{" "}
-              <Button
-                variant="link"
-                type="button"
-                className="text-gray inline text-[12px] font-normal underline"
-                onClick={blocker.onResolve}
-              >
-                Remove from list
-              </Button>
-              {blocker.description && (
-                <p className="text-[10px]">{blocker.description}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-      </m.div>
+      <BlockersCard
+        activeBlockers={activeBlockers}
+        total={total}
+        onResolveAll={onResolveAll}
+      />
     );
   }
 

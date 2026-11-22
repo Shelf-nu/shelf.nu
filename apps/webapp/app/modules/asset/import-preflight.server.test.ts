@@ -91,7 +91,9 @@ describe("validateContentImportRows", () => {
   it("rejects a header whose type contradicts an existing custom field", () => {
     const { errors } = validateContentImportRows({
       data: [row({ "cf:Price,type:text": "free text" })],
-      existingCustomFields: [{ name: "Price", type: "AMOUNT" }],
+      existingCustomFields: [
+        { name: "Price", type: "AMOUNT", format: "PLAIN" },
+      ],
     });
 
     expect(errors).toHaveLength(1);
@@ -105,7 +107,9 @@ describe("validateContentImportRows", () => {
       data: Array.from({ length: 40 }, () =>
         row({ "cf:Price,type:text": "free text" })
       ),
-      existingCustomFields: [{ name: "Price", type: "AMOUNT" }],
+      existingCustomFields: [
+        { name: "Price", type: "AMOUNT", format: "PLAIN" },
+      ],
     });
 
     expect(errors).toHaveLength(1);
@@ -115,10 +119,51 @@ describe("validateContentImportRows", () => {
   it("matches existing custom fields case-insensitively", () => {
     const { errors } = validateContentImportRows({
       data: [row({ "cf:PRICE,type:text": "free text" })],
-      existingCustomFields: [{ name: "price", type: "AMOUNT" }],
+      existingCustomFields: [
+        { name: "price", type: "AMOUNT", format: "PLAIN" },
+      ],
     });
 
     expect(errors).toHaveLength(1);
+  });
+
+  it("refuses a value that is not a web link for an existing Link field", () => {
+    const { errors } = validateContentImportRows({
+      data: [
+        row({ "cf:Manual,type:text": "https://example.com/manual.pdf" }),
+        row({ "cf:Manual,type:text": "see shelf" }),
+      ],
+      existingCustomFields: [{ name: "Manual", type: "TEXT", format: "LINK" }],
+    });
+
+    expect(errors).toEqual([
+      {
+        row: 3,
+        title: "Invalid custom field value",
+        message:
+          "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+      },
+    ]);
+  });
+
+  it("checks a format:link column against the field it creates", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Manual,type:text,format:link": "see shelf" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors.map((error) => error.message)).toEqual([
+      "Custom field 'Manual': Enter just the link, with no spaces or other text. The value we found is: 'see shelf'.",
+    ]);
+  });
+
+  it("ignores format:link on a column for an existing plain text field", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Serial,type:text,format:link": "see shelf" })],
+      existingCustomFields: [{ name: "Serial", type: "TEXT", format: "PLAIN" }],
+    });
+
+    expect(errors).toEqual([]);
   });
 
   it("refuses a file over the row cap without validating rows", () => {
@@ -129,7 +174,30 @@ describe("validateContentImportRows", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0].row).toBe(0);
-    expect(errors[0].message).toContain(String(MAX_CONTENT_IMPORT_ROWS));
+    expect(errors[0].message).toContain(
+      MAX_CONTENT_IMPORT_ROWS.toLocaleString("en-US")
+    );
+  });
+
+  it("accepts files up to a caller's higher row cap", () => {
+    const data = Array.from({ length: MAX_CONTENT_IMPORT_ROWS + 1 }, () =>
+      row()
+    );
+
+    expect(
+      validateContentImportRows({
+        data,
+        existingCustomFields: [],
+        maxRows: 10_000,
+      }).errors
+    ).toEqual([]);
+    expect(
+      validateContentImportRows({
+        data,
+        existingCustomFields: [],
+        maxRows: 1000,
+      }).errors[0].message
+    ).toContain("1,000");
   });
 
   it("caps the listed errors but still counts the rest", () => {
@@ -169,6 +237,46 @@ describe("validateContentImportRows", () => {
     expect(errors[0].title).toBe("Conflicting custom field columns");
   });
 
+  it("rejects a description over 5,000 characters", () => {
+    expect(
+      validateContentImportRows({
+        data: [row(), row({ description: "a".repeat(5123) })],
+        existingCustomFields: [],
+      })
+    ).toEqual({
+      errors: [
+        {
+          row: 3,
+          title: "Description too long",
+          message:
+            'Asset "Aputure 300x": the description is 5,123 characters, but the maximum is 5,000. Shorten it and import again.',
+        },
+      ],
+      totalErrors: 1,
+    });
+  });
+
+  it("accepts a description of exactly 5,000 characters", () => {
+    expect(
+      validateContentImportRows({
+        data: [row({ description: "a".repeat(5000) })],
+        existingCustomFields: [],
+      })
+    ).toEqual({ errors: [], totalErrors: 0 });
+  });
+
+  it("counts a \\r\\n line break in a description as one character", () => {
+    // 5,001 UTF-16 units, 5,000 characters as the user counts them.
+    expect(
+      validateContentImportRows({
+        data: [
+          row({ description: `${"a".repeat(2500)}\r\n${"a".repeat(2499)}` }),
+        ],
+        existingCustomFields: [],
+      })
+    ).toEqual({ errors: [], totalErrors: 0 });
+  });
+
   it("accepts two columns defining one custom field with the SAME type", () => {
     // The importer accepts these today; refusing here would make pre-flight
     // stricter than the code it guards.
@@ -178,5 +286,61 @@ describe("validateContentImportRows", () => {
     });
 
     expect(errors).toEqual([]);
+  });
+
+  it.each([[""], ["   "], [undefined]])("requires a title (%j)", (title) => {
+    const { errors } = validateContentImportRows({
+      data: [row(), row({ title } as never)],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toEqual([
+      {
+        row: 3,
+        title: "Title required",
+        message: expect.stringContaining("title column"),
+      },
+    ]);
+  });
+
+  it("names an untitled row by its line in other messages", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ title: "", description: "a".repeat(5001) })],
+      existingCustomFields: [],
+    });
+
+    expect(errors.map((e) => e.title)).toEqual([
+      "Title required",
+      "Description too long",
+    ]);
+    expect(errors[1].message).toContain("The asset on row 2");
+  });
+
+  it.each([["yes"], ["No"], [" YES "], [""], ["   "]])(
+    "accepts a boolean custom field value of %j",
+    (value) => {
+      const { errors } = validateContentImportRows({
+        data: [row({ "cf:Insured,type:boolean": value })],
+        existingCustomFields: [],
+      });
+
+      expect(errors).toEqual([]);
+    }
+  );
+
+  it("rejects a boolean custom field value other than yes or no", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Insured,type:boolean": "maybe" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toEqual([
+      {
+        row: 2,
+        title: "Invalid custom field value",
+        message:
+          'Custom field "Insured" accepts only yes or no. The value we found is: "maybe".',
+      },
+    ]);
   });
 });

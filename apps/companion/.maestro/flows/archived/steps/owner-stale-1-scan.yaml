@@ -1,0 +1,42 @@
+appId: com.shelf.companion.carlos
+---
+# Steps, part 1 of 2: scan two ACTIVE assets into the Assign tray. Between
+# the parts, `seed-e2e.sh archived-stale` archives one of them, so the app
+# holds a row it believes is active. No login (see ../01-owner.yaml).
+
+- openLink: "shelf://scanner"
+- extendedWaitUntil:
+    visible: "Scanner action: Assign.*"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Clear all scanned items"
+    optional: true
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ACTIVE_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-input"
+    optional: true
+- inputText: ${SHELF_TEST_SECOND_ACTIVE_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+# Both rows are clean: nothing blocks the submit.
+- assertNotVisible: ".*archived and can't be put in custody.*"
+- assertVisible:
+    id: "batch-drawer-submit"
+    enabled: true

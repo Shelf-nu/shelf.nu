@@ -38,6 +38,26 @@ export const ASSET_QTY_STATUS_LABELS = Object.freeze({
   PARTIALLY_RESERVED: "Partially reserved",
 });
 
+// Labels for the quantity FIGURES on a pool (not its status badge).
+//
+// `FREE_NOW` is the physical count: total minus custody, kits and checked-out.
+// It is deliberately NOT called "Available", three different things in this
+// product were called that at once (this figure, the `Available` status badge,
+// and the `Available to book` flag), and only this one is time-bound. Without
+// the word "now" a row reading "Available 10" beside "Reserved 12" looks like a
+// contradiction rather than two facts about different moments.
+//
+// It lives here because the figure is rendered on the assets index, the asset
+// page, the reports PDF and the mobile asset screen. Renaming it in one place
+// and not the others is worse than not renaming it at all: the same number ends
+// up with two names in one product. One constant, one edit.
+export const ASSET_QUANTITY_FIGURE_LABELS = Object.freeze({
+  TOTAL: "Total quantity",
+  FREE_NOW: "Free now",
+  IN_CUSTODY: "In custody",
+  RESERVED: "Reserved",
+});
+
 // Booking-context pseudo-statuses an asset row can show inside a booking
 // (web canonical: the enum path in asset-status-badge/status-labels.ts).
 export const ASSET_BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
@@ -87,6 +107,12 @@ export const BOOKING_STATUS_LABELS = Object.freeze({
   CANCELLED: "Cancelled",
 });
 
+// Booking states derived from data rather than a BookingStatus value.
+export const BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
+  // A RESERVED booking whose approval is still outstanding.
+  PENDING_APPROVAL: "Pending approval",
+});
+
 // Audit session status enum (AuditStatus in the Prisma schema).
 export const AUDIT_STATUS_LABELS = Object.freeze({
   PENDING: "Pending",
@@ -102,15 +128,15 @@ export const AUDIT_STATUS_LABELS = Object.freeze({
 // to explain (the web's "Not assigned" tooltip). They live together so the
 // three can never say different things about who is allowed to scan.
 //
-// All three name BOTH roles because the server allows both: requireAuditAssignee
-// returns early for any caller that is not BASE/SELF_SERVICE, so ADMIN and OWNER
-// are exactly the set who may scan an unassigned audit.
+// All three name every role that sees all audits (`audits.scope === "all"` in
+// the role policy), because requireAuditAssignee lets exactly those roles scan
+// an audit nobody is assigned to: owners, admins and managers.
 // Pinned by the AUDIT_UNASSIGNED_LABELS tests in the webapp.
 export const AUDIT_UNASSIGNED_LABELS = Object.freeze({
-  SHORT: "Unassigned · admins and owners can scan",
-  A11Y: "unassigned, admins and owners can scan",
+  SHORT: "Unassigned · owners, admins and managers can scan",
+  A11Y: "unassigned, owners, admins and managers can scan",
   DETAIL:
-    "Workspace admins and owners can perform this audit because it has no specific assignee.",
+    "Workspace owners, admins and managers can perform this audit because it has no specific assignee.",
 });
 
 // Per-asset audit status (AuditAssetStatus in the Prisma schema).
@@ -200,7 +226,57 @@ export function auditAssetStatusLabel(status, isAuditCompleted) {
   return AUDIT_ASSET_STATUS_LABELS[status];
 }
 
-// Why a booking cannot be reserved yet — the three rules web's Reserve button
+/**
+ * The unit count of one audit row of a quantity-tracked asset, as every
+ * surface in both apps prints it (scan lists, the audit overview, the receipt).
+ *
+ * A row of a quantity-tracked asset carries `expectedQuantity` (snapshotted
+ * when the row is created) and `foundQuantity` (what the auditor counted).
+ * Individual assets have neither, and get no label.
+ *
+ * - FOUND, counted: "8 of 14 pcs", or "16 of 14 pcs (+2)" for a surplus
+ * - UNEXPECTED, counted: "8 pcs counted"
+ * - FOUND or UNEXPECTED with no count (an app build without the count
+ *   prompt): "Not counted"
+ * - MISSING: "0 of 14 pcs"
+ * - PENDING (not scanned while the audit runs): "14 pcs expected"
+ *
+ * @param {{ status: string, expectedQuantity?: number | null, foundQuantity?: number | null }} row
+ * @param {string | null | undefined} [unit] - `Asset.unitOfMeasure`; the default
+ *   literal "units" is treated as no unit
+ * @returns {string | null} the label, or null for an individual asset
+ */
+export function auditCountLabel(row, unit) {
+  if (row.expectedQuantity === null || row.expectedQuantity === undefined) {
+    return null;
+  }
+  const named = unit && unit !== "units" ? unit : null;
+  const suffix = named ? ` ${named}` : "";
+  const unitWord = named ?? "units";
+  const expected = row.expectedQuantity;
+  const counted = row.foundQuantity !== null && row.foundQuantity !== undefined;
+
+  switch (row.status) {
+    case "FOUND": {
+      if (!counted) return "Not counted";
+      // A surplus is a finding too: say how many more than the record.
+      const surplus = row.foundQuantity - expected;
+      return `${row.foundQuantity} of ${expected}${suffix}${
+        surplus > 0 ? ` (+${surplus})` : ""
+      }`;
+    }
+    case "UNEXPECTED":
+      return counted
+        ? `${row.foundQuantity} ${unitWord} counted`
+        : "Not counted";
+    case "MISSING":
+      return `0 of ${expected}${suffix}`;
+    default:
+      return `${expected} ${unitWord} expected`;
+  }
+}
+
+// Why a booking cannot be reserved yet: the rules web's Reserve button
 // disables on, in one register for every surface that states them: the web
 // tooltip, the mobile route's 400, the in-transaction guard's 400 and the
 // companion's client-side note.
@@ -215,6 +291,7 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
     "This booking holds assets marked as unavailable. Remove them, or make them available again, before reserving.",
   ALREADY_BOOKED:
     "This booking holds assets already booked for that period. Remove them, or change the dates, before reserving.",
+  START_PASSED: "The start time has passed. Move it later to reserve.",
 });
 
 // Refusal shown when emptying a RESERVED booking. Such a booking with nothing
@@ -229,6 +306,287 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
 // reconciles the asset's status when it happens).
 export const BOOKING_EMPTY_RESERVED_MESSAGE =
   "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
+
+// The name a booking row carries in place of a custodian the viewer may not
+// see. The server sends it, the web badge draws it and the companion app draws
+// it, so a withheld custodian reads the same everywhere. Distinct from `null`,
+// which means the booking has no custodian at all: a client must tell the two
+// apart, or an unassigned booking reads as a hidden one.
+export const WITHHELD_CUSTODIAN_NAME = "private";
+
+// Why an individually tracked asset that belongs to a kit cannot be put into
+// custody on its own. Custody of such an asset comes from its kit: assign
+// custody to the kit, or take the asset out of the kit first. One register for
+// every surface that states the rule: the server's 400 on every assign path,
+// the web asset page and assets index menus, and the companion asset screen.
+//
+// Quantity-tracked assets are not covered. A kit holds only a slice of a pool,
+// and the units outside every kit can still be assigned on their own.
+export const KIT_MEMBER_CUSTODY_BLOCKED_TITLE = "Asset is part of a kit";
+
+/**
+ * The reason a single kit member's "Assign custody" action is disabled.
+ *
+ * @param {string} kitName - the name of the kit the asset belongs to
+ * @returns {string}
+ */
+export function kitMemberCustodyBlockedReason(kitName) {
+  return `This asset is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/**
+ * The server's refusal when an assign request names a kit member.
+ *
+ * @param {{ assetTitle: string; kitName: string }} names
+ * @returns {string}
+ */
+export function kitMemberCustodyRefusal({ assetTitle, kitName }) {
+  return `"${assetTitle}" is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/** How many kit members a refusal names before summarising the rest. */
+const KIT_MEMBERS_NAMED_IN_REFUSAL = 3;
+
+/**
+ * The server's refusal when an assign request names several kit members.
+ *
+ * A "select all" request can hold many, and the operator cannot see which from
+ * the menu, so the refusal gives the count and names the first few. One member
+ * reads exactly as {@link kitMemberCustodyRefusal}.
+ *
+ * @param {{ assetTitle: string; kitName: string }[]} members - at least one
+ * @returns {string}
+ */
+export function kitMembersCustodyRefusal(members) {
+  if (members.length === 1) return kitMemberCustodyRefusal(members[0]);
+
+  const named = members
+    .slice(0, KIT_MEMBERS_NAMED_IN_REFUSAL)
+    .map((m) => `"${m.assetTitle}"`);
+  const rest = members.length - named.length;
+  const list =
+    rest > 0
+      ? `${named.join(", ")} and ${rest} more`
+      : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+
+  return `${members.length} of the selected assets are part of a kit: ${list}. Assign custody to the kit, or remove them from the kit first.`;
+}
+
+// The reason a bulk "Assign custody" action is disabled when the selection
+// holds at least one kit member.
+export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =
+  "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
+
+// Why "Reinstate" is refused for an archived asset whose kit is in custody or
+// checked out. The kit took its hold without this member, so reinstating it
+// would leave an active member the kit does not account for. Shown by the
+// server refusal and by the disabled Reinstate action alike.
+export const KIT_IN_USE_REINSTATE_REASON =
+  "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
+// Archived assets (`Asset.archivedAt`) are out of service: the only changes
+// allowed are reinstate and permanent delete. Reinstating needs the asset
+// `archive` permission (admins and owners), so every sentence below that says
+// how to fix things is worded for the person reading it. A member who cannot
+// reinstate is told to ask an admin, never to use a button they do not have.
+// One register for the web tooltips, the server's refusals (which the
+// companion shows verbatim) and the companion's own reasons.
+
+/** How many assets or kits a refusal names before summarising the rest. */
+const NAMED_IN_ARCHIVED_REFUSAL = 3;
+
+/**
+ * Joins names for a sentence: `"A"`, `"A" and "B"`, `"A", "B", "C" and 2 more`.
+ *
+ * @param {string[]} names - at least one
+ * @returns {string}
+ */
+function quotedNameList(names) {
+  const named = names
+    .slice(0, NAMED_IN_ARCHIVED_REFUSAL)
+    .map((name) => `"${name}"`);
+  const rest = names.length - named.length;
+  if (rest > 0) return `${named.join(", ")} and ${rest} more`;
+  if (named.length === 1) return named[0];
+  return `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+}
+
+/**
+ * The reason an action on an archived asset is disabled.
+ *
+ * @param {{ canReinstate: boolean; action?: "change" | "book" }} options -
+ *   `canReinstate` is whether the reader holds the asset `archive` permission
+ * @returns {string}
+ */
+export function archivedAssetBlockedReason({
+  canReinstate,
+  action = "change",
+}) {
+  if (!canReinstate) {
+    return "This asset is archived. Ask an admin to reinstate it.";
+  }
+  return action === "book"
+    ? "This asset is archived. Reinstate it to book it."
+    : "This asset is archived. Reinstate it to make changes.";
+}
+
+/**
+ * The refusal when a request touches archived assets. Names them, so the
+ * person can find them in a long list or a scanner batch.
+ *
+ * - `"reinstate"`: a change to the asset itself (edit, custody, location).
+ * - `"remove-from-list"`: a batch the person built (scanner, selection). The
+ *   fix that works for every role is dropping the archived rows.
+ * - `"remove-from-booking"`: a booking that holds them (reserve, check-out).
+ *
+ * @param {{ titles: string[]; fix: "reinstate" | "remove-from-list" | "remove-from-booking"; canReinstate: boolean }} options
+ * @returns {string}
+ */
+export function archivedAssetsRefusal({ titles, fix, canReinstate }) {
+  const count = titles.length;
+  const them = count === 1 ? "it" : "them";
+  const subject =
+    count === 0
+      ? "Some of these assets are archived."
+      : `${quotedNameList(titles)} ${count === 1 ? "is" : "are"} archived.`;
+
+  switch (fix) {
+    case "remove-from-list":
+      return `${subject} Remove ${them} from the list and try again.`;
+    case "remove-from-booking":
+      return canReinstate
+        ? `${subject} Remove ${them} from the booking or reinstate ${them}.`
+        : `${subject} Remove ${them} from the booking or ask an admin to reinstate ${them}.`;
+    default:
+      return canReinstate
+        ? `${subject} Reinstate ${them} to make changes.`
+        : `${subject} Ask an admin to reinstate ${them}.`;
+  }
+}
+
+/**
+ * The sentence added to a success message when archived kit members, or
+ * archived assets of a copied booking, were left out.
+ *
+ * @param {number} count - archived assets left out, at least one
+ * @returns {string}
+ */
+export function archivedAssetsLeftOut(count) {
+  return `${count} archived ${
+    count === 1 ? "asset was" : "assets were"
+  } left out.`;
+}
+
+/** How many short models {@link modelReservationsReduced} names before "and N more". */
+const REDUCED_MODELS_NAMED = 3;
+
+/**
+ * Names the first few models and "and N more".
+ *
+ * @param {string[]} names
+ * @returns {string}
+ */
+function namedModels(names) {
+  const more = names.length - REDUCED_MODELS_NAMED;
+  return `${names.slice(0, REDUCED_MODELS_NAMED).join(", ")}${
+    more > 0 ? ` and ${more} more` : ""
+  }`;
+}
+
+/**
+ * The sentence for models the new dates have too few units of.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number }[]} models
+ * @returns {string}
+ */
+function reservedShort(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested, reserved }] = models;
+    return reserved === 0
+      ? `None of the ${requested} × ${assetModelName} could be reserved for the new dates.`
+      : `Only ${reserved} of ${requested} × ${assetModelName} could be reserved for the new dates.`;
+  }
+  return `Fewer units are free for the new dates, so ${
+    models.length
+  } models were reserved short: ${namedModels(
+    models.map((m) => `${m.assetModelName} (${m.reserved} of ${m.requested})`)
+  )}.`;
+}
+
+/**
+ * The sentence for models whose reservation could not be written at all. Says
+ * nothing about availability, because the cause was an error, not the pool.
+ *
+ * @param {{ assetModelName: string; requested: number }[]} models
+ * @returns {string}
+ */
+function reservationFailed(models) {
+  if (models.length === 1) {
+    const [{ assetModelName, requested }] = models;
+    return `Could not reserve ${requested} × ${assetModelName}. Try again from the booking.`;
+  }
+  return `Could not reserve ${models.length} models (${namedModels(
+    models.map((m) => `${m.requested} × ${m.assetModelName}`)
+  )}). Try again from the booking.`;
+}
+
+/**
+ * The sentences added to a success message when a copied booking could not
+ * reserve every model unit the source had open: because the new dates have
+ * fewer units free, or because the reservation could not be written
+ * (`failed`), which is worded as an error to retry rather than as a shortfall.
+ *
+ * @param {{ assetModelName: string; requested: number; reserved: number; failed?: boolean }[]} models
+ *   - at least one, each reserved below what was asked
+ * @returns {string}
+ */
+export function modelReservationsReduced(models) {
+  const short = models.filter((m) => !m.failed);
+  const failed = models.filter((m) => m.failed);
+  return [
+    short.length > 0 ? reservedShort(short) : null,
+    failed.length > 0 ? reservationFailed(failed) : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * The refusal when kits with no active asset are put into custody or booked.
+ * Such a kit would be held or booked while nothing in it is.
+ *
+ * @param {{ kits: { name: string; hasArchivedAssets: boolean }[]; action: "custody" | "booking" }} options
+ *   - `kits`: at least one; `hasArchivedAssets` is false for an empty kit
+ * @returns {string}
+ */
+export function kitsWithoutActiveAssetsRefusal({ kits, action }) {
+  const verb = action === "custody" ? "put into custody" : "book";
+  if (kits.length === 1) {
+    const [kit] = kits;
+    return kit.hasArchivedAssets
+      ? `Kit "${kit.name}" holds only archived assets, so there is nothing to ${verb}. Add an active asset to it, or have an admin reinstate one.`
+      : `Kit "${kit.name}" has no assets, so there is nothing to ${verb}. Add assets to it first.`;
+  }
+  return `${
+    kits.length
+  } kits have no active assets, so there is nothing to ${verb}: ${quotedNameList(
+    kits.map((kit) => kit.name)
+  )}. Add active assets to them first.`;
+}
+
+/**
+ * The reason a kit's Book or custody action is disabled because the kit holds
+ * no active asset.
+ *
+ * @param {{ hasArchivedAssets: boolean; action: "custody" | "booking" }} options
+ * @returns {string}
+ */
+export function kitWithoutActiveAssetsReason({ hasArchivedAssets, action }) {
+  const goal = action === "custody" ? "assign custody" : "book this kit";
+  return hasArchivedAssets
+    ? `This kit holds only archived assets. Add an active asset to ${goal}.`
+    : `This kit has no assets. Add assets to ${goal}.`;
+}
 
 /**
  * The semantic weight a status badge carries, independent of any palette.
@@ -339,3 +697,391 @@ export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
   ONE_WAY: "used up",
   TWO_WAY: "returnable",
 });
+
+// Stock-status verdicts for the assets-index `Stock status` column. Derived
+// per QUANTITY_TRACKED asset by `POOL_STOCK_STATUS_EXPR` in the webapp's
+// modules/asset/query.server.ts, over the `STOCK_STATUSES` values in
+// @shelf/quantity-control; INDIVIDUAL assets get no verdict and render blank.
+//
+// Deliberately NOT stock-shop words. Shelf serves two cohorts and one of them
+// rents returnable equipment: "Out of stock" on a fully booked camera pool is
+// both the wrong noun and the wrong instruction (buy more vs. wait for the
+// return). NONE_FREE / LOW / ENOUGH read correctly for a consumable and for a
+// pooled asset alike. NO_THRESHOLD has no label on purpose, the cell renders
+// an em dash, because a badge there reads as a level, and "nobody set a floor"
+// is the absence of an opinion, not a healthy one.
+export const STOCK_STATUS_LABELS = Object.freeze({
+  SHORT: "Short",
+  NONE_FREE: "None free",
+  LOW: "Running low",
+  ENOUGH: "Enough",
+});
+
+/**
+ * How the explicit check-in and check-out requirement is explained, on the
+ * website's two settings cards and on the phone where the quick button is
+ * hidden by it.
+ *
+ * The two directions carry the same sentences with only the verb changed, so a
+ * reader who learned one card can read the other without re-reading it. The
+ * exemption is stated in full on every surface: the workspace owner is never
+ * restricted by either switch, and Base users hold no booking check-in or
+ * check-out permission at all, so neither switch applies to them.
+ *
+ * `TITLE` names the card, `EXEMPTION` is the sentence every card shows below
+ * its heading, `PHONE_HINT` is the one line the companion renders where the
+ * one-tap button is hidden. Per-role switch text comes from
+ * {@link explicitRequirementSwitchDescription}.
+ */
+export const EXPLICIT_REQUIREMENT_LABELS = Object.freeze({
+  CHECKIN: Object.freeze({
+    TITLE: "Check-in needs each item scanned or selected",
+    EXEMPTION:
+      "The workspace owner is never restricted. Base users cannot check in.",
+    PHONE_HINT:
+      "Your workspace requires each item to be scanned or selected to check in.",
+  }),
+  CHECKOUT: Object.freeze({
+    TITLE: "Check-out needs each item scanned or selected",
+    EXEMPTION:
+      "The workspace owner is never restricted. Base users cannot check out.",
+    PHONE_HINT:
+      "Your workspace requires each item to be scanned or selected to check out.",
+  }),
+});
+
+/**
+ * The two switches the explicit requirement can be turned on with, named as
+ * the settings cards show them. The ADMIN switch also covers Managers, whose
+ * policy reads the same setting. OWNER and BASE are absent on purpose: see the
+ * exemption sentence in {@link EXPLICIT_REQUIREMENT_LABELS}.
+ */
+export const EXPLICIT_REQUIREMENT_ROLE_LABELS = Object.freeze({
+  ADMIN: "Admins and Managers",
+  SELF_SERVICE: "Self Service users",
+});
+
+/**
+ * Describes what one switch on an explicit-requirement card does for its role.
+ *
+ * @param {"CHECKIN"|"CHECKOUT"} direction - which card the switch sits on
+ * @param {"ADMIN"|"SELF_SERVICE"} role - the role the switch covers
+ * @returns {string} e.g. "Removes the one-click check-in for Admins and Managers. They check
+ *   items in by scanning them or by selecting them from the list."
+ */
+export function explicitRequirementSwitchDescription(direction, role) {
+  const roleLabel = EXPLICIT_REQUIREMENT_ROLE_LABELS[role];
+  if (direction === "CHECKIN") {
+    return `Removes the one-click check-in for ${roleLabel}. They check items in by scanning them or by selecting them from the list.`;
+  }
+  return `Removes the one-click check-out for ${roleLabel}. They check items out by scanning them or by selecting them from the list.`;
+}
+
+/**
+ * The booking check-in / check-out methods an app may declare in a request
+ * body, keyed by themselves so call sites read `BOOKING_METHOD.scanned`.
+ *
+ * `scanned` is an item that went through a scanner, `selected` an item ticked
+ * in a list. `quick` (the one-click whole-booking action) is not among them:
+ * the server knows which routes are the one-click actions and records that
+ * itself, so a client cannot label a scan as quick or the other way round.
+ *
+ * Shared because the server validates the field against exactly this list and
+ * the companion sends it: a value one side renames without the other would
+ * refuse every check-in and check-out from the phone.
+ */
+export const BOOKING_METHOD = Object.freeze({
+  scanned: "scanned",
+  selected: "selected",
+});
+
+/** {@link BOOKING_METHOD} as a tuple, the shape a validation enum takes. */
+export const CLIENT_DECLARED_BOOKING_METHODS = Object.freeze([
+  BOOKING_METHOD.scanned,
+  BOOKING_METHOD.selected,
+]);
+
+/**
+ * Name of the form field that carries a typed delete confirmation. The bulk
+ * delete endpoints read it, and every confirm dialog posts it under this name.
+ */
+export const DELETE_CONFIRMATION_FIELD = "confirmation";
+
+/**
+ * The word a delete asks for when the item has no name to type: a blank title,
+ * or one made only of spaces or invisible characters.
+ */
+export const DELETE_CONFIRMATION_FALLBACK = "delete";
+
+/**
+ * The invisible format characters a delete confirmation ignores: soft hyphen,
+ * Arabic letter mark, Mongolian vowel separator, zero-width space, joiners and
+ * direction marks, bidi embeddings and isolates, word joiner and invisible
+ * operators, byte order mark, and interlinear annotation marks.
+ *
+ * Spelled out rather than written as `\p{Cf}`: the companion bundles this
+ * package for Hermes, and an explicit class compiles on every engine both apps
+ * support.
+ */
+const INVISIBLE_FORMAT_CHARACTERS =
+  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]/g;
+
+/**
+ * Reduces a typed delete confirmation to the form it is compared in.
+ *
+ * Drops {@link INVISIBLE_FORMAT_CHARACTERS} (zero-width space, joiners, byte
+ * order mark and the like) first: the instruction cannot show them, so they
+ * are never asked for. Then Unicode NFC, after the drop so a letter and an
+ * accent that sat on either side of an invisible character still compose: a
+ * macOS keyboard can emit a decomposed "é" while the stored name holds the
+ * composed one, and the two would never match. Then trims, collapses runs of
+ * whitespace (a title with a double space must not demand one) and
+ * lower-cases. The point of the field is a deliberate act, not a spelling
+ * test.
+ *
+ * @param {unknown} value - what the user typed, or the expected name or count
+ * @returns {string} the comparable form; "" for null or undefined
+ */
+export function normalizeDeleteConfirmation(value) {
+  return String(value ?? "")
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
+    .normalize("NFC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/**
+ * What the user must type to confirm a delete: the item's name or count, or
+ * {@link DELETE_CONFIRMATION_FALLBACK} when the name is blank once normalized.
+ * Every surface shows this in its instruction rather than the raw name, which
+ * can be blank.
+ *
+ * @param {string | number} expected - the item's name, or the number of
+ *   selected items for a bulk delete
+ * @returns {string} the text to show and to type
+ */
+export function deleteConfirmationTarget(expected) {
+  return normalizeDeleteConfirmation(expected)
+    ? String(expected)
+    : DELETE_CONFIRMATION_FALLBACK;
+}
+
+/**
+ * Whether a typed confirmation unlocks a delete.
+ *
+ * One rule for every surface: the webapp dialogs, the server guards and the
+ * companion's delete sheets all call this, so the button the user sees
+ * enabled is never refused by the server for a spelling difference. The typed
+ * value is compared with {@link deleteConfirmationTarget}, which is never
+ * blank, so an empty input confirms nothing, a nameless item included.
+ *
+ * @param {unknown} typed - what the user typed
+ * @param {string | number} expected - the item's name, or the number of
+ *   selected items for a bulk delete
+ * @returns {boolean} true when they match after normalization
+ */
+export function deleteConfirmationMatches(typed, expected) {
+  return (
+    normalizeDeleteConfirmation(typed) ===
+    normalizeDeleteConfirmation(deleteConfirmationTarget(expected))
+  );
+}
+
+/**
+ * What a permanent delete removes, for the deletes both apps offer. The
+ * webapp's delete dialogs and the companion's delete sheets show these, so a
+ * user reads the same consequences on either device.
+ */
+export const DELETE_CONSEQUENCE_LABELS = Object.freeze({
+  ASSET:
+    "This permanently deletes the asset and everything recorded on it: notes, custody, reminders and custom field values. It is removed from every booking, kit and audit it was part of, past and upcoming, and its QR code is unlinked. This cannot be undone.",
+  BOOKING:
+    "This permanently deletes the booking with its notes, model reservations and check-in and check-out history. If it is ongoing or overdue, its assets become available. This cannot be undone.",
+});
+
+/**
+ * How an audit photo reached Shelf, as `AuditImage.captureSource` stores it.
+ * `CAMERA` is a photo the phone app reports it took with its own camera, which
+ * cannot hand back an old picture; `LIBRARY` was picked from the phone's photo
+ * library; `WEB_UPLOAD` came through the web app, which cannot tell a camera
+ * shot from a file; `PHONE` came from a version of the phone app that does
+ * not say which. Photos from before this field have none.
+ */
+export const AUDIT_PHOTO_SOURCE_LABELS = Object.freeze({
+  CAMERA: "Shelf app camera",
+  LIBRARY: "Photo library",
+  WEB_UPLOAD: "Web upload",
+  PHONE: "Phone app",
+});
+
+/** The date and time a photo tile shows, before the year is added. */
+const SHORT_DATE_TIME = Object.freeze({
+  day: "numeric",
+  month: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** The flags an audit photo can carry: the cases a reviewer should check. */
+export const AUDIT_PHOTO_FLAG_LABELS = Object.freeze({
+  OLD_PHOTO: "Old photo",
+  NO_DATE: "No date",
+});
+
+/**
+ * How much older than its upload a photo may be before it is flagged. A photo
+ * taken the evening before and added in the morning is normal; one taken days
+ * before is a picture that was not taken when it was added as evidence.
+ */
+export const AUDIT_PHOTO_OLD_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * One line that explains the icons and flags, for a printed receipt where
+ * nothing can be hovered.
+ */
+export const AUDIT_PHOTO_KEY =
+  "Each photo shows how it reached Shelf (Shelf app camera, photo library, web upload or phone app) and when it was taken. Old photo: taken more than a day before it was uploaded. No date: the photo carries no capture time.";
+
+/** A duration in the largest whole unit a reader would use. */
+function describeGap(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} days`;
+}
+
+/** Reads a date-ish value as epoch milliseconds, or null. */
+function toMs(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Everything both apps show for one audit photo, so the web, the receipt PDF
+ * and the companion read the same.
+ *
+ * Quiet when a photo is fine, a flag when it is not: a normal photo gets an
+ * icon and a short date and time; only an old photo or one with no date gets
+ * a flag. The full sentence is for the preview, where there is room.
+ *
+ * - "Old photo": taken more than {@link AUDIT_PHOTO_OLD_AFTER_MS} before it
+ *   was uploaded. That is the case audit photos exist to catch, a picture
+ *   that was not taken when it was added as evidence. The upload is the only
+ *   reference: an audit can run for days, so its start or a scan time would
+ *   flag photos taken during the audit.
+ * - "No date": the photo carries no capture time.
+ * - A photo uploaded before Shelf read capture times (no source, no date) is
+ *   shown by its upload time with no flag: its date was never looked for, so
+ *   calling it missing would flag every photo in every older audit.
+ * - A camera photo with no EXIF date shows its upload time, labelled as such
+ *   (a photo taken in the app is uploaded minutes later at most), and is still
+ *   flagged "No date": the official app sends the camera's date, so a camera
+ *   claim without one is not to be trusted quietly.
+ *
+ * @param {{
+ *   captureSource?: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null,
+ *   capturedAt?: string | Date | null,
+ *   createdAt?: string | Date | null,
+ * }} photo - the `AuditImage` fields
+ * @param {{
+ *   format: {
+ *     dateTime: (value: string | Date) => string,
+ *     custom: (value: string | Date, options: object) => string,
+ *   },
+ *   now?: Date,
+ * }} options - the viewer's own formatters, and the current time (a photo
+ *   from another year shows its year)
+ * @returns {{
+ *   source: "CAMERA" | "LIBRARY" | "WEB_UPLOAD" | "PHONE" | null,
+ *   sourceLabel: string | null,
+ *   short: string | null,
+ *   flag: "OLD_PHOTO" | "NO_DATE" | null,
+ *   flagLabel: string | null,
+ *   detail: string,
+ * }}
+ */
+export function describeAuditPhoto(photo, { format, now = new Date() }) {
+  const source = AUDIT_PHOTO_SOURCE_LABELS[photo.captureSource]
+    ? photo.captureSource
+    : null;
+  const sourceLabel = source ? AUDIT_PHOTO_SOURCE_LABELS[source] : null;
+
+  const capturedMs = toMs(photo.capturedAt);
+  const uploadedMs = toMs(photo.createdAt);
+  // The year shows only when it differs from the upload's, compared in the
+  // viewer's own zone so the server and the browser decide alike.
+  const yearOf = (value) => format.custom(value, { year: "numeric" });
+  const uploadYear = photo.createdAt ? yearOf(photo.createdAt) : null;
+  const thisYear = yearOf(now);
+  const short = (value) => {
+    const year = yearOf(value);
+    return format.custom(
+      value,
+      year !== thisYear || (uploadYear && year !== uploadYear)
+        ? { ...SHORT_DATE_TIME, year: "numeric" }
+        : SHORT_DATE_TIME
+    );
+  };
+
+  // Uploaded before Shelf read capture times: show it as it always was.
+  if (!source && capturedMs === null) {
+    return {
+      source: null,
+      sourceLabel: null,
+      short: uploadedMs !== null ? short(photo.createdAt) : null,
+      flag: null,
+      flagLabel: null,
+      detail:
+        uploadedMs !== null
+          ? `Uploaded ${format.dateTime(photo.createdAt)}`
+          : "Time taken unknown",
+    };
+  }
+
+  const usesUploadTime =
+    capturedMs === null && source === "CAMERA" && uploadedMs !== null;
+  const shownValue =
+    capturedMs !== null
+      ? photo.capturedAt
+      : usesUploadTime
+      ? photo.createdAt
+      : null;
+
+  // A photo with no capture time is flagged even when a camera photo shows its
+  // upload time: a camera claim with no date is exactly what a modified client
+  // would send with an old, stripped picture.
+  let flag = null;
+  if (capturedMs === null) flag = "NO_DATE";
+  else if (
+    uploadedMs !== null &&
+    uploadedMs - capturedMs > AUDIT_PHOTO_OLD_AFTER_MS
+  ) {
+    flag = "OLD_PHOTO";
+  }
+
+  let when;
+  if (!shownValue) when = "time taken unknown";
+  else if (usesUploadTime) when = `uploaded ${format.dateTime(shownValue)}`;
+  else if (source === "CAMERA") when = format.dateTime(shownValue);
+  else if (source) when = `file says ${format.dateTime(shownValue)}`;
+  else when = `taken ${format.dateTime(shownValue)}`;
+
+  let relation = null;
+  if (capturedMs !== null && uploadedMs !== null && uploadedMs >= capturedMs) {
+    relation = `${describeGap(uploadedMs - capturedMs)} before upload`;
+  }
+
+  const sentence = [sourceLabel, when, relation].filter(Boolean).join(" · ");
+  return {
+    source,
+    sourceLabel,
+    short: shownValue ? short(shownValue) : null,
+    flag,
+    flagLabel: flag ? AUDIT_PHOTO_FLAG_LABELS[flag] : null,
+    detail: sentence.charAt(0).toUpperCase() + sentence.slice(1),
+  };
+}

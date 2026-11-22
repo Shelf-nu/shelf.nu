@@ -25,7 +25,12 @@ import {
   type Column,
 } from "~/modules/asset-index-settings/helpers";
 import { getPrimaryCustody } from "~/modules/custody/utils";
-import { encodeCsvListCell, quoteCsvCell } from "~/utils/csv-cells";
+import {
+  encodeCsvListCell,
+  neutralizeCsvFormula,
+  quoteCsvCell,
+} from "~/utils/csv-cells";
+import { customFieldCsvHeader } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -104,7 +109,7 @@ const CORE_IMPORT_FIELDS: Array<{
 export type BuildImportReadyColumnsArgs = {
   columnScope: ColumnScope;
   settingsColumns: Column[];
-  activeCustomFields: Array<Pick<CustomField, "name" | "type">>;
+  activeCustomFields: Array<Pick<CustomField, "name" | "type" | "format">>;
   barcodesEnabled: boolean;
 };
 
@@ -155,7 +160,7 @@ export function buildImportReadyColumns({
     if (includeAll || visibleColumnNames.has(columnName)) {
       columns.push({
         kind: "cf",
-        header: `cf:${cf.name},type:${cf.type}`,
+        header: customFieldCsvHeader(cf),
         name: cf.name,
         cfType: cf.type,
       });
@@ -329,6 +334,10 @@ export function buildImportReadyRows(
  * Builds the final import-ready CSV string (comma-delimited, every cell
  * double-quoted, CRLF line endings).
  *
+ * Every cell goes through {@link neutralizeCsvFormula}, like every other Shelf
+ * export, so a value a spreadsheet would run as a formula opens as text. The
+ * import parser reverses the guard, so the file still re-imports unchanged.
+ *
  * @param args - Scope, column settings, active custom fields, barcode flag, assets.
  * @returns The CSV file contents.
  */
@@ -336,6 +345,8 @@ export function buildImportReadyCsvFromAssets(
   args: BuildImportReadyCsvArgs
 ): string {
   return buildImportReadyRows(args)
-    .map((row) => row.map(quoteCsvCell).join(","))
+    .map((row) =>
+      row.map((cell) => quoteCsvCell(neutralizeCsvFormula(cell))).join(",")
+    )
     .join("\r\n");
 }

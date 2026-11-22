@@ -76,13 +76,18 @@ export function isPrivateOrReservedIp(ip: string): boolean {
 
 /**
  * Thrown when an outbound fetch is refused because the destination resolves to
- * a blocked address. Distinct so callers can avoid pointlessly retrying.
+ * a blocked address (or, for {@link safeFetchPrefix}, uses a non-default
+ * port). Distinct so callers can avoid pointlessly retrying.
  */
 export class BlockedAddressError extends ShelfError {
-  constructor(host: string, ip?: string) {
+  constructor(
+    host: string,
+    ip?: string,
+    message = "Refused to fetch from a private or reserved network address"
+  ) {
     super({
       cause: null,
-      message: "Refused to fetch from a private or reserved network address",
+      message,
       additionalData: { host, ip },
       label,
       shouldBeCaptured: false,
@@ -217,15 +222,114 @@ function isRedirectStatus(status: number): boolean {
   return [301, 302, 303, 307, 308].includes(status);
 }
 
+/** How {@link followGuardedRedirects} sends each request. */
+interface GuardedRequestOptions {
+  /** Aborts the request, including any redirect hop. */
+  signal: AbortSignal;
+  /** Sent on every hop. */
+  headers?: Readonly<Record<string, string>>;
+  /** Refuses any hop whose URL names a port other than the scheme's default. */
+  defaultPortOnly?: boolean;
+}
+
+/**
+ * Validates one hop: {@link assertSafeUrl}, plus the default-port rule when
+ * asked for.
+ *
+ * @throws {ShelfError} If the URL is malformed or uses a disallowed protocol
+ * @throws {BlockedAddressError} If the host is a private/reserved IP literal,
+ *   or the port is not the default one while `defaultPortOnly` is set
+ */
+function assertSafeHop(url: string, defaultPortOnly: boolean): URL {
+  const target = assertSafeUrl(url);
+  // `URL.port` is empty for the scheme's default port, even when written out.
+  if (defaultPortOnly && target.port !== "") {
+    throw new BlockedAddressError(
+      target.host,
+      undefined,
+      "Refused to fetch from a non-default port"
+    );
+  }
+  return target;
+}
+
+/**
+ * GETs a URL through the SSRF-guarded dispatcher and follows redirects
+ * **manually**, so every hop is re-validated. Each hop's host is checked two
+ * ways: IP literals via {@link assertSafeUrl} (undici skips `connect.lookup`
+ * for literals), named hosts via {@link ssrfGuardedLookup} at connect time.
+ * Together they close the redirect and DNS-rebinding bypasses.
+ *
+ * @param url - The destination URL (typically from untrusted user input)
+ * @param options - Abort signal, headers, and the default-port rule
+ * @returns The first non-redirect response, whatever its status, and the URL
+ *   it came from. The caller owns the response body.
+ * @throws {ShelfError} If a hop is refused, the request fails or times out, a
+ *   redirect has no `Location`, or there are more than {@link MAX_REDIRECTS}
+ */
+async function followGuardedRedirects(
+  url: string,
+  { signal, headers, defaultPortOnly = false }: GuardedRequestOptions
+): Promise<{ response: Response; finalUrl: URL }> {
+  let target = assertSafeHop(url, defaultPortOnly);
+
+  for (let redirects = 0; ; redirects++) {
+    if (redirects > MAX_REDIRECTS) {
+      throw new ShelfError({
+        cause: null,
+        message: `Too many redirects (> ${MAX_REDIRECTS})`,
+        additionalData: { url, finalUrl: target.href },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(target, {
+        signal,
+        headers,
+        redirect: "manual",
+        // Route through the SSRF-guarded dispatcher. `dispatcher` is the
+        // undici RequestInit extension exposed by Node's global fetch.
+        // @ts-expect-error -- `dispatcher` is not in the DOM RequestInit types.
+        dispatcher: ssrfSafeAgent,
+      });
+    } catch (cause) {
+      // When the guarded lookup rejects a named hop, fetch wraps the error
+      // (e.g. `TypeError: fetch failed` with `.cause`). Recover the original
+      // BlockedAddressError so callers can skip pointless retries.
+      const blocked = findBlockedCause(cause);
+      if (blocked) throw blocked;
+      throw cause;
+    }
+
+    if (!isRedirectStatus(response.status)) {
+      return { response, finalUrl: target };
+    }
+
+    const location = response.headers.get("location");
+    // Release the redirect response's socket before the next request.
+    await response.body?.cancel().catch(() => {});
+    if (!location) {
+      throw new ShelfError({
+        cause: null,
+        message: `Redirect (${response.status}) without a Location header`,
+        additionalData: { url, from: target.href },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+    // Resolve relative redirects against the current URL, then re-validate.
+    target = assertSafeHop(new URL(location, target).href, defaultPortOnly);
+  }
+}
+
 /**
  * Fetches a user-supplied URL with SSRF protection and a streaming size cap.
  *
  * - Only `http:`/`https:` are permitted.
- * - Redirects are followed **manually** so every hop is re-validated. Each
- *   hop's host is checked two ways: IP literals via {@link assertSafeUrl}
- *   (undici skips `connect.lookup` for literals), named hosts via
- *   {@link ssrfGuardedLookup} at connect time — together closing the redirect
- *   and DNS-rebinding bypasses.
+ * - Every redirect hop is re-validated (see {@link followGuardedRedirects}).
  * - The body is read incrementally while the timeout is still armed, so an
  *   oversized **or** slow/stalled body is aborted rather than buffered.
  *
@@ -233,8 +337,8 @@ function isRedirectStatus(status: number): boolean {
  * @param options - Size cap and timeout overrides
  * @returns The response body buffer and its content-type
  * @throws {ShelfError} If the protocol is disallowed, the destination is
- *   blocked, the request fails/times out, redirects too many times, or the
- *   body exceeds `maxBytes`
+ *   blocked, the request fails/times out, redirects too many times, answers
+ *   with a non-2xx status, or the body exceeds `maxBytes`
  */
 export async function safeFetch(
   url: string,
@@ -247,82 +351,189 @@ export async function safeFetch(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    let target = assertSafeUrl(url);
+    const { response } = await followGuardedRedirects(url, {
+      signal: controller.signal,
+    });
 
-    for (let redirects = 0; ; redirects++) {
-      if (redirects > MAX_REDIRECTS) {
-        throw new ShelfError({
-          cause: null,
-          message: `Too many redirects (> ${MAX_REDIRECTS})`,
-          additionalData: { url, finalUrl: target.href },
-          label,
-          shouldBeCaptured: false,
-        });
-      }
-
-      let response: Response;
-      try {
-        response = await fetch(target, {
-          signal: controller.signal,
-          redirect: "manual",
-          // Route through the SSRF-guarded dispatcher. `dispatcher` is the
-          // undici RequestInit extension exposed by Node's global fetch.
-          // @ts-expect-error -- `dispatcher` is not in the DOM RequestInit types.
-          dispatcher: ssrfSafeAgent,
-        });
-      } catch (cause) {
-        // When the guarded lookup rejects a named hop, fetch wraps the error
-        // (e.g. `TypeError: fetch failed` with `.cause`). Recover the original
-        // BlockedAddressError so callers can skip pointless retries.
-        const blocked = findBlockedCause(cause);
-        if (blocked) throw blocked;
-        throw cause;
-      }
-
-      // Manual redirect handling — validate the next hop, then continue.
-      if (isRedirectStatus(response.status)) {
-        const location = response.headers.get("location");
-        // Release the redirect response's socket before the next request.
-        await response.body?.cancel().catch(() => {});
-        if (!location) {
-          throw new ShelfError({
-            cause: null,
-            message: `Redirect (${response.status}) without a Location header`,
-            additionalData: { url, from: target.href },
-            label,
-            shouldBeCaptured: false,
-          });
-        }
-        // Resolve relative redirects against the current URL, then re-validate.
-        target = assertSafeUrl(new URL(location, target).href);
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new ShelfError({
-          cause: null,
-          message: `HTTP ${response.status}: ${response.statusText}`,
-          additionalData: { url, status: response.status },
-          label,
-          shouldBeCaptured: false,
-        });
-      }
-
-      const contentType = response.headers.get("content-type") || "";
-      // Read the body while the timeout is still armed, passing the same signal
-      // so a stalled/slow (trickle-fed) body is aborted too — not just an
-      // oversized one.
-      const buffer = await readBodyWithLimit(
-        response,
-        maxBytes,
-        url,
-        controller.signal
-      );
-      return { buffer, contentType };
+    if (!response.ok) {
+      throw new ShelfError({
+        cause: null,
+        message: `HTTP ${response.status}: ${response.statusText}`,
+        additionalData: { url, status: response.status },
+        label,
+        shouldBeCaptured: false,
+      });
     }
+
+    const contentType = response.headers.get("content-type") || "";
+    // Read the body while the timeout is still armed, passing the same signal
+    // so a stalled/slow (trickle-fed) body is aborted too, not just an
+    // oversized one.
+    const buffer = await readBodyWithLimit(
+      response,
+      maxBytes,
+      url,
+      controller.signal
+    );
+    return { buffer, contentType };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Options for {@link safeFetchPrefix}. */
+export interface SafeFetchPrefixOptions {
+  /** Read at most this many bytes, then stop without error. */
+  maxBytes: number;
+  /** Per-request timeout in milliseconds, covering redirects and the read. */
+  timeoutMs?: number;
+  /** Sent on every hop (User-Agent, Accept, Accept-Language). */
+  headers?: Readonly<Record<string, string>>;
+  /**
+   * ASCII marker, matched case-insensitively; reading stops once it has been
+   * received, e.g. `"</head>"`.
+   */
+  stopAfter?: string;
+  /**
+   * Decides from the final response's status and headers whether its body is
+   * worth reading. When it returns false the body is discarded unread. Reads
+   * every body when omitted.
+   */
+  readBodyIf?: (response: { status: number; headers: Headers }) => boolean;
+}
+
+/** Result of {@link safeFetchPrefix}. */
+export interface SafeFetchPrefixResult {
+  status: number;
+  /** The URL the final response came from, after redirects. */
+  finalUrl: URL;
+  headers: Headers;
+  /** The bytes read, at most `maxBytes`. Empty when the body was skipped. */
+  body: Buffer;
+  /** True when reading stopped before the response body ended. */
+  truncated: boolean;
+}
+
+/**
+ * GETs the start of a page: the same SSRF guard and redirect re-validation as
+ * {@link safeFetch}, but any status is returned, only the default port is
+ * allowed on every hop, and the body is read up to `stopAfter` or `maxBytes`
+ * instead of in full. Reaching either limit ends the read without an error.
+ *
+ * @param url - The destination URL (typically from untrusted user input)
+ * @param options - Size cap, timeout, headers, stop marker and body filter
+ * @returns The final status, URL and headers, and the body prefix
+ * @throws {BlockedAddressError} If a hop is a private/reserved address or
+ *   names a non-default port
+ * @throws {ShelfError} If the URL is invalid, the request fails or times out,
+ *   or redirects too many times
+ */
+export async function safeFetchPrefix(
+  url: string,
+  options: SafeFetchPrefixOptions
+): Promise<SafeFetchPrefixResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  );
+
+  try {
+    const { response, finalUrl } = await followGuardedRedirects(url, {
+      signal: controller.signal,
+      headers: options.headers,
+      defaultPortOnly: true,
+    });
+    const { status, headers } = response;
+
+    if (options.readBodyIf && !options.readBodyIf({ status, headers })) {
+      // Not awaited, like the early stop in `readBodyPrefix`.
+      void response.body?.cancel().catch(() => {});
+      return {
+        status,
+        finalUrl,
+        headers,
+        body: Buffer.alloc(0),
+        truncated: response.body !== null,
+      };
+    }
+
+    const read = await readBodyPrefix(
+      response,
+      options,
+      url,
+      controller.signal
+    );
+    return { status, finalUrl, headers, ...read };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Reads a response body until it ends, `stopAfter` has been received, or
+ * `maxBytes` is reached, whichever comes first.
+ *
+ * @param url - The source URL (for error context only)
+ * @throws {ShelfError} If the signal fires or the body cannot be read
+ */
+async function readBodyPrefix(
+  response: Response,
+  { maxBytes, stopAfter }: SafeFetchPrefixOptions,
+  url: string,
+  signal: AbortSignal
+): Promise<{ body: Buffer; truncated: boolean }> {
+  if (!response.body) return { body: Buffer.alloc(0), truncated: false };
+
+  const marker = stopAfter?.toLowerCase();
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  let truncated = true;
+  // The last bytes of the previous chunk, so a marker split across two chunks
+  // is still found.
+  let seam = Buffer.alloc(0);
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw timedOut(url);
+      if (done) {
+        truncated = false;
+        break;
+      }
+
+      const room = maxBytes - total;
+      const chunk = Buffer.from(value.subarray(0, room));
+      chunks.push(chunk);
+      total += chunk.byteLength;
+      if (value.byteLength > room) break;
+
+      if (marker) {
+        const window = Buffer.concat([seam, chunk]);
+        if (window.toString("latin1").toLowerCase().includes(marker)) break;
+        seam = window.subarray(Math.max(0, window.length - marker.length + 1));
+      }
+    }
+  } finally {
+    // Not awaited: the bytes needed are in hand, and the caller must not wait
+    // for the rest of the stream to settle.
+    if (truncated) void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+
+  return { body: Buffer.concat(chunks), truncated };
+}
+
+/** The error a body read throws when its request's timeout fires. */
+function timedOut(url: string): ShelfError {
+  return new ShelfError({
+    cause: null,
+    message: "Timed out while reading the response body",
+    additionalData: { url },
+    label,
+    shouldBeCaptured: false,
+  });
 }
 
 /**
@@ -380,13 +591,7 @@ export async function readBodyWithLimit(
   /** Cancels the reader and throws a uniform abort error. */
   const abort = async (): Promise<never> => {
     await reader.cancel().catch(() => {});
-    throw new ShelfError({
-      cause: null,
-      message: "Timed out while reading the response body",
-      additionalData: { url },
-      label,
-      shouldBeCaptured: false,
-    });
+    throw timedOut(url);
   };
 
   try {

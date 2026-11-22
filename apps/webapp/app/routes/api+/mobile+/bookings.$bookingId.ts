@@ -13,12 +13,7 @@
  * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
  * @see {@link file://./../../../modules/booking/shape-booking-assets.ts} sortCollapsedBookingAssets
  */
-import {
-  AssetStatus,
-  AssetType,
-  BookingStatus,
-  OrganizationRoles,
-} from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -45,20 +40,41 @@ import {
   combineDispatchedWithStoredUnits,
   computeDispatchedUnitsByAsset,
 } from "~/modules/booking/checkout-attribution";
+import { isManualSourceSlice } from "~/modules/booking/checkout-source-location";
+import {
+  getCheckoutSourceQuestions,
+  loadMultiPlacedPoolIds,
+  loadSliceSourceLocations,
+} from "~/modules/booking/checkout-source-location.server";
+import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
+import {
+  hasItemsStillOutToExtend,
+  isExtendableStatus,
+} from "~/modules/booking/extend-eligibility";
 import { isBookingArchivable } from "~/modules/booking/helpers";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   bookingDraftVisibilityClause,
-  computeBookingAssetRemaining,
-  computeBookingAssetRemainingToCheckOut,
+  computeBookingAssetsRemainingToCheckOut,
+  computeBookingCheckinRemaining,
   getBookingFlags,
   getDetailedPartialCheckinData,
 } from "~/modules/booking/service.server";
 import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-assets";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
+import {
+  canSeeBooking,
+  canWriteBooking,
+} from "~/utils/booking-authorization.server";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
+import {
+  isBookingPendingApproval,
+  isBookingApprovalEnabled,
+  roleReservesAsRequest,
+} from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -66,6 +82,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * GET /api/mobile/bookings/:bookingId
@@ -84,18 +101,43 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // details, assets, tags and action flags via mobile.
     await assertMobileCanUseBookings(organizationId);
 
-    // `canSeeAllBookings` answers who may READ a booking they do not custody:
-    // ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace override
-    // allows it. `isSelfServiceOrBase` is the narrower, role-only question of
-    // which ACTIONS the caller may take, and must stay role-only: the override
-    // widens reading and never writing.
-    const { canSeeAllBookings, isSelfServiceOrBase, effectiveRole, roles } =
-      await getMobileUserContext(user.id, organizationId);
+    // `access.bookings.seeAll` answers who may READ a booking they do not
+    // custody: ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace
+    // override allows it. The action flags below read the role policy and the
+    // matrix, never the override: it widens reading and never writing.
+    const { access, roles } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const { bookingId } = getParams(
       params,
       z.object({ bookingId: z.string().min(1) })
     );
+
+    /**
+     * The version an approver approves, read BEFORE the booking and its
+     * contents below, so a change that commits while this loads makes the
+     * version older than what the screen shows, never newer: Approve then
+     * refuses instead of approving what the approver did not see. Read only
+     * for someone who may approve; sent only with `canApprove`.
+     */
+    // Resolved once: it gates both this version read and `canApprove` below.
+    const canApprovePerm = await hasPermission({
+      userId: user.id,
+      organizationId,
+      roles,
+      workspace: access.workspaceGrants,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.approve,
+    });
+    const reviewableVersion = canApprovePerm
+      ? await readBookingRequestVersion(db, {
+          bookingId,
+          organizationId,
+          pendingOnly: true,
+        })
+      : null;
 
     const booking = await db.booking.findFirst({
       where: {
@@ -125,6 +167,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        // Feeds the derived pending-approval flag exposed in the response.
+        approvedAt: true,
+        archivedWithoutCheckin: true,
         from: true,
         to: true,
         createdAt: true,
@@ -171,6 +216,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             id: true,
             quantity: true,
             assetKitId: true,
+            // why: kit provenance that survives a member leaving the kit
+            // mid-booking; such residue has no manual source to show.
+            sourceKitId: true,
+            // Where a pool slice's units left from, recorded at check-out.
+            // Resolved to `{ id, name }` per slice below.
+            sourceLocationId: true,
             asset: {
               select: {
                 id: true,
@@ -182,6 +233,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // spread that builds each row — there is no explicit mapping to
                 // grep for, so do not assume it is unused.
                 availableToBook: true,
+                // A DRAFT booking can hold an asset that was archived after it
+                // was added. The app badges that row "Archived" and greys out
+                // Reserve, which the server refuses for it. Reaches the client
+                // through the same `serializeAssetImage(rest)` spread.
+                archivedAt: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -264,7 +320,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * and this same status, so a booking that opens on one platform opens on
      * the other.
      */
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId: user.id })) {
+    if (!canSeeBooking({ access, booking, userId: user.id })) {
       return data(
         { error: { message: "You are not authorized to view this booking" } },
         { status: 403 }
@@ -292,7 +348,47 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       quantity: number;
       assetKitId: string | null;
       kit: { id: string; name: string } | null;
+      /**
+       * The location this pool slice's units left from, recorded when it was
+       * first checked out. Set only where the web booking row shows "from
+       * <Location>": a standalone slice of a pool at two or more placements.
+       * `null` otherwise (individual assets, kit slices, pools at one
+       * location, slices not out yet, the unplaced units, a deleted location).
+       */
+      sourceLocation: SliceSourceLocation | null;
     };
+    const sourcedPoolSlices = booking.bookingAssets.filter(
+      (ba) =>
+        ba.asset.type === AssetType.QUANTITY_TRACKED && isManualSourceSlice(ba)
+    );
+    const [
+      sourceLocationsById,
+      multiPlacedPoolIds,
+      modelReservationShortfalls,
+    ] = await Promise.all([
+      loadSliceSourceLocations({
+        organizationId,
+        locationIds: sourcedPoolSlices.map((ba) => ba.sourceLocationId),
+      }),
+      loadMultiPlacedPoolIds({
+        organizationId,
+        assetIds: sourcedPoolSlices.map((ba) => ba.asset.id),
+      }),
+      // Reservations the booking's dates can no longer fill (e.g. a unit was
+      // archived with "Archive anyway"), so the app can warn like the web
+      // page. Measured only while units can still be assigned.
+      canAssignModelUnits(booking.status)
+        ? findModelRequestShortfallsForBooking({
+            booking: {
+              id: booking.id,
+              from: booking.from,
+              to: booking.to,
+              modelRequests: booking.modelRequests,
+            },
+            organizationId,
+          })
+        : [],
+    ]);
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
@@ -315,6 +411,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         quantity: ba.quantity,
         assetKitId: ba.assetKitId,
         kit: sliceKit,
+        sourceLocation:
+          ba.asset.type === AssetType.QUANTITY_TRACKED &&
+          isManualSourceSlice(ba) &&
+          multiPlacedPoolIds.has(ba.asset.id)
+            ? sourceLocationsById.get(ba.sourceLocationId) ?? null
+            : null,
       };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {
@@ -557,19 +659,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ];
 
     // Per-QUANTITY_TRACKED-asset remaining, computed up-front so the capability
-    // flags below can reason about UNITS, not the asset's global status.
-    const qtRemaining = await Promise.all(
-      assets
-        .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
-        .map(async (a) => {
-          const [remainingToCheckIn, remainingToCheckOut] = await Promise.all([
-            computeBookingAssetRemaining(db, booking.id, a.id),
-            computeBookingAssetRemainingToCheckOut(db, booking.id, a.id),
-          ]);
-          return { assetId: a.id, remainingToCheckIn, remainingToCheckOut };
-        })
+    // flags below can reason about UNITS, not the asset's global status. One
+    // batched read each way covers every asset on the booking.
+    const qtAssetIds = assets
+      .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
+      .map((a) => a.id);
+    const [checkinRemaining, checkoutRemaining] = await Promise.all([
+      computeBookingCheckinRemaining(db, booking.id, qtAssetIds),
+      computeBookingAssetsRemainingToCheckOut(db, booking.id, qtAssetIds),
+    ]);
+    const remainingByAsset = new Map(
+      qtAssetIds.map((assetId) => [
+        assetId,
+        {
+          assetId,
+          remainingToCheckIn: checkinRemaining.byAsset.get(assetId) ?? 0,
+          remainingToCheckOut: checkoutRemaining.get(assetId) ?? 0,
+        },
+      ])
     );
-    const remainingByAsset = new Map(qtRemaining.map((r) => [r.assetId, r]));
 
     /**
      * Units of a quantity-tracked asset that are out, not yet back, and that
@@ -624,20 +732,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Quick "check in all" and "check out all" are disallowed when the
     // workspace requires EXPLICIT (scan/select) check-in or check-out for the
-    // caller's role. Mirrors the web booking action's `checkIn`, `checkOut` and
-    // `checkOutRemaining` guards, so the app never offers an action the web /
-    // workspace settings forbid.
+    // caller, judged by the caller's access (its effective role). Mirrors the
+    // web booking action's `checkIn`, `checkOut` and `checkOutRemaining`
+    // guards, so the app never offers an action the web / workspace settings
+    // forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const canQuickCheckin = !(
-      (effectiveRole === OrganizationRoles.ADMIN &&
-        bookingSettings.requireExplicitCheckinForAdmin) ||
-      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-        bookingSettings.requireExplicitCheckinForSelfService)
-    );
-    const canQuickCheckout = !isExplicitCheckoutRequired({
-      role: effectiveRole,
-      bookingSettings,
+    const canQuickCheckin = !isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkin",
+    });
+    const canQuickCheckout = !isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     // Per-booking lifecycle-action availability, mirroring the web
@@ -654,11 +763,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canDeletePerm,
       canCheckoutPerm,
       canCheckinPerm,
+      canExtendPerm,
     ] = await Promise.all([
       hasPermission({
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.cancel,
       }),
@@ -666,6 +777,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.archive,
       }),
@@ -673,6 +785,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.create,
       }),
@@ -680,6 +793,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.delete,
       }),
@@ -687,6 +801,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
       }),
@@ -694,16 +809,72 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: user.id,
         organizationId,
         roles,
+        workspace: access.workspaceGrants,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        workspace: access.workspaceGrants,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.extend,
       }),
     ]);
     // State says the booking COULD be checked out or in; the role says whether
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
-    const canCheckout = canCheckoutByState && canCheckoutPerm;
-    const canCheckin = canCheckinByState && canCheckinPerm;
+    // Approval gate: a pending reservation request is never checked out, by
+    // anyone; it is approved first. The service refuses the check-out
+    // whatever the app version, and this flag keeps every app version from
+    // drawing a button the server would refuse. Derived with the same shared
+    // helper the web and the service use.
+    const isPendingApproval = isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: isBookingApprovalEnabled(bookingSettings),
+    });
+    // Seeing a booking (the workspace see-toggles) never grants writing it:
+    // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
+    // this caller may only read offers no actions.
+    const writesBooking = canWriteBooking({
+      booking: {
+        creatorId: booking.creator?.id ?? null,
+        custodianUserId: booking.custodianUserId,
+      },
+      userId: user.id,
+      access,
+    });
+    const canCheckout =
+      writesBooking &&
+      canCheckoutByState &&
+      canCheckoutPerm &&
+      !isPendingApproval;
+    // Who may decide the request: the same `booking:approve` answer the web
+    // Approve button and the `approve-booking` intent resolve, so the phone
+    // never draws (or withholds) a decision the server would answer otherwise.
+    // Only with the version this screen shows: without it an approval could
+    // not be checked against what the approver saw, so the app offers none
+    // until the booking is reloaded.
+    const canApprove =
+      isPendingApproval && canApprovePerm && reviewableVersion !== null;
+    // Sent back with Approve so a request that changed since this screen
+    // loaded is refused.
+    const requestVersion = canApprove ? reviewableVersion : null;
+    // Told BEFORE the reservation: whether this caller's Reserve would land as
+    // a request waiting for a decision. The same rule `reserveBooking` applies
+    // (workspace requires approval, and the caller's role is one whose
+    // reservations alert the workspace), so the app can word its prompt and
+    // its success message as a request instead of a done reservation.
+    const reservationNeedsApproval =
+      booking.status === BookingStatus.DRAFT &&
+      roleReservesAsRequest({
+        approvalSetting: access.policy.bookings.approvalSetting,
+        settings: bookingSettings,
+      });
+    const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
      *
@@ -715,31 +886,55 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * added after check-out closable from a browser and from nowhere on the
      * phone.
      */
-    const canCheckinAll = isActiveBooking && canCheckinPerm && canQuickCheckin;
+    const canCheckinAll =
+      writesBooking && isActiveBooking && canCheckinPerm && canQuickCheckin;
 
     const bookingActions = {
+      // Edit: an open booking this caller writes. `booking:update` is held by
+      // every role, so writing THIS booking is the whole rule; a booking the
+      // workspace only lets them see offers no edit the save would refuse.
+      canEdit:
+        !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+        writesBooking,
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
         (booking.status === "RESERVED" ||
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
+        writesBooking &&
         canCancelPerm,
       // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
       // its end date) + archive permission.
       canArchive:
         isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        writesBooking &&
         canArchivePerm,
-      // Duplicate: any status; gated by create permission (web's duplicate
-      // route enforces create — we hide it for those who lack it rather than
-      // 403 on tap).
-      canDuplicate: canCreatePerm,
-      // Delete: requires the delete permission AND (admin/owner any status |
-      // self-service/base only on DRAFT). Mirrors the web client gate; the
-      // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
-      canDelete:
-        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
-          !isSelfServiceOrBase) &&
-        canDeletePerm,
+      // Discard draft: archive a DRAFT, for a caller who may archive but not
+      // delete (web `discardDraft` in booking-actions.ts). Served by
+      // `bookings/archive` with `discardDraft: true`.
+      canDiscardDraft:
+        booking.status === "DRAFT" &&
+        writesBooking &&
+        canArchivePerm &&
+        !canDeletePerm,
+      // Duplicate: any status; gated by create permission and by writing this
+      // booking, the two checks the duplicate endpoint makes.
+      canDuplicate: writesBooking && canCreatePerm,
+      // Delete: the delete permission and writing this booking, the checks
+      // the endpoint makes (`assertCanDeleteBooking`). The companion reads
+      // this server-computed flag as is.
+      canDelete: writesBooking && canDeletePerm,
+      // Extend: the service's state rules (started, something still out) +
+      // extend permission, so the app never offers an extension it refuses.
+      canExtend:
+        isExtendableStatus(booking.status) &&
+        hasItemsStillOutToExtend({
+          assets: booking.bookingAssets.map((ba) => ba.asset),
+          checkedInAssetIds,
+          slices: sliceRows,
+        }) &&
+        writesBooking &&
+        canExtendPerm,
     };
 
     // Flatten book-by-model reservations into a mobile-friendly shape. Each
@@ -863,6 +1058,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedInAssetIds,
       checkedOutAssetIds,
       bookingStatus: booking.status,
+      archivedWithoutCheckin: booking.archivedWithoutCheckin,
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 
@@ -889,6 +1085,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             })
           ).hasAlreadyBookedAssets
         : false;
+
+    /**
+     * Pools on this booking that sit at two or more locations and have not
+     * gone out yet, with the options a "From location" picker needs. The same
+     * data the web check-out dialogs read, so the phone can ask the same
+     * question and send the answers as `sourceLocations`. Empty unless the
+     * booking can still check out. Additive: older apps ignore it.
+     */
+    const checkoutSourceQuestions = (
+      [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+      ] as BookingStatus[]
+    ).includes(booking.status)
+      ? await getCheckoutSourceQuestions({
+          organizationId,
+          bookingId: booking.id,
+        })
+      : [];
 
     return data({
       booking: {
@@ -921,8 +1137,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequests,
         modelRequestCount,
         outstandingModelUnitCount,
+        modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
+        // True while this reservation request awaits a decision: the app
+        // renders a "Pending approval" badge and hides checkout.
+        isPendingApproval,
+        canApprove,
+        requestVersion,
+        reservationNeedsApproval,
       },
       checkedInAssetIds,
       // Which assets this booking actually sent out, from the slice markers.
@@ -936,6 +1159,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckinAll,
       canQuickCheckout,
       bookingActions,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

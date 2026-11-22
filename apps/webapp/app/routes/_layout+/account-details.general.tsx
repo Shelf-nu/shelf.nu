@@ -35,6 +35,7 @@ import {
 import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import { assertEmailChangeAllowed } from "~/modules/auth/sso-enforcement.server";
 import {
   getUserByID,
   getUserWithContact,
@@ -47,6 +48,7 @@ import type { UpdateUserContactPayload } from "~/modules/user-contact/service.se
 import { updateUserContact } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
@@ -329,6 +331,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (parsedData.type !== "initiateEmailChange")
           throw new Error("Invalid payload type");
 
+        // A standard account that must sign in with SSO could otherwise move
+        // itself to an address off the SSO domain and regain password login.
+        await assertEmailChangeAllowed({ userId, email });
+
         const ssoDomains = await getConfiguredSSODomains();
         const user = await getUserByID(userId, {
           select: {
@@ -406,13 +412,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const { otp, email: newEmail } = parsedData;
 
+        // Checked again here: a code issued before the account was refused
+        // must not complete the change.
+        await assertEmailChangeAllowed({ userId, email });
+
         /** Just to make sure the user exists */
         await getUserByID(userId, {
           select: { id: true } satisfies Prisma.UserSelect,
         });
 
         // Attempt to verify the OTP
-        const { error: verifyError } = await getSupabaseAdmin().auth.verifyOtp({
+        const { error: verifyError } = await getSupabaseAdmin({
+          clientIp: getClientIpFromHeaders(request.headers),
+        }).auth.verifyOtp({
           email: newEmail,
           token: otp,
           type: "email_change",
@@ -432,7 +444,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         /** Refresh the session so it has the up-to-date email */
         const { refreshToken } = authSession;
-        const newSession = await refreshAccessToken(refreshToken);
+        const newSession = await refreshAccessToken(refreshToken, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
         context.setSession(newSession);
         /** Destroy all other sessions */
         await getSupabaseAdmin().auth.admin.signOut(

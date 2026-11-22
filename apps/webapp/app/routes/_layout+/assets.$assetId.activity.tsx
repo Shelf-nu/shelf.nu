@@ -5,8 +5,9 @@ import { Notes } from "~/components/assets/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAsset } from "~/modules/asset/service.server";
+import { getLinkTitles } from "~/modules/link-preview/service.server";
 import { getPaginatedAndFilterableAssetNotes } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
@@ -99,6 +100,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    /** Titles for the web links in the notes on this page, for their chips. */
+    const linkTitles = await getLinkTitles({
+      organizationId,
+      notes: items,
+    });
+
     const header: HeaderData = {
       title: `${asset.title}'s activity`,
     };
@@ -119,6 +126,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         search,
         totalPages,
         hasNotes,
+        linkTitles,
         modelName,
         searchFieldLabel: "Search notes",
       }),
@@ -142,7 +150,7 @@ export const handle = {
 };
 
 export default function AssetActivity() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadNotes = userHasPermission({
     roles,
     entity: PermissionEntity.note,

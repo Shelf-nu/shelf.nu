@@ -14,6 +14,8 @@
  *
  * @see {@link file://./../../../app/routes/api+/asset-models.$assetModelId.assets.ts}
  */
+import type { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { loader } from "~/routes/api+/asset-models.$assetModelId.assets";
 
@@ -56,13 +58,18 @@ vitest.mock("~/modules/asset/service.server", () => ({
   getAdvancedPaginatedAndFilterableAssets: vitest.fn(),
 }));
 // why: isolates the org-scoping lookup so a cross-org model id can be
-// simulated without seeding two organizations.
+// simulated without seeding two organizations, and exposes the unfiltered
+// count as a seam whose WHERE clause is asserted below.
 vitest.mock("~/database/db.server", () => ({
-  db: { assetModel: { findFirst: vitest.fn() } },
+  db: {
+    assetModel: { findFirst: vitest.fn() },
+    asset: { count: vitest.fn() },
+  },
 }));
 
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
@@ -73,6 +80,49 @@ const context = {
 
 function request(url: string) {
   return new Request(url);
+}
+
+/**
+ * A `requirePermission` result for `role`, built from the real policy.
+ * `custodySeeAll` defaults to hidden: the workspace toggles that widen custody
+ * visibility default to off in production, so the redaction cases exercise
+ * the common case.
+ */
+function caller(
+  role: string,
+  {
+    organizationId,
+    custodySeeAll = false,
+  }: { organizationId: string; custodySeeAll?: boolean }
+) {
+  const ctx = permissionContext({
+    roles: [role as OrganizationRoles],
+    organizationId,
+  });
+  return {
+    ...ctx,
+    canUseBarcodes: false,
+    access: {
+      ...ctx.access,
+      custody: { ...ctx.access.custody, seeAll: custodySeeAll },
+    },
+  };
+}
+
+/**
+ * The WHERE clause the unfiltered count ran with, or `undefined` when it never
+ * ran.
+ *
+ * Read through a declared shape rather than off the Prisma delegate's own
+ * generic signature, so a renamed field in the clause is a failing assertion
+ * here instead of an `unknown` the compiler waves through.
+ */
+function unfilteredCountWhere(): Record<string, unknown> | undefined {
+  const calls = vitest.mocked(db.asset.count).mock.calls as unknown as Array<
+    [{ where?: Record<string, unknown> }]
+  >;
+
+  return calls[0]?.[0]?.where;
 }
 
 describe("asset model assets endpoint", () => {
@@ -86,15 +136,12 @@ describe("asset model assets endpoint", () => {
       timeZone: "Asia/Tokyo",
     } as never);
 
-    vitest.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-      canUseBarcodes: false,
-      // Restricted-by-default: `baseUserCanSeeCustody` /
-      // `selfServiceCanSeeCustody` both default to `false` in production, so
-      // the redaction test below exercises the common case, not an edge one.
-      canSeeAllCustody: false,
-    } as never);
+    vitest.mocked(requirePermission).mockResolvedValue(
+      caller("ADMIN", {
+        organizationId: "org-1",
+        custodySeeAll: false,
+      }) as never
+    );
     vitest.mocked(getAssetIndexSettings).mockResolvedValue({
       mode: "ADVANCED",
       columns: [],
@@ -103,6 +150,7 @@ describe("asset model assets endpoint", () => {
       id: "am-1",
       name: "MacBook Pro 16",
     } as never);
+    vitest.mocked(db.asset.count).mockResolvedValue(0 as never);
     vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
       assets: [],
       totalAssets: 0,
@@ -147,16 +195,16 @@ describe("asset model assets endpoint", () => {
     expect(args.filters).toContain("status=is:AVAILABLE");
     expect(args.filters).toContain("assetModel=is:am-1");
     // An ADMIN caller gets the unrestricted query, matching the index loader.
-    expect(args.availableToBookOnly).toBe(false);
+    expect(args.bookableScope).toBeNull();
   });
 
-  it("restricts to bookable assets for a SELF_SERVICE caller, matching the index loader", async () => {
-    vitest.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "SELF_SERVICE",
-      canUseBarcodes: false,
-      canSeeAllCustody: false,
-    } as never);
+  it("restricts to bookable and held assets for a SELF_SERVICE caller, matching the index loader", async () => {
+    vitest.mocked(requirePermission).mockResolvedValue(
+      caller("SELF_SERVICE", {
+        organizationId: "org-1",
+        custodySeeAll: false,
+      }) as never
+    );
 
     await loader({
       context,
@@ -166,7 +214,101 @@ describe("asset model assets endpoint", () => {
 
     const [args] = vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mock
       .calls[0];
-    expect(args.availableToBookOnly).toBe(true);
+    expect(args.bookableScope).toEqual({ holderUserId: "user-1" });
+    // The unfiltered count is narrowed the same way: counted over the wider
+    // set, it would report assets this viewer is shown nowhere else.
+    expect(unfilteredCountWhere()).toMatchObject({
+      AND: [bookableListScopeWhere({ holderUserId: "user-1" })],
+    });
+  });
+
+  it("counts the model's own assets unfiltered when nothing matched, scoped to the caller's organization", async () => {
+    vitest.mocked(db.asset.count).mockResolvedValue(52 as never);
+
+    const response = (await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=status%3Dis%3AAVAILABLE"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never)) as unknown as Response;
+
+    expect(unfilteredCountWhere()).toEqual({
+      // From `requirePermission`, never from the request: a count widened past
+      // the caller's workspace reports another organization's inventory.
+      organizationId: "org-1",
+      // The rollup this sheet drills into counts INDIVIDUAL assets only, so a
+      // count including stock pools would not describe the same set.
+      type: "INDIVIDUAL",
+      assetModelId: "am-1",
+      // The index's default Active view hides archived assets, and clearing
+      // filters never shows them, so they are not "hidden by your filters".
+      archivedAt: null,
+    });
+
+    const body = (await response.json()) as { unfilteredAssets: number | null };
+    // What separates "your filters exclude everything in this model" from "this
+    // model is empty" in the sheet's one empty-state sentence.
+    expect(body.unfilteredAssets).toBe(52);
+  });
+
+  it("counts within the index's Archived view when the caller is in it (issue #382)", async () => {
+    await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=archived%3Darchived"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    // The view is not a filter the user can clear, so it scopes this count too.
+    expect(unfilteredCountWhere()).toMatchObject({
+      assetModelId: "am-1",
+      archivedAt: { not: null },
+    });
+  });
+
+  it("holds a member without asset: archive to the Active view (issue #382)", async () => {
+    // A BASE member never sees the Archived tab. Typing `archived=archived`
+    // into the forwarded string must not hand them the archived set anyway.
+    vitest
+      .mocked(requirePermission)
+      .mockResolvedValue(caller("BASE", { organizationId: "org-1" }) as never);
+
+    await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=archived%3Darchived"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    expect(unfilteredCountWhere()).toMatchObject({
+      assetModelId: "am-1",
+      archivedAt: null,
+    });
+  });
+
+  it("skips the unfiltered count when the filtered set has rows", async () => {
+    vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
+      assets: [{ id: "asset-1" }],
+      totalAssets: 1,
+      page: 1,
+      perPage: 20,
+      totalPages: 1,
+    } as never);
+
+    const response = (await loader({
+      context,
+      request: request("https://x.test/api/asset-models/am-1/assets"),
+      params: { assetModelId: "am-1" },
+    } as never)) as unknown as Response;
+
+    // A sheet with rows states its own count, so paying for a second query on
+    // every open would buy a sentence that is never rendered.
+    expect(vitest.mocked(db.asset.count)).not.toHaveBeenCalled();
+    const body = (await response.json()) as { unfilteredAssets: number | null };
+    expect(body.unfilteredAssets).toBeNull();
   });
 
   it("redacts a foreign custodian's identity when the viewer cannot see all custody", async () => {
