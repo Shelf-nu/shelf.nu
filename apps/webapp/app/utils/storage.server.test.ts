@@ -16,22 +16,29 @@ import {
   uploadFile,
 } from "./storage.server";
 
-// why: parsePdfFormData uploads to real Supabase Storage via
-// getSupabaseAdmin() - stub only that network boundary so the multipart
-// parsing this security test exercises runs for real, unmocked.
-const mockUpload = vi.fn();
-// why: removeFilesByPrefix paginates through Supabase Storage's list() and
-// then calls remove(), and removePublicFiles calls remove() - stub both so
-// the tests stay offline and can assert the paths sent in each request.
-const mockList = vi.fn();
-const mockRemove = vi.fn();
+// why: the Supabase admin client talks to storage over HTTP; stub `remove` so
+// the tests stay offline and can assert the paths sent in each request
+const storageRemoveMock = vi.hoisted(() => vi.fn());
+// why: same client, for `upload`. It answers like Storage does: the path it
+// stored at, and the full key (bucket included). Every upload in this file
+// goes to the `assets` bucket unless a test overrides the response.
+const storageUploadMock = vi.hoisted(() =>
+  vi.fn((path: string) =>
+    Promise.resolve({
+      data: { path, fullPath: `assets/${path}` },
+      error: null,
+    })
+  )
+);
+// why: same client, for `list`, which folder reads page through
+const storageListMock = vi.hoisted(() => vi.fn());
 vi.mock("~/integrations/supabase/client", () => ({
   getSupabaseAdmin: () => ({
     storage: {
       from: () => ({
-        upload: mockUpload,
-        list: mockList,
-        remove: mockRemove,
+        remove: storageRemoveMock,
+        upload: storageUploadMock,
+        list: storageListMock,
       }),
     },
   }),
@@ -276,12 +283,6 @@ describe("findShelfErrorInCause", () => {
 describe("parsePdfFormData", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mirrors Supabase's real upload() response: echoes back the path it
-    // was asked to store at.
-    mockUpload.mockImplementation((path: string) => ({
-      data: { path },
-      error: null,
-    }));
   });
 
   /**
@@ -340,7 +341,7 @@ describe("parsePdfFormData", () => {
     expect(result.path).toBe("org-1/asset-1/attachment-123.pdf");
     expect(result.originalName).toBe("invoice.pdf");
     expect(result.size).toBe(PDF_BODY.length);
-    expect(mockUpload).toHaveBeenCalledOnce();
+    expect(storageUploadMock).toHaveBeenCalledOnce();
   });
 
   it("rejects a plain text 'file' field forging an upload result", async () => {
@@ -367,7 +368,7 @@ describe("parsePdfFormData", () => {
 
     // Confirms the forged path never reached storage - Supabase's upload()
     // must never have been called with attacker-supplied data.
-    expect(mockUpload).not.toHaveBeenCalled();
+    expect(storageUploadMock).not.toHaveBeenCalled();
   });
 
   it("rejects a file whose declared type is application/pdf but whose bytes are not", async () => {
@@ -387,7 +388,7 @@ describe("parsePdfFormData", () => {
       })
     ).rejects.toThrow(/not a valid PDF/);
 
-    expect(mockUpload).not.toHaveBeenCalled();
+    expect(storageUploadMock).not.toHaveBeenCalled();
   });
 
   it("rejects a file part with no Content-Type header at all", async () => {
@@ -402,7 +403,7 @@ describe("parsePdfFormData", () => {
       })
     ).rejects.toThrow();
 
-    expect(mockUpload).not.toHaveBeenCalled();
+    expect(storageUploadMock).not.toHaveBeenCalled();
   });
 });
 
@@ -418,10 +419,10 @@ describe("removeFilesByPrefix", () => {
     }));
     const secondPage = [{ name: "file-100.pdf" }, { name: "file-101.pdf" }];
 
-    mockList
+    storageListMock
       .mockResolvedValueOnce({ data: firstPage, error: null })
       .mockResolvedValueOnce({ data: secondPage, error: null });
-    mockRemove.mockResolvedValue({ data: [], error: null });
+    storageRemoveMock.mockResolvedValue({ data: [], error: null });
 
     await removeFilesByPrefix({
       organizationId: "org-1",
@@ -429,12 +430,12 @@ describe("removeFilesByPrefix", () => {
       bucketName: "attachments",
     });
 
-    expect(mockList).toHaveBeenCalledTimes(2);
-    expect(mockList).toHaveBeenNthCalledWith(1, "org-1/asset-1", {
+    expect(storageListMock).toHaveBeenCalledTimes(2);
+    expect(storageListMock).toHaveBeenNthCalledWith(1, "org-1/asset-1", {
       limit: 100,
       offset: 0,
     });
-    expect(mockList).toHaveBeenNthCalledWith(2, "org-1/asset-1", {
+    expect(storageListMock).toHaveBeenNthCalledWith(2, "org-1/asset-1", {
       limit: 100,
       offset: 100,
     });
@@ -442,35 +443,37 @@ describe("removeFilesByPrefix", () => {
     const expectedPaths = [...firstPage, ...secondPage].map(
       (entry) => `org-1/asset-1/${entry.name}`
     );
-    expect(mockRemove).toHaveBeenCalledOnce();
-    expect(mockRemove).toHaveBeenCalledWith(expectedPaths);
+    expect(storageRemoveMock).toHaveBeenCalledOnce();
+    expect(storageRemoveMock).toHaveBeenCalledWith(expectedPaths);
   });
 
   it("stops after a single page when it comes back short of the page size", async () => {
-    mockList.mockResolvedValueOnce({
+    storageListMock.mockResolvedValueOnce({
       data: [{ name: "only-file.pdf" }],
       error: null,
     });
-    mockRemove.mockResolvedValue({ data: [], error: null });
+    storageRemoveMock.mockResolvedValue({ data: [], error: null });
 
     await removeFilesByPrefix({
       organizationId: "org-1",
       entityId: "asset-1",
     });
 
-    expect(mockList).toHaveBeenCalledOnce();
-    expect(mockRemove).toHaveBeenCalledWith(["org-1/asset-1/only-file.pdf"]);
+    expect(storageListMock).toHaveBeenCalledOnce();
+    expect(storageRemoveMock).toHaveBeenCalledWith([
+      "org-1/asset-1/only-file.pdf",
+    ]);
   });
 
   it("does nothing when the prefix has no files at all", async () => {
-    mockList.mockResolvedValueOnce({ data: [], error: null });
+    storageListMock.mockResolvedValueOnce({ data: [], error: null });
 
     await removeFilesByPrefix({
       organizationId: "org-1",
       entityId: "asset-1",
     });
 
-    expect(mockRemove).not.toHaveBeenCalled();
+    expect(storageRemoveMock).not.toHaveBeenCalled();
   });
 });
 
@@ -479,8 +482,8 @@ describe("removePublicFiles", () => {
     `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/${path}`;
 
   beforeEach(() => {
-    mockRemove.mockReset();
-    mockRemove.mockResolvedValue({ data: [], error: null });
+    storageRemoveMock.mockReset();
+    storageRemoveMock.mockResolvedValue({ data: [], error: null });
   });
 
   it("removes every file in a single storage request", async () => {
@@ -492,8 +495,8 @@ describe("removePublicFiles", () => {
       ],
     });
 
-    expect(mockRemove).toHaveBeenCalledTimes(1);
-    expect(mockRemove).toHaveBeenCalledWith([
+    expect(storageRemoveMock).toHaveBeenCalledTimes(1);
+    expect(storageRemoveMock).toHaveBeenCalledWith([
       "org-1/locations/loc-1/a.jpg",
       "org-1/locations/loc-1/a-thumbnail.jpg",
       "org-1/locations/loc-2/b.jpg",
@@ -509,7 +512,9 @@ describe("removePublicFiles", () => {
       ],
     });
 
-    expect(mockRemove).toHaveBeenCalledWith(["org-1/locations/loc-1/a.jpg"]);
+    expect(storageRemoveMock).toHaveBeenCalledWith([
+      "org-1/locations/loc-1/a.jpg",
+    ]);
     expect(result).toEqual({ invalidUrlCount: 1 });
   });
 
@@ -518,12 +523,12 @@ describe("removePublicFiles", () => {
       publicUrls: ["https://elsewhere.example.com/files/x.jpg"],
     });
 
-    expect(mockRemove).not.toHaveBeenCalled();
+    expect(storageRemoveMock).not.toHaveBeenCalled();
     expect(result).toEqual({ invalidUrlCount: 1 });
   });
 
   it("throws when the storage request fails", async () => {
-    mockRemove.mockResolvedValue({
+    storageRemoveMock.mockResolvedValue({
       data: null,
       error: new Error("storage down"),
     });
@@ -542,7 +547,7 @@ describe("removePublicFiles", () => {
     await expect(removePublicFiles({ publicUrls })).rejects.toBeInstanceOf(
       ShelfError
     );
-    expect(mockRemove).not.toHaveBeenCalled();
+    expect(storageRemoveMock).not.toHaveBeenCalled();
   });
 });
 

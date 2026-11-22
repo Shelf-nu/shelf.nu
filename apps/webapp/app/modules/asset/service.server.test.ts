@@ -3023,6 +3023,8 @@ describe("createAsset cross-org guards", () => {
         attachmentPath: "org-A/asset-owning-it/attachment-123.pdf",
       })
     ).rejects.toThrow(ShelfError);
+  });
+
   it("rejects a tag from a different organization before writing", async () => {
     expect.assertions(3);
     // why: an empty result is how the org-scoped lookup reports a tag that

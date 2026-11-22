@@ -1,10 +1,7 @@
 import { Readable } from "node:stream";
 
-import {
-  type FileUpload,
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
+import type { FileUpload } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -488,7 +485,6 @@ export async function parseFileFormData({
   textFields?: readonly string[];
 }) {
   try {
-    const uploadHandler = async (upload: FileUpload) => {
     /** The values this function uploaded, the only thing it returns. */
     const uploaded = new FormData();
 
@@ -507,7 +503,11 @@ export async function parseFileFormData({
         return undefined;
       }
 
-      const fileStream = await normalizeToAsyncIterable(upload);
+      if (!file) {
+        return undefined;
+      }
+
+      const fileStream = await normalizeToAsyncIterable(file);
 
       if (!fileStream) {
         return undefined;
@@ -844,29 +844,6 @@ export async function parsePdfFormData({
       shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
     });
   }
-}
-
-/**
- * Recursively walks the `.cause` chain to find a `MaxFileSizeExceededError`.
- *
- * `parseFormData` wraps errors, so this helper normalises the shape and lets
- * callers respond with the correct user-facing message when the underlying
- * file exceeds the configured size.
- */
-function getMaxFileSizeExceededError(
-  error: unknown
-): MaxFileSizeExceededError | null {
-  if (error instanceof MaxFileSizeExceededError) {
-    return error;
-  }
-
-  const cause = (error as { cause?: unknown })?.cause;
-
-  if (!cause) {
-    return null;
-  }
-
-  return getMaxFileSizeExceededError(cause);
 }
 
 /**

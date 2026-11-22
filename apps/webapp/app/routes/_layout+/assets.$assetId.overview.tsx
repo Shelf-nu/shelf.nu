@@ -290,7 +290,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // 50 kit-driven of 100) as over-allocated.
       const inLocationsManual = (asset.assetLocations ?? []).reduce(
         (sum: number, al) =>
-          sum + (al.assetKitId === null ? (al.quantity ?? 0) : 0),
+          sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
         0
       );
 
@@ -526,10 +526,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
-      asset: redactCustodianForViewer([{ ...asset, customFields }], {
-        canSeeAllCustody: access.custody.seeAll,
-        userId,
-      })[0],
+      asset: redactCustodianForViewer(
+        [{ ...asset, customFields, attachmentUrl: attachmentDisplayUrl }],
+        {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }
+      )[0],
       currentOrganization,
       userId,
       lastScan,
@@ -1564,8 +1567,8 @@ export default function AssetOverview() {
                       asset?.archivedAt
                         ? "This asset is archived. Reinstate it to change availability."
                         : !canUpdateAvailability
-                          ? "You do not have the permissions to change availability"
-                          : "Toggle availability"
+                        ? "You do not have the permissions to change availability"
+                        : "Toggle availability"
                     }
                   />
                   <input type="hidden" value="toggle" name="intent" />
@@ -1808,9 +1811,9 @@ export default function AssetOverview() {
                                   // people. Manual rows only: kit-held units
                                   // follow the kit. Never names anyone.
                                   custodySources?.multiSource && !p.viaKit
-                                    ? (custodySources.options.find(
+                                    ? custodySources.options.find(
                                         (o) => o.locationId === p.locationId
-                                      )?.inCustody ?? 0)
+                                      )?.inCustody ?? 0
                                     : 0
                                 }
                               />
