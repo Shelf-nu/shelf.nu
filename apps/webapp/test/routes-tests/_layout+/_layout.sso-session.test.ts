@@ -5,7 +5,9 @@
  * being refused (a domain newly configured for SSO, a deploy). The layout
  * loader revokes every session of the account server-side, ends this one and
  * sends the person to `/login`, which explains why. SSO users are never asked:
- * their session came from SSO.
+ * their session came from SSO, and neither is a session obtained through one of
+ * the deployment's identity providers, such as the custom OIDC login of a
+ * linked account.
  *
  * The non-refused cases use a user who has not onboarded, so the loader stops
  * at the onboarding redirect right after the guard without needing the
@@ -15,6 +17,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { revokeAllSessions } from "~/modules/auth/service.server";
+import { isIdentityProviderSession } from "~/modules/auth/sso-callback.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { loader } from "~/routes/_layout+/_layout";
@@ -31,6 +34,13 @@ vi.mock("~/modules/auth/sso-enforcement.server", () => ({
 // whether the loader made it.
 vi.mock("~/modules/auth/service.server", () => ({
   revokeAllSessions: vi.fn(),
+}));
+
+// why: whether a session came from the deployment's identity providers is
+// decided against auth.identities and has its own tests
+// (sso-callback.server.test.ts); here only what the loader does with it matters.
+vi.mock("~/modules/auth/sso-callback.server", () => ({
+  isIdentityProviderSession: vi.fn(),
 }));
 
 // why: supplies the signed-in user row, the input the guard reads.
@@ -88,6 +98,7 @@ describe("_layout loader SSO session guard", () => {
     vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
       allowed: true,
     });
+    vi.mocked(isIdentityProviderSession).mockResolvedValue(false);
   });
 
   it("signs out a non-SSO user whose address must now use SSO", async () => {
@@ -128,6 +139,28 @@ describe("_layout loader SSO session guard", () => {
 
     const { response, destroySession } = await load();
 
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(response.headers.get("Location")).toBe("/onboarding");
+  });
+
+  it("keeps an identity-provider session of a non-SSO account whose address is refused", async () => {
+    // A linked account that is not an SSO account holds such a session after
+    // signing in through the custom OIDC login; the decision is about email
+    // sign-ins and must not end it.
+    vi.mocked(getUserByID).mockResolvedValue(USER as never);
+    vi.mocked(isIdentityProviderSession).mockResolvedValue(true);
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+
+    const { response, destroySession } = await load();
+
+    expect(isIdentityProviderSession).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1", accessToken: "access-token" })
+    );
     expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
     expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(destroySession).not.toHaveBeenCalled();

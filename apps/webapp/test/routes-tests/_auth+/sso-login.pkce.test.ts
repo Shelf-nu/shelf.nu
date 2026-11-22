@@ -29,7 +29,10 @@ vi.mock("~/database/db.server", () => ({ db: {} }));
 // why: the loader reads shelf.config for the SSO kill-switch; pinning it keeps
 // these assertions independent of DISABLE_SSO in the local environment.
 vi.mock("~/config/shelf.config", () => ({
-  config: { disableSSO: false },
+  config: {
+    disableSSO: false,
+    oidc: { enabled: false, buttonLabel: "Log in with SSO" },
+  },
 }));
 
 /** The default SSO domain the loader reads; empty unless a case sets one. */

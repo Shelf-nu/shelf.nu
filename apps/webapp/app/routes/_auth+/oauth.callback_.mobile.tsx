@@ -1,16 +1,17 @@
 /**
  * Mobile SSO callback (native-app web-delegated auth).
  *
- * Supabase redirects here (instead of `/oauth/callback`) after it validates the
- * SAML assertion for a `platform=mobile` SSO sign-in, with an authorization
- * code on the URL. The action trades that code for the SSO session using the
- * PKCE verifier this browser kept when `/sso-login` started the sign-in, so a
+ * Supabase redirects here (instead of `/oauth/callback`) after a
+ * `platform=mobile` single sign-on (SAML SSO or the custom OIDC login), with an
+ * authorization code on the URL. The action trades that code for the SSO session using the
+ * PKCE verifier this browser kept when `/sso-login` or `/oidc-login` started
+ * the sign-in, so a
  * callback link opened in any other browser cannot complete. A sign-in started
  * from the identity provider's dashboard never lands here, so tokens in the URL
  * fragment are never accepted.
  *
  * SSO completion then matches the web callback (user and workspace
- * provisioning, SCIM linking via `resolveUserAndOrgForSsoCallback`), except
+ * provisioning and group mapping via `completeSsoCallback`), except
  * that instead of setting a web session it mints a single-use authorization
  * code for the app and hands it back through the `shelf://auth-callback?code=`
  * deeplink. The app redeems that code at `POST /api/mobile/exchange`, proving
@@ -31,13 +32,16 @@ import { data, useFetcher } from "react-router";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import {
   createMobileAuthCode,
   deleteExpiredMobileAuthCodes,
 } from "~/modules/auth/mobile-sso.server";
+import {
+  completeSsoCallback,
+  isAnySsoEnabled,
+} from "~/modules/auth/sso-callback.server";
 import { exchangeSsoCode } from "~/modules/auth/sso-pkce.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
@@ -56,12 +60,7 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import { readProviderError } from "~/utils/sso-callback";
-import {
-  assertSsoAuthenticatedSession,
-  getSsoClaimsForAuthUser,
-  isSsoAccountLinkedError,
-  resolveUserAndOrgForSsoCallback,
-} from "~/utils/sso.server";
+import { isSsoAccountLinkedError } from "~/utils/sso.server";
 
 /** Custom-scheme deeplink the companion app registers and listens for. */
 const MOBILE_CALLBACK_URL = "shelf://auth-callback";
@@ -69,14 +68,13 @@ const MOBILE_CALLBACK_URL = "shelf://auth-callback";
 /**
  * What the page posts: only the `?code=` Supabase put on the callback URL.
  * Every claim the action acts on (groups, names, contact info) is read
- * server-side with `getSsoClaimsForAuthUser`, never from the form.
+ * server-side by `completeSsoCallback`, never from the form.
  */
 const MobileCallbackSchema = z.object({
   code: z.string().min(1),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { disableSSO } = config;
   // Clears the one-shot PKCE challenge cookie. Applied on every exit path —
   // success (once the challenge is bound to the code) and failure (so an
   // abandoned flow doesn't leave the challenge readable for its full TTL).
@@ -88,7 +86,7 @@ export async function action({ request }: ActionFunctionArgs) {
   responseHeaders.append("Set-Cookie", clearChallengeCookie);
   responseHeaders.append("Set-Cookie", await clearSsoCodeVerifier());
   try {
-    if (disableSSO) {
+    if (!isAnySsoEnabled()) {
       throw new ShelfError({
         cause: null,
         title: "SSO is disabled",
@@ -120,15 +118,6 @@ export async function action({ request }: ActionFunctionArgs) {
           ),
           clientIp: getClientIpFromHeaders(request.headers),
         });
-        // Any Supabase session would pass the steps below, so refuse one that
-        // was not obtained through SSO before anything is provisioned or synced.
-        await assertSsoAuthenticatedSession(authSession);
-        const { groups, firstName, lastName, contactInfo } =
-          await getSsoClaimsForAuthUser({
-            authUserId: authSession.userId,
-            email: authSession.email,
-          });
-
         // Provision the user/org exactly as the web flow does (creates the user
         // on first login, links SCIM groups). The app's bearer-auth API looks
         // the user up by auth id, so this must run before we mint a code.
@@ -137,12 +126,10 @@ export async function action({ request }: ActionFunctionArgs) {
         // detectFormatPrefsForPersistence), so the lazy backfill fills the real
         // zone later rather than sticking on the "UTC" fallback.
         const formatPrefs = detectFormatPrefsForPersistence(request);
-        const { user } = await resolveUserAndOrgForSsoCallback({
+        // `completeSsoCallback` first refuses a session that was not obtained
+        // through SSO, and reads every claim server-side.
+        const { user } = await completeSsoCallback({
           authSession,
-          firstName,
-          lastName,
-          groups,
-          contactInfo,
           formatPrefs,
         });
 

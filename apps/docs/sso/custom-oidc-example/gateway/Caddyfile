@@ -1,0 +1,69 @@
+{
+	admin off
+	# Only the Keycloak site below uses TLS; no :80 redirect listener needed.
+	auto_https disable_redirects
+}
+
+# 1) Public entry point of the Supabase services, in place of Supabase's Kong
+#    gateway: maps the paths supabase-js expects (/auth/v1, /storage/v1) to the
+#    services. Reached as http://localhost:8000 by the browser and by Shelf.
+http://:8000 {
+	# The browser calls this from the Shelf origin. The services' own CORS
+	# headers are dropped below so that exactly one set is sent.
+	header {
+		Access-Control-Allow-Origin "http://localhost:3000"
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+		Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info, x-supabase-api-version, x-upsert, cache-control, range, prefer, tus-resumable, upload-length, upload-metadata, upload-offset"
+		Access-Control-Expose-Headers "content-range, content-length, x-sb-error-code, tus-resumable, upload-offset, location"
+		Access-Control-Max-Age "3600"
+		Vary "Origin"
+	}
+
+	@preflight method OPTIONS
+	handle @preflight {
+		respond 204
+	}
+
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	handle_path /auth/v1/* {
+		reverse_proxy auth:9999 {
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Access-Control-Allow-Credentials
+			header_down -Access-Control-Max-Age
+		}
+	}
+
+	handle_path /storage/v1/* {
+		reverse_proxy storage:5000 {
+			header_up X-Forwarded-Prefix /storage/v1
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Expose-Headers
+			header_down -Access-Control-Allow-Credentials
+			header_down -Access-Control-Max-Age
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
+
+# 2) Keycloak. Supabase Auth only accepts a custom OIDC issuer that is HTTPS,
+#    is not localhost and does not resolve to a private address, and Keycloak
+#    names the URL the browser logged in on as the issuer of its tokens. So
+#    the browser and Supabase Auth both reach Keycloak through this one HTTPS
+#    name (certificate from Caddy's own CA, which the auth container trusts
+#    and the browser warns about once). The browser needs the name in
+#    /etc/hosts, see ../custom-oidc.md.
+https://keycloak.shelf.internal:8443 {
+	tls internal
+	reverse_proxy keycloak:8080
+}

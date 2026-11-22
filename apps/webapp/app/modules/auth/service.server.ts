@@ -11,6 +11,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { assertEmailLoginEnabled } from "./email-login.server";
 import { mapAuthSession } from "./mappers.server";
 import {
   createSsoRequiredError,
@@ -64,7 +65,8 @@ function createInvalidOtpError(cause: unknown, email: string): ShelfError {
 /**
  * Ends the one session behind `accessToken` (scope `local`), leaving the
  * account's other sessions alone. Use it for a session opened server-side
- * whose flow is then refused or fails, so it does not outlive the request.
+ * whose flow is then refused or fails, so it does not outlive the request, and
+ * for a session whose sign-in method the deployment no longer accepts.
  *
  * Best-effort: the caller refuses the request whether or not this succeeds,
  * and the tokens are never handed to the client, so a failure is logged rather
@@ -86,7 +88,7 @@ export async function revokeSession(accessToken: string): Promise<void> {
       new ShelfError({
         cause,
         message:
-          "Failed to revoke a session opened by a refused or failed sign-in. The tokens were not returned to the client.",
+          "Failed to revoke a session whose sign-in was refused or failed.",
         label,
       })
     );
@@ -502,9 +504,14 @@ function isNoAccountForCodeError(error: AuthError): boolean {
  *
  * @param email - the address to send the code to
  * @param visitor - see {@link VisitorIp}
- * @throws {ShelfError} a wrapped Supabase failure
+ * @throws {ShelfError} 403 while email login is switched off; otherwise a
+ *   wrapped Supabase failure
  */
 export async function sendOTP(email: string, { clientIp }: VisitorIp = {}) {
+  // Outside the try: the catch below rewrites what it catches, and this
+  // refusal has to reach the caller as it is.
+  assertEmailLoginEnabled();
+
   try {
     const decision = await getLegacyLoginDecision(email);
     if (!decision.allowed) return;
@@ -915,14 +922,19 @@ export async function verifyAuthSession(authSession: AuthSession) {
  * @param otp - the code the person typed
  * @param visitor - see {@link VisitorIp}
  * @returns the mapped auth session
- * @throws {ShelfError} {@link INVALID_OTP_MESSAGE} for a wrong or expired code
- *   and for a refused address; otherwise a wrapped verification failure
+ * @throws {ShelfError} 403 while email login is switched off;
+ *   {@link INVALID_OTP_MESSAGE} for a wrong or expired code and for a refused
+ *   address; otherwise a wrapped verification failure
  */
 export async function verifyOtpAndSignin(
   email: string,
   otp: string,
   { clientIp }: VisitorIp = {}
 ) {
+  // Asked before the code is verified, so a code sent while email login was
+  // still on opens no session.
+  assertEmailLoginEnabled();
+
   let authSession: AuthSession;
   try {
     const { data, error } = await getSupabaseAdmin({ clientIp }).auth.verifyOtp(

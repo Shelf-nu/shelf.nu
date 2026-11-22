@@ -3,8 +3,10 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
+import { config } from "~/config/shelf.config";
 import {
   refreshAccessToken,
+  revokeSession,
   validateSession,
 } from "~/modules/auth/service.server";
 import { getClientIpFromHeaders } from "~/utils/client-ip.server";
@@ -13,6 +15,7 @@ import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
 import { isQrId } from "~/utils/id";
 import { Logger } from "~/utils/logger";
+import { isSingleSignOnSession } from "~/utils/sso.server";
 import type { FlashData, SessionData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -291,6 +294,43 @@ export function refreshSession() {
       session.unset(authSessionKey);
       c.set(SESSION_ENDED_KEY, true);
     }
+
+    return next();
+  });
+}
+
+/**
+ * Ends web sessions that were not obtained through single sign-on while email
+ * login is switched off (`DISABLE_EMAIL_LOGIN`), such as a password or
+ * one-time-code session opened before the switch was turned on.
+ *
+ * Runs on every request, after `refreshSession` and before `protect`, so pages,
+ * resource routes and API calls are all covered. It ends the session the way a
+ * failed refresh does, so `protect` sends the person to the login page and
+ * tells them they were logged out. Only this session is revoked: the refusal
+ * is about how it was obtained, and the account may still sign in through
+ * single sign-on.
+ *
+ * The access token comes from the signed session cookie, which only holds
+ * tokens Supabase Auth issued to the server, so its `amr` claim is read
+ * without a lookup.
+ */
+export function endEmailLoginSessions() {
+  return createMiddleware(async (c, next) => {
+    if (!config.disableEmailLogin) {
+      return next();
+    }
+
+    const session = getSession<SessionData, FlashData>(c);
+    const auth = session.get(authSessionKey);
+
+    if (!auth || isSingleSignOnSession(auth.accessToken)) {
+      return next();
+    }
+
+    await revokeSession(auth.accessToken);
+    session.unset(authSessionKey);
+    c.set(SESSION_ENDED_KEY, true);
 
     return next();
   });

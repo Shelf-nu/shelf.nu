@@ -25,6 +25,9 @@
  * that account, so it is told to use SSO before anything is created; an SSO
  * account (refused only for being SSO) still accepts.
  *
+ * With email login switched off, that account and its sign-in would bypass
+ * single sign-on, so a visitor who is not signed in is asked to sign in first.
+ *
  * @see {@link file://./../../../app/routes/_auth+/accept-invite.$inviteId.tsx}
  */
 
@@ -50,6 +53,22 @@ vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
   return {
     createSsoRequiredError: actual.createSsoRequiredError,
     getLegacyLoginDecision: mockGetLegacyLoginDecision,
+  };
+});
+
+// why: DISABLE_EMAIL_LOGIN is read from the environment when the config module
+// loads; the getter lets one test switch it while every other value stays real.
+const emailLogin = vi.hoisted(() => ({ disabled: false }));
+vi.mock("~/config/shelf.config", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("~/config/shelf.config")>();
+  return {
+    config: {
+      ...original.config,
+      get disableEmailLogin() {
+        return emailLogin.disabled;
+      },
+    },
   };
 });
 
@@ -277,6 +296,48 @@ describe("accept-invite action", () => {
     // The assertion that matters: no account is created, no sign-in tried.
     expect(updateInviteStatus).not.toHaveBeenCalled();
     expect(signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  describe("with email login switched off", () => {
+    beforeEach(() => {
+      emailLogin.disabled = true;
+    });
+    afterEach(() => {
+      emailLogin.disabled = false;
+    });
+
+    it("asks a visitor who is not signed in to sign in first, creating nothing", async () => {
+      const result = (await accept({
+        inviteId: "real-invite",
+        token: tokenFor("real-invite"),
+      })) as unknown as Response;
+
+      expect(result.status).toBe(403);
+      expect(await result.text()).toContain(
+        "Please log in with single sign-on first"
+      );
+      expect(updateInviteStatus).not.toHaveBeenCalled();
+      expect(signInWithEmail).not.toHaveBeenCalled();
+    });
+
+    it("accepts for a signed-in user without a password sign-in", async () => {
+      const result = (await action({
+        request: new Request("https://app.shelf.nu/accept-invite/real-invite", {
+          method: "POST",
+          body: new URLSearchParams({ token: tokenFor("real-invite") }),
+        }),
+        params: { inviteId: "real-invite" },
+        context: {
+          isAuthenticated: true,
+          getSession: () => ({ userId: "user-1" }),
+          setSession: vi.fn(),
+        },
+      } as unknown as Parameters<typeof action>[0])) as unknown as Response;
+
+      expect(result.status).toBe(302);
+      expect(updateInviteStatus).toHaveBeenCalledTimes(1);
+      expect(signInWithEmail).not.toHaveBeenCalled();
+    });
   });
 
   it("still accepts for an existing SSO account", async () => {

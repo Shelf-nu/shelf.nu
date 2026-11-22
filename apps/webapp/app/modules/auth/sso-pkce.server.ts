@@ -1,8 +1,9 @@
 /**
  * SSO sign-in with PKCE (RFC 7636) between Shelf and Supabase Auth.
  *
- * A sign-in that starts at `/sso-login` asks Supabase for an authorization
- * code instead of tokens. The secret half of the pair, the code verifier,
+ * A sign-in that starts at `/sso-login` (SAML SSO, {@link startSsoSignIn}) or
+ * `/oidc-login` (the custom OIDC login, {@link startOidcSignIn}) asks Supabase
+ * for an authorization code instead of tokens. The secret half of the pair, the code verifier,
  * stays in this browser's `sso_code_verifier` cookie; only its hash travels to
  * Supabase. The callback then trades `?code=` for a session, which Supabase
  * grants only with the matching verifier. A callback link opened in any other
@@ -10,7 +11,7 @@
  * browser into their own account by sending them a link.
  *
  * Sign-ins started from the identity provider's dashboard (an Okta tile, say)
- * never pass through `/sso-login`, so they carry no verifier and arrive with
+ * never pass through either route, so they carry no verifier and arrive with
  * tokens in the URL fragment instead. The web callback handles those
  * separately, behind an explicit confirmation step.
  *
@@ -20,11 +21,12 @@
  * after the start and handed back in for the exchange, and nothing is shared
  * between requests.
  *
- * @see {@link file://./../../routes/_auth+/sso-login.tsx} starts the sign-in
+ * @see {@link file://./../../routes/_auth+/sso-login.tsx} starts a SAML sign-in
+ * @see {@link file://./../../routes/_auth+/oidc-login.tsx} starts an OIDC sign-in
  * @see {@link file://./../../routes/_auth+/oauth.callback.tsx} web exchange
  * @see {@link file://./../../routes/_auth+/oauth.callback_.mobile.tsx} mobile exchange
  */
-import type { SupportedStorage } from "@supabase/supabase-js";
+import type { Provider, SupportedStorage } from "@supabase/supabase-js";
 import { createClient, isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import {
@@ -32,6 +34,8 @@ import {
   visitorIpHeaders,
 } from "~/integrations/supabase/client";
 import {
+  OIDC_PROVIDER,
+  OIDC_SCOPES,
   SERVER_URL,
   SUPABASE_ANON_PUBLIC,
   SUPABASE_SECRET_KEY,
@@ -131,13 +135,23 @@ export function isCodeVerifier(value: unknown): value is string {
 }
 
 /**
+ * The Shelf callback a sign-in lands on. Built here, never taken from the
+ * caller, so it is always an allow-listed, query-free Supabase redirect URL
+ * (Supabase treats `?` as a wildcard in its allow-list).
+ *
+ * @param platform - `"mobile"` for the native-app callback, `"web"` otherwise
+ * @returns The absolute callback URL
+ */
+function callbackUrl(platform: "web" | "mobile"): string {
+  return `${SERVER_URL}/oauth/callback${
+    platform === "mobile" ? "/mobile" : ""
+  }`;
+}
+
+/**
  * Starts an SSO sign-in for a company domain and returns the identity
  * provider URL to send the browser to, together with the code verifier the
  * caller must keep in the `sso_code_verifier` cookie for the callback.
- *
- * The callback path is built here, never taken from the caller, so it is
- * always an allow-listed, query-free Supabase redirect URL (Supabase treats
- * `?` as a wildcard in its allow-list).
  *
  * @param domain - The company domain whose SSO provider to use
  * @param options.platform - `"mobile"` lands on the native-app callback; the
@@ -155,16 +169,12 @@ export async function startSsoSignIn(
   }: { platform?: "web" | "mobile" } & VisitorIp = {}
 ): Promise<{ url: string; codeVerifier: string }> {
   try {
-    const redirectTo = `${SERVER_URL}/oauth/callback${
-      platform === "mobile" ? "/mobile" : ""
-    }`;
-
     const { auth, storedVerifier } = createPkceAuthClient(undefined, {
       clientIp,
     });
     const { data, error } = await auth.signInWithSSO({
       domain,
-      options: { redirectTo },
+      options: { redirectTo: callbackUrl(platform) },
     });
 
     if (error) throw error;
@@ -192,6 +202,80 @@ export async function startSsoSignIn(
       status: noProvider ? 400 : 500,
       shouldBeCaptured: !noProvider,
       additionalData: { domain },
+    });
+  }
+}
+
+/**
+ * Starts a sign-in through the custom OIDC provider (`OIDC_PROVIDER`) and
+ * returns the URL to send the browser to, together with the code verifier the
+ * caller must keep in the `sso_code_verifier` cookie for the callback.
+ *
+ * The URL is Supabase's authorize endpoint for the provider, with the S256
+ * challenge of the verifier. Building it needs no request to Supabase.
+ *
+ * @param options.platform - `"mobile"` lands on the native-app callback; the
+ *   web callback otherwise
+ * @param options.clientIp - Unused while no request is made; accepted so both
+ *   start functions are called the same way. See `VisitorIp` in
+ *   `./service.server`
+ * @returns The provider URL and the code verifier
+ * @throws {ShelfError} 404 (not captured) when no provider is configured, or a
+ *   captured error when the sign-in cannot be started
+ */
+export async function startOidcSignIn({
+  platform = "web",
+  clientIp,
+}: { platform?: "web" | "mobile" } & VisitorIp = {}): Promise<{
+  url: string;
+  codeVerifier: string;
+}> {
+  if (!OIDC_PROVIDER) {
+    throw new ShelfError({
+      cause: null,
+      status: 404,
+      title: "Not found",
+      message: "This sign-in method is not available.",
+      label,
+      shouldBeCaptured: false,
+    });
+  }
+
+  try {
+    const { auth, storedVerifier } = createPkceAuthClient(undefined, {
+      clientIp,
+    });
+    const { data, error } = await auth.signInWithOAuth({
+      // Supabase names custom providers `custom:<identifier>`.
+      provider: OIDC_PROVIDER as Provider,
+      options: {
+        redirectTo: callbackUrl(platform),
+        // Without scopes, the ones stored on the provider in Supabase apply.
+        ...(OIDC_SCOPES ? { scopes: OIDC_SCOPES } : {}),
+        skipBrowserRedirect: true,
+      },
+    });
+
+    if (error) throw error;
+
+    const codeVerifier = storedVerifier();
+    if (!data.url || !isCodeVerifier(codeVerifier)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Supabase did not start a PKCE sign-in",
+        label,
+      });
+    }
+
+    return { url: data.url, codeVerifier };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong. Please try again later or contact support.",
+      label,
+      status: 500,
+      additionalData: { provider: OIDC_PROVIDER },
     });
   }
 }

@@ -89,10 +89,12 @@ export function loader(_args: LoaderFunctionArgs) {
       "LATEST_COMPANION_VERSION",
       LATEST_COMPANION_VERSION
     ),
-    ssoEnabled: !config.disableSSO,
-    // Password login is an organisation-level concern (SSO orgs disable it per
-    // organisation), not an instance-level one, so this is always true today.
-    // It exists so the app can hide the password fields when that changes.
-    passwordLoginEnabled: true,
+    // The app's "Sign in with SSO" opens `/sso-login`, which hosts both the
+    // SAML domain form and the custom OIDC button, so either one enables it.
+    ssoEnabled: !config.disableSSO || config.oidc.enabled,
+    // False only when the instance turned email login off for everyone
+    // (DISABLE_EMAIL_LOGIN), so the app can hide its password fields. SSO
+    // workspaces that refuse passwords for their own members do not change it.
+    passwordLoginEnabled: !config.disableEmailLogin,
   });
 }

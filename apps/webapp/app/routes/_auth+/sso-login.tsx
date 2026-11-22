@@ -8,6 +8,7 @@ import {
   redirect,
   Form,
   useActionData,
+  useLoaderData,
   useNavigation,
 } from "react-router";
 import { useZorm } from "react-zorm";
@@ -49,9 +50,12 @@ const SSOLoginFormSchema = z.object({
 });
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
+  const { disableSSO, oidc } = config;
   const title = "Log in with SSO";
-  const subHeading = "Enter your company's domain to login with SSO.";
-  const { disableSSO } = config;
+  // With SAML SSO switched off the page shows the OIDC button only.
+  const subHeading = disableSSO
+    ? "Use single sign-on to log in."
+    : "Enter your company's domain to login with SSO.";
 
   const url = new URL(request.url);
   // The native-app flow opens this page with `?platform=mobile`. The in-app
@@ -65,7 +69,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect("/");
     }
 
-    if (disableSSO) {
+    // The page hosts both SSO methods, so it closes only when neither is on.
+    if (disableSSO && !oidc.enabled) {
       throw new ShelfError({
         cause: null,
         title: "SSO is disabled",
@@ -104,12 +109,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (isMobile && validChallenge) {
-      return data(payload({ title, subHeading }), {
+      return data(payload({ title, subHeading, disableSSO, oidc }), {
         headers: {
           "Set-Cookie":
             await mobilePkceChallengeCookie.serialize(validChallenge),
         },
       });
+    }
+
+    // With only the OIDC login available there is nothing to choose on this
+    // page, so the web flow goes straight to the identity provider.
+    if (disableSSO && !isMobile) {
+      return redirect("/oidc-login");
     }
 
     // If a default SSO domain is configured, skip the domain input form and
@@ -125,7 +136,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    return payload({ title, subHeading });
+    return payload({ title, subHeading, disableSSO, oidc });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
@@ -138,6 +149,19 @@ export async function action({ request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
+        // The domain form is the SAML SSO; the OIDC login does not post here.
+        if (config.disableSSO) {
+          throw new ShelfError({
+            cause: null,
+            title: "SSO is disabled",
+            message:
+              "For more information, please contact your workspace administrator.",
+            label: "User onboarding",
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
+
         const { domain, platform } = parseData(
           await request.formData(),
           SSOLoginFormSchema,
@@ -168,6 +192,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function SSOLogin() {
+  const { disableSSO, oidc } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", SSOLoginFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -183,34 +208,54 @@ export default function SSOLogin() {
   return (
     <>
       <div className="flex flex-col gap-3">
-        <Form method="post" ref={zo.ref}>
-          {/* Forwarded so the action can target the native-app callback. */}
-          <input type="hidden" name="platform" value={platform} />
-          <div className="flex flex-col gap-3">
-            <Input
-              ref={domainInputRef}
-              data-test-id="domain"
-              label="Company domain"
-              placeholder="yourdomain.com"
-              required
-              name={zo.fields.domain()}
-              type="text"
-              autoComplete="domain"
-              disabled={disabled}
-              inputClassName="w-full"
-              error={zo.errors.domain()?.message}
-            />
-            <Button
-              className="text-center"
-              type="submit"
-              data-test-id="login"
-              disabled={disabled}
-              width="full"
-            >
-              Log In
-            </Button>
-          </div>
-        </Form>
+        {oidc.enabled ? (
+          // Leaves the app for the identity provider, so it has to be a
+          // document navigation. The native-app flow keeps its platform so
+          // the login lands on the mobile callback.
+          <Button
+            to={
+              platform === "mobile"
+                ? "/oidc-login?platform=mobile"
+                : "/oidc-login"
+            }
+            reloadDocument
+            variant={disableSSO ? "primary" : "secondary"}
+            width="full"
+            data-test-id="oidcLogin"
+          >
+            {oidc.buttonLabel}
+          </Button>
+        ) : null}
+        {disableSSO ? null : (
+          <Form method="post" ref={zo.ref}>
+            {/* Forwarded so the action can target the native-app callback. */}
+            <input type="hidden" name="platform" value={platform} />
+            <div className="flex flex-col gap-3">
+              <Input
+                ref={domainInputRef}
+                data-test-id="domain"
+                label="Company domain"
+                placeholder="yourdomain.com"
+                required
+                name={zo.fields.domain()}
+                type="text"
+                autoComplete="domain"
+                disabled={disabled}
+                inputClassName="w-full"
+                error={zo.errors.domain()?.message}
+              />
+              <Button
+                className="text-center"
+                type="submit"
+                data-test-id="login"
+                disabled={disabled}
+                width="full"
+              >
+                Log In
+              </Button>
+            </div>
+          </Form>
+        )}
         {data?.error?.message && (
           <div className="text-sm text-error-500">{data.error.message}</div>
         )}

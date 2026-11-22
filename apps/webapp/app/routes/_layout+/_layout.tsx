@@ -55,6 +55,7 @@ import {
   shapeActiveImportForViewer,
 } from "~/modules/asset-import/viewer-payload";
 import { revokeAllSessions } from "~/modules/auth/service.server";
+import { isIdentityProviderSession } from "~/modules/auth/sso-callback.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getPendingApprovalCount } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -187,7 +188,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Every session of the account is revoked server-side, not only this
     // cookie: the refresh-token row is the auth boundary, so a session left
     // open in another browser would otherwise keep refreshing.
-    if (!user.sso) {
+    // A session obtained through one of this deployment's identity providers
+    // is not asked either: a linked account that is not an SSO account holds
+    // one after signing in through the custom OIDC login. The access token
+    // comes from the signed session cookie, which only holds tokens Supabase
+    // Auth issued to the server, so its `amr` claim can be trusted.
+    if (!user.sso && !(await isIdentityProviderSession(authSession))) {
       const decision = await getLegacyLoginDecisionForUser({
         userId: user.id,
         email: user.email,

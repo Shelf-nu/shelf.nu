@@ -102,6 +102,8 @@ If you are self-hosting shelf and want to setup SSO, please refer to the supabas
 
 SSO sign-ins started at `/sso-login` use the PKCE flow (Supabase Auth returns a one-time `?code=` that the callback exchanges with a verifier kept in an HttpOnly cookie). A self-hosted Supabase Auth must support PKCE for SSO, which it has since April 2023. The callback URLs to allow in Supabase stay the same: `/oauth/callback` and `/oauth/callback/mobile`.
 
+If your identity provider speaks OpenID Connect instead of SAML, or you want a single login button without a company domain, see [Custom OIDC Login](./custom-oidc.md).
+
 ### Attribute mapping [#](#attribute-mapping)
 
 For SSO users to be able to login to shelf, you will need to do some attribute mapping as per [Supabase documentation](https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml?queryGroups=language&language=js#understanding-attribute-mappings). We already provide a file for mapping attributes which you can find inside the project root [./sso/attributes.json](../../sso/attributes.json)

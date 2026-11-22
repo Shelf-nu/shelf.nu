@@ -1,4 +1,13 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
+import type * as ShelfConfigModule from "~/config/shelf.config";
 
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -11,7 +20,11 @@ import {
   shapeMobileAssetResponse,
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
-import { revokeAllSessions } from "~/modules/auth/service.server";
+import {
+  revokeAllSessions,
+  revokeSession,
+} from "~/modules/auth/service.server";
+import { isIdentityProviderSession } from "~/modules/auth/sso-callback.server";
 import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import type * as StorageServer from "~/utils/storage.server";
@@ -54,6 +67,30 @@ vi.mock("./mobile-usage.server", () => ({
   recordMobileActivity: vi.fn(),
 }));
 
+// why: DISABLE_EMAIL_LOGIN is read from the environment when the config module
+// loads; the getter lets one suite switch it per test while every other value
+// stays real.
+const emailLogin = vi.hoisted(() => ({ disabled: false }));
+vi.mock("~/config/shelf.config", async (importOriginal) => {
+  const original = await importOriginal<typeof ShelfConfigModule>();
+  return {
+    config: {
+      ...original.config,
+      get disableEmailLogin() {
+        return emailLogin.disabled;
+      },
+    },
+  };
+});
+
+// why: whether a session came from this deployment's identity providers is
+// decided against auth.identities and has its own tests
+// (sso-callback.server.test.ts); here only what `requireMobileAuth` does with
+// the answer matters.
+vi.mock("~/modules/auth/sso-callback.server", () => ({
+  isIdentityProviderSession: vi.fn(),
+}));
+
 // why: the SSO decision has its own tests (sso-enforcement.server.test.ts);
 // here only whether `requireMobileAuth` asks it, and what it does with the
 // answer, matters. The error factory stays real so the 403 is the shared one.
@@ -65,10 +102,11 @@ vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
   };
 });
 
-// why: revoking a refused account's sessions is a Supabase Auth admin call;
-// the spy records whether `requireMobileAuth` made it.
+// why: revoking sessions is a Supabase Auth admin call; the spies record
+// which revocation `requireMobileAuth` made.
 vi.mock("~/modules/auth/service.server", () => ({
   revokeAllSessions: vi.fn(),
+  revokeSession: vi.fn(),
 }));
 
 /**
@@ -452,6 +490,7 @@ describe("requireMobileAuth", () => {
     vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
       allowed: true,
     });
+    vi.mocked(isIdentityProviderSession).mockResolvedValue(false);
   });
 
   /**
@@ -557,6 +596,129 @@ describe("requireMobileAuth", () => {
     });
     expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(user.id).toBe("user-1");
+  });
+
+  /** A request whose bearer token records an OAuth sign-in. */
+  function oauthRequest() {
+    const payload = Buffer.from(
+      JSON.stringify({ amr: [{ method: "oauth", timestamp: 1 }] })
+    ).toString("base64url");
+    const { url } = signedInAs({ ...BASE_ROW, sso: false });
+    return new Request(url, {
+      headers: { Authorization: `Bearer header.${payload}.signature` },
+    });
+  }
+
+  it("does not ask the decision for an identity-provider session of a non-SSO account", async () => {
+    // An account that is not an SSO account holds such a session when its
+    // custom OIDC login was linked to it. The decision would refuse the
+    // address here; it must not be reached.
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+    vi.mocked(isIdentityProviderSession).mockResolvedValue(true);
+
+    const { user } = await requireMobileAuth(oauthRequest());
+
+    expect(isIdentityProviderSession).toHaveBeenCalledWith({
+      accessToken: expect.any(String),
+      userId: "user-1",
+    });
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+    expect(user.id).toBe("user-1");
+  });
+
+  it("asks the decision for an OAuth session of any other provider", async () => {
+    // `amr` names only the method, so a session of another OAuth provider
+    // must not escape the SSO enforcement a password session gets.
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+
+    await expect(requireMobileAuth(oauthRequest())).rejects.toMatchObject({
+      status: 403,
+      title: "Single sign-on required",
+    });
+    expect(revokeAllSessions).toHaveBeenCalled();
+  });
+
+  describe("with email login switched off", () => {
+    beforeEach(() => {
+      emailLogin.disabled = true;
+    });
+    afterEach(() => {
+      emailLogin.disabled = false;
+    });
+
+    /**
+     * Builds an access token whose `amr` claim records how the session was
+     * obtained. Only the payload is read, so header and signature are fillers.
+     */
+    function tokenObtainedWith(method: string) {
+      const payload = Buffer.from(
+        JSON.stringify({ amr: [{ method, timestamp: 1 }] })
+      ).toString("base64url");
+      return `header.${payload}.signature`;
+    }
+
+    /** The same request as `signedInAs`, carrying the given token. */
+    function withToken(request: Request, token: string) {
+      return new Request(request.url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+
+    it("refuses a password session and revokes only that session", async () => {
+      const token = tokenObtainedWith("password");
+      const request = withToken(signedInAs({ ...BASE_ROW, sso: false }), token);
+
+      await expect(requireMobileAuth(request)).rejects.toMatchObject({
+        status: 403,
+        title: "Email login is disabled",
+      });
+      expect(revokeSession).toHaveBeenCalledWith(token);
+      // The account's single sign-on sessions on other devices stay valid.
+      expect(revokeAllSessions).not.toHaveBeenCalled();
+      expect(recordMobileActivity).not.toHaveBeenCalled();
+    });
+
+    it("refuses a session whose sign-in method cannot be read", async () => {
+      const request = signedInAs({ ...BASE_ROW, sso: false });
+
+      await expect(requireMobileAuth(request)).rejects.toMatchObject({
+        status: 403,
+        title: "Email login is disabled",
+      });
+    });
+
+    it("accepts a custom OIDC session of an account that is not an SSO account", async () => {
+      const request = withToken(
+        signedInAs({ ...BASE_ROW, sso: false }),
+        tokenObtainedWith("oauth")
+      );
+
+      const { user } = await requireMobileAuth(request);
+
+      expect(user.id).toBe("user-1");
+      expect(revokeSession).not.toHaveBeenCalled();
+      expect(revokeAllSessions).not.toHaveBeenCalled();
+    });
+
+    it("accepts a SAML SSO session", async () => {
+      const request = withToken(
+        signedInAs({ ...BASE_ROW, sso: true }),
+        tokenObtainedWith("sso/saml")
+      );
+
+      const { user } = await requireMobileAuth(request);
+
+      expect(user.id).toBe("user-1");
+      expect(revokeSession).not.toHaveBeenCalled();
+      expect(revokeAllSessions).not.toHaveBeenCalled();
+    });
   });
 
   it("lets an SSO user through without asking the decision", async () => {

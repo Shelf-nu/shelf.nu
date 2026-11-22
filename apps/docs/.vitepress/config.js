@@ -202,6 +202,10 @@ export default {
             text: "Okta",
             link: "/sso/providers/okta",
           },
+          {
+            text: "Custom OIDC Login (self-hosted)",
+            link: "/sso/custom-oidc",
+          },
         ],
       },
       {

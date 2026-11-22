@@ -4,7 +4,8 @@
  *
  * Two ways in, handled differently:
  *
- * - **Started at `/sso-login`** (the usual way): the URL carries `?code=`. The
+ * - **Started at `/sso-login` or `/oidc-login`** (the usual way): the URL
+ *   carries `?code=`. The
  *   page posts it, and the action trades it for the session with the PKCE
  *   verifier this browser kept in its `sso_code_verifier` cookie. A link
  *   forwarded to another browser has no verifier and cannot complete.
@@ -15,9 +16,10 @@
  *   someone into an account that is not theirs then needs them to accept a
  *   stranger's email, never a silent redirect.
  *
- * Both end in the same server-side steps: refuse sessions not obtained through
- * SSO, read the IdP claims from the identity, provision the user and workspace,
- * set the session.
+ * Both end in the same server-side steps (`completeSsoCallback`): refuse
+ * sessions not obtained through SSO (SAML SSO or the custom OIDC login), read
+ * the IdP claims from the identity, provision the user and workspaces, set the
+ * session.
  *
  * @see {@link file://./../../modules/auth/sso-pkce.server.ts}
  * @see {@link file://./oauth.callback_.mobile.tsx} native-app counterpart
@@ -34,12 +36,15 @@ import { z } from "zod";
 import type { AuthSession } from "@server/session";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  completeSsoCallback,
+  isAnySsoEnabled,
+} from "~/modules/auth/sso-callback.server";
 import {
   exchangeSsoCode,
   readTokenAccount,
@@ -68,19 +73,13 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { readProviderError } from "~/utils/sso-callback";
-import {
-  assertSsoAuthenticatedSession,
-  getSsoClaimsForAuthUser,
-  isSsoAccountLinkedError,
-  resolveUserAndOrgForSsoCallback,
-} from "~/utils/sso.server";
+import { isSsoAccountLinkedError } from "~/utils/sso.server";
 
 /**
  * What the page posts. Every claim the action acts on (groups, names, contact
- * info) is read server-side with `getSsoClaimsForAuthUser`, never from the
- * form.
+ * info) is read server-side by `completeSsoCallback`, never from the form.
  *
- * - `code`: the `?code=` of a sign-in started at `/sso-login`.
+ * - `code`: the `?code=` of a sign-in started at `/sso-login` or `/oidc-login`.
  * - `identify`: the access token of a dashboard sign-in, to learn whose
  *   account it is before asking the person to confirm.
  * - `confirm`: the person confirmed; the tokens of that dashboard sign-in.
@@ -129,34 +128,20 @@ async function completeSsoSignIn({
   redirectTo?: string;
   headers: [string, string][];
 }) {
-  // Any Supabase session would pass the steps below, so refuse one that was
-  // not obtained through SSO before anything is provisioned or synced.
-  await assertSsoAuthenticatedSession(authSession);
-  const { groups, firstName, lastName, contactInfo } =
-    await getSsoClaimsForAuthUser({
-      authUserId: authSession.userId,
-      email: authSession.email,
-    });
-
   /**
-   * Resolves the workspace to land in, and also:
+   * Refuses a session not obtained through SSO before anything is provisioned
+   * or synced, then resolves the workspace to land in, and also:
    * - creates the user if they do not exist
    * - refuses when the email already belongs to a non-SSO account
-   * - links the user to their workspace when SCIM is configured
+   * - links the user to their workspace when SCIM is configured, or to the
+   *   workspaces the custom OIDC group mapping assigns
    */
   // Detect the caller's date/time/week/timezone prefs from browser hints; only
   // the new-user branch of the resolver consumes them. timeZone is null when
   // the CH-time-zone cookie is absent, so the "UTC" fallback is never stamped
   // permanently (the lazy backfill fills it).
   const formatPrefs = detectFormatPrefsForPersistence(request);
-  const { org } = await resolveUserAndOrgForSsoCallback({
-    authSession,
-    firstName,
-    lastName,
-    groups,
-    contactInfo,
-    formatPrefs,
-  });
+  const { org } = await completeSsoCallback({ authSession, formatPrefs });
 
   setSession(authSession);
   // Whatever lists this browser remembers belong to whoever used it last.
@@ -198,7 +183,6 @@ async function completeSsoSignIn({
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
-  const { disableSSO } = config;
   // The verifier is single-use: every answer to a code exchange removes it.
   // Answers to a dashboard sign-in leave it, so a sign-in another tab started
   // at /sso-login can still finish.
@@ -208,7 +192,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     // The callback serves only SSO; a social login provider would need its
     // own handling here.
-    if (disableSSO) {
+    if (!isAnySsoEnabled()) {
       throw new ShelfError({
         cause: null,
         title: "SSO is disabled",

@@ -16,6 +16,7 @@ import { BUILD_VERSION_PATH, buildVersion } from "./build-version";
 import { logger } from "./logger";
 import {
   applyForwardedProto,
+  endEmailLoginSessions,
   ensureHostHeaders,
   protect,
   refreshSession,
@@ -261,6 +262,13 @@ export default createHonoServer<ServerEnv>({
     server.use("*", refreshSession());
 
     /**
+     * End sessions not obtained through single sign-on while email login is
+     * switched off. After the refresh, so it reads the current token; before
+     * `protect`, which then sends the person to the login page.
+     */
+    server.use("*", endEmailLoginSessions());
+
+    /**
      * Add protected routes middleware
      *
      */
@@ -276,6 +284,7 @@ export default createHonoServer<ServerEnv>({
           "/join",
           "/login",
           "/sso-login",
+          "/oidc-login", // Custom OIDC login start: redirects to the identity provider
           "/oauth/callback",
           "/oauth/callback/mobile", // Native-app SSO callback (web-delegated)
           "/logout",
