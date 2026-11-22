@@ -208,7 +208,8 @@ export async function updateAssetAttachment({
     let updated;
     try {
       updated = await db.asset.update({
-        where: { id: assetId, organizationId },
+        // Still active at write time, not only at the lookup above.
+        where: { id: assetId, organizationId, archivedAt: null },
         data: {
           attachmentPath: path,
           attachmentOriginalName: sanitizeAttachmentName(originalName),
@@ -292,7 +293,8 @@ export async function removeAssetAttachment({
     });
 
     const updated = await db.asset.update({
-      where: { id: assetId, organizationId },
+      // Still active at write time, not only at the lookup above.
+      where: { id: assetId, organizationId, archivedAt: null },
       data: {
         attachmentPath: null,
         attachmentOriginalName: null,

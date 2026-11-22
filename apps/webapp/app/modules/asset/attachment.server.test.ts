@@ -195,7 +195,7 @@ describe("asset attachment", () => {
       );
       expect(removeFileAtPath).not.toHaveBeenCalled();
       expect(db.asset.update).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: "asset-1", organizationId: "org-1", archivedAt: null },
         data: {
           attachmentPath: "org-1/asset-1/attachment-123.pdf",
           attachmentOriginalName: "invoicefdp.pdf",
@@ -323,7 +323,7 @@ describe("asset attachment", () => {
       });
 
       expect(db.asset.update).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: "asset-1", organizationId: "org-1", archivedAt: null },
         data: {
           attachmentPath: null,
           attachmentOriginalName: null,
