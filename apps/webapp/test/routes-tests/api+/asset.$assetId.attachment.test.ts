@@ -42,7 +42,7 @@ vi.mock("~/utils/storage.server", () => ({
   listFilesInFolder: mockListFilesInFolder,
   parsePdfFormData: mockParsePdfFormData,
   removeFileAtPath: vi.fn(),
-  removeFilesByPrefix: vi.fn(),
+  removeFilesAtPaths: vi.fn(),
 }));
 
 // why: the RBAC matrix is tested elsewhere; here the gate grants the caller's

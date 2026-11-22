@@ -197,7 +197,10 @@ import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { formatModelShortfallMessage } from "./archive-shortfall";
 import type { ModelReservationShortfall } from "./archive-shortfall";
-import { resolveStagedAttachment } from "./attachment.server";
+import {
+  removeAttachmentFilesOfDeletedAssets,
+  resolveStagedAttachment,
+} from "./attachment.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -3540,6 +3543,8 @@ export async function deleteAsset({
       const deleted = await tx.asset.delete({
         where: { id, organizationId },
         select: {
+          // Removed from storage once the delete commits, see below.
+          attachmentPath: true,
           reminders: {
             select: {
               alertDateTime: true,
@@ -3572,6 +3577,11 @@ export async function deleteAsset({
 
     // Not awaited: it reads storage and the workspace's assets, never rejects.
     void removeImageFilesOfDeletedAssets({ assetIds: [id], organizationId });
+    // Not awaited either: it logs a failure and never rejects.
+    void removeAttachmentFilesOfDeletedAssets({
+      attachmentPaths: [deletedAsset.attachmentPath],
+      organizationId,
+    });
 
     // Cancel reminders outside transaction (cleanup operation, not critical for atomicity)
     await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
@@ -7294,8 +7304,8 @@ export async function bulkDeleteAssets({
     });
 
     /**
-     * Read before the delete: the ids also feed the image file cleanup that
-     * runs once the rows are gone. `title` is also selected so we can attach
+     * Read before the delete: the ids and attachment paths also feed the file
+     * cleanup that runs once the rows are gone. `title` is also selected so we can attach
      * it as `meta.title` on the `ASSET_DELETED` activity events emitted
      * post-delete (useful for activity feeds where the asset row no longer
      * exists to JOIN against).
@@ -7306,7 +7316,7 @@ export async function bulkDeleteAssets({
         id: { in: resolvedIds },
         organizationId,
       },
-      select: { id: true, title: true },
+      select: { id: true, title: true, attachmentPath: true },
     });
 
     // Before any write: the typed count must be the number about to go.
@@ -7357,6 +7367,10 @@ export async function bulkDeleteAssets({
       // Not awaited: it reads storage and the workspace's assets, never rejects.
       void removeImageFilesOfDeletedAssets({
         assetIds: assets.map((asset) => asset.id),
+        organizationId,
+      });
+      void removeAttachmentFilesOfDeletedAssets({
+        attachmentPaths: assets.map((asset) => asset.attachmentPath),
         organizationId,
       });
     } catch (cause) {

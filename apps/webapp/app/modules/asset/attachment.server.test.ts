@@ -20,7 +20,7 @@ vi.mock("~/utils/storage.server", () => ({
   ),
   listFilesInFolder: vi.fn(),
   removeFileAtPath: vi.fn(),
-  removeFilesByPrefix: vi.fn(),
+  removeFilesAtPaths: vi.fn(),
 }));
 
 // why: no real Postgres in unit tests. Each case sets the exact "before" row
@@ -30,6 +30,7 @@ vi.mock("~/database/db.server", () => ({
     asset: {
       findFirst: vi.fn(),
       findFirstOrThrow: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
     },
   },
@@ -37,12 +38,13 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import {
   createSignedUrl,
   listFilesInFolder,
   parsePdfFormData,
   removeFileAtPath,
-  removeFilesByPrefix,
+  removeFilesAtPaths,
 } from "~/utils/storage.server";
 import {
   buildAttachmentKey,
@@ -50,6 +52,7 @@ import {
   MAX_ATTACHMENT_NAME_LENGTH,
   parseAttachmentPath,
   removeAssetAttachment,
+  removeAttachmentFilesOfDeletedAssets,
   ATTACHMENT_LINK_TTL_SECONDS,
   findStagedAttachmentPath,
   resolveStagedAttachment,
@@ -73,10 +76,18 @@ function mockAssetRow(row: Pick<Asset, "id" | "attachmentPath">): Asset {
   return row as Asset;
 }
 
+// why: Logger.error writes to the console and Sentry; spy on it to assert a
+// best-effort failure is logged without producing output
+let loggerErrorSpy: ReturnType<typeof vi.spyOn>;
+
 describe("asset attachment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loggerErrorSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
     vi.mocked(removeFileAtPath).mockResolvedValue(undefined);
+    vi.mocked(removeFilesAtPaths).mockResolvedValue(undefined);
+    vi.mocked(listFilesInFolder).mockResolvedValue([]);
+    vi.mocked(db.asset.findMany).mockResolvedValue([]);
   });
 
   describe("buildAttachmentKey", () => {
@@ -213,11 +224,41 @@ describe("asset attachment", () => {
         organizationId: "org-1",
       });
 
+      expect(removeFileAtPath).toHaveBeenCalledTimes(1);
       expect(removeFileAtPath).toHaveBeenCalledWith({
         path: "org-1/asset-1/attachment-old.pdf",
         bucketName: "assets",
       });
-      expect(removeFilesByPrefix).not.toHaveBeenCalled();
+      expect(removeFilesAtPaths).not.toHaveBeenCalled();
+    });
+
+    it("removes the new file and keeps the old one when saving fails", async () => {
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({
+          id: "asset-1",
+          attachmentPath: "org-1/asset-1/attachment-old.pdf",
+        })
+      );
+      vi.mocked(parsePdfFormData).mockResolvedValue({
+        path: "org-1/asset-1/attachment-new.pdf",
+        originalName: "invoice-2.pdf",
+        size: 999,
+      });
+      vi.mocked(db.asset.update).mockRejectedValue(new Error("db down"));
+
+      await expect(
+        updateAssetAttachment({
+          request: {} as Request,
+          assetId: "asset-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toThrow();
+
+      expect(removeFileAtPath).toHaveBeenCalledTimes(1);
+      expect(removeFileAtPath).toHaveBeenCalledWith({
+        path: "org-1/asset-1/attachment-new.pdf",
+        bucketName: "assets",
+      });
     });
 
     it("does not touch the db when the upload is refused", async () => {
@@ -341,6 +382,48 @@ describe("asset attachment", () => {
       expect(createSignedUrl).not.toHaveBeenCalled();
     });
 
+    it("removes files staged earlier under the placeholder, but not the new one", async () => {
+      const earlier = FILE_NAME.replace("1760000000", "1750000000");
+      vi.mocked(parsePdfFormData).mockResolvedValue({
+        path: STAGED_PATH,
+        originalName: "invoice.pdf",
+        size: 1234,
+      });
+      vi.mocked(listFilesInFolder).mockResolvedValue([
+        { name: earlier, size: 1 },
+        { name: FILE_NAME, size: 1234 },
+      ]);
+
+      await stageAssetAttachment({
+        request: {} as Request,
+        placeholderId: PLACEHOLDER,
+        organizationId: ORG,
+      });
+
+      expect(removeFilesAtPaths).toHaveBeenCalledWith({
+        paths: [`${ORG}/${PLACEHOLDER}/${earlier}`],
+        bucketName: "assets",
+      });
+    });
+
+    it("still returns the staged file when cleaning up earlier ones fails", async () => {
+      vi.mocked(parsePdfFormData).mockResolvedValue({
+        path: STAGED_PATH,
+        originalName: "invoice.pdf",
+        size: 1234,
+      });
+      vi.mocked(listFilesInFolder).mockRejectedValue(new Error("timeout"));
+
+      await expect(
+        stageAssetAttachment({
+          request: {} as Request,
+          placeholderId: PLACEHOLDER,
+          organizationId: ORG,
+        })
+      ).resolves.toMatchObject({ attachmentPath: STAGED_PATH });
+      expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
+    });
+
     it("refuses a placeholder id that would leave the workspace folder", async () => {
       await expect(
         stageAssetAttachment({
@@ -355,17 +438,61 @@ describe("asset attachment", () => {
   });
 
   describe("clearStagedAssetAttachment", () => {
-    it("clears the placeholder folder", async () => {
+    it("removes the placeholder folder's files", async () => {
+      vi.mocked(listFilesInFolder).mockResolvedValue([
+        { name: FILE_NAME, size: 1 },
+      ]);
+
       await clearStagedAssetAttachment({
         placeholderId: PLACEHOLDER,
         organizationId: ORG,
       });
 
-      expect(removeFilesByPrefix).toHaveBeenCalledWith({
-        organizationId: ORG,
-        entityId: PLACEHOLDER,
+      expect(removeFilesAtPaths).toHaveBeenCalledWith({
+        paths: [STAGED_PATH],
         bucketName: "assets",
       });
+    });
+
+    it("never removes a file an asset already owns", async () => {
+      const unowned = FILE_NAME.replace("1760000000", "1750000000");
+      vi.mocked(listFilesInFolder).mockResolvedValue([
+        { name: FILE_NAME, size: 1 },
+        { name: unowned, size: 1 },
+      ]);
+      // why: the created asset stores the path it was staged under
+      vi.mocked(db.asset.findMany).mockResolvedValue([
+        { attachmentPath: STAGED_PATH } as Asset,
+      ]);
+
+      await clearStagedAssetAttachment({
+        placeholderId: PLACEHOLDER,
+        organizationId: ORG,
+      });
+
+      expect(db.asset.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            organizationId: ORG,
+            attachmentPath: {
+              in: [STAGED_PATH, `${ORG}/${PLACEHOLDER}/${unowned}`],
+            },
+          },
+        })
+      );
+      expect(removeFilesAtPaths).toHaveBeenCalledWith({
+        paths: [`${ORG}/${PLACEHOLDER}/${unowned}`],
+        bucketName: "assets",
+      });
+    });
+
+    it("sends no removal when the folder is empty", async () => {
+      await clearStagedAssetAttachment({
+        placeholderId: PLACEHOLDER,
+        organizationId: ORG,
+      });
+
+      expect(removeFilesAtPaths).not.toHaveBeenCalled();
     });
 
     it("refuses a placeholder id that is a dot segment", async () => {
@@ -373,7 +500,43 @@ describe("asset attachment", () => {
         clearStagedAssetAttachment({ placeholderId: "..", organizationId: ORG })
       ).rejects.toMatchObject({ status: 400 });
 
-      expect(removeFilesByPrefix).not.toHaveBeenCalled();
+      expect(listFilesInFolder).not.toHaveBeenCalled();
+      expect(removeFilesAtPaths).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("removeAttachmentFilesOfDeletedAssets", () => {
+    it("removes the stored paths of the deleted assets that had one", async () => {
+      await removeAttachmentFilesOfDeletedAssets({
+        attachmentPaths: [STAGED_PATH, null, undefined],
+        organizationId: ORG,
+      });
+
+      expect(removeFilesAtPaths).toHaveBeenCalledWith({
+        paths: [STAGED_PATH],
+        bucketName: "assets",
+      });
+    });
+
+    it("sends no request when no deleted asset had an attachment", async () => {
+      await removeAttachmentFilesOfDeletedAssets({
+        attachmentPaths: [null],
+        organizationId: ORG,
+      });
+
+      expect(removeFilesAtPaths).not.toHaveBeenCalled();
+    });
+
+    it("logs and resolves when Storage refuses", async () => {
+      vi.mocked(removeFilesAtPaths).mockRejectedValue(new Error("Bad gateway"));
+
+      await expect(
+        removeAttachmentFilesOfDeletedAssets({
+          attachmentPaths: [STAGED_PATH],
+          organizationId: ORG,
+        })
+      ).resolves.toBeUndefined();
+      expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
     });
   });
 

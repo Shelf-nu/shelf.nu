@@ -38,7 +38,7 @@ import {
   listFilesInFolder,
   parsePdfFormData,
   removeFileAtPath,
-  removeFilesByPrefix,
+  removeFilesAtPaths,
 } from "~/utils/storage.server";
 
 const label: ErrorLabel = "Assets";
@@ -204,14 +204,31 @@ export async function updateAssetAttachment({
       newFileName: buildAttachmentKey({ organizationId, folderId: assetId }),
     });
 
-    const updated = await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        attachmentPath: path,
-        attachmentOriginalName: sanitizeAttachmentName(originalName),
-        attachmentSize: size,
-      },
-    });
+    let updated;
+    try {
+      updated = await db.asset.update({
+        where: { id: assetId, organizationId },
+        data: {
+          attachmentPath: path,
+          attachmentOriginalName: sanitizeAttachmentName(originalName),
+          attachmentSize: size,
+        },
+      });
+    } catch (cause) {
+      // Nothing points at the new file, so it would only ever be a leftover.
+      await removeFileAtPath({ path, bucketName: ATTACHMENT_BUCKET }).catch(
+        (removeCause: unknown) =>
+          Logger.error(
+            new ShelfError({
+              cause: removeCause,
+              message: "Failed to remove an attachment that was not saved",
+              additionalData: { assetId },
+              label,
+            })
+          )
+      );
+      throw cause;
+    }
 
     if (asset.attachmentPath) {
       // Best effort: the targeted delete leaves the new file in the same
@@ -322,6 +339,7 @@ export async function removeAssetAttachment({
  *   folder segment
  * @param params.organizationId - The caller's workspace
  * @returns The staged path, the cleaned original name and the size in bytes.
+ *   Files staged earlier under the same placeholder are removed.
  *   The create form opens the file through the viewing route, by placeholder
  *   id, so no URL is returned.
  * @throws {ShelfError} When the placeholder id is unsafe or the upload is
@@ -345,6 +363,25 @@ export async function stageAssetAttachment({
       }),
     });
 
+    // The create form holds one file, so anything staged earlier under this
+    // placeholder is now unreachable. Best effort: the upload already worked.
+    try {
+      await removeUnclaimedStagedFiles({
+        placeholderId,
+        organizationId,
+        keepPath: path,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to remove earlier staged attachments",
+          additionalData: { placeholderId, organizationId },
+          label,
+        })
+      );
+    }
+
     return {
       attachmentPath: path,
       attachmentOriginalName: sanitizeAttachmentName(originalName),
@@ -365,7 +402,8 @@ export async function stageAssetAttachment({
 
 /**
  * Removes the PDF staged under a create form's placeholder id. No row records
- * the exact key yet, so the whole placeholder folder is cleared.
+ * the exact key yet, so the placeholder folder is cleared, except files an
+ * asset already owns.
  *
  * @param params.placeholderId - The create form's placeholder id
  * @param params.organizationId - The caller's workspace
@@ -378,23 +416,106 @@ export async function clearStagedAssetAttachment({
   placeholderId: string;
   organizationId: Organization["id"];
 }) {
+  try {
+    await removeUnclaimedStagedFiles({ placeholderId, organizationId });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while removing the asset attachment",
+      additionalData: { placeholderId },
+      label,
+      status: isLikeShelfError(cause) ? cause.status : undefined,
+    });
+  }
+}
+
+/**
+ * Deletes the files in a placeholder folder that no asset owns.
+ *
+ * The placeholder id comes from the client, and asset pages expose stored
+ * attachment paths, so a folder named here can hold a file an asset already
+ * stores (a created asset keeps the path it was staged under). Those files
+ * are never deleted from here.
+ *
+ * @param params.placeholderId - The create form's placeholder id
+ * @param params.organizationId - The caller's workspace
+ * @param params.keepPath - A path to leave alone, such as the file just staged
+ * @throws {ShelfError} 400 for an unsafe placeholder id, or when Storage or
+ *   the database refuses
+ */
+async function removeUnclaimedStagedFiles({
+  placeholderId,
+  organizationId,
+  keepPath,
+}: {
+  placeholderId: string;
+  organizationId: Organization["id"];
+  keepPath?: string;
+}) {
   if (!ATTACHMENT_FOLDER_ID_PATTERN.test(placeholderId)) {
     throw invalidAttachmentError({ organizationId, placeholderId });
   }
 
+  const folder = `${organizationId}/${placeholderId}`;
+  const files = await listFilesInFolder({
+    folder,
+    bucketName: ATTACHMENT_BUCKET,
+  });
+  const candidates = files
+    .map((file) => `${folder}/${file.name}`)
+    .filter((path) => path !== keepPath);
+  if (candidates.length === 0) return;
+
+  const owned = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an archived asset keeps its attachment
+    where: { organizationId, attachmentPath: { in: candidates } },
+    select: { attachmentPath: true },
+  });
+  const ownedPaths = new Set(owned.map((asset) => asset.attachmentPath));
+  const unowned = candidates.filter((path) => !ownedPaths.has(path));
+  if (unowned.length === 0) return;
+
+  await removeFilesAtPaths({ paths: unowned, bucketName: ATTACHMENT_BUCKET });
+}
+
+/**
+ * Removes the attachment files of assets that were just deleted.
+ *
+ * `removeImageFilesOfDeletedAssets` clears each deleted asset's own folder,
+ * but a file staged on the create form stays in its placeholder folder, so it
+ * is removed here by its stored path.
+ *
+ * Call it only after the rows are deleted. Best effort, and never rejects: a
+ * failure is logged, because the delete has already happened.
+ *
+ * @param params.attachmentPaths - The deleted rows' `attachmentPath` values
+ * @param params.organizationId - The workspace they were deleted from
+ */
+export async function removeAttachmentFilesOfDeletedAssets({
+  attachmentPaths,
+  organizationId,
+}: {
+  attachmentPaths: (string | null | undefined)[];
+  organizationId: Organization["id"];
+}): Promise<void> {
+  const paths = attachmentPaths.filter(
+    (path): path is string => typeof path === "string" && path.length > 0
+  );
+  if (paths.length === 0) return;
+
   try {
-    await removeFilesByPrefix({
-      organizationId,
-      entityId: placeholderId,
-      bucketName: ATTACHMENT_BUCKET,
-    });
+    await removeFilesAtPaths({ paths, bucketName: ATTACHMENT_BUCKET });
   } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while removing the asset attachment",
-      additionalData: { placeholderId },
-      label,
-    });
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to remove attachment files of deleted assets",
+        additionalData: { organizationId, fileCount: paths.length },
+        label,
+      })
+    );
   }
 }
 

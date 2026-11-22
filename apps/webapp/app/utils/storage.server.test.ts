@@ -9,7 +9,7 @@ import {
   isSupabaseServerError,
   listFilesInFolder,
   parsePdfFormData,
-  removeFilesByPrefix,
+  removeFilesAtPaths,
   MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFiles,
@@ -501,73 +501,46 @@ describe("listFilesInFolder", () => {
   });
 });
 
-describe("removeFilesByPrefix", () => {
+describe("removeFilesAtPaths", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    storageRemoveMock.mockReset();
+    storageRemoveMock.mockResolvedValue({ data: [], error: null });
   });
 
-  it("removes every entry across multiple list() pages, not just the first", async () => {
-    // Supabase Storage's list() caps a single call at `limit` entries
-    const firstPage = Array.from({ length: 100 }, (_, i) => ({
-      name: `file-${i}.pdf`,
-    }));
-    const secondPage = [{ name: "file-100.pdf" }, { name: "file-101.pdf" }];
-
-    storageListMock
-      .mockResolvedValueOnce({ data: firstPage, error: null })
-      .mockResolvedValueOnce({ data: secondPage, error: null });
-    storageRemoveMock.mockResolvedValue({ data: [], error: null });
-
-    await removeFilesByPrefix({
-      organizationId: "org-1",
-      entityId: "asset-1",
-      bucketName: "attachments",
-    });
-
-    expect(storageListMock).toHaveBeenCalledTimes(2);
-    expect(storageListMock).toHaveBeenNthCalledWith(1, "org-1/asset-1", {
-      limit: 100,
-      offset: 0,
-    });
-    expect(storageListMock).toHaveBeenNthCalledWith(2, "org-1/asset-1", {
-      limit: 100,
-      offset: 100,
-    });
-
-    const expectedPaths = [...firstPage, ...secondPage].map(
-      (entry) => `org-1/asset-1/${entry.name}`
+  it("removes exactly the given keys, split into requests Storage accepts", async () => {
+    const paths = Array.from(
+      { length: MAX_PUBLIC_FILES_PER_REMOVE + 2 },
+      (_, i) => `org-1/asset-1/file-${i}.pdf`
     );
-    expect(storageRemoveMock).toHaveBeenCalledOnce();
-    expect(storageRemoveMock).toHaveBeenCalledWith(expectedPaths);
+
+    await removeFilesAtPaths({ paths, bucketName: "assets" });
+
+    expect(storageRemoveMock).toHaveBeenCalledTimes(2);
+    expect(storageRemoveMock).toHaveBeenNthCalledWith(
+      1,
+      paths.slice(0, MAX_PUBLIC_FILES_PER_REMOVE)
+    );
+    expect(storageRemoveMock).toHaveBeenNthCalledWith(
+      2,
+      paths.slice(MAX_PUBLIC_FILES_PER_REMOVE)
+    );
   });
 
-  it("stops after a single page when it comes back short of the page size", async () => {
-    storageListMock.mockResolvedValueOnce({
-      data: [{ name: "only-file.pdf" }],
-      error: null,
-    });
-    storageRemoveMock.mockResolvedValue({ data: [], error: null });
-
-    await removeFilesByPrefix({
-      organizationId: "org-1",
-      entityId: "asset-1",
-    });
-
-    expect(storageListMock).toHaveBeenCalledOnce();
-    expect(storageRemoveMock).toHaveBeenCalledWith([
-      "org-1/asset-1/only-file.pdf",
-    ]);
-  });
-
-  it("does nothing when the prefix has no files at all", async () => {
-    storageListMock.mockResolvedValueOnce({ data: [], error: null });
-
-    await removeFilesByPrefix({
-      organizationId: "org-1",
-      entityId: "asset-1",
-    });
+  it("sends no request for an empty list", async () => {
+    await removeFilesAtPaths({ paths: [], bucketName: "assets" });
 
     expect(storageRemoveMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when Storage refuses", async () => {
+    storageRemoveMock.mockResolvedValueOnce({
+      data: null,
+      error: new Error("Bad gateway"),
+    });
+
+    await expect(
+      removeFilesAtPaths({ paths: ["org-1/a.pdf"], bucketName: "assets" })
+    ).rejects.toThrow(ShelfError);
   });
 });
 

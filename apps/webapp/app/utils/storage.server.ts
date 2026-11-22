@@ -1418,74 +1418,47 @@ export async function listFilesInFolder({
 }
 
 /**
- * Deletes every object under an org+entity storage prefix in `bucketName`.
- * For an entity that doesn't have a DB row yet (e.g. a PDF attachment
- * staged while a new asset is still being filled out) there is no stored
- * URL to read the exact path from, so this removes by folder instead of
- * by a single known key.
- */
-export async function removeFilesByPrefix({
-  organizationId,
-  entityId,
-  bucketName = PUBLIC_BUCKET,
-}: {
-  organizationId: string;
-  entityId: string;
-  bucketName?: string;
-}) {
-  try {
-    const prefix = `${organizationId}/${entityId}`;
-
-    // list() caps a single call at PAGE_SIZE entries (Supabase's own default),
-    // paginating via limit/offset.
-    const PAGE_SIZE = 100;
-    const entries: { name: string }[] = [];
-    let offset = 0;
-    let hasMore = true;
-    while (hasMore) {
-      const { data: page, error: listError } = await getSupabaseAdmin()
-        .storage.from(bucketName)
-        .list(prefix, { limit: PAGE_SIZE, offset });
-
-      if (listError) {
-        throw listError;
-      }
-
-      if (!page || page.length === 0) {
-        break;
-      }
-
-      entries.push(...page);
-      offset += page.length;
-      hasMore = page.length === PAGE_SIZE;
-    }
-
-    if (entries.length === 0) {
-      return;
-    }
-
-    const { error: removeError } = await getSupabaseAdmin()
-      .storage.from(bucketName)
-      .remove(entries.map((entry) => `${prefix}/${entry.name}`));
-
-    if (removeError) {
-      throw removeError;
-    }
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Failed to remove staged files",
-      additionalData: { organizationId, entityId, bucketName },
-      label,
-    });
-  }
-}
-
-/**
  * Most objects Supabase Storage deletes in one `remove()` request. The API
  * rejects a larger list, so callers with more files must split them.
  */
 export const MAX_PUBLIC_FILES_PER_REMOVE = 1000;
+
+/**
+ * Deletes objects from a bucket by their exact keys, in requests of at most
+ * {@link MAX_PUBLIC_FILES_PER_REMOVE} keys. Removing a key that is already
+ * gone is not an error.
+ *
+ * @param params.paths - Object keys, without the bucket
+ * @param params.bucketName - The bucket to delete from
+ * @throws {ShelfError} When Storage refuses a request. Earlier requests may
+ *   already have removed their keys.
+ */
+export async function removeFilesAtPaths({
+  paths,
+  bucketName,
+}: {
+  paths: string[];
+  bucketName: string;
+}) {
+  try {
+    for (let i = 0; i < paths.length; i += MAX_PUBLIC_FILES_PER_REMOVE) {
+      const { error } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .remove(paths.slice(i, i + MAX_PUBLIC_FILES_PER_REMOVE));
+
+      if (error) {
+        throw error;
+      }
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove files. Please try again.",
+      additionalData: { pathCount: paths.length, bucketName },
+      label,
+    });
+  }
+}
 
 /**
  * Removes many files from the public `files` bucket in a single storage
