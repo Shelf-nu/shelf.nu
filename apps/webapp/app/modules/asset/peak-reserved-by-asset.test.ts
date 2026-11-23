@@ -57,6 +57,7 @@ function reservation(
     bookingId,
     quantity: qty,
     assetKitId,
+    checkedOutQuantity: 0,
     booking: { from: new Date(from), to: new Date(to), status },
   };
 }
@@ -323,6 +324,35 @@ describe("getPeakReservedUnitsByAsset, a slice sent out again after a full retur
     });
 
     expect(peaks.get(ASSET)).toBe(2);
+  });
+
+  it("never counts more than the slice booked", async () => {
+    // Three full trips: 18 sent out, 6 back. The slice holds 6, not 12.
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx: txWith(
+        [{ ...redispatched, checkedOutQuantity: 18 }],
+        [firstTripReturn]
+      ),
+    });
+
+    expect(peaks.get(ASSET)).toBe(6);
+  });
+
+  it("takes the larger reading, not their sum, after a partial return and a top-up", async () => {
+    // 6 booked, 6 out, 3 back, 3 out again: 9 sent out in total, 3 back.
+    // Not yet given back: 6 - 3 = 3. Out right now: 9 - 3 = 6.
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx: txWith(
+        [{ ...redispatched, checkedOutQuantity: 9 }],
+        [{ ...firstTripReturn, _sum: { quantity: 3 } }]
+      ),
+    });
+
+    expect(peaks.get(ASSET)).toBe(6);
   });
 
   it("frees a slice that came back in full and stayed back", async () => {

@@ -150,74 +150,6 @@ type AssertAssetQuantityNotBelowReservationsArgs = {
 };
 
 /**
- * Minimal Prisma surface {@link assertAssetQuantityNotBelowReservations}
- * needs — a `Pick` of {@link AvailabilityBatchClient} (only the delegates
- * this guard actually queries: `custody`, `assetKit`, `bookingAsset`,
- * `consumptionLog`) rather than the full batch-client surface. Mirrors how
- * `~/modules/booking/stock-conflicts.server`'s `StockConflictDbClient` reuses
- * the same batch-client shape without pulling in methods it never calls
- * (`asset.findMany`, `partialBookingCheckout.findMany` — this guard doesn't
- * need the asset's own `quantity` row or partial-checkout sessions, only
- * what's currently committed against it).
- */
-export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
-  AvailabilityBatchClient,
-  "custody" | "assetKit" | "bookingAsset" | "consumptionLog"
->;
-
-/**
- * STOCK-LOWERING guard: blocks reducing a QUANTITY_TRACKED asset's total
- * `quantity` below what is ALREADY committed elsewhere — operator custody,
- * kit allocations, or an overlapping active booking. Without this guard, an
- * admin editing the asset overview (or a CSV update-existing import, which
- * routes through the same `updateAsset` call) could shrink the pool
- * underneath commitments that already exist, silently leaving custody/kit
- * rows or a booking's reserved slice referencing more units than the asset
- * now has.
- *
- * This is the MIRROR-IMAGE guard to {@link assertAssetQuantityAvailable} /
- * {@link assertAssetQuantitiesAvailable}: those police a BOOKING's requested
- * quantity against the asset's pool (asset total held fixed); this one
- * polices the ASSET's total itself against everything already drawing from
- * that pool (bookings/kits/custody held fixed).
- *
- * The threshold is a COMMITTED PEAK, not a sum:
- * ```
- * committed = inCustody + inKits + peakConcurrent(reservedIntervals)
- * ```
- * `inCustody` is operator custody right now (`kitCustodyId IS NULL`);
- * `inKits` is Σ `AssetKit.quantity`; the booking term is the PEAK concurrent
- * demand (via {@link peakConcurrent}) across every ACTIVE (RESERVED/ONGOING/
- * OVERDUE) STANDALONE (`assetKitId: null`) reservation for this asset — two
- * bookings that never overlap must not stack (the same bb1/bb2 model
- * {@link getAssetAvailability} uses; a naive sum would reject a perfectly
- * safe reduction). Deliberately UNWINDOWED — this guard protects the asset's
- * WHOLE FUTURE TIMELINE, not one booking's dates, so every active
- * reservation is fetched via {@link buildActiveBookingWhere} with
- * `window: null` (OVERDUE included unconditionally, sentinel-extended via
- * {@link resolveIntervalTo} so an unreturned unit keeps counting against
- * every future instant). Each reservation's `qty` is the booked amount minus
- * already-logged {@link RESERVATION_REDUCING_CATEGORIES} dispositions, and
- * never less than the units the row has out right now (see
- * {@link reservedUnitsStillHeld}): a slice returned in full and checked out
- * again still commits the units of its second trip.
- *
- * A reduction to EXACTLY `committed` is allowed — only `newTotal < committed`
- * rejects, since the pool is fully (not over-) subscribed at that total.
- *
- * Runs a FIXED small number of queries (custody + kits + reserved rows in
- * parallel, plus one more for logged dispositions ONLY when there are
- * reserved rows to net against) regardless of how many bookings/kits/custody
- * rows exist for the asset — no per-booking fan-out.
- *
- * Call inside the mutation's own transaction, with the asset already behind
- * `lockAssetForQuantityUpdate`, so the read-then-decide is race-safe (same
- * contract as {@link assertAssetQuantityAvailable}).
- *
- * @param args - See {@link AssertAssetQuantityNotBelowReservationsArgs}.
- * @throws {ShelfError} 400 (`shouldBeCaptured: false`) when `newTotal` would drop below `committed`.
- */
-/**
  * Units one standalone reservation row still holds against the asset's pool.
  *
  * Two readings, and the larger one wins:
@@ -234,12 +166,13 @@ export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
  *
  * @param row.quantity - `BookingAsset.quantity`, the booked units
  * @param row.checkedOutQuantity - `BookingAsset.checkedOutQuantity`, cumulative
- *   units sent out; absent or null reads as none
+ *   units sent out; null reads as none. Required, so a read that forgets to
+ *   select the column fails to compile
  * @param logged - RESERVATION_REDUCING_CATEGORIES units attributed to the row
  * @returns Non-negative units, never more than `row.quantity`
  */
 function reservedUnitsStillHeld(
-  row: { quantity: number; checkedOutQuantity?: number | null },
+  row: { quantity: number; checkedOutQuantity: number | null },
   logged: number
 ): number {
   const notYetGivenBack = Math.max(0, row.quantity - logged);
@@ -465,6 +398,62 @@ export async function getPeakReservedUnitsByAsset({
   return peaks;
 }
 
+/**
+ * Minimal Prisma surface {@link assertAssetQuantityNotBelowReservations}
+ * needs: the `custody` and `assetKit` delegates of
+ * {@link AvailabilityBatchClient} for the two holders it sums itself, plus the
+ * reads {@link getPeakReservedUnitsByAsset} issues for the booking term.
+ */
+export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
+  AvailabilityBatchClient,
+  "custody" | "assetKit"
+> &
+  PeakReservedTxClient;
+
+/**
+ * STOCK-LOWERING guard: blocks reducing a QUANTITY_TRACKED asset's total
+ * `quantity` below what is ALREADY committed elsewhere — operator custody,
+ * kit allocations, or an overlapping active booking. Without this guard, an
+ * admin editing the asset overview (or a CSV update-existing import, which
+ * routes through the same `updateAsset` call) could shrink the pool
+ * underneath commitments that already exist, silently leaving custody/kit
+ * rows or a booking's reserved slice referencing more units than the asset
+ * now has.
+ *
+ * This is the MIRROR-IMAGE guard to {@link assertAssetQuantityAvailable} /
+ * {@link assertAssetQuantitiesAvailable}: those police a BOOKING's requested
+ * quantity against the asset's pool (asset total held fixed); this one
+ * polices the ASSET's total itself against everything already drawing from
+ * that pool (bookings/kits/custody held fixed).
+ *
+ * The threshold is a COMMITTED PEAK, not a sum:
+ * ```
+ * committed = inCustody + inKits + peakConcurrent(reservedIntervals)
+ * ```
+ * `inCustody` is operator custody right now (`kitCustodyId IS NULL`);
+ * `inKits` is Σ `AssetKit.quantity`; the booking term is the PEAK concurrent
+ * demand from {@link getPeakReservedUnitsByAsset}: every ACTIVE (RESERVED /
+ * ONGOING / OVERDUE) STANDALONE (`assetKitId: null`) reservation for this
+ * asset, across its whole future timeline. Two bookings that never overlap do
+ * not stack (a naive sum would reject a perfectly safe reduction), returns are
+ * netted per slice, and a slice never counts for less than the units it has
+ * out right now.
+ *
+ * A reduction to EXACTLY `committed` is allowed. Only `newTotal < committed`
+ * rejects, since the pool is fully (not over-) subscribed at that total.
+ *
+ * Runs a FIXED small number of queries (custody, kits and reserved rows in
+ * parallel, plus one more for logged dispositions ONLY when there are
+ * reserved rows to net against) regardless of how many bookings, kits or
+ * custody rows exist for the asset.
+ *
+ * Call inside the mutation's own transaction, with the asset already behind
+ * `lockAssetForQuantityUpdate`, so the read-then-decide is race-safe (same
+ * contract as {@link assertAssetQuantityAvailable}).
+ *
+ * @param args - See {@link AssertAssetQuantityNotBelowReservationsArgs}.
+ * @throws {ShelfError} 400 (`shouldBeCaptured: false`) when `newTotal` would drop below `committed`.
+ */
 export async function assertAssetQuantityNotBelowReservations({
   assetId,
   organizationId,
@@ -473,13 +462,13 @@ export async function assertAssetQuantityNotBelowReservations({
   assetTitle,
   unitOfMeasure,
 }: AssertAssetQuantityNotBelowReservationsArgs): Promise<void> {
-  const [custodyGroups, inKitsGroups, reservedRows] = await Promise.all([
+  const [custodyGroups, inKitsGroups, peakReservedByAsset] = await Promise.all([
     tx.custody.groupBy({
       by: ["assetId"],
-      // Custody has no `organizationId` column of its own — scope through
-      // the asset relation, mirroring `getAssetAvailabilityBatch`'s
+      // Custody has no `organizationId` column of its own, so it is scoped
+      // through the asset relation, mirroring `getAssetAvailabilityBatch`'s
       // identical org-scope guard (org-scope-user-supplied-ids rule).
-      // `kitCustodyId: null` = OPERATOR custody only — kit-inherited custody is
+      // `kitCustodyId: null` = OPERATOR custody only. Kit-inherited custody is
       // already counted via `AssetKit.quantity` (`inKits` below), so including
       // it here would double-count against the committed threshold.
       where: { assetId, asset: { organizationId }, kitCustodyId: null },
@@ -490,83 +479,16 @@ export async function assertAssetQuantityNotBelowReservations({
       where: { assetId, organizationId },
       _sum: { quantity: true },
     }),
-    tx.bookingAsset.findMany({
-      where: {
-        assetId,
-        // Kit-driven slices are already counted via `inKits` — summing them
-        // here too would double-count the same units.
-        assetKitId: null,
-        // `window: null` — the asset's FULL active-reservation timeline, not
-        // just one booking's dates. We're protecting every future instant
-        // this asset could be drawn from, not a single window.
-        booking: buildActiveBookingWhere(organizationId, null),
-      },
-      select: {
-        assetId: true,
-        bookingId: true,
-        quantity: true,
-        checkedOutQuantity: true,
-        booking: { select: { from: true, to: true, status: true } },
-      },
-    }),
+    // The booking term is the same peak the kit picker reads, so the guard
+    // and the picker can never disagree about what bookings hold. It nets
+    // returns per slice: a return logged against a kit slice of the same
+    // booking must not shrink the standalone reservation.
+    getPeakReservedUnitsByAsset({ assetIds: [assetId], organizationId, tx }),
   ]);
 
   const inCustody = custodyGroups[0]?._sum.quantity ?? 0;
   const inKits = inKitsGroups[0]?._sum.quantity ?? 0;
-
-  let peakReserved = 0;
-  if (reservedRows.length > 0) {
-    const bookingIds = [...new Set(reservedRows.map((r) => r.bookingId))];
-
-    // Mirrors every other availability read's logged-dispositions query —
-    // RETURN/CONSUME/LOSS/DAMAGE reduce a booking's remaining reserved
-    // footprint before it competes for the pool.
-    const loggedGroups = await tx.consumptionLog.groupBy({
-      by: ["bookingId", "assetId"],
-      where: {
-        assetId,
-        bookingId: { in: bookingIds },
-        category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-      },
-      _sum: { quantity: true },
-    });
-
-    const loggedByBookingId = new Map<string, number>();
-    for (const group of loggedGroups) {
-      if (group.bookingId) {
-        loggedByBookingId.set(group.bookingId, group._sum.quantity ?? 0);
-      }
-    }
-
-    const intervals: AvailabilityInterval[] = [];
-    for (const row of reservedRows) {
-      // Defensive only: `Booking` is a required (non-nullable) relation on
-      // `BookingAsset`, so a row with no `booking` should never occur.
-      if (!row.booking) continue;
-
-      const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-      // Never negative, and never below the units the row has out right now.
-      const remaining = reservedUnitsStillHeld(row, logged);
-      if (remaining === 0) continue;
-
-      // `windowTo` fallback is unreachable here (`row.booking.to` is always
-      // defined whenever `row.booking` is) — passed through only to satisfy
-      // `resolveIntervalTo`'s signature, mirroring
-      // `flagBookingStockConflicts`'s identical unwindowed sweep in
-      // `~/modules/booking/stock-conflicts.server`.
-      const to = resolveIntervalTo(
-        row.booking.status,
-        row.booking.to,
-        row.booking.to
-      );
-      intervals.push({ from: row.booking.from, to, qty: remaining });
-    }
-
-    // PEAK, not sum — two bookings that never overlap must not stack and
-    // inflate the threshold above what the pool is ever actually holding at
-    // once (the bb1/bb2 model).
-    peakReserved = peakConcurrent(intervals);
-  }
+  const peakReserved = peakReservedByAsset.get(assetId) ?? 0;
 
   const committed = inCustody + inKits + peakReserved;
 

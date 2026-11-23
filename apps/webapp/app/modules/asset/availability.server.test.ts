@@ -1871,9 +1871,12 @@ describe("assertAssetQuantityNotBelowReservations", () => {
     status = "RESERVED"
   ) {
     return {
+      id: `ba-${bookingId}`,
       assetId: ASSET_ID,
       bookingId,
       quantity,
+      assetKitId: null,
+      checkedOutQuantity: 0,
       booking: { from: new Date(from), to: new Date(to), status },
     };
   }
@@ -1920,6 +1923,75 @@ describe("assertAssetQuantityNotBelowReservations", () => {
           assetTitle: "Widget",
         })
       ).resolves.toBeUndefined();
+    });
+
+    it("still counts them when the booking also returned a kit slice of the asset", async () => {
+      // Booking b1 holds 6 loose units and a 4-unit kit slice. The kit slice
+      // returned 4, tagged to its own row. The loose slice returned 6 and went
+      // out again, so 6 loose units are out. The kit slice's return must not
+      // be netted against them.
+      const tx = createMockTx();
+      tx.bookingAsset.findMany.mockResolvedValue([
+        {
+          ...reservedRow("b1", 6, "2026-01-01", "2026-01-31", "ONGOING"),
+          checkedOutQuantity: 12,
+        },
+        {
+          ...reservedRow("b1", 4, "2026-01-01", "2026-01-31", "ONGOING"),
+          id: "ba-b1-kit",
+          assetKitId: "asset-kit-1",
+          checkedOutQuantity: 4,
+        },
+      ]);
+      tx.consumptionLog.groupBy.mockResolvedValue([
+        {
+          bookingAssetId: "ba-b1",
+          bookingId: "b1",
+          assetId: ASSET_ID,
+          _sum: { quantity: 6 },
+        },
+        {
+          bookingAssetId: "ba-b1-kit",
+          bookingId: "b1",
+          assetId: ASSET_ID,
+          _sum: { quantity: 4 },
+        },
+      ]);
+
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx,
+          newTotal: 5,
+          assetTitle: "Widget",
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("never commits more than the slice booked", async () => {
+      // Three full trips: 18 sent out in total, 6 back. 12 "out" by the
+      // counter, but the slice only ever holds 6 units.
+      const tx = txWithRedispatch(12);
+
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx,
+          newTotal: 6,
+          assetTitle: "Widget",
+        })
+      ).resolves.toBeUndefined();
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx,
+          newTotal: 5,
+          assetTitle: "Widget",
+        })
+      ).rejects.toMatchObject({ status: 400 });
     });
 
     it("allows any total once the slice is back and stays back", async () => {
