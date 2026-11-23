@@ -92,6 +92,15 @@ export const MAX_MISSING_BUNDLE_FILES = 10;
  */
 export const HYDRATION_CLOCK_GAP_MS = 5_000;
 
+/**
+ * User agents of search crawlers and link previewers. They report
+ * `navigator.webdriver` as false but load pages the way a bot does, so a
+ * failure they hit says nothing about users. Matched case-insensitively.
+ * Keep it free of backslashes: it is interpolated into the inline script.
+ */
+export const CRAWLER_USER_AGENT_PATTERN =
+  "googlebot|bingbot|yandexbot|duckduckbot|baiduspider|applebot|petalbot|slurp|facebookexternalhit|crawler|spider|lighthouse";
+
 /** Global the inline script exposes so the bundle can stand it down. */
 const WATCHDOG_GLOBAL = "__shelfHydrationWatchdog";
 
@@ -151,7 +160,10 @@ export type HydrationFailureReport = {
   wallClockMs?: number | null;
   /** `navigator.connection.effectiveType`, where the browser exposes it. */
   connection?: string | null;
-  /** The browser is driven by automation (`navigator.webdriver`). */
+  /**
+   * The page was loaded by automation (`navigator.webdriver`) or by a crawler
+   * whose user agent matches {@link CRAWLER_USER_AGENT_PATTERN}.
+   */
   automated?: boolean;
 };
 
@@ -313,7 +325,9 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       // Monotonic time stops while the device sleeps; wall-clock time does not.
       wallClockMs: perf && perf.timeOrigin ? Math.round(Date.now() - perf.timeOrigin) : null,
       connection: connection || null,
-      automated: navigator.webdriver === true
+      automated:
+        navigator.webdriver === true ||
+        new RegExp("${CRAWLER_USER_AGENT_PATTERN}", "i").test(navigator.userAgent || "")
     };
   }
 
