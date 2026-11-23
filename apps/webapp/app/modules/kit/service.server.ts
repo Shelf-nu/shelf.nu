@@ -4777,8 +4777,7 @@ export async function bulkReleaseKitCustody({
       const assetsToFlipAvailable = allAssetIds.filter(
         (id) => !stillCustodiedIds.has(id)
       );
-      // The helper org-scopes the write itself, so the previous
-      // `require-org-scope-on-id-queries` suppression is no longer needed.
+      // The helper org-scopes the write itself.
       await releaseAssetsToAvailableUnlessCheckedOut(
         tx,
         assetsToFlipAvailable,
@@ -8162,8 +8161,7 @@ export async function bulkRemoveAssetsFromKits({
           organizationId,
         },
       });
-      // The helper org-scopes the write itself, so the previous
-      // `require-org-scope-on-id-queries` suppression is no longer needed.
+      // The helper org-scopes the write itself.
       await releaseAssetsToAvailableUnlessCheckedOut(
         tx,
         assetsToFlipAvailable,

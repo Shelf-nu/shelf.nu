@@ -1543,10 +1543,9 @@ describe("bulkRemoveAssetsFromKits", () => {
   it("should emit ASSET_KIT_CHANGED for each asset that left a kit", async () => {
     expect.assertions(2);
 
-    // Translated from main's PR #2535 to our pivot schema + Custody[] shape:
-    //   - `kit` is now sourced via `assetKits: { select: { kit: {...} } }`
-    //     and flattened in-memory.
-    //   - `custody` is an array (Phase 2 made Custody 1:N on Asset).
+    // Fixture shape:
+    //   - each `assetKits` row is one kit membership of the asset.
+    //   - `custody` is an array: an asset can hold several Custody rows.
     const assets = [
       {
         id: "asset-1",
@@ -1788,7 +1787,14 @@ describe("bulkRemoveAssetsFromKits", () => {
       expect(notes.filter((note) => note.includes("/kits/kit-b"))).toHaveLength(
         1
       );
-      expect(notes.filter((note) => note.includes("released"))).toHaveLength(2);
+
+      // Each release note names the custodian whose custody ended, and the
+      // units that custody row held (Custody.quantity).
+      const releaseNotes = notes.filter((note) => note.includes("released"));
+      expect(releaseNotes).toEqual([
+        expect.stringMatching(/\/users\/user-a".*custody of 4 pcs\.$/),
+        expect.stringMatching(/\/users\/user-b".*custody of 3 pcs\.$/),
+      ]);
 
       // The pool left two kits but is one asset.
       expect(result).toEqual({ removedFromKitCount: 1 });
