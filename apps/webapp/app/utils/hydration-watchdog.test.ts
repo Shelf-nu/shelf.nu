@@ -170,6 +170,7 @@ const isShowingScreen = () =>
 /** What the tab's visibility and automation flag read as, per test. */
 let visibility: DocumentVisibilityState = "visible";
 let automated = false;
+let userAgent = "";
 
 /** Shows or hides the tab, firing the event the browser would. */
 function setTabVisibility(state: DocumentVisibilityState) {
@@ -187,6 +188,12 @@ Object.defineProperty(navigator, "webdriver", {
   configurable: true,
   get: () => automated,
 });
+// why: lets a test load the page as a crawler that does not set webdriver.
+const browserUserAgent = navigator.userAgent;
+Object.defineProperty(navigator, "userAgent", {
+  configurable: true,
+  get: () => userAgent,
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -199,6 +206,7 @@ beforeEach(() => {
   vi.mocked(Sentry.logger.info).mockClear();
   visibility = "visible";
   automated = false;
+  userAgent = browserUserAgent;
 });
 
 afterEach(() => {
@@ -767,6 +775,18 @@ describe("markHydrated", () => {
     // Crawlers and link previewers fast-forward timers; their timeouts say
     // nothing about users.
     automated = true;
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing for a search crawler that does not report automation", () => {
+    userAgent =
+      "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
     runWatchdog();
     vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
 
