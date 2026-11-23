@@ -110,7 +110,7 @@ describe("admin user route: linkSubscriptionToWorkspace", () => {
         subscriptionId: "sub_1",
         organizationId: "",
       })
-    )) as Response;
+    )) as unknown as Response;
 
     expect(response.status).toBe(400);
     expect(linkSubscriptionToWorkspaceAsAdmin).not.toHaveBeenCalled();
@@ -132,7 +132,7 @@ describe("admin user route: linkSubscriptionToWorkspace", () => {
         subscriptionId: "sub_1",
         organizationId: "org-other",
       })
-    )) as Response;
+    )) as unknown as Response;
 
     expect(response.status).toBe(400);
     expect(JSON.stringify(await response.json())).toContain(
@@ -156,7 +156,7 @@ describe("admin user route: linkSubscriptionToWorkspace", () => {
         subscriptionId: "sub_1",
         organizationId: "org-2",
       })
-    )) as Response;
+    )) as unknown as Response;
 
     expect(response.status).toBe(403);
     expect(linkSubscriptionToWorkspaceAsAdmin).not.toHaveBeenCalled();
