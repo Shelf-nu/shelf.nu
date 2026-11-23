@@ -36,7 +36,7 @@
  * @see {@link file://../../../../packages/quantity-control/src/availability.ts} — the pure primitives.
  */
 
-import type { Prisma } from "@prisma/client";
+import type { BookingSourceAllocation, Prisma } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import {
   ACTIVE_BOOKING_STATUSES,
@@ -162,68 +162,109 @@ type AssertAssetQuantityNotBelowReservationsArgs = {
  */
 export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
   AvailabilityBatchClient,
-  "custody" | "assetKit" | "bookingAsset" | "consumptionLog"
->;
+  "custody" | "assetKit" | "consumptionLog"
+> &
+  ConvertedSliceRowsClient & {
+    bookingAsset: {
+      findMany: (args: {
+        where: Prisma.BookingAssetWhereInput;
+        select: {
+          id: true;
+          assetId: true;
+          bookingId: true;
+          quantity: true;
+          sourceAllocation: true;
+          booking: { select: { from: true; to: true; status: true } };
+        };
+      }) => Promise<
+        Array<{
+          id: string;
+          assetId: string;
+          bookingId: string;
+          quantity: number;
+          sourceAllocation?: BookingSourceAllocation;
+          booking: { from: Date; to: Date; status: BookingStatus } | null;
+        }>
+      >;
+    };
+  };
 
 /**
- * STOCK-LOWERING guard: blocks reducing a QUANTITY_TRACKED asset's total
- * `quantity` below what is ALREADY committed elsewhere — operator custody,
- * kit allocations, or an overlapping active booking. Without this guard, an
- * admin editing the asset overview (or a CSV update-existing import, which
- * routes through the same `updateAsset` call) could shrink the pool
- * underneath commitments that already exist, silently leaving custody/kit
- * rows or a booking's reserved slice referencing more units than the asset
- * now has.
- *
- * This is the MIRROR-IMAGE guard to {@link assertAssetQuantityAvailable} /
- * {@link assertAssetQuantitiesAvailable}: those police a BOOKING's requested
- * quantity against the asset's pool (asset total held fixed); this one
- * polices the ASSET's total itself against everything already drawing from
- * that pool (bookings/kits/custody held fixed).
- *
- * The threshold is a COMMITTED PEAK, not a sum:
- * ```
- * committed = inCustody + inKits + peakConcurrent(reservedIntervals)
- * ```
- * `inCustody` is operator custody right now (`kitCustodyId IS NULL`);
- * `inKits` is Σ `AssetKit.quantity`; the booking term is the PEAK concurrent
- * demand (via {@link peakConcurrent}) across every ACTIVE (RESERVED/ONGOING/
- * OVERDUE) STANDALONE (`assetKitId: null`) reservation for this asset — two
- * bookings that never overlap must not stack (the same bb1/bb2 model
- * {@link getAssetAvailability} uses; a naive sum would reject a perfectly
- * safe reduction). Deliberately UNWINDOWED — this guard protects the asset's
- * WHOLE FUTURE TIMELINE, not one booking's dates, so every active
- * reservation is fetched via {@link buildActiveBookingWhere} with
- * `window: null` (OVERDUE included unconditionally, sentinel-extended via
- * {@link resolveIntervalTo} so an unreturned unit keeps counting against
- * every future instant). Each reservation's `qty` is the booked amount minus
- * already-logged {@link RESERVATION_REDUCING_CATEGORIES} dispositions,
- * exactly as every other availability read in this module computes it.
- *
- * A reduction to EXACTLY `committed` is allowed — only `newTotal < committed`
- * rejects, since the pool is fully (not over-) subscribed at that total.
- *
- * Runs a FIXED small number of queries (custody + kits + reserved rows in
- * parallel, plus one more for logged dispositions ONLY when there are
- * reserved rows to net against) regardless of how many bookings/kits/custody
- * rows exist for the asset — no per-booking fan-out.
- *
- * Call inside the mutation's own transaction, with the asset already behind
- * `lockAssetForQuantityUpdate`, so the read-then-decide is race-safe (same
- * contract as {@link assertAssetQuantityAvailable}).
- *
- * @param args - See {@link AssertAssetQuantityNotBelowReservationsArgs}.
- * @throws {ShelfError} 400 (`shouldBeCaptured: false`) when `newTotal` would drop below `committed`.
+ * The source-row read both pool readers issue for the standalone slices of
+ * converted groups. Structural so the root client and an interactive
+ * transaction both satisfy it.
  */
+export type ConvertedSliceRowsClient = {
+  bookingAssetSource: {
+    findMany: (args: {
+      where: { organizationId: string; bookingAssetId: { in: string[] } };
+      select: { bookingAssetId: true; quantity: true; releasedQuantity: true };
+    }) => Promise<
+      Array<{
+        bookingAssetId: string;
+        quantity: number;
+        releasedQuantity: number;
+      }>
+    >;
+  };
+};
+
+/** Modes of a converted standalone slice: its source rows carry its demand. */
+const CONVERTED_STANDALONE_MODES: ReadonlySet<BookingSourceAllocation> =
+  new Set<BookingSourceAllocation>(["AUTO", "MANUAL"]);
+
 /**
- * The two reads {@link getPeakReservedUnitsByAsset} issues.
+ * True when a slice belongs to a converted group. A row read without the
+ * column (an older fixture or a narrower select) counts as LEGACY.
+ *
+ * A group is all LEGACY or has no LEGACY slice (conversion converts every
+ * slice at once and a slice added later is KIT or AUTO), so one slice's mode
+ * answers for its group. A group converted only through orphaned shares has
+ * no slices left, so it contributes nothing to any reader here.
+ */
+function isConvertedSlice(mode: BookingSourceAllocation | undefined): boolean {
+  return mode !== undefined && mode !== "LEGACY";
+}
+
+/**
+ * Remaining reservation (`quantity - releasedQuantity`, UNASSIGNED rows
+ * included) summed per slice, in one query. Issues no query for no slices.
+ *
+ * @param tx - Client or transaction
+ * @param organizationId - Scopes the read through the rows' own column
+ * @param sliceIds - AUTO / MANUAL slices of converted groups
+ * @returns Units still held per slice id; absent means zero
+ */
+async function loadRemainingReservationBySlice(
+  tx: ConvertedSliceRowsClient,
+  organizationId: string,
+  sliceIds: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (sliceIds.length === 0) return result;
+  const rows = await tx.bookingAssetSource.findMany({
+    where: { organizationId, bookingAssetId: { in: sliceIds } },
+    select: { bookingAssetId: true, quantity: true, releasedQuantity: true },
+  });
+  for (const row of rows) {
+    result.set(
+      row.bookingAssetId,
+      (result.get(row.bookingAssetId) ?? 0) +
+        Math.max(0, row.quantity - row.releasedQuantity)
+    );
+  }
+  return result;
+}
+
+/**
+ * The reads {@link getPeakReservedUnitsByAsset} issues.
  *
  * Structural, and declared here rather than widened out of the shared
  * availability client: the `groupBy` needs `bookingAssetId` in its `by`, which
  * the shared client does not expose, and broadening that type reaches every
  * other availability read.
  */
-export type PeakReservedTxClient = {
+export type PeakReservedTxClient = ConvertedSliceRowsClient & {
   bookingAsset: {
     findMany: (args: {
       where: Prisma.BookingAssetWhereInput;
@@ -233,6 +274,7 @@ export type PeakReservedTxClient = {
         bookingId: true;
         quantity: true;
         assetKitId: true;
+        sourceAllocation: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
@@ -242,6 +284,7 @@ export type PeakReservedTxClient = {
         bookingId: string;
         quantity: number;
         assetKitId: string | null;
+        sourceAllocation?: BookingSourceAllocation;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
@@ -280,13 +323,25 @@ export type PeakReservedTxClient = {
  * through `AssetKit.quantity` by every caller of this, and would otherwise be
  * subtracted twice.
  *
- * Already-logged {@link RESERVATION_REDUCING_CATEGORIES} dispositions reduce a
- * booking's remaining footprint first. They are attributed per
- * `BookingAsset` ROW: one (booking, asset) pair can hold a standalone slice
- * and kit-driven ones at once, so a return logged against a kit slice must not
- * shrink the standalone reservation this guard is protecting. Dispositions
- * predating per-row attribution carry no row id and fill kit-driven slices
- * first, per `ConsumptionLog.bookingAssetId`.
+ * The method is picked per (booking, asset) group, and every group's
+ * intervals are combined before one sweep per asset, so an asset with LEGACY
+ * groups on some bookings and converted groups on others never sums separate
+ * peaks:
+ *
+ * - A converted group (any slice not LEGACY) reads its AUTO / MANUAL slices'
+ *   source rows: each slice holds `sum(quantity - releasedQuantity)` over its
+ *   rows, UNASSIGNED included. Its KIT slices contribute nothing, and its
+ *   disposition logs are not read (shares already moved them to released).
+ * - A LEGACY group reduces each standalone slice by already-logged
+ *   {@link RESERVATION_REDUCING_CATEGORIES} dispositions. They are attributed
+ *   per `BookingAsset` ROW: one (booking, asset) pair can hold a standalone
+ *   slice and kit-driven ones at once, so a return logged against a kit slice
+ *   must not shrink the standalone reservation this guard is protecting.
+ *   Dispositions predating per-row attribution carry no row id and fill
+ *   kit-driven slices first, per `ConsumptionLog.bookingAssetId`.
+ *
+ * Queries: the slices, then (in parallel) the LEGACY groups' logs and the
+ * converted slices' source rows, each only when such groups exist.
  *
  * @param args.assetIds - Assets to compute for. Empty issues no queries.
  * @param args.organizationId - Caller's organization; scopes every read
@@ -322,21 +377,43 @@ export async function getPeakReservedUnitsByAsset({
       bookingId: true,
       quantity: true,
       assetKitId: true,
+      sourceAllocation: true,
       booking: { select: { from: true, to: true, status: true } },
     },
   });
 
   if (rows.length === 0) return peaks;
 
-  const loggedGroups = await tx.consumptionLog.groupBy({
-    by: ["bookingAssetId", "bookingId", "assetId"],
-    where: {
-      assetId: { in: assetIds },
-      bookingId: { in: [...new Set(rows.map((r) => r.bookingId))] },
-      category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-    },
-    _sum: { quantity: true },
-  });
+  const pairOf = (r: { bookingId: string; assetId: string }) =>
+    `${r.bookingId}:${r.assetId}`;
+  const convertedPairs = new Set(
+    rows.filter((r) => isConvertedSlice(r.sourceAllocation)).map(pairOf)
+  );
+  const legacyRows = rows.filter((r) => !convertedPairs.has(pairOf(r)));
+  const convertedStandaloneIds = rows
+    .filter(
+      (r) =>
+        convertedPairs.has(pairOf(r)) &&
+        r.assetKitId === null &&
+        r.sourceAllocation !== undefined &&
+        CONVERTED_STANDALONE_MODES.has(r.sourceAllocation)
+    )
+    .map((r) => r.id);
+
+  const [loggedGroups, remainingBySlice] = await Promise.all([
+    legacyRows.length === 0
+      ? Promise.resolve([])
+      : tx.consumptionLog.groupBy({
+          by: ["bookingAssetId", "bookingId", "assetId"],
+          where: {
+            assetId: { in: assetIds },
+            bookingId: { in: [...new Set(legacyRows.map((r) => r.bookingId))] },
+            category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+          },
+          _sum: { quantity: true },
+        }),
+    loadRemainingReservationBySlice(tx, organizationId, convertedStandaloneIds),
+  ]);
 
   /** Dispositions attributed to one specific `BookingAsset` row. */
   const loggedByRowId = new Map<string, number>();
@@ -395,14 +472,20 @@ export async function getPeakReservedUnitsByAsset({
   const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
   for (const row of rows) {
     // Kit-driven slices are counted through `AssetKit.quantity`; summing them
-    // here too would subtract the same units twice.
+    // here too would subtract the same units twice. In a converted group
+    // these are the KIT slices.
     if (row.assetKitId !== null) continue;
     if (!row.booking) continue;
 
-    const pair = `${row.bookingId}:${row.assetId}`;
-    const logged =
-      (loggedByRowId.get(row.id) ?? 0) + (legacyForStandalone.get(pair) ?? 0);
-    const remaining = Math.max(0, row.quantity - logged);
+    const pair = pairOf(row);
+    let remaining: number;
+    if (convertedPairs.has(pair)) {
+      remaining = remainingBySlice.get(row.id) ?? 0;
+    } else {
+      const logged =
+        (loggedByRowId.get(row.id) ?? 0) + (legacyForStandalone.get(pair) ?? 0);
+      remaining = Math.max(0, row.quantity - logged);
+    }
     if (remaining === 0) continue;
 
     const to = resolveIntervalTo(
@@ -423,6 +506,61 @@ export async function getPeakReservedUnitsByAsset({
   return peaks;
 }
 
+/**
+ * STOCK-LOWERING guard: blocks reducing a QUANTITY_TRACKED asset's total
+ * `quantity` below what is ALREADY committed elsewhere: operator custody,
+ * kit allocations, or an overlapping active booking. Without this guard, an
+ * admin editing the asset overview (or a CSV update-existing import, which
+ * routes through the same `updateAsset` call) could shrink the pool
+ * underneath commitments that already exist, silently leaving custody/kit
+ * rows or a booking's reserved slice referencing more units than the asset
+ * now has.
+ *
+ * This is the MIRROR-IMAGE guard to {@link assertAssetQuantityAvailable} /
+ * {@link assertAssetQuantitiesAvailable}: those police a BOOKING's requested
+ * quantity against the asset's pool (asset total held fixed); this one
+ * polices the ASSET's total itself against everything already drawing from
+ * that pool (bookings/kits/custody held fixed).
+ *
+ * The threshold is a COMMITTED PEAK, not a sum:
+ * ```
+ * committed = inCustody + inKits + peakConcurrent(reservedIntervals)
+ * ```
+ * `inCustody` is operator custody right now (`kitCustodyId IS NULL`);
+ * `inKits` is Σ `AssetKit.quantity`; the booking term is the PEAK concurrent
+ * demand (via {@link peakConcurrent}) across every ACTIVE (RESERVED/ONGOING/
+ * OVERDUE) STANDALONE (`assetKitId: null`) reservation for this asset: two
+ * bookings that never overlap must not stack (the same bb1/bb2 model
+ * {@link getAssetAvailability} uses; a naive sum would reject a perfectly
+ * safe reduction). Deliberately UNWINDOWED: this guard protects the asset's
+ * WHOLE FUTURE TIMELINE, not one booking's dates, so every active
+ * reservation is fetched via {@link buildActiveBookingWhere} with
+ * `window: null` (OVERDUE included unconditionally, sentinel-extended via
+ * {@link resolveIntervalTo} so an unreturned unit keeps counting against
+ * every future instant). The method is picked per slice: a LEGACY
+ * reservation's `qty` is the booked amount minus already-logged
+ * {@link RESERVATION_REDUCING_CATEGORIES} dispositions of its booking; an
+ * AUTO / MANUAL slice of a converted group contributes the remaining
+ * reservation of its source rows (`quantity - releasedQuantity`, UNASSIGNED
+ * included), and its disposition logs are not read. All intervals then go
+ * through one sweep, so mixed groups never sum separate peaks.
+ *
+ * A reduction to EXACTLY `committed` is allowed; only `newTotal < committed`
+ * rejects, since the pool is fully (not over-) subscribed at that total.
+ *
+ * Runs a FIXED small number of queries (custody + kits + reserved rows in
+ * parallel, then logged dispositions when there are LEGACY reservations and
+ * source rows when there are converted ones, in parallel) regardless of how
+ * many bookings, kits or custody rows exist for the asset: no per-booking
+ * fan-out.
+ *
+ * Call inside the mutation's own transaction, with the asset already behind
+ * `lockAssetForQuantityUpdate`, so the read-then-decide is race-safe (same
+ * contract as {@link assertAssetQuantityAvailable}).
+ *
+ * @param args - See {@link AssertAssetQuantityNotBelowReservationsArgs}.
+ * @throws {ShelfError} 400 (`shouldBeCaptured: false`) when `newTotal` would drop below `committed`.
+ */
 export async function assertAssetQuantityNotBelowReservations({
   assetId,
   organizationId,
@@ -460,9 +598,11 @@ export async function assertAssetQuantityNotBelowReservations({
         booking: buildActiveBookingWhere(organizationId, null),
       },
       select: {
+        id: true,
         assetId: true,
         bookingId: true,
         quantity: true,
+        sourceAllocation: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     }),
@@ -473,20 +613,34 @@ export async function assertAssetQuantityNotBelowReservations({
 
   let peakReserved = 0;
   if (reservedRows.length > 0) {
-    const bookingIds = [...new Set(reservedRows.map((r) => r.bookingId))];
+    // Every row here is standalone, so a converted row is AUTO or MANUAL and
+    // its own mode answers for its group.
+    const legacyRows = reservedRows.filter(
+      (r) => !isConvertedSlice(r.sourceAllocation)
+    );
+    const convertedIds = reservedRows
+      .filter((r) => isConvertedSlice(r.sourceAllocation))
+      .map((r) => r.id);
+    const bookingIds = [...new Set(legacyRows.map((r) => r.bookingId))];
 
-    // Mirrors every other availability read's logged-dispositions query —
-    // RETURN/CONSUME/LOSS/DAMAGE reduce a booking's remaining reserved
-    // footprint before it competes for the pool.
-    const loggedGroups = await tx.consumptionLog.groupBy({
-      by: ["bookingId", "assetId"],
-      where: {
-        assetId,
-        bookingId: { in: bookingIds },
-        category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-      },
-      _sum: { quantity: true },
-    });
+    // LEGACY rows mirror every other availability read's logged-dispositions
+    // query: RETURN/CONSUME/LOSS/DAMAGE reduce a booking's remaining reserved
+    // footprint before it competes for the pool. Converted rows read their
+    // source rows instead.
+    const [loggedGroups, remainingBySlice] = await Promise.all([
+      bookingIds.length === 0
+        ? Promise.resolve([])
+        : tx.consumptionLog.groupBy({
+            by: ["bookingId", "assetId"],
+            where: {
+              assetId,
+              bookingId: { in: bookingIds },
+              category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+            },
+            _sum: { quantity: true },
+          }),
+      loadRemainingReservationBySlice(tx, organizationId, convertedIds),
+    ]);
 
     const loggedByBookingId = new Map<string, number>();
     for (const group of loggedGroups) {
@@ -501,10 +655,14 @@ export async function assertAssetQuantityNotBelowReservations({
       // `BookingAsset`, so a row with no `booking` should never occur.
       if (!row.booking) continue;
 
-      const logged = loggedByBookingId.get(row.bookingId) ?? 0;
       // Clamp at 0 per row, same defence-in-depth as every other primitive
-      // in this module — an over-logged booking can't push demand negative.
-      const remaining = Math.max(0, row.quantity - logged);
+      // in this module: an over-logged booking can't push demand negative.
+      const remaining = isConvertedSlice(row.sourceAllocation)
+        ? remainingBySlice.get(row.id) ?? 0
+        : Math.max(
+            0,
+            row.quantity - (loggedByBookingId.get(row.bookingId) ?? 0)
+          );
       if (remaining === 0) continue;
 
       // `windowTo` fallback is unreachable here (`row.booking.to` is always

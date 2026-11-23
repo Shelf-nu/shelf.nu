@@ -1846,15 +1846,16 @@ describe("assertAssetQuantityNotBelowReservations", () => {
   /**
    * Same `AvailabilityBatchClient`-shaped mock convention as the batch
    * primitive's own `createMockBatchClient()` above (duplicated locally per
-   * this file's per-`describe` fixture convention) — only the subset of
-   * delegates this guard actually queries (`custody`, `assetKit`,
-   * `bookingAsset`, `consumptionLog`) needs stubbing.
+   * this file's per-`describe` fixture convention). Only the delegates this
+   * guard queries (`custody`, `assetKit`, `bookingAsset`, `consumptionLog`,
+   * and `bookingAssetSource` for converted slices) need stubbing.
    */
   function createMockTx() {
     return {
       custody: { groupBy: vitest.fn().mockResolvedValue([]) },
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
       consumptionLog: {
         findMany: vitest.fn().mockResolvedValue([]),
         groupBy: vitest.fn().mockResolvedValue([]),
@@ -2095,6 +2096,55 @@ describe("assertAssetQuantityNotBelowReservations", () => {
     expect(txMany.assetKit.groupBy).toHaveBeenCalledTimes(1);
     expect(txMany.bookingAsset.findMany).toHaveBeenCalledTimes(1);
     expect(txMany.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a converted slice from its source rows and combines it with LEGACY rows in one peak", async () => {
+    const tx = createMockTx();
+    tx.bookingAsset.findMany.mockResolvedValue([
+      // LEGACY: 5 booked over Jan 1-10, nothing logged.
+      reservedRow("b1", 5, "2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z"),
+      // Converted AUTO slice over Jan 5-15: 9 booked, its rows still hold 4.
+      {
+        ...reservedRow("b2", 9, "2026-01-05T00:00:00Z", "2026-01-15T00:00:00Z"),
+        id: "auto-row",
+        sourceAllocation: "AUTO",
+      },
+    ]);
+    // A return on b2 is already inside the rows' `releasedQuantity`; the
+    // guard must not net it a second time.
+    tx.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b2", assetId: ASSET_ID, _sum: { quantity: 5 } },
+    ]);
+    tx.bookingAssetSource.findMany.mockResolvedValue([
+      { bookingAssetId: "auto-row", quantity: 6, releasedQuantity: 5 },
+      { bookingAssetId: "auto-row", quantity: 3, releasedQuantity: 0 },
+    ]);
+
+    // committed = peak(5 + 4) = 9.
+    await expect(
+      assertAssetQuantityNotBelowReservations({
+        assetId: ASSET_ID,
+        organizationId: ORG_ID,
+        tx,
+        newTotal: 9,
+        assetTitle: "Widget",
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      assertAssetQuantityNotBelowReservations({
+        assetId: ASSET_ID,
+        organizationId: ORG_ID,
+        tx,
+        newTotal: 8,
+        assetTitle: "Widget",
+      })
+    ).rejects.toThrow(ShelfError);
+
+    expect(tx.consumptionLog.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { in: ["b1"] } }),
+      })
+    );
   });
 
   it("skips the logged-dispositions query entirely when there are no reserved rows", async () => {
