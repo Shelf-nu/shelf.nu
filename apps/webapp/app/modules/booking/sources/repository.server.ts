@@ -11,6 +11,10 @@
  * tables through their own `organizationId` column, on `BookingAsset` and
  * `ConsumptionLog` through `booking.organizationId`. An id from another
  * workspace is simply not found, and a write that names one is refused.
+ * Two bindings are not checked here: that a LOCATION row's `locationId` is in
+ * the same workspace, and that a share's slice and row belong to its log's
+ * group. The deferred trigger checks 6 (org consistency) and 10 (share
+ * binding) enforce both at commit.
  *
  * Both functions run inside the caller's transaction and take no locks; the
  * caller holds the booking and asset locks. The deferred constraint triggers
@@ -21,6 +25,7 @@
  * @see {@link file://../../../../../../packages/quantity-control/src/booking-sources.ts} row rules
  */
 
+import { Prisma } from "@prisma/client";
 import {
   KNOWN_KINDS,
   isRowRemovable,
@@ -52,7 +57,6 @@ export type SourcesTx = Pick<
   | "bookingAssetSource"
   | "bookingDispositionShare"
   | "consumptionLog"
-  | "$queryRaw"
   | "$executeRaw"
 >;
 
@@ -277,6 +281,82 @@ export async function loadGroupStates(
   return result;
 }
 
+/** New counters for one existing source row. */
+type RowCounterUpdate = {
+  id: string;
+  quantity: number;
+  outQuantity: number;
+  releasedQuantity: number;
+  dispatchedTotal: number;
+};
+
+/**
+ * One statement that sets the counters of several source rows of one
+ * workspace, and stamps `updatedAt` (the column has no database default).
+ * Each VALUES tuple is `(id, quantity, outQuantity, releasedQuantity,
+ * dispatchedTotal)`, followed by the workspace id as the last parameter.
+ *
+ * @param organizationId - The trusted workspace id
+ * @param rows - At least one row update
+ * @returns The `UPDATE ... FROM (VALUES ...)` statement
+ */
+export function buildRowCounterUpdateSql(
+  organizationId: string,
+  rows: RowCounterUpdate[]
+): Prisma.Sql {
+  const values = Prisma.join(
+    rows.map(
+      (r) =>
+        Prisma.sql`(${r.id}::text, ${r.quantity}::int, ${r.outQuantity}::int, ${r.releasedQuantity}::int, ${r.dispatchedTotal}::int)`
+    )
+  );
+  return Prisma.sql`
+    UPDATE "BookingAssetSource" AS s
+    SET "quantity" = v.q,
+        "outQuantity" = v.o,
+        "releasedQuantity" = v.r,
+        "dispatchedTotal" = v.d,
+        "updatedAt" = now()
+    FROM (VALUES ${values}) AS v(id, q, o, r, d)
+    WHERE s."id" = v.id AND s."organizationId" = ${organizationId}`;
+}
+
+/** Moves every share on `fromRowId` to a slice and row, or orphans them (both null). */
+type ShareRepoint = {
+  fromRowId: string;
+  toBookingAssetId: string | null;
+  toSourceId: string | null;
+};
+
+/**
+ * One statement that moves the shares of several source rows of one
+ * workspace. Each VALUES tuple is `(fromRowId, toBookingAssetId, toSourceId)`,
+ * followed by the workspace id as the last parameter. A share is matched by
+ * its row id before the statement runs, so moves never chain within a call.
+ *
+ * @param organizationId - The trusted workspace id
+ * @param moves - At least one move
+ * @returns The `UPDATE ... FROM (VALUES ...)` statement
+ */
+export function buildShareRepointSql(
+  organizationId: string,
+  moves: ShareRepoint[]
+): Prisma.Sql {
+  const values = Prisma.join(
+    moves.map(
+      (m) =>
+        Prisma.sql`(${m.fromRowId}::text, ${m.toBookingAssetId}::text, ${m.toSourceId}::text)`
+    )
+  );
+  return Prisma.sql`
+    UPDATE "BookingDispositionShare" AS sh
+    SET "bookingAssetId" = v.to_slice,
+        "bookingAssetSourceId" = v.to_row
+    FROM (VALUES ${values}) AS v(from_row, to_slice, to_row)
+    WHERE sh."bookingAssetSourceId" = v.from_row
+      AND sh."organizationId" = ${organizationId}`;
+}
+
 /** Refuses a plan the repository cannot write: a bug in the caller. */
 function refusePlan(
   message: string,
@@ -328,9 +408,11 @@ function compareKeepCandidates(a: WorkingRow, b: WorkingRow): number {
  * ask to delete, a known kind first), because such a slice needs at least one
  * row.
  *
- * Writes: row updates one per changed row, row creates in one `createMany`,
- * share moves one `updateMany` per moved row, new shares in one `createMany`,
- * deletes in one `deleteMany`, modes one `updateMany` per distinct change.
+ * Writes: row updates in one `UPDATE ... FROM (VALUES ...)`, row creates in
+ * one `createMany`, share moves in one `UPDATE ... FROM (VALUES ...)`, new
+ * shares in one `createMany`, deletes in one `deleteMany`, modes one
+ * `updateMany` per distinct change. A plan that moves shares onto a row whose
+ * own shares it also moves is refused: one statement moves each share once.
  *
  * Upserts are find-then-write, not `INSERT ... ON CONFLICT`: the rows of every
  * affected slice are read for validation anyway, the caller holds the asset
@@ -506,6 +588,7 @@ export async function writeSourcePlan(
     if (current?.id) rowById.set(current.id, next);
   }
 
+  const repointOrigins = new Set(plan.repointShares.map((r) => r.fromRowId));
   for (const r of plan.repointShares) {
     const from = rowById.get(r.fromRowId);
     if (!from) continue; // proven to exist in step 1
@@ -529,6 +612,15 @@ export async function writeSourcePlan(
             fromRowId: r.fromRowId,
             toBookingAssetId: r.toBookingAssetId,
             toKey: r.toKey,
+          }
+        );
+      }
+      if (to.id !== undefined && repointOrigins.has(to.id)) {
+        throw refusePlan(
+          "Shares are moved onto a row whose shares also move.",
+          {
+            fromRowId: r.fromRowId,
+            toRowId: to.id,
           }
         );
       }
@@ -633,16 +725,19 @@ export async function writeSourcePlan(
   // 7. Write rows.
   const toUpdate = kept.filter((r) => r.id !== undefined && r.touched);
   const toCreate = kept.filter((r) => r.id === undefined);
-  for (const row of toUpdate) {
-    await tx.bookingAssetSource.updateMany({
-      where: { id: row.id, organizationId },
-      data: {
-        quantity: row.quantity,
-        outQuantity: row.outQuantity,
-        releasedQuantity: row.releasedQuantity,
-        dispatchedTotal: row.dispatchedTotal,
-      },
-    });
+  if (toUpdate.length > 0) {
+    await tx.$executeRaw(
+      buildRowCounterUpdateSql(
+        organizationId,
+        toUpdate.map((row) => ({
+          id: row.id ?? "",
+          quantity: row.quantity,
+          outQuantity: row.outQuantity,
+          releasedQuantity: row.releasedQuantity,
+          dispatchedTotal: row.dispatchedTotal,
+        }))
+      )
+    );
   }
   if (toCreate.length > 0) {
     await tx.bookingAssetSource.createMany({
@@ -673,7 +768,9 @@ export async function writeSourcePlan(
     for (const r of fresh)
       idByKey.set(keyOf(r.bookingAssetId, sourceKey(r)), r.id);
   } else {
-    for (const r of kept) {
+    // Every persisted row still exists at this point (deletes run last), so
+    // this sees the same rows a re-read would.
+    for (const r of [...kept, ...toDelete]) {
       if (r.id) idByKey.set(keyOf(r.bookingAssetId, sourceKey(r)), r.id);
     }
   }
@@ -689,17 +786,20 @@ export async function writeSourcePlan(
   };
 
   // 9. Move and insert shares before deleting rows, so no delete orphans one.
-  for (const r of plan.repointShares) {
-    await tx.bookingDispositionShare.updateMany({
-      where: { organizationId, bookingAssetSourceId: r.fromRowId },
-      data: {
-        bookingAssetId: r.toBookingAssetId,
-        bookingAssetSourceId:
-          r.toBookingAssetId === null || r.toKey === null
-            ? null
-            : resolve(r.toBookingAssetId, r.toKey),
-      },
-    });
+  if (plan.repointShares.length > 0) {
+    await tx.$executeRaw(
+      buildShareRepointSql(
+        organizationId,
+        plan.repointShares.map((r) => ({
+          fromRowId: r.fromRowId,
+          toBookingAssetId: r.toBookingAssetId,
+          toSourceId:
+            r.toBookingAssetId === null || r.toKey === null
+              ? null
+              : resolve(r.toBookingAssetId, r.toKey),
+        }))
+      )
+    );
   }
   if (plan.insertShares.length > 0) {
     await tx.bookingDispositionShare.createMany({

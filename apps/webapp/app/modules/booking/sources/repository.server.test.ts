@@ -6,17 +6,29 @@
  * which the fake answers from an `organizationId` it stores on slices and
  * logs), so rows from another workspace are simply not there, as with the
  * real query. It also counts calls per table method, so the batching rules
- * are observable. CI has no database for unit tests, so this is where the
+ * are observable. Deleting a source row nulls `bookingAssetSourceId` on its
+ * shares, as the real `ON DELETE SET NULL` foreign key does, so a delete that
+ * ran before a share move would leave the share orphaned and fail the test.
+ *
+ * The two batched `UPDATE ... FROM (VALUES ...)` statements are applied by
+ * reading the statement's parameters: the fake knows each statement's tuple
+ * width (5 for row counters, 3 for share moves) and that the workspace id is
+ * the last parameter. That keeps the resulting state observable in the same
+ * tests that assert one statement per table, without parsing SQL; the
+ * column names themselves are pinned by a SQL-text assertion. CI has no database for unit tests, so this is where the
  * repository's reading and writing rules are proven.
  *
  * @see {@link file://./repository.server.ts}
  */
 
+import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { ShelfError } from "~/utils/error";
 
 import {
+  buildRowCounterUpdateSql,
+  buildShareRepointSql,
   loadGroupStates,
   writeSourcePlan,
   type SourcePlanWrite,
@@ -108,17 +120,73 @@ function fakeTx(seed: {
     },
     deleteMany: (args: { where: Where }) => {
       count(`${table}.deleteMany`);
-      const before = tables[table].length;
+      const gone = tables[table].filter((r) => matches(r, args.where));
       tables[table] = tables[table].filter((r) => !matches(r, args.where));
-      return Promise.resolve({ count: before - tables[table].length });
+      if (table === "bookingAssetSource") {
+        // ON DELETE SET NULL from the share to its source row.
+        const ids = new Set(gone.map((r) => r.id));
+        for (const sh of tables.bookingDispositionShare) {
+          if (ids.has(sh.bookingAssetSourceId)) sh.bookingAssetSourceId = null;
+        }
+      }
+      return Promise.resolve({ count: gone.length });
     },
   });
+
+  /** Applies one of the repository's two batched UPDATE statements. */
+  const executeRaw = (query: Prisma.Sql) => {
+    const values = [...query.values];
+    const organizationId = values.pop();
+    let hits = 0;
+    if (query.sql.includes('UPDATE "BookingAssetSource"')) {
+      count("bookingAssetSource.executeRaw");
+      for (let i = 0; i < values.length; i += 5) {
+        const [id, q, o, r, d] = values.slice(i, i + 5);
+        for (const row of tables.bookingAssetSource) {
+          if (row.id !== id || row.organizationId !== organizationId) continue;
+          Object.assign(row, {
+            quantity: q,
+            outQuantity: o,
+            releasedQuantity: r,
+            dispatchedTotal: d,
+            updatedAt: "now()",
+          });
+          hits++;
+        }
+      }
+    } else if (query.sql.includes('UPDATE "BookingDispositionShare"')) {
+      count("bookingDispositionShare.executeRaw");
+      // Match every share by its row id before moving any, as one statement does.
+      const moves: Array<{ targets: Row[]; toSlice: unknown; toRow: unknown }> =
+        [];
+      for (let i = 0; i < values.length; i += 3) {
+        const [from, toSlice, toRow] = values.slice(i, i + 3);
+        const targets = tables.bookingDispositionShare.filter(
+          (sh) =>
+            sh.bookingAssetSourceId === from &&
+            sh.organizationId === organizationId
+        );
+        moves.push({ targets, toSlice, toRow });
+      }
+      for (const m of moves) {
+        for (const sh of m.targets) {
+          sh.bookingAssetId = m.toSlice;
+          sh.bookingAssetSourceId = m.toRow;
+          hits++;
+        }
+      }
+    } else {
+      throw new Error(`Unexpected statement: ${query.sql}`);
+    }
+    return Promise.resolve(hits);
+  };
 
   const tx = {
     bookingAsset: delegate("bookingAsset"),
     bookingAssetSource: delegate("bookingAssetSource"),
     bookingDispositionShare: delegate("bookingDispositionShare"),
     consumptionLog: delegate("consumptionLog"),
+    $executeRaw: executeRaw,
   } as unknown as SourcesTx;
   return { tx, tables, calls };
 }
@@ -164,6 +232,15 @@ function share(over: Row): Row {
     origin: "SEEDED",
     ...over,
   };
+}
+
+/** Number of write calls of any kind the fake received. */
+function writeCount(calls: Record<string, number>): number {
+  return Object.entries(calls)
+    .filter(([name]) =>
+      /\.(createMany|updateMany|deleteMany|executeRaw)$/.test(name)
+    )
+    .reduce((sum, [, n]) => sum + n, 0);
 }
 
 /** A plan with nothing in it, to override per test. */
@@ -758,5 +835,305 @@ describe("writeSourcePlan", () => {
         }),
       })
     ).rejects.toMatchObject({ status: 500 });
+  });
+  /** An AUTO slice with history on two LOCATION rows and an empty UNKNOWN row. */
+  function historyFixture(orgOfRows = ORG) {
+    return fakeTx({
+      slices: [
+        slice({
+          id: "s1",
+          sourceAllocation: "AUTO",
+          sourcesConvertedAt: new Date(),
+          checkedOutQuantity: 4,
+        }),
+      ],
+      rows: [
+        sourceRow({
+          id: "r-a",
+          organizationId: orgOfRows,
+          bookingAssetId: "s1",
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 5,
+          releasedQuantity: 2,
+          dispatchedTotal: 2,
+        }),
+        sourceRow({
+          id: "r-b",
+          organizationId: orgOfRows,
+          bookingAssetId: "s1",
+          kind: "LOCATION",
+          locationId: "loc-b",
+          quantity: 5,
+          releasedQuantity: 2,
+          dispatchedTotal: 2,
+        }),
+        sourceRow({
+          id: "r-u",
+          organizationId: orgOfRows,
+          bookingAssetId: "s1",
+          kind: "UNKNOWN",
+        }),
+      ],
+      shares: [
+        share({
+          id: "sh-a",
+          organizationId: orgOfRows,
+          consumptionLogId: "l1",
+          bookingAssetId: "s1",
+          bookingAssetSourceId: "r-a",
+          quantity: 2,
+        }),
+        share({
+          id: "sh-b",
+          organizationId: orgOfRows,
+          consumptionLogId: "l2",
+          bookingAssetId: "s1",
+          bookingAssetSourceId: "r-b",
+          quantity: 2,
+        }),
+      ],
+      logs: [
+        {
+          id: "l-foreign",
+          organizationId: OTHER_ORG,
+          bookingId: "b9",
+          assetId: "a1",
+          bookingAssetId: null,
+          category: "RETURN",
+          quantity: 1,
+          createdAt: new Date(),
+        },
+      ],
+    });
+  }
+
+  it("updates rows and moves shares in at most one statement per table", async () => {
+    const { tx, tables, calls } = historyFixture();
+
+    await writeSourcePlan(tx, {
+      organizationId: ORG,
+      plan: emptyPlan({
+        upsertRows: [
+          {
+            bookingAssetId: "s1",
+            kind: "LOCATION",
+            locationId: "loc-a",
+            quantity: 5,
+            outQuantity: 0,
+            releasedQuantity: 2,
+            dispatchedTotal: 0,
+          },
+          {
+            bookingAssetId: "s1",
+            kind: "LOCATION",
+            locationId: "loc-b",
+            quantity: 5,
+            outQuantity: 0,
+            releasedQuantity: 2,
+            dispatchedTotal: 0,
+          },
+          {
+            bookingAssetId: "s1",
+            kind: "UNKNOWN",
+            locationId: null,
+            quantity: 0,
+            outQuantity: 0,
+            releasedQuantity: 0,
+            dispatchedTotal: 4,
+          },
+        ],
+        repointShares: [
+          { fromRowId: "r-a", toBookingAssetId: "s1", toKey: "UNKNOWN:" },
+          { fromRowId: "r-b", toBookingAssetId: "s1", toKey: "UNKNOWN:" },
+        ],
+      }),
+    });
+
+    expect(calls["bookingAssetSource.executeRaw"]).toBe(1);
+    expect(calls["bookingDispositionShare.executeRaw"]).toBe(1);
+    expect(calls["bookingAssetSource.updateMany"]).toBeUndefined();
+    expect(calls["bookingDispositionShare.updateMany"]).toBeUndefined();
+    expect(tables.bookingAssetSource.find((r) => r.id === "r-u")).toMatchObject(
+      {
+        dispatchedTotal: 4,
+        updatedAt: "now()",
+      }
+    );
+    expect(tables.bookingAssetSource.find((r) => r.id === "r-a")).toMatchObject(
+      {
+        dispatchedTotal: 0,
+      }
+    );
+    expect(
+      tables.bookingDispositionShare.map((sh) => sh.bookingAssetSourceId)
+    ).toEqual(["r-u", "r-u"]);
+  });
+
+  it("refuses a plan that moves shares onto a row whose shares also move", async () => {
+    const { tx, calls } = historyFixture();
+
+    await expect(
+      writeSourcePlan(tx, {
+        organizationId: ORG,
+        plan: emptyPlan({
+          repointShares: [
+            {
+              fromRowId: "r-a",
+              toBookingAssetId: "s1",
+              toKey: "LOCATION:loc-b",
+            },
+            { fromRowId: "r-b", toBookingAssetId: "s1", toKey: "UNKNOWN:" },
+          ],
+        }),
+      })
+    ).rejects.toMatchObject({ status: 500 });
+    expect(writeCount(calls)).toBe(0);
+  });
+
+  it("refuses a row of another workspace in deleteRowIds and writes nothing", async () => {
+    const { tx, tables, calls } = historyFixture(OTHER_ORG);
+
+    await expect(
+      writeSourcePlan(tx, {
+        organizationId: ORG,
+        plan: emptyPlan({ deleteRowIds: ["r-u"] }),
+      })
+    ).rejects.toMatchObject({ status: 500 });
+    expect(writeCount(calls)).toBe(0);
+    expect(tables.bookingAssetSource).toHaveLength(3);
+  });
+
+  it("refuses a row of another workspace in repointShares and writes nothing", async () => {
+    const { tx, tables, calls } = historyFixture(OTHER_ORG);
+
+    await expect(
+      writeSourcePlan(tx, {
+        organizationId: ORG,
+        plan: emptyPlan({
+          repointShares: [
+            { fromRowId: "r-a", toBookingAssetId: null, toKey: null },
+          ],
+        }),
+      })
+    ).rejects.toMatchObject({ status: 500 });
+    expect(writeCount(calls)).toBe(0);
+    expect(tables.bookingDispositionShare[0].bookingAssetSourceId).toBe("r-a");
+  });
+
+  it("refuses a disposition log of another workspace in insertShares and writes nothing", async () => {
+    const { tx, tables, calls } = historyFixture();
+
+    await expect(
+      writeSourcePlan(tx, {
+        organizationId: ORG,
+        plan: emptyPlan({
+          insertShares: [
+            {
+              consumptionLogId: "l-foreign",
+              bookingAssetId: null,
+              sourceKey: null,
+              quantity: 1,
+              origin: "OVERFLOW",
+            },
+          ],
+        }),
+      })
+    ).rejects.toMatchObject({ status: 500 });
+    expect(writeCount(calls)).toBe(0);
+    expect(tables.bookingDispositionShare).toHaveLength(2);
+  });
+
+  it("resolves share keys to existing rows without re-reading when nothing is created", async () => {
+    const { tx, tables, calls } = fakeTx({
+      slices: [
+        slice({
+          id: "s1",
+          sourceAllocation: "AUTO",
+          sourcesConvertedAt: new Date(),
+          checkedOutQuantity: 3,
+        }),
+      ],
+      rows: [
+        sourceRow({
+          id: "r1",
+          bookingAssetId: "s1",
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 10,
+          outQuantity: 3,
+          dispatchedTotal: 3,
+        }),
+      ],
+      logs: [
+        {
+          id: "l1",
+          organizationId: ORG,
+          bookingId: "b1",
+          assetId: "a1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 1,
+          createdAt: new Date(),
+        },
+      ],
+    });
+
+    await writeSourcePlan(tx, {
+      organizationId: ORG,
+      plan: emptyPlan({
+        upsertRows: [
+          {
+            bookingAssetId: "s1",
+            kind: "LOCATION",
+            locationId: "loc-a",
+            quantity: 10,
+            outQuantity: 2,
+            releasedQuantity: 1,
+            dispatchedTotal: 3,
+          },
+        ],
+        insertShares: [
+          {
+            consumptionLogId: "l1",
+            bookingAssetId: "s1",
+            sourceKey: "LOCATION:loc-a",
+            quantity: 1,
+            origin: "RECORDED",
+          },
+        ],
+      }),
+    });
+
+    // One read of the slice's rows; no re-read after writing.
+    expect(calls["bookingAssetSource.findMany"]).toBe(1);
+    expect(tables.bookingDispositionShare).toEqual([
+      expect.objectContaining({ bookingAssetSourceId: "r1", bookingId: "b1" }),
+    ]);
+  });
+});
+
+describe("batched update statements", () => {
+  it("name the mapped columns, stamp updatedAt and scope by workspace", () => {
+    const rows = buildRowCounterUpdateSql(ORG, [
+      {
+        id: "r1",
+        quantity: 5,
+        outQuantity: 1,
+        releasedQuantity: 2,
+        dispatchedTotal: 3,
+      },
+    ]);
+    expect(rows.sql).toContain('UPDATE "BookingAssetSource"');
+    expect(rows.sql).toContain('"updatedAt" = now()');
+    expect(rows.sql).toContain('s."organizationId" =');
+    expect(rows.values).toEqual(["r1", 5, 1, 2, 3, ORG]);
+
+    const moves = buildShareRepointSql(ORG, [
+      { fromRowId: "r1", toBookingAssetId: null, toSourceId: null },
+    ]);
+    expect(moves.sql).toContain('UPDATE "BookingDispositionShare"');
+    expect(moves.sql).toContain('sh."bookingAssetSourceId" = v.from_row');
+    expect(moves.values).toEqual(["r1", null, null, ORG]);
   });
 });
