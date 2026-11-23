@@ -24,6 +24,7 @@ const { mockCheck, mockGetSnapshot } = vi.hoisted(() => ({
 vi.mock("@sentry/react-router", () => ({
   captureException: vi.fn(),
   logger: { info: vi.fn() },
+  flush: vi.fn(),
 }));
 
 // why: the real checker fetches the server's build id; the test controls the
@@ -65,6 +66,7 @@ describe("LazyLoadBoundary", () => {
   beforeEach(() => {
     vi.mocked(Sentry.captureException).mockReset();
     vi.mocked(Sentry.logger.info).mockReset();
+    vi.mocked(Sentry.flush).mockReset();
     mockCheck.mockReset();
     mockCheck.mockResolvedValue("unknown");
     mockGetSnapshot.mockReset();
@@ -236,6 +238,9 @@ describe("LazyLoadBoundary", () => {
     window.dispatchEvent(new Event("pagehide"));
 
     expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    // The SDK flushed its log buffer when the tab turned hidden, before
+    // pagehide, so this log is sent only if the report flushes it itself.
+    expect(Sentry.flush).toHaveBeenCalledTimes(1);
     expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 

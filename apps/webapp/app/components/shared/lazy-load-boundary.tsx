@@ -98,6 +98,10 @@ function reportChunkFailure(error: unknown) {
         serverBuildId:
           snapshot.status === "newer" ? snapshot.serverBuildId : null,
       });
+      // Logs wait in the SDK's buffer, which it sends when the tab turns
+      // hidden. That fires before `pagehide`, so a log written at unload
+      // would never leave the buffer without this flush.
+      void Sentry.flush();
       return;
     }
     Sentry.captureException(error, {
