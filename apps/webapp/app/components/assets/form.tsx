@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -381,6 +381,11 @@ const AssetFormInner = ({
   // about silent fallback when this asset can't satisfy the workspace preference).
   const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  // Id of the hidden node that carries the location restriction reason to
+  // assistive tech: the hover card renders it, and the location picker
+  // points at it with `aria-describedby` (see the Location row below).
+  const locationDisabledReasonId = useId();
 
   // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
   // removing a barcode in the section above immediately removes the matching
@@ -1471,6 +1476,7 @@ const AssetFormInner = ({
           />
           {isKitAsset || isMultiPlacedPool ? (
             <DisabledReasonHoverCard
+              descriptionId={locationDisabledReasonId}
               triggerClassName="disabled w-full cursor-not-allowed"
               reason={
                 isKitAsset ? (
@@ -1491,6 +1497,7 @@ const AssetFormInner = ({
             >
               <DynamicSelect
                 disabled={locationDisabled || isMultiPlacedPool}
+                descriptionId={locationDisabledReasonId}
                 selectionMode="set"
                 fieldName="newLocationId"
                 triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
