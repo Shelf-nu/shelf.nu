@@ -368,3 +368,49 @@ describe("getPeakReservedUnitsByAsset, a slice sent out again after a full retur
     expect(peaks.get(ASSET)).toBeUndefined();
   });
 });
+
+describe("getPeakReservedUnitsByAsset, untagged returns on a kit slice sent out twice", () => {
+  it("keeps them on the kit slice, so the loose slice still holds its units", async () => {
+    // Booking b1: 6 loose units, all out, and a 4-unit kit slice that went out
+    // twice (8 sent out) and came back twice. One return of 4 is tagged to the
+    // kit row, the other carries no row id. Both belong to the kit slice.
+    const loose = {
+      ...reservation(ASSET, "b1", 6, "2026-01-01", "2026-01-31", {
+        status: BookingStatus.ONGOING,
+      }),
+      checkedOutQuantity: 6,
+    };
+    const kitSlice = {
+      ...reservation(ASSET, "b1", 4, "2026-01-01", "2026-01-31", {
+        id: "b1-kit",
+        assetKitId: "asset-kit-1",
+        status: BookingStatus.ONGOING,
+      }),
+      checkedOutQuantity: 8,
+    };
+
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx: txWith(
+        [loose, kitSlice],
+        [
+          {
+            bookingAssetId: "b1-kit",
+            bookingId: "b1",
+            assetId: ASSET,
+            _sum: { quantity: 4 },
+          },
+          {
+            bookingAssetId: null,
+            bookingId: "b1",
+            assetId: ASSET,
+            _sum: { quantity: 4 },
+          },
+        ]
+      ),
+    });
+
+    expect(peaks.get(ASSET)).toBe(6);
+  });
+});

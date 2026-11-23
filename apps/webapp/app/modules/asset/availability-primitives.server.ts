@@ -351,13 +351,24 @@ export async function getPeakReservedUnitsByAsset({
     // whose units were already returned under its own row id has nothing left
     // to soak up, and treating its full quantity as capacity would swallow the
     // legacy total before any of it reached the standalone row.
+    //
+    // A kit row's room is the larger of what it booked and what it has sent
+    // out. `checkedOutQuantity` is cumulative, so a row sent out twice can
+    // take two trips' worth of returns; sizing it by the booked quantity alone
+    // would push the second trip's untagged returns onto the standalone row.
+    // The booked quantity stays the floor for rows whose counter is unset.
     const kitDrivenCapacity = rows
       .filter(
         (r) => r.assetKitId !== null && `${r.bookingId}:${r.assetId}` === pair
       )
       .reduce(
         (sum, r) =>
-          sum + Math.max(0, r.quantity - (loggedByRowId.get(r.id) ?? 0)),
+          sum +
+          Math.max(
+            0,
+            Math.max(r.quantity, r.checkedOutQuantity ?? 0) -
+              (loggedByRowId.get(r.id) ?? 0)
+          ),
         0
       );
 
