@@ -21,6 +21,8 @@ import {
   allocateNewSlices,
   getSliceSourceSummaries,
   resizeSlices,
+  setAutoSources,
+  setManualSources,
 } from "./booking-sources.server";
 import type { BookingSourcesTx } from "./conversion.server";
 import type * as RepositoryModule from "./repository.server";
@@ -37,6 +39,7 @@ const h = vi.hoisted(() => ({
   states: new Map<string, unknown>(),
   freeFor: (_args: FreeArgs): unknown[] => [],
   writes: [] as unknown[],
+  windows: [] as Array<{ from: Date; to: Date }>,
   db: {} as Record<string, unknown>,
   capacity: new Map<string, Map<string, number>>(),
 }));
@@ -70,12 +73,15 @@ vi.mock("./repository.server", async (importOriginal) => {
 // why: free units, capacity and competing holds are computed and tested in
 // capacity.server.test.ts; fixed answers isolate the facade's decisions.
 vi.mock("./capacity.server", () => ({
-  computeFreeBySource: vi.fn((_tx: unknown, args: FreeArgs) => {
-    h.order.push("computeFreeBySource");
-    return h.freeFor(args);
-  }),
+  computeFreeBySourceForPools: vi.fn(
+    (_tx: unknown, args: FreeArgs & { assetIds: string[] }) => {
+      h.order.push("computeFreeBySourceForPools");
+      h.windows.push(args.window);
+      return new Map(args.assetIds.map((id) => [id, h.freeFor(args)]));
+    }
+  ),
   loadSourceCapacity: vi.fn(() => h.capacity),
-  loadCompetingHolds: vi.fn(() => []),
+  loadCompetingHoldsByPool: vi.fn(() => new Map()),
 }));
 
 // why: a held-back group logs; the tests do not need log lines.
@@ -200,6 +206,7 @@ async function refusal(call: Promise<void>): Promise<ShelfError> {
 beforeEach(() => {
   h.order = [];
   h.writes = [];
+  h.windows = [];
   h.freeFor = () => free(20, 0);
   h.capacity = new Map();
 });
@@ -265,7 +272,7 @@ describe("allocateNewSlices", () => {
     expect(h.order).toEqual([
       "lock",
       "loadGroupStates",
-      "computeFreeBySource",
+      "computeFreeBySourceForPools",
       "writeSourcePlan",
     ]);
   });
@@ -481,6 +488,29 @@ describe("resizeSlices", () => {
     );
   });
 
+  it("lowers a LEGACY slice that converts now without admitting units it gives up", async () => {
+    // Only 6 units fit anywhere; the slice books 10 and is lowered to 5.
+    h.freeFor = () => free(6, 0);
+    seedGroup({ slices: [slice({ id: "s1", quantity: 10 })] });
+
+    await resizeSlices(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      changes: [{ sliceId: "s1", quantity: 5 }],
+      window: WINDOW,
+      adoptionEnabled: true,
+    });
+
+    const plan = writtenPlan();
+    expect(plan.setModes).toEqual([{ bookingAssetId: "s1", mode: "AUTO" }]);
+    expect(plan.upsertRows).toContainEqual(
+      expect.objectContaining({ kind: "UNPLACED", quantity: 5 })
+    );
+    expect(
+      plan.upsertRows.filter((r) => r.kind === "UNASSIGNED" && r.quantity > 0)
+    ).toEqual([]);
+  });
+
   it("lowers a slice from its pending units and refuses to go below out", async () => {
     seedGroup({
       converted: true,
@@ -591,6 +621,298 @@ describe("admitWindowChange", () => {
         expect.objectContaining({ kind: "UNPLACED", quantity: 5 }),
       ])
     );
+  });
+  it("measures an overdue extension from now, never from the old end", async () => {
+    // The booking ended on Dec 2 and it is now Dec 2 18:00; another booking
+    // fills Demo Warehouse in the gap already behind us, which cannot compete.
+    const overdueNow = new Date("2026-12-02T18:00:00Z");
+    h.freeFor = ({ window }) =>
+      window.from.getTime() === overdueNow.getTime() ? free(0, 5) : free(0, 0);
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "MANUAL",
+          checkedOutQuantity: 5,
+          rows: [
+            row("s1", {
+              kind: "LOCATION",
+              locationId: "loc-a",
+              quantity: 5,
+              outQuantity: 5,
+              dispatchedTotal: 5,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    await admitWindowChange(
+      fakeTx({ slices: [{ id: "s1" }], status: "OVERDUE" }),
+      {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        from: WINDOW.from,
+        to: NEW_TO,
+        previous: PREVIOUS,
+        kind: "extend",
+        now: overdueNow,
+        adoptionEnabled: true,
+      }
+    );
+
+    expect(h.windows).toEqual([{ from: overdueNow, to: NEW_TO }]);
+    expect(h.writes).toHaveLength(1);
+  });
+
+  it("lets a booking already short from lost stock shorten its dates", async () => {
+    // Stock was lost: over the old window Demo Warehouse has 2 free for the
+    // 5 this booking holds (3 short); over the shorter window it has 3 free
+    // (2 short). The change makes the shortage smaller, so it is admitted.
+    const shorterTo = new Date("2026-12-01T18:00:00Z");
+    h.freeFor = ({ window }) =>
+      window.to.getTime() === shorterTo.getTime() ? free(0, 3) : free(0, 2);
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "MANUAL",
+          rows: [
+            row("s1", { kind: "LOCATION", locationId: "loc-a", quantity: 5 }),
+          ],
+        }),
+      ],
+    });
+
+    await admitWindowChange(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      from: WINDOW.from,
+      to: shorterTo,
+      previous: PREVIOUS,
+      kind: "dates",
+      adoptionEnabled: true,
+    });
+
+    expect(h.writes).toHaveLength(1);
+  });
+
+  it("refuses new dates that make a shortage worse, with the free units of the new window", async () => {
+    h.freeFor = ({ window }) =>
+      window.to.getTime() === NEW_TO.getTime() ? free(0, 1) : free(0, 5);
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "MANUAL",
+          rows: [
+            row("s1", { kind: "LOCATION", locationId: "loc-a", quantity: 5 }),
+          ],
+        }),
+      ],
+    });
+
+    const error = await refusal(
+      admitWindowChange(fakeTx({ slices: [{ id: "s1" }] }), {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        from: WINDOW.from,
+        to: NEW_TO,
+        previous: PREVIOUS,
+        kind: "dates",
+        adoptionEnabled: true,
+      })
+    );
+
+    expect(error.message).toBe(
+      "Not enough units at Demo Warehouse (1 free) for these dates."
+    );
+    expect(h.writes).toHaveLength(0);
+  });
+});
+
+describe("setManualSources", () => {
+  /** One AUTO slice of 5 at Unplaced, optionally with units out. */
+  function seedSlice(out = 0) {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          checkedOutQuantity: out,
+          rows: [
+            row("s1", { quantity: 5, outQuantity: out, dispatchedTotal: out }),
+          ],
+        }),
+      ],
+    });
+  }
+
+  /** Calls setManualSources for s1 with the given split. */
+  function choose(
+    sources: Array<{ locationId: string | null; quantity: number }>,
+    status = "RESERVED"
+  ) {
+    return setManualSources(fakeTx({ slices: [{ id: "s1" }], status }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      sliceId: "s1",
+      sources,
+      window: WINDOW,
+      adoptionEnabled: true,
+    });
+  }
+
+  beforeEach(() => {
+    h.freeFor = () => free(10, 3);
+  });
+
+  it("refuses a split that does not add up to the planned units", async () => {
+    seedSlice();
+
+    const error = await refusal(
+      choose([
+        { locationId: null, quantity: 2 },
+        { locationId: "loc-a", quantity: 2 },
+      ])
+    );
+
+    expect(error.message).toBe("The sources must add up to 5 units.");
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("refuses to leave a source with fewer units than are out from it", async () => {
+    seedSlice(3);
+
+    const error = await refusal(
+      choose([
+        { locationId: null, quantity: 1 },
+        { locationId: "loc-a", quantity: 4 },
+      ])
+    );
+
+    expect(error.message).toBe(
+      "A source cannot have fewer units than are already out from it."
+    );
+  });
+
+  it("refuses a location that is not a placement of the pool", async () => {
+    seedSlice();
+
+    const error = await refusal(choose([{ locationId: "loc-b", quantity: 5 }]));
+
+    expect(error.message).toBe(
+      "One of the chosen locations does not hold this asset."
+    );
+  });
+
+  it("admits only at sources that gain units, naming their free units", async () => {
+    seedSlice();
+
+    const error = await refusal(
+      choose([
+        { locationId: null, quantity: 1 },
+        { locationId: "loc-a", quantity: 4 },
+      ])
+    );
+
+    expect(error.message).toBe(
+      "Not enough units at Demo Warehouse (3 free) for these dates."
+    );
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("writes an admitted split and makes the slice MANUAL", async () => {
+    seedSlice();
+
+    await choose([
+      { locationId: null, quantity: 2 },
+      { locationId: "loc-a", quantity: 3 },
+    ]);
+
+    const plan = writtenPlan();
+    expect(plan.setModes).toEqual([{ bookingAssetId: "s1", mode: "MANUAL" }]);
+    expect(plan.upsertRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "UNPLACED", quantity: 2 }),
+        expect.objectContaining({
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 3,
+        }),
+      ])
+    );
+  });
+
+  it("does not admit a draft's split: a draft holds nothing", async () => {
+    seedSlice();
+
+    await choose([{ locationId: "loc-a", quantity: 5 }], "DRAFT");
+
+    expect(writtenPlan().upsertRows).toContainEqual(
+      expect.objectContaining({ kind: "LOCATION", quantity: 5 })
+    );
+  });
+});
+
+describe("setAutoSources", () => {
+  /** One MANUAL slice of 5 at Demo Warehouse. */
+  function seedManual() {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "MANUAL",
+          rows: [
+            row("s1", { kind: "LOCATION", locationId: "loc-a", quantity: 5 }),
+          ],
+        }),
+      ],
+    });
+  }
+
+  /** Calls setAutoSources for s1. */
+  function auto() {
+    return setAutoSources(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      sliceId: "s1",
+      window: WINDOW,
+      adoptionEnabled: true,
+    });
+  }
+
+  it("returns a MANUAL slice to AUTO and re-allocates its pending units by the rule", async () => {
+    h.freeFor = () => free(10, 3);
+    seedManual();
+
+    await auto();
+
+    const plan = writtenPlan();
+    expect(plan.setModes).toEqual([{ bookingAssetId: "s1", mode: "AUTO" }]);
+    expect(plan.upsertRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "LOCATION", quantity: 0 }),
+        expect.objectContaining({ kind: "UNPLACED", quantity: 5 }),
+      ])
+    );
+  });
+
+  it("refuses when the pending units fit nowhere, before any write", async () => {
+    h.freeFor = () => free(2, 1);
+    seedManual();
+
+    const error = await refusal(auto());
+
+    expect(error.message).toBe(
+      "Not enough units at Demo Warehouse (1 free) and Unplaced (2 free) for these dates."
+    );
+    expect(h.writes).toHaveLength(0);
   });
 });
 

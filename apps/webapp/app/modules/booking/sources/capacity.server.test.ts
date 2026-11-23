@@ -15,7 +15,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   computeFreeBySource,
+  computeFreeBySourceForPools,
   loadCompetingHolds,
+  loadCompetingHoldsByPool,
   loadPhysicalNow,
   loadSourceCapacity,
   type CapacityTx,
@@ -446,6 +448,90 @@ describe("computeFreeBySource", () => {
     });
 
     expect(free.find((s) => s.locationId === "loc-a")?.free).toBe(0);
+  });
+});
+
+/** Total reads the fake answered, across every table method. */
+function queryCount(tx: ReturnType<typeof fakeTx>): number {
+  return [
+    tx.asset.findMany,
+    tx.assetLocation.findMany,
+    tx.custody.groupBy,
+    tx.bookingAsset.findMany,
+    tx.bookingAssetSource.findMany,
+    tx.consumptionLog.findMany,
+  ].reduce((sum, fn) => sum + fn.mock.calls.length, 0);
+}
+
+/** `count` pools, each with 10 units at loc-a and a 4-unit reserved hold there. */
+function pools(count: number) {
+  const ids = Array.from({ length: count }, (_, i) => `pool-${i}`);
+  return {
+    ids,
+    seed: {
+      assets: ids.map((id) => ({ id, organizationId: ORG, quantity: 10 })),
+      placements: ids.map((id, i) => ({
+        id: `pl-${i}`,
+        assetId: id,
+        organizationId: ORG,
+        locationId: "loc-a",
+        quantity: 10,
+        assetKitId: null,
+      })),
+      bookings: [booking("other", "RESERVED", "2026-01-12", "2026-01-15")],
+      slices: ids.map((id, i) => slice(`s-${i}`, "other", { assetId: id })),
+      sources: ids.map((_, i) =>
+        row(`s-${i}`, "LOCATION", "loc-a", { quantity: 4 })
+      ),
+    },
+  };
+}
+
+describe("computeFreeBySourceForPools", () => {
+  it("issues the same number of queries for one pool as for three", async () => {
+    const one = pools(1);
+    const three = pools(3);
+    const txOne = fakeTx(one.seed);
+    const txThree = fakeTx(three.seed);
+
+    const freeOne = await computeFreeBySourceForPools(asTx(txOne), {
+      organizationId: ORG,
+      assetIds: one.ids,
+      window: WINDOW,
+    });
+    const freeThree = await computeFreeBySourceForPools(asTx(txThree), {
+      organizationId: ORG,
+      assetIds: three.ids,
+      window: WINDOW,
+    });
+
+    expect(queryCount(txOne)).toBe(5);
+    expect(queryCount(txThree)).toBe(queryCount(txOne));
+    expect(freeOne.size).toBe(1);
+    expect(freeThree.size).toBe(3);
+    for (const id of three.ids) {
+      // Each pool sees only its own hold: 10 placed minus 4 held.
+      expect(freeThree.get(id)?.find((s) => s.kind === "LOCATION")?.free).toBe(
+        6
+      );
+    }
+  });
+});
+
+describe("loadCompetingHoldsByPool", () => {
+  it("groups the holds of several pools by pool in two queries", async () => {
+    const three = pools(3);
+    const tx = fakeTx(three.seed);
+
+    const byPool = await loadCompetingHoldsByPool(asTx(tx), {
+      organizationId: ORG,
+      assetIds: three.ids,
+      window: WINDOW,
+    });
+
+    expect(queryCount(tx)).toBe(2);
+    expect([...byPool.keys()].sort()).toEqual(three.ids);
+    expect(byPool.get("pool-1")?.map((h) => h.sliceId)).toEqual(["s-1"]);
   });
 });
 

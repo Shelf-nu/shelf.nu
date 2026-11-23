@@ -54,9 +54,9 @@ import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
 import {
-  loadCompetingHolds,
+  computeFreeBySourceForPools,
+  loadCompetingHoldsByPool,
   loadSourceCapacity,
-  computeFreeBySource,
 } from "./capacity.server";
 import {
   allocateSessionPending,
@@ -134,6 +134,10 @@ async function openCall(
   }
 ): Promise<CallContext> {
   const { organizationId, bookingId, sliceIds, window } = args;
+  // Reading the slice list before the asset lock is safe: the caller holds
+  // the booking lock, so no slice is added or removed meanwhile, and every
+  // read that decides anything (slices, rows, logs, shares) runs again under
+  // the asset lock in `openGroupSession`.
   const [slices, booking] = await Promise.all([
     tx.bookingAsset.findMany({
       where: {
@@ -203,7 +207,12 @@ function convertedSlice(
 
 /**
  * Sources at which a group's holds no longer fit: this booking's remaining
- * reservation there is above the free units over the window.
+ * reservation there is above the free units over the window (capacity minus
+ * the peak of every other active booking's holds). Every source where the
+ * short sweep flags one of the booking's slices is included, and so may be a
+ * source where the sweep grants this booking first and a lower-priority
+ * booking is the one short; an AUTO slice there is then moved too, but only
+ * when it fits elsewhere in full, which frees room for the other booking.
  */
 function overcommittedKeys(group: WorkingGroup): Set<string> {
   const freeByKey = new Map(group.free.map((s) => [sourceKey(s), s.free]));
@@ -336,7 +345,10 @@ export async function allocateNewSlices(
  * AUTO and MANUAL slices: an increase is allocated and admitted (a MANUAL
  * slice keeps to the sources it already uses when it has any), a decrease
  * takes pending units first (UNASSIGNED first), then released units, never
- * below out. LEGACY slices (LEGACY or held-back groups) are left alone.
+ * below out. A slice whose group converts in this call is decreased before
+ * its seeded pending units are allocated, and what pending remains is
+ * allocated without refusing: a decrease never adds demand. LEGACY slices
+ * (LEGACY or held-back groups) are left alone.
  *
  * @param tx - The caller's transaction; the caller holds the booking lock
  * @param args.changes - New quantity per slice
@@ -362,6 +374,28 @@ export async function resizeSlices(
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
   });
   const how: AllocationHow = ctx.isDraft ? "draft" : "voluntary";
+
+  // A decrease adds no demand: it first takes the pending units conversion
+  // seeded (they hold no source yet), and whatever pending is left on a
+  // shrinking slice is existing demand, allocated without refusing.
+  const decreased = new Set<string>();
+  for (const change of args.changes) {
+    const found = convertedSlice(ctx, change.sliceId);
+    if (!found || change.quantity >= found.slice.quantity) continue;
+    decreased.add(found.slice.id);
+    const item = ctx.session.pending.find((p) => p.sliceId === found.slice.id);
+    if (!item) continue;
+    const take = Math.min(
+      item.quantity,
+      found.slice.quantity - change.quantity
+    );
+    item.quantity -= take;
+    found.slice.quantity -= take;
+  }
+  const allPending = ctx.session.pending;
+  ctx.session.pending = allPending.filter((p) => decreased.has(p.sliceId));
+  await allocateSessionPending(tx, ctx.session, "involuntary");
+  ctx.session.pending = allPending.filter((p) => !decreased.has(p.sliceId));
   await allocateSessionPending(tx, ctx.session, how);
 
   const touched = new Set<string>();
@@ -441,10 +475,13 @@ function standaloneSlice(ctx: CallContext, sliceId: string) {
  * `sources` gives the planned units (pending plus out) wanted at each loose
  * source: a location id for a manual placement of the pool, or null for
  * Unplaced. Only pending units move: each source keeps at least the units
- * out from it, released units stay where they are, and units out with an
- * unknown origin are not part of the split. So the sources must add up to the
- * slice's planned units on its loose and UNASSIGNED rows, which for a slice
- * with nothing out or returned is its whole quantity.
+ * out from it, and released units stay where they are.
+ *
+ * The sources must add up to the slice's planned units (`quantity -
+ * released`) on its LOCATION, UNPLACED and UNASSIGNED rows. Units out on an
+ * UNKNOWN row are excluded: their origin is not a loose source and the user
+ * cannot move them. For a slice with nothing out or returned this is its
+ * whole quantity.
  *
  * An active booking's change is admitted: at every source that gains units,
  * the booking's whole remaining reservation must fit the free units over the
@@ -613,20 +650,68 @@ export async function setAutoSources(
 }
 
 /**
+ * A refusal entry for a source key of a group: kind and location from the
+ * free entry when the source is a placement, else from the booking's own row
+ * (a location that is no longer a placement has 0 free).
+ */
+function refusalEntryFor(
+  group: WorkingGroup,
+  key: string,
+  freeByKey: Map<string, RefusalEntry>
+): RefusalEntry | null {
+  const source = freeByKey.get(key);
+  if (source) return source;
+  for (const slice of group.slices) {
+    const row = slice.rows.find(
+      (r) => LOOSE_KINDS.has(r.kind) && sourceKey(r) === key
+    );
+    if (row && (row.kind === "LOCATION" || row.kind === "UNPLACED")) {
+      return { kind: row.kind, locationId: row.locationId, free: 0 };
+    }
+  }
+  return null;
+}
+
+/** Shortfall per source: what the booking holds there beyond the free units. */
+function shortfallBySource(
+  held: Map<string, number>,
+  free: RefusalEntry[]
+): Map<string, number> {
+  const freeByKey = new Map(free.map((s) => [sourceKey(s), s.free]));
+  const result = new Map<string, number>();
+  for (const [key, units] of held) {
+    result.set(key, Math.max(0, units - (freeByKey.get(key) ?? 0)));
+  }
+  return result;
+}
+
+/**
  * Admits a change of a booking's window: new dates, reserving a draft, or an
  * extension.
  *
  * Measured window: `[from, to)` for `dates` and `reserve`;
  * `[max(previous.to, now), to)` for `extend` (time already behind an overdue
- * booking cannot compete). At every source the booking holds, its whole
- * remaining reservation (out plus pending) must fit the free units over that
- * window. An AUTO slice that does not fit (or has pending on UNASSIGNED) is
- * re-allocated when another set of sources fits over the whole new window;
- * otherwise, and for MANUAL slices, the change is refused naming each source
- * that does not fit with its free units.
+ * booking cannot compete). Free units, the allocation of pending units
+ * conversion seeds, and AUTO re-allocation are all measured over it.
+ *
+ * At every source, the shortfall is what the booking holds there (out plus
+ * pending) beyond the free units. The change is refused only when it creates
+ * or worsens a shortage: the shortfall over the measured window is above the
+ * shortfall before the change. Before the change means the previous window
+ * for `dates`, and nothing for `reserve` (a draft holds nothing) and `extend`
+ * (the booking held nothing in the added time). So a booking already short
+ * because stock was lost can still shorten its dates.
+ *
+ * AUTO slices that do not fit (or have pending on UNASSIGNED) are first moved
+ * to sources that fit when there are any. Pending units still on UNASSIGNED
+ * refuse `reserve` and `extend`. Refusals name each source with its free
+ * units over the measured window.
  *
  * A draft changing dates is not admitted (it holds nothing); `reserve` always
  * is. LEGACY groups convert first when adoption is enabled.
+ *
+ * Queries beyond {@link openCall}: one batched free read over the previous
+ * window for `dates`, location names on a refusal, and the write.
  *
  * @param tx - The caller's transaction; the caller holds the booking lock
  * @param args.from - The new start
@@ -635,7 +720,7 @@ export async function setAutoSources(
  * @param args.kind - What changed
  * @param args.now - The current time, for extensions (defaults to now)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
- * @throws {ShelfError} 400 naming the sources that do not fit
+ * @throws {ShelfError} 400 naming the sources whose shortage the change creates or worsens
  */
 export async function admitWindowChange(
   tx: BookingSourcesTx,
@@ -650,18 +735,30 @@ export async function admitWindowChange(
     adoptionEnabled?: boolean;
   }
 ): Promise<void> {
-  const { organizationId, bookingId, from, to, kind } = args;
-  const fullWindow: Window = { from, to };
+  const { organizationId, bookingId, from, to, kind, previous } = args;
+  const now = args.now ?? new Date();
+  const start =
+    kind === "extend"
+      ? new Date(Math.max(previous.to.getTime(), now.getTime()))
+      : from;
+  // An extension whose added time is already behind us adds nothing to admit.
+  const measured = start.getTime() < to.getTime();
+  const window: Window = measured ? { from: start, to } : { from, to };
+
   const ctx = await openCall(tx, {
     organizationId,
     bookingId,
-    window: fullWindow,
+    window,
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
   });
-  const admits = kind === "reserve" || !ctx.isDraft;
-  await allocateSessionPending(tx, ctx.session, admits ? "voluntary" : "draft");
+  const voluntary = kind === "reserve" || !ctx.isDraft;
+  await allocateSessionPending(
+    tx,
+    ctx.session,
+    voluntary ? "voluntary" : "draft"
+  );
 
-  if (!admits) {
+  if (!voluntary || !measured) {
     reallocateConflictingAutoSlices(ctx.session);
     await finishCall(tx, ctx);
     return;
@@ -671,7 +768,27 @@ export async function admitWindowChange(
     (g) => g.status === "converted"
   );
 
-  // AUTO slices move to sources that fit the whole new window.
+  // The shortfall before the change, on the booking's holds as they stand.
+  const shortfallBefore = new Map<WorkingGroup, Map<string, number>>();
+  if (kind === "dates" && converted.length > 0) {
+    const previousFree = await computeFreeBySourceForPools(tx, {
+      organizationId,
+      assetIds: converted.map((g) => g.key.assetId),
+      window: previous,
+      excludeBookingId: bookingId,
+    });
+    for (const group of converted) {
+      shortfallBefore.set(
+        group,
+        shortfallBySource(
+          ownHoldBySource(group),
+          previousFree.get(group.key.assetId) ?? []
+        )
+      );
+    }
+  }
+
+  // AUTO slices move to sources that fit the measured window.
   for (const group of converted) {
     const over = overcommittedKeys(group);
     for (const slice of group.slices) {
@@ -682,44 +799,20 @@ export async function admitWindowChange(
     }
   }
 
-  // The measured window: an extension only competes from the later of the
-  // old end and now.
-  let checkFree = new Map(converted.map((g) => [g, g.free]));
-  if (kind === "extend") {
-    const now = args.now ?? new Date();
-    const start = new Date(Math.max(args.previous.to.getTime(), now.getTime()));
-    if (start.getTime() >= to.getTime()) {
-      await finishCall(tx, ctx);
-      return;
-    }
-    const lists = await Promise.all(
-      converted.map((g) =>
-        computeFreeBySource(tx, {
-          organizationId,
-          assetId: g.key.assetId,
-          window: { from: start, to },
-          excludeBookingId: bookingId,
-        })
-      )
-    );
-    checkFree = new Map(converted.map((g, i) => [g, lists[i]]));
-  }
-
   for (const group of converted) {
-    const free = checkFree.get(group) ?? [];
-    const freeByKey = new Map(free.map((s) => [sourceKey(s), s]));
+    const freeByKey = new Map<string, RefusalEntry>(
+      group.free.map((s) => [sourceKey(s), s])
+    );
+    const before = shortfallBefore.get(group) ?? new Map<string, number>();
+    const after = shortfallBySource(ownHoldBySource(group), group.free);
     const refused: RefusalEntry[] = [];
-    for (const [key, held] of ownHoldBySource(group)) {
-      const source = freeByKey.get(key);
-      if (held <= (source?.free ?? 0)) continue;
-      const [kindPart, locationPart] = key.split(":");
-      refused.push({
-        kind: kindPart === "UNPLACED" ? "UNPLACED" : "LOCATION",
-        locationId: kindPart === "UNPLACED" ? null : locationPart || null,
-        free: source?.free ?? 0,
-      });
+    for (const [key, shortfall] of after) {
+      if (shortfall <= (before.get(key) ?? 0)) continue;
+      const entry = refusalEntryFor(group, key, freeByKey);
+      if (entry) refused.push(entry);
     }
-    const needsLocation = group.slices.some((s) => unassignedPending(s) > 0);
+    const needsLocation =
+      kind !== "dates" && group.slices.some((s) => unassignedPending(s) > 0);
     if (refused.length === 0 && needsLocation) {
       refused.push(...availableForBooking(group));
     }
@@ -751,9 +844,9 @@ export type SliceSourceSummary = {
  * units out granted first and pending units by priority. Pending units on
  * UNASSIGNED are always short.
  *
- * Queries: slices with the booking (two, parallel), source rows (one),
- * capacity (three) and competing holds (two per pool) in parallel, location
- * names (one).
+ * Queries: slices with the booking (two, parallel), source rows (one), then
+ * capacity (three), competing holds (two) and location names (one) in
+ * parallel, whatever the number of pools.
  *
  * @param args.organizationId - The trusted workspace id
  * @param args.bookingId - The booking
@@ -804,18 +897,14 @@ export async function getSliceSourceSummaries(args: {
   const locationIds = [
     ...new Set(rows.flatMap((r) => (r.locationId ? [r.locationId] : []))),
   ];
-  const [capacity, holdLists, locations] = await Promise.all([
+  const [capacity, holdsByPool, locations] = await Promise.all([
     loadSourceCapacity(db, { organizationId, assetIds }),
-    Promise.all(
-      assetIds.map((assetId) =>
-        loadCompetingHolds(db, {
-          organizationId,
-          assetIds: [assetId],
-          window,
-          excludeBookingId: bookingId,
-        })
-      )
-    ),
+    loadCompetingHoldsByPool(db, {
+      organizationId,
+      assetIds,
+      window,
+      excludeBookingId: bookingId,
+    }),
     locationIds.length === 0
       ? Promise.resolve([])
       : db.location.findMany({
@@ -825,7 +914,7 @@ export async function getSliceSourceSummaries(args: {
   ]);
   const locationNames = new Map(locations.map((l) => [l.id, l.name]));
 
-  assetIds.forEach((assetId, index) => {
+  for (const assetId of assetIds) {
     const assetSlices = loose.filter((s) => s.assetId === assetId);
     const sliceIds = new Set(assetSlices.map((s) => s.id));
     const assetRows = rows.filter((r) => sliceIds.has(r.bookingAssetId));
@@ -858,7 +947,7 @@ export async function getSliceSourceSummaries(args: {
     }
     const shortages = computeShortSlices({
       capacityBySource: capacity.get(assetId) ?? new Map(),
-      holds: [...(holdLists[index] ?? []), ...own],
+      holds: [...(holdsByPool.get(assetId) ?? []), ...own],
       unassignedPendingBySlice,
     }).filter((s) => sliceIds.has(s.sliceId));
 
@@ -876,6 +965,6 @@ export async function getSliceSourceSummaries(args: {
         mode: slice.sourceAllocation,
       });
     }
-  });
+  }
   return result;
 }

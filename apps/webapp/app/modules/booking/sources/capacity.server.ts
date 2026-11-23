@@ -331,12 +331,80 @@ function peakOverWindow(holds: SourceHold[], window: CapacityWindow): number {
 }
 
 /**
- * Free units at each loose source of one pool over a window: capacity minus
- * the peak of competing holds there, floored at 0. Returns the unplaced units
- * first (`createdOrder` -1), then every manual placement in creation order
- * (`createdOrder` 0, 1, ...), ready for the allocation rule.
+ * Free units at each loose source of several pools over a window: capacity
+ * minus the peak of competing holds there, floored at 0. Each pool's list
+ * has the unplaced units first (`createdOrder` -1), then every manual
+ * placement in creation order (`createdOrder` 0, 1, ...), ready for the
+ * allocation rule.
  *
- * Five queries in two parallel rounds (capacity: three; holds: two).
+ * Five queries in two parallel rounds (capacity: three; holds: two),
+ * whatever the number of pools.
+ *
+ * @param tx - The caller's transaction
+ * @param args.organizationId - The trusted workspace id
+ * @param args.assetIds - The pools
+ * @param args.window - The half-open window to admit over
+ * @param args.excludeBookingId - The booking being admitted
+ * @returns assetId -> free units per source; a pool outside the workspace is absent
+ */
+export async function computeFreeBySourceForPools(
+  tx: CapacityTx,
+  args: {
+    organizationId: string;
+    assetIds: string[];
+    window: CapacityWindow;
+    excludeBookingId?: string;
+  }
+): Promise<Map<string, SourceFree[]>> {
+  const { organizationId, window, excludeBookingId } = args;
+  const assetIds = [...new Set(args.assetIds)];
+  const result = new Map<string, SourceFree[]>();
+  if (assetIds.length === 0) return result;
+
+  const [pools, holds] = await Promise.all([
+    loadPoolSources(tx, { organizationId, assetIds }),
+    loadHoldsWithAsset(tx, {
+      organizationId,
+      assetIds,
+      window,
+      excludeBookingId,
+    }),
+  ]);
+
+  for (const [assetId, pool] of pools) {
+    const poolHolds = holds.filter((h) => h.assetId === assetId);
+    const freeAt = (key: string) =>
+      Math.max(
+        0,
+        (pool.capacity.get(key) ?? 0) -
+          peakOverWindow(
+            poolHolds.filter((h) => h.sourceKey === key),
+            window
+          )
+      );
+    result.set(assetId, [
+      {
+        kind: "UNPLACED",
+        locationId: null,
+        free: freeAt(UNPLACED_KEY),
+        createdOrder: -1,
+      },
+      ...pool.locationOrder.map(
+        (locationId, index): SourceFree => ({
+          kind: "LOCATION",
+          locationId,
+          free: freeAt(sourceKey({ kind: "LOCATION", locationId })),
+          createdOrder: index,
+        })
+      ),
+    ]);
+  }
+  return result;
+}
+
+/**
+ * Free units at each loose source of one pool over a window: the one-pool
+ * form of {@link computeFreeBySourceForPools}. Five queries.
  *
  * @param tx - The caller's transaction
  * @param args.organizationId - The trusted workspace id
@@ -354,45 +422,39 @@ export async function computeFreeBySource(
     excludeBookingId?: string;
   }
 ): Promise<SourceFree[]> {
-  const { organizationId, assetId, window, excludeBookingId } = args;
-  const [pools, holds] = await Promise.all([
-    loadPoolSources(tx, { organizationId, assetIds: [assetId] }),
-    loadHoldsWithAsset(tx, {
-      organizationId,
-      assetIds: [assetId],
-      window,
-      excludeBookingId,
-    }),
-  ]);
-  const pool = pools.get(assetId);
-  if (!pool) return [];
+  const { assetId, ...rest } = args;
+  const byPool = await computeFreeBySourceForPools(tx, {
+    ...rest,
+    assetIds: [assetId],
+  });
+  return byPool.get(assetId) ?? [];
+}
 
-  const freeAt = (key: string) =>
-    Math.max(
-      0,
-      (pool.capacity.get(key) ?? 0) -
-        peakOverWindow(
-          holds.filter((h) => h.sourceKey === key),
-          window
-        )
-    );
-
-  return [
-    {
-      kind: "UNPLACED",
-      locationId: null,
-      free: freeAt(UNPLACED_KEY),
-      createdOrder: -1,
-    },
-    ...pool.locationOrder.map(
-      (locationId, index): SourceFree => ({
-        kind: "LOCATION",
-        locationId,
-        free: freeAt(sourceKey({ kind: "LOCATION", locationId })),
-        createdOrder: index,
-      })
-    ),
-  ];
+/**
+ * {@link loadCompetingHolds} for several pools at once, grouped by pool:
+ * two queries whatever the number of pools.
+ *
+ * @param tx - The caller's transaction
+ * @param args - As {@link loadCompetingHolds}
+ * @returns assetId -> holds; a pool with none is absent
+ */
+export async function loadCompetingHoldsByPool(
+  tx: CapacityTx,
+  args: {
+    organizationId: string;
+    assetIds: string[];
+    window: CapacityWindow;
+    excludeBookingId?: string;
+  }
+): Promise<Map<string, SourceHold[]>> {
+  const holds = await loadHoldsWithAsset(tx, args);
+  const byPool = new Map<string, SourceHold[]>();
+  for (const { assetId, ...hold } of holds) {
+    const list = byPool.get(assetId) ?? [];
+    list.push(hold);
+    byPool.set(assetId, list);
+  }
+  return byPool;
 }
 
 /**

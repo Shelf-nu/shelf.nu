@@ -56,7 +56,7 @@ import { SENTRY_DSN } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
-import { computeFreeBySource } from "./capacity.server";
+import { computeFreeBySourceForPools } from "./capacity.server";
 import type { CapacityTx } from "./capacity.server";
 import { planGroupConversion } from "./conversion";
 import {
@@ -297,8 +297,9 @@ function reportHeldBack(
  * `loadFree` is true, and always for a group that converts now (it decides
  * UNKNOWN versus UNPLACED carriers) or has a LEGACY slice to adopt.
  *
- * Queries: `loadGroupStates` (four), then `computeFreeBySource` (five) per
- * group that needs it, all groups in parallel.
+ * Queries: `loadGroupStates` (four), then `computeFreeBySourceForPools`
+ * (five) once per distinct booking among the groups that need free units,
+ * whatever the number of pools (one booking for every facade call).
  *
  * @param tx - The caller's transaction; the caller holds the booking and asset locks
  * @param args.organizationId - The trusted workspace id
@@ -352,18 +353,34 @@ export async function openGroupSession(
         // A LEGACY slice of a group that ends converted is adopted: allocated.
         s.slices.some((slice) => slice.mode === "LEGACY"))
   );
-  const freeLists = await Promise.all(
-    needFree.map((s) =>
-      computeFreeBySource(tx, {
-        organizationId,
-        assetId: s.key.assetId,
-        window,
-        excludeBookingId: s.key.bookingId,
-      })
+  // One batched read per booking: free units exclude that booking's holds.
+  const assetsByBooking = new Map<string, string[]>();
+  for (const s of needFree) {
+    const list = assetsByBooking.get(s.key.bookingId) ?? [];
+    list.push(s.key.assetId);
+    assetsByBooking.set(s.key.bookingId, list);
+  }
+  const freeByBooking = new Map(
+    await Promise.all(
+      [...assetsByBooking].map(
+        async ([bookingId, assetIds]) =>
+          [
+            bookingId,
+            await computeFreeBySourceForPools(tx, {
+              organizationId,
+              assetIds,
+              window,
+              excludeBookingId: bookingId,
+            }),
+          ] as const
+      )
     )
   );
   const freeByGroup = new Map(
-    needFree.map((s, i) => [groupMapKey(s.key), freeLists[i]])
+    needFree.map((s) => [
+      groupMapKey(s.key),
+      freeByBooking.get(s.key.bookingId)?.get(s.key.assetId) ?? [],
+    ])
   );
 
   for (const [mapKey, state] of states) {
@@ -735,9 +752,10 @@ export function buildSessionPlan(session: GroupSession): SourcePlanWrite {
  * The caller holds the booking lock of every group's booking (lock order:
  * booking rows, then asset rows) and calls this inside its transaction.
  *
- * Queries: the lock (one), `loadGroupStates` (four), `computeFreeBySource`
- * (five) per group that converts now, in parallel, location names (one) only
- * on a refusal, and the write.
+ * Queries: the lock (one), `loadGroupStates` (four),
+ * `computeFreeBySourceForPools` (five) per distinct booking with a group that
+ * converts now or has a slice to adopt, location names (one) only on a
+ * refusal, and the write.
  *
  * @param tx - The caller's transaction
  * @param args.organizationId - The trusted workspace id

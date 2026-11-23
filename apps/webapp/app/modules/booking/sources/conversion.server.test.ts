@@ -54,10 +54,12 @@ vi.mock("./repository.server", async (importOriginal) => {
 // why: free units per source are computed and tested in
 // capacity.server.test.ts; a fixed answer isolates the allocation decision.
 vi.mock("./capacity.server", () => ({
-  computeFreeBySource: vi.fn(() => {
-    h.order.push("computeFreeBySource");
-    return h.free;
-  }),
+  computeFreeBySourceForPools: vi.fn(
+    (_tx: unknown, args: { assetIds: string[] }) => {
+      h.order.push("computeFreeBySourceForPools");
+      return new Map(args.assetIds.map((id) => [id, h.free]));
+    }
+  ),
 }));
 
 // why: the held-back report must carry the raw numbers; the spy reads them
@@ -235,7 +237,7 @@ describe("ensureGroupsConverted", () => {
     expect(h.order).toEqual([
       "lock",
       "loadGroupStates",
-      "computeFreeBySource",
+      "computeFreeBySourceForPools",
       "writeSourcePlan",
     ]);
   });
