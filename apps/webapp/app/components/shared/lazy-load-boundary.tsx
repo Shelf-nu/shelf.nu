@@ -12,10 +12,20 @@
  * reporting. That check also raises the app-wide new-version prompt when a
  * newer build is live. The report waits for the check (bounded by the
  * checker's own deadline), or goes out at `pagehide` if the page unloads
- * first, so a click on Reload never loses it. The report carries a `build` tag: `superseded` when a
- * newer build is live or this tab has already seen one (an expected 404 after
- * a deploy, sent as a warning), `current` when the tab runs the live build (a
- * real failure), `unknown` when the check cannot tell.
+ * first, so a click on Reload never loses it. Where it goes depends on the
+ * check:
+ *
+ * - `superseded` (a newer build is live, or this tab has already seen one): an
+ *   expected miss, since a deploy deletes the previous build's files. It goes
+ *   to Sentry Logs, not to an issue; the user already has the Reload button
+ *   and the new-version prompt.
+ * - `current` (the tab runs the live build) and `unknown` (the check cannot
+ *   tell): a real failure, such as a broken deploy or a proxy blocking our
+ *   files. It is captured as an exception with a `build` tag.
+ *
+ * Only a check that proves the tab is stale sends a failure to Logs. A stale
+ * tab that reloads and fails again is on the live build, so the second
+ * failure raises an issue.
  *
  * @see {@link file://./reload-app-button.tsx}
  * @see {@link file://./../../utils/build-version-checker.ts}
@@ -26,7 +36,7 @@ import { Component, Suspense } from "react";
 import type { ReactNode } from "react";
 import * as Sentry from "@sentry/react-router";
 import type { BuildComparison } from "~/utils/build-version";
-import { isChunkLoadError } from "~/utils/build-version";
+import { getOwnBuildId, isChunkLoadError } from "~/utils/build-version";
 import { getBuildVersionChecker } from "~/utils/build-version-checker";
 import { ReloadAppButton, UnsavedChangesReloadHint } from "./reload-app-button";
 
@@ -56,7 +66,8 @@ export function chunkFailureBuildLabel(
 }
 
 /**
- * Reports a chunk load failure once its build is known.
+ * Reports a chunk load failure once its build is known: to Sentry Logs when
+ * the tab is superseded, as an exception otherwise.
  *
  * The report waits for an immediate build check, whose own deadline bounds
  * the wait. If the page unloads first (the Reload button is on screen
@@ -74,13 +85,23 @@ function reportChunkFailure(error: unknown) {
     if (reported) return;
     reported = true;
     window.removeEventListener("pagehide", reportBeforeUnload);
+    const snapshot = checker.getSnapshot();
     const build = chunkFailureBuildLabel(
       comparison,
-      checker.getSnapshot().status === "newer"
+      snapshot.status === "newer"
     );
+    if (build === "superseded") {
+      Sentry.logger.info("Chunk from a superseded build failed to load", {
+        message: error instanceof Error ? error.message : String(error),
+        path: window.location.pathname,
+        ownBuildId: getOwnBuildId(),
+        serverBuildId:
+          snapshot.status === "newer" ? snapshot.serverBuildId : null,
+      });
+      return;
+    }
     Sentry.captureException(error, {
       tags: { source: "lazy-load-boundary", chunk_load_error: true, build },
-      ...(build === "superseded" ? { level: "warning" as const } : {}),
     });
   };
   const reportBeforeUnload = () => report("unknown");
