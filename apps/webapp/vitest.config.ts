@@ -55,9 +55,11 @@ export default defineConfig({
       "mocks/**/*.{js,ts}",
       "test/e2e/**/*",
       "test/setup-test-env.ts",
-      // Real-database tests need a migrated Postgres; they run only through
-      // `vitest.db.config.ts` (`pnpm webapp:test:db`).
-      "**/*.db.test.ts",
+      // The harness-based real-database tests need a migrated Postgres; they
+      // run only through `vitest.db.config.ts` (`pnpm webapp:test:db`).
+      // `*.db.test.ts` files elsewhere skip themselves without their own
+      // database URL, so they stay runnable by path here.
+      "test/db/**",
       // React Router's typegen mirrors route filenames under .react-router/types,
       // so a route test at `foo.test.ts` produces a generated file with the same
       // name that vitest would otherwise try to run as a test.

@@ -16,8 +16,10 @@ database and are named `*.db.test.ts`.
 | `apps/webapp/test/db/fixtures.ts`        | `seedOrgWithPool()`, `seedBooking()`                   |
 | `apps/webapp/test/db/harness.db.test.ts` | Self-test proving the harness works                    |
 
-The main suite (`pnpm webapp:test`) excludes `**/*.db.test.ts`, so these files
-never run without a database.
+The main suite (`pnpm webapp:test`) excludes `test/db/**`, so these files
+never run without a database. Older `*.db.test.ts` files under `app/` gate
+themselves with `describe.skipIf` on their own database URL and are run by
+path through the main config.
 
 ## The `_test` guard
 
