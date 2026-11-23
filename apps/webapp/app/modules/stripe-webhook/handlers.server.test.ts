@@ -1037,6 +1037,22 @@ describe("handleSubscriptionCreated", () => {
 });
 
 describe("handleSubscriptionPaused", () => {
+  it("pauses both add-ons of a subscription without a plan", async () => {
+    await handleSubscriptionPaused(
+      buildEvent(
+        "customer.subscription.paused",
+        buildSubscription({
+          productIds: [AUDITS_PRODUCT, BARCODES_PRODUCT],
+          status: "paused",
+        })
+      ),
+      user
+    );
+
+    expect(mockAuditAddonWebhook).toHaveBeenCalledTimes(1);
+    expect(mockBarcodeAddonWebhook).toHaveBeenCalledTimes(1);
+  });
+
   it("pauses the add-ons bundled on a tier subscription and still downgrades the user", async () => {
     const subscription = buildSubscription({
       productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
@@ -1140,6 +1156,42 @@ describe("handleSubscriptionPaused", () => {
 });
 
 describe("handleSubscriptionDeleted", () => {
+  it("cancels both add-ons of a subscription without a plan", async () => {
+    await handleSubscriptionDeleted(
+      buildEvent(
+        "customer.subscription.deleted",
+        buildSubscription({
+          productIds: [AUDITS_PRODUCT, BARCODES_PRODUCT],
+          status: "canceled",
+        })
+      ),
+      user
+    );
+
+    expect(mockAuditAddonWebhook).toHaveBeenCalledTimes(1);
+    expect(mockBarcodeAddonWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the add-ons on when a subscription without a plan is cancelled for a transfer", async () => {
+    await handleSubscriptionDeleted(
+      buildEvent(
+        "customer.subscription.deleted",
+        buildSubscription({
+          productIds: [AUDITS_PRODUCT, BARCODES_PRODUCT],
+          status: "canceled",
+          metadata: {
+            organizationId: "org-1",
+            transferred_to_subscription: "sub_2",
+          },
+        })
+      ),
+      user
+    );
+
+    expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+    expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
+  });
+
   it("cancels every add-on bundled on the tier subscription", async () => {
     const subscription = buildSubscription({
       productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
@@ -1506,6 +1558,89 @@ describe("handleSubscriptionUpdated", () => {
         ["audits", "org-2"],
         ["barcodes", "org-2"],
       ]);
+    });
+
+    it("leaves the workspace it moved to untouched in the one it left when switching on fails", async () => {
+      const products = [TEAM_PRODUCT, AUDITS_PRODUCT];
+      stripeHolds(
+        storedSubscription(products, { metadata: { organizationId: "org-2" } })
+      );
+      mockAuditAddonWebhook.mockRejectedValueOnce(new Error("database down"));
+
+      await expect(
+        handleSubscriptionUpdated(movedEvent(products), user)
+      ).rejects.toThrow("database down");
+
+      expect(switchedOff()).toEqual([]);
+    });
+
+    it("does not move a past-due add-on that another subscription keeps on in the workspace it left", async () => {
+      const products = [TEAM_PRODUCT, AUDITS_PRODUCT];
+      stripeHolds(
+        storedSubscription(products, {
+          status: "past_due",
+          metadata: { organizationId: "org-2" },
+        }),
+        storedSubscription([AUDITS_PRODUCT], {
+          id: "sub_2",
+          metadata: { organizationId: "org-1" },
+        })
+      );
+      mockOrgFindUnique.mockResolvedValue({
+        auditsEnabled: true,
+        barcodesEnabled: false,
+      });
+
+      await handleSubscriptionUpdated(movedEvent(products), user);
+
+      expect(mockOrgUpdate).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "org-2" } })
+      );
+    });
+
+    it("ignores a late first link when Stripe shows the subscription moved since", async () => {
+      stripeHolds(
+        storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT], {
+          metadata: { organizationId: "org-2" },
+        })
+      );
+
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT],
+            metadata: { organizationId: "org-1" },
+          }),
+          { metadata: { organizationId: "" } }
+        ),
+        user
+      );
+
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+    });
+
+    it("switches off an add-on dropped from a subscription without a plan", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({ productIds: [AUDITS_PRODUCT] }),
+          {
+            items: {
+              data: [AUDITS_PRODUCT, BARCODES_PRODUCT].map((product) => ({
+                price: { product },
+              })),
+            },
+          }
+        ),
+        user
+      );
+
+      expect(mockOrgUpdate).toHaveBeenCalledWith({
+        where: { id: "org-1" },
+        data: { barcodesEnabled: false },
+        select: { id: true },
+      });
     });
 
     it("leaves other workspaces alone when the first workspace is set", async () => {
