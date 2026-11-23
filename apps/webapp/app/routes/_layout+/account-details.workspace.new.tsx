@@ -26,6 +26,11 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
+import {
+  adminUserUrl,
+  adminWorkspaceUrl,
+  linkWaitingSubscriptionsToWorkspace,
+} from "~/modules/stripe-webhook/helpers.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -145,8 +150,45 @@ export async function action({ context, request }: ActionFunctionArgs) {
       currency,
     });
 
+    // An invoice-billed subscription the user holds without a workspace goes
+    // to this one, with its add-ons, when it is the only Team workspace it
+    // could belong to. A failed lookup never blocks workspace creation; the
+    // admin is told so they can link it by hand.
+    await linkWaitingSubscriptionsToWorkspace({
+      userId,
+      organizationId: newOrg.id,
+    }).catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to link waiting subscriptions to the new workspace during workspace creation",
+          additionalData: { userId, organizationId: newOrg.id },
+          label: "Stripe",
+        })
+      );
+
+      void sendEmail({
+        to: ADMIN_EMAIL,
+        subject: "ACTION REQUIRED: Subscription linking failed",
+        text: [
+          "A user created a Team workspace, but Shelf could not check whether",
+          "a subscription without a workspace belongs to it.",
+          "",
+          `User ID: ${userId}`,
+          `  ${adminUserUrl(userId)}`,
+          `Organization ID: ${newOrg.id}`,
+          `  ${adminWorkspaceUrl(newOrg.id)}`,
+          "",
+          "Check the user's subscriptions and link the one that belongs to",
+          "this workspace on their admin page (link above), or set",
+          "metadata.organizationId on it in Stripe.",
+        ].join("\n"),
+      });
+    });
+
     // Link audit addon to new org if checkout included audits.
-    // This must not block workspace creation — if it fails, we log,
+    // This must not block workspace creation: if it fails, we log,
     // notify the admin, and let the user continue.
     const url = new URL(request.url);
     const includesAudits = url.searchParams.get("includesAudits") === "true";
