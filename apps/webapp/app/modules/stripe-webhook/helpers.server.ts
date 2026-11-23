@@ -507,20 +507,24 @@ export async function linkWaitingSubscriptionsToWorkspace({
   ];
   for (const sub of ordered) {
     // The handlers' creation branch switches the add-on on for the workspace
-    // (and records a used trial), whatever the subscription's live status.
+    // (and records a used trial). A `past_due` subscription is linked without
+    // it: Shelf cannot tell a grace period from an invoice already overdue,
+    // and paying the invoice switches the add-ons on for the linked workspace
+    // (`handleInvoicePaid`).
     const linked = {
       ...sub,
       metadata: { ...sub.metadata, organizationId },
     } as Stripe.Subscription;
     const addonTypes = addonTypesOf(sub);
-    if (addonTypes.includes("audits")) {
+    const switchOn = sub.status !== "past_due";
+    if (switchOn && addonTypes.includes("audits")) {
       await handleAuditAddonWebhook({
         eventType: "customer.subscription.created",
         subscription: linked,
         organizationId,
       });
     }
-    if (addonTypes.includes("barcodes")) {
+    if (switchOn && addonTypes.includes("barcodes")) {
       await handleBarcodeAddonWebhook({
         eventType: "customer.subscription.created",
         subscription: linked,
@@ -576,13 +580,78 @@ export function sendAdminWorkspaceLinkedEmail({
 }
 
 /**
+ * Why the admin is asked to pick a workspace, as the email's subject and
+ * opening sentence:
+ * - no free Team workspace: every one the customer owns already has a plan
+ *   subscription, so the customer may need another workspace;
+ * - several free Team workspaces: any of them could be meant;
+ * - one free workspace and several subscriptions without one: they may be
+ *   meant for different workspaces;
+ * - one free workspace and one subscription: it is not the workspace the
+ *   customer just created.
+ *
+ * @param args.subscriptionCount - How many subscriptions wait for a workspace
+ * @param args.ownedCount - How many Team workspaces the customer owns
+ * @param args.candidateCount - How many of them no live plan is linked to
+ */
+function pickWorkspaceReason({
+  subscriptionCount,
+  ownedCount,
+  candidateCount,
+}: {
+  subscriptionCount: number;
+  ownedCount: number;
+  candidateCount: number;
+}): { subject: string; reason: string[] } {
+  if (candidateCount === 0) {
+    return {
+      subject:
+        "Needs you: no free Team workspace for a subscription, link it in Stripe metadata",
+      reason: [
+        "A subscription has no workspace, and every Team workspace the",
+        "customer owns already has its own plan subscription, so none was",
+        "picked. The customer may need another workspace (raise their",
+        "workspace limit), or the subscription may belong to one of these.",
+      ],
+    };
+  }
+  if (candidateCount > 1) {
+    return {
+      subject: `Needs you: customer owns ${ownedCount} Team workspaces, pick one in Stripe metadata`,
+      reason: [
+        "A subscription has no workspace and several Team workspaces could",
+        "be meant, so none was picked.",
+      ],
+    };
+  }
+  if (subscriptionCount > 1) {
+    return {
+      subject:
+        "Needs you: more than one subscription has no workspace, pick in Stripe metadata",
+      reason: [
+        "More than one subscription of the customer (plans or add-ons) has",
+        "no workspace, and they may be meant for different workspaces, so",
+        "none was picked.",
+      ],
+    };
+  }
+  return {
+    subject:
+      "Needs you: subscription has no workspace, confirm the Team workspace in Stripe metadata",
+    reason: [
+      "A subscription has no workspace. One Team workspace is free, but it",
+      "is not the one the customer just created, so none was picked.",
+    ],
+  };
+}
+
+/**
  * Asks the admin to pick the workspace for subscriptions that
  * `resolveTeamWorkspaceForPlan` could not place with certainty. Sent only
  * when `ADMIN_EMAIL` is configured.
  *
- * The subject names the reason: several Team workspaces could be meant, or
- * one workspace but more than one subscription (plans or add-ons) without a
- * workspace. Linking a subscription on the admin user page
+ * The subject and opening sentence name the reason (`pickWorkspaceReason`).
+ * Linking a subscription on the admin user page
  * (`linkSubscriptionToWorkspaceAsAdmin`) or setting `metadata.organizationId`
  * in Stripe raises a `customer.subscription.updated` event, which switches its
  * add-ons on for that workspace.
@@ -604,18 +673,16 @@ export function sendAdminPickWorkspaceEmail({
   candidates: LinkableWorkspace[];
 }) {
   if (!ADMIN_EMAIL) return;
-  const subject =
-    candidates.length > 1
-      ? `Needs you: customer owns ${ownedCount} Team workspaces, pick one in Stripe metadata`
-      : "Needs you: more than one subscription has no workspace, pick in Stripe metadata";
+  const { subject, reason } = pickWorkspaceReason({
+    subscriptionCount: subscriptionIds.length,
+    ownedCount,
+    candidateCount: candidates.length,
+  });
   sendEmail({
     to: ADMIN_EMAIL,
     subject,
     text: [
-      "A subscription has no workspace and Shelf could not tell which Team",
-      "workspace it belongs to, so none was picked. Either several workspaces",
-      "could be meant, or more than one subscription of the customer (plans",
-      "or add-ons) names no workspace.",
+      ...reason,
       "",
       `Customer: ${user.email}`,
       `  ${adminUserUrl(user.id)}`,

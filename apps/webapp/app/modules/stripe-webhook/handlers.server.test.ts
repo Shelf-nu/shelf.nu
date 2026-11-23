@@ -160,11 +160,20 @@ vi.mock("~/modules/organization/service.server", () => ({
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn(),
 }));
+// why: the workspace limit check reads the user's tier limit and workspaces
+// from the database; each test states whether another workspace is allowed
+const { mockAssertCanCreateWorkspace } = vi.hoisted(() => ({
+  mockAssertCanCreateWorkspace: vi.fn(),
+}));
+vi.mock("~/utils/subscription.server", () => ({
+  assertUserCanCreateMoreOrganizations: mockAssertCanCreateWorkspace,
+}));
 // why: Logger makes external calls
 vi.mock("~/utils/logger", () => ({
   Logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
+import { sendTeamTrialWelcomeEmail } from "~/emails/stripe/welcome-to-trial";
 import {
   fetchStripeSubscription,
   getCustomerNotificationData,
@@ -327,6 +336,7 @@ beforeEach(() => {
   // unless a test says otherwise.
   mockSubscriptionsList.mockResolvedValue({ data: [], has_more: false });
   mockOrgFindMany.mockResolvedValue([]);
+  mockAssertCanCreateWorkspace.mockResolvedValue(undefined);
   mockProductsRetrieve.mockImplementation((productId: string) => {
     const product = PRODUCTS[productId];
     return product
@@ -452,6 +462,87 @@ describe("handleSubscriptionCreated", () => {
       expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
         expect.objectContaining({ needsTeamWorkspace: true })
       );
+    });
+
+    describe("when every Team workspace the customer owns has its own plan", () => {
+      beforeEach(() => {
+        mockOrgFindMany.mockResolvedValue([
+          { id: "org-9", name: "ZZ Test Team" },
+        ]);
+        stripeHolds(
+          storedSubscription([TEAM_PRODUCT], {
+            id: "sub_0",
+            metadata: { organizationId: "org-9" },
+          }),
+          storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT])
+        );
+      });
+
+      it("asks the admin, not the customer, when their plan allows no other workspace", async () => {
+        mockAssertCanCreateWorkspace.mockRejectedValue(
+          new Error("Not allowed")
+        );
+
+        await handleSubscriptionCreated(
+          buildEvent("customer.subscription.created", unlinked()),
+          user
+        );
+
+        expect(mockSubscriptionsUpdate).toHaveBeenCalledTimes(1);
+        expect(organizationIdsWritten()).toEqual([]);
+        expect(adminEmailSubjects()).toEqual([
+          "Needs you: no free Team workspace for a subscription, link it in Stripe metadata",
+        ]);
+        expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
+          expect.objectContaining({ needsTeamWorkspace: false })
+        );
+      });
+
+      it("asks the customer to create another workspace when their plan allows one", async () => {
+        await handleSubscriptionCreated(
+          buildEvent("customer.subscription.created", unlinked()),
+          user
+        );
+
+        expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+        expect(adminEmailSubjects()).toEqual([]);
+        expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
+          expect.objectContaining({ needsTeamWorkspace: true })
+        );
+      });
+    });
+
+    it("welcomes a trial user once the workspace link has gone through", async () => {
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", {
+          ...unlinked(),
+          trial_start: 1,
+          trial_end: 2,
+        } as Stripe.Subscription),
+        user
+      );
+
+      expect(sendTeamTrialWelcomeEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not welcome a trial user when linking fails, so Stripe's retry welcomes them once", async () => {
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+      mockSubscriptionsList.mockRejectedValue(new Error("Stripe is down"));
+
+      await expect(
+        handleSubscriptionCreated(
+          buildEvent("customer.subscription.created", {
+            ...unlinked(),
+            trial_start: 1,
+            trial_end: 2,
+          } as Stripe.Subscription),
+          user
+        )
+      ).rejects.toThrow();
+
+      expect(sendTeamTrialWelcomeEmail).not.toHaveBeenCalled();
     });
 
     it("is linked to the one Team workspace the customer owns, with its add-ons", async () => {
@@ -2053,6 +2144,21 @@ describe("handleInvoiceOverdue", () => {
     vi.mocked(getInvoiceNotificationData).mockResolvedValue({
       emailsToNotify: [],
     } as unknown as Awaited<ReturnType<typeof getInvoiceNotificationData>>);
+  });
+
+  it("sends no email when reading the subscription fails, so Stripe's retry sends them once", async () => {
+    vi.mocked(getInvoiceNotificationData).mockResolvedValue({
+      emailsToNotify: ["owner@example.com"],
+    } as unknown as Awaited<ReturnType<typeof getInvoiceNotificationData>>);
+    vi.mocked(fetchStripeSubscription).mockRejectedValue(
+      new Error("Stripe is down")
+    );
+
+    await expect(
+      handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1")
+    ).rejects.toThrow();
+
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it("keeps Team while another live Team subscription still pays for it", async () => {

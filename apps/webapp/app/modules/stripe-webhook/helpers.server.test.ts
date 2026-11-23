@@ -637,12 +637,13 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });
 
-  it("switches on the add-ons of a past-due subscription too", async () => {
+  it("links a past-due subscription but leaves its add-ons to the paid invoice", async () => {
     stripeHolds(subscription([TEAM, AUDITS], { status: "past_due" }));
 
     await linkToNewWorkspace();
 
-    expect(addonsSwitchedOn()).toEqual(["audits:sub_1:org-new"]);
+    expect(organizationIdsWritten()).toEqual(["org-new"]);
+    expect(addonsSwitchedOn()).toEqual([]);
   });
 
   it("links a plan-only subscription too, so a later plan does not count this workspace as free", async () => {
@@ -729,6 +730,46 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     );
     expect(email.text).toContain("/admin-dashboard/user-1");
     expect(email.text).toContain("/admin-dashboard/org/org-new");
+  });
+
+  it("tells the admin no Team workspace is free when every one has its own plan", async () => {
+    stripeHolds(
+      subscription([TEAM], {
+        id: "sub_plan",
+        metadata: { organizationId: "org-new" },
+      }),
+      subscription([AUDITS], { id: "sub_audits" })
+    );
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([
+      "Needs you: no free Team workspace for a subscription, link it in Stripe metadata",
+    ]);
+    const [email] = mockSendEmail.mock.calls[0];
+    expect(email.text).toContain("already has its own plan subscription");
+  });
+
+  it("asks the admin to confirm when the one free workspace is not the new one", async () => {
+    stripeHolds(
+      subscription([TEAM], {
+        id: "sub_plan",
+        metadata: { organizationId: "org-new" },
+      }),
+      subscription([AUDITS], { id: "sub_audits" })
+    );
+    mockOrgFindMany.mockResolvedValue([
+      { id: "org-old", name: "ZZ Old" },
+      { id: "org-new", name: "ZZ New" },
+    ]);
+
+    await linkToNewWorkspace();
+
+    expect(organizationIdsWritten()).toEqual([]);
+    expect(adminEmailSubjects()).toEqual([
+      "Needs you: subscription has no workspace, confirm the Team workspace in Stripe metadata",
+    ]);
   });
 
   it("asks the admin instead of putting several add-on subscriptions on one workspace", async () => {

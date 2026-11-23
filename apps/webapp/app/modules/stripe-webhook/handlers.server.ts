@@ -32,6 +32,7 @@ import {
   type CustomerWithSubscriptions,
 } from "~/utils/stripe.server";
 
+import { assertUserCanCreateMoreOrganizations } from "~/utils/subscription.server";
 import { resolveUserGreetingName } from "~/utils/user";
 import {
   addonTypesOf,
@@ -98,6 +99,20 @@ async function syncBundledAddons({
       organizationId,
     });
   }
+}
+
+/**
+ * Whether the user's plan lets them create another workspace, the check the
+ * workspace creation page runs. Any failure counts as no, so the admin is
+ * asked rather than the customer sent to a page that refuses them.
+ *
+ * @param userId - The user the subscription belongs to
+ */
+async function canCreateAnotherWorkspace(userId: string): Promise<boolean> {
+  return assertUserCanCreateMoreOrganizations(userId).then(
+    () => true,
+    () => false
+  );
 }
 
 /**
@@ -678,7 +693,8 @@ function buildUpgradeCompletedProps(
  * (`linkWaitingSubscriptionsToWorkspace`). Otherwise, for an invoice-billed
  * subscription that Stripe still holds as active or trialing,
  * `resolveTeamWorkspaceForPlan` decides:
- * - no candidate workspace: `"unplaced"`, as above;
+ * - no candidate workspace: `"unplaced"`, as above, when the user's plan
+ *   lets them create another workspace; otherwise the admin is asked;
  * - one certain workspace: the add-ons switch on there, the subscription's
  *   metadata names it (`linkedMetadata`), and the admin is told;
  * - anything else: nothing is guessed and the admin is asked to pick, once
@@ -737,7 +753,12 @@ async function linkSubscriptionToTeamWorkspace({
     owned,
     subscriptions,
   });
-  if (candidates.length === 0) return "unplaced";
+  // Every Team workspace the user owns is taken by a plan. The create link
+  // only helps a user whose plan allows another workspace; for anyone else
+  // the admin places the subscription.
+  if (candidates.length === 0 && (await canCreateAnotherWorkspace(user.id))) {
+    return "unplaced";
+  }
   if (!workspace) {
     await askAdminToPickWorkspaceOnce({
       user,
@@ -914,6 +935,12 @@ export async function handleSubscriptionCreated(
   const isTrialSubscription =
     !!subscription.trial_end && !!subscription.trial_start;
 
+  // The trial welcome goes out once the add-on and workspace work below has
+  // succeeded: a failure there makes Stripe retry the event, and the retry
+  // must not welcome the user again.
+  let trialWelcomeTo:
+    | { email: string; firstName: string | null; displayName: string | null }
+    | undefined;
   if (isTrialSubscription && !isTransferredSubscription) {
     const trialUser = await db.user
       .update({
@@ -933,11 +960,7 @@ export async function handleSubscriptionCreated(
           status: 500,
         });
       });
-
-    void sendTeamTrialWelcomeEmail({
-      email: trialUser.email,
-      firstName: resolveUserGreetingName(trialUser),
-    });
+    trialWelcomeTo = trialUser;
   } else if (isTransferredSubscription) {
     // Transferred subscription: update tier but skip welcome emails
     // and don't set usedFreeTrial (already handled in transferOwnership)
@@ -987,6 +1010,13 @@ export async function handleSubscriptionCreated(
     user,
     loadSubscriptions,
   });
+
+  if (trialWelcomeTo) {
+    void sendTeamTrialWelcomeEmail({
+      email: trialWelcomeTo.email,
+      firstName: resolveUserGreetingName(trialWelcomeTo),
+    });
+  }
 
   if (!isTrialSubscription && !isTransferredSubscription) {
     // Direct paid conversion (non-trial, non-transfer): a free user just
@@ -1614,38 +1644,6 @@ export async function handleInvoiceOverdue(
       });
     });
 
-  sendAdminInvoiceEmail({
-    user,
-    eventType: event.type,
-    invoiceId: overdueInvoice.id,
-    subject: `Invoice overdue: ${user.email}`,
-  });
-
-  // Send user notification (deduplicated). The due date is formatted with the
-  // billed (recipient) user's resolved prefs.
-  const prefs = await resolveUserFormatPrefsById(user.id, null);
-  const { emailsToNotify, customerName, subscriptionName, amountDue, dueDate } =
-    await getInvoiceNotificationData({
-      customerId,
-      invoice: overdueInvoice,
-      user,
-      prefs,
-    });
-
-  for (const email of emailsToNotify) {
-    sendEmail({
-      to: email,
-      subject: "Action needed: Your Shelf invoice is overdue",
-      text: unpaidInvoiceUserText({
-        customerEmail: email,
-        customerName,
-        subscriptionName,
-        amountDue,
-        dueDate,
-      }),
-    });
-  }
-
   // End the tier and the add-ons of the subscription the invoice belongs to
   const subscriptionId =
     overdueInvoice.parent?.subscription_details?.subscription;
@@ -1696,6 +1694,40 @@ export async function handleInvoiceOverdue(
         }
       }
     }
+  }
+
+  // The emails go out last: a failed Stripe read or write above makes Stripe
+  // retry the event, and the retry must not send them a second time.
+  sendAdminInvoiceEmail({
+    user,
+    eventType: event.type,
+    invoiceId: overdueInvoice.id,
+    subject: `Invoice overdue: ${user.email}`,
+  });
+
+  // Send user notification (deduplicated). The due date is formatted with the
+  // billed (recipient) user's resolved prefs.
+  const prefs = await resolveUserFormatPrefsById(user.id, null);
+  const { emailsToNotify, customerName, subscriptionName, amountDue, dueDate } =
+    await getInvoiceNotificationData({
+      customerId,
+      invoice: overdueInvoice,
+      user,
+      prefs,
+    });
+
+  for (const email of emailsToNotify) {
+    sendEmail({
+      to: email,
+      subject: "Action needed: Your Shelf invoice is overdue",
+      text: unpaidInvoiceUserText({
+        customerEmail: email,
+        customerName,
+        subscriptionName,
+        amountDue,
+        dueDate,
+      }),
+    });
   }
 
   return OK();
