@@ -210,6 +210,12 @@ describe("describeStockMovement: one sentence per log category", () => {
     );
   });
 
+  it("CONVERTED", () => {
+    expect(movement(logRow({ category: "CONVERTED" }))?.text).toBe(
+      `2 Units turned into individual assets by Dana Reyes ${WHEN}`
+    );
+  });
+
   it("ADJUSTMENT quotes the note", () => {
     const out = movement(
       logRow({ category: "ADJUSTMENT", note: "Recount after audit" })

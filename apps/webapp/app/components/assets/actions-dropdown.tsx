@@ -92,6 +92,11 @@ const ConditionalActionsDropdown = () => {
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
+  const canCreateAsset = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.create,
+  });
   /** Delete is its own grant: a member who may edit may still not delete. */
   const canDeleteAsset = userHasPermission({
     roles,
@@ -262,6 +267,31 @@ const ConditionalActionsDropdown = () => {
                   >
                     <span className="flex items-center gap-2">
                       <ArrowUpDownIcon className="size-5" /> Adjust quantity
+                    </span>
+                  </Button>
+                </div>
+              </When>
+              {/* Creates assets and lowers the pool, so it needs both grants.
+                  Hidden on an archived pool, whose stock is out of service. */}
+              <When
+                truthy={
+                  isQtyTracked &&
+                  canUpdateAsset &&
+                  canCreateAsset &&
+                  !isArchived
+                }
+              >
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    to="overview/create-from-stock"
+                    role="link"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={handleMenuClose}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon icon="duplicate" /> Create assets from stock
                     </span>
                   </Button>
                 </div>

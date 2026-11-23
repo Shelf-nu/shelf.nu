@@ -566,12 +566,14 @@ export type CustodySourceNoteVerb =
   | "restocked"
   | "lost"
   | "added"
-  | "removed";
+  | "removed"
+  | "converted";
 
 /**
  * Writes a note on a location's timeline when units of a pool leave it into
- * custody, are used up from it, or are restocked / lost there. Holders are
- * never named: the note says what happened to the location's units.
+ * custody, are used up from it, are restocked / lost there, or are made into
+ * individual assets there. Holders are never named: the note says what
+ * happened to the location's units.
  *
  * Only called for pools placed at two or more locations, so a pool at one location
  * adds nothing new to its location's timeline. Best-effort: the stock
@@ -621,6 +623,7 @@ export async function createCustodySourceLocationNote({
       lost: `${actor} recorded ${units} as lost at ${location}.`,
       added: `${actor} added ${units} at ${location} (adjustment).`,
       removed: `${actor} removed ${units} from ${location} (adjustment).`,
+      converted: `${actor} created individual assets from ${units} at ${location}.`,
     }[verb];
 
     await createSystemLocationNote({ locationId, content, userId });
