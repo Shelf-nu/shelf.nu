@@ -238,8 +238,8 @@ export async function loadBookedOutBySource(
  *
  * LEGACY groups count through {@link loadBookedOutBySource}; converted groups
  * through the `outQuantity` of their LOCATION source rows at this location on
- * ONGOING or OVERDUE bookings. KIT rows never count. Two reads in parallel
- * (three to four queries in all).
+ * ONGOING or OVERDUE bookings. KIT rows never count. Two reads in parallel;
+ * the converted read is one empty indexed query while no group is converted.
  *
  * Counts only; a booking never changes a location's placed count.
  *
@@ -277,7 +277,8 @@ export async function countUnitsOnBookingsFromLocation({
 /**
  * Units out right now from one location on converted groups, per pool: the
  * `outQuantity` of LOCATION source rows there whose slice is on an ONGOING or
- * OVERDUE booking. Two queries; none when no pool is asked about.
+ * OVERDUE booking. One indexed source-row read, then a slice read only when
+ * rows exist; none when no pool is asked about. KIT rows are never read.
  *
  * @param args.organizationId - Scopes both reads
  * @param args.locationId - The location page being viewed
@@ -297,10 +298,24 @@ async function loadConvertedOutAtLocation({
   const ids = [...new Set(assetIds)];
   if (ids.length === 0) return result;
 
+  // Source rows first: the (organizationId, locationId) index answers this
+  // with nothing while no group is converted, so a LEGACY-only page pays one
+  // empty indexed read and no slice query.
+  const rows = await db.bookingAssetSource.findMany({
+    where: {
+      organizationId,
+      locationId,
+      kind: "LOCATION",
+      outQuantity: { gt: 0 },
+    },
+    select: { bookingAssetId: true, outQuantity: true },
+  });
+  if (rows.length === 0) return result;
+
   const slices = await db.bookingAsset.findMany({
     where: {
+      id: { in: [...new Set(rows.map((row) => row.bookingAssetId))] },
       assetId: { in: ids },
-      sourceAllocation: { in: ["AUTO", "MANUAL"] },
       booking: {
         organizationId,
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
@@ -308,19 +323,7 @@ async function loadConvertedOutAtLocation({
     },
     select: { id: true, assetId: true },
   });
-  if (slices.length === 0) return result;
-
   const assetBySlice = new Map(slices.map((s) => [s.id, s.assetId]));
-  const rows = await db.bookingAssetSource.findMany({
-    where: {
-      organizationId,
-      bookingAssetId: { in: [...assetBySlice.keys()] },
-      kind: "LOCATION",
-      locationId,
-      outQuantity: { gt: 0 },
-    },
-    select: { bookingAssetId: true, outQuantity: true },
-  });
   for (const row of rows) {
     const assetId = assetBySlice.get(row.bookingAssetId);
     if (!assetId) continue;

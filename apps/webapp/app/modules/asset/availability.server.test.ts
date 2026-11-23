@@ -99,6 +99,9 @@ function createMockTx() {
     bookingAsset: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
+    bookingAssetSource: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     consumptionLog: {
       findMany: vitest.fn().mockResolvedValue([]),
       groupBy: vitest.fn().mockResolvedValue([]),
@@ -521,6 +524,67 @@ describe("getAssetAvailability", () => {
     expect(a.reservedTotal).toBe(3);
   });
 
+  it("reads a converted slice from its source rows and peaks it with LEGACY rows", async () => {
+    resetMocks();
+    const tx = createMockTx();
+    tx.bookingAsset.findMany.mockResolvedValue([
+      // LEGACY: booked 5, 2 returned, so 3 over Jan 1-5.
+      {
+        id: "legacy-row",
+        bookingId: "b1",
+        quantity: 5,
+        sourceAllocation: "LEGACY",
+        booking: {
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-05T00:00:00Z"),
+          status: "RESERVED",
+        },
+      },
+      // Converted AUTO: booked 6 over Jan 3-8, rows still hold 4 + 1.
+      {
+        id: "auto-row",
+        bookingId: "b2",
+        quantity: 6,
+        sourceAllocation: "AUTO",
+        booking: {
+          from: new Date("2026-01-03T00:00:00Z"),
+          to: new Date("2026-01-08T00:00:00Z"),
+          status: "RESERVED",
+        },
+      },
+    ]);
+    tx.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b1", _sum: { quantity: 2 } },
+    ]);
+    tx.bookingAssetSource.findMany.mockResolvedValue([
+      { bookingAssetId: "auto-row", quantity: 5, releasedQuantity: 1 },
+      { bookingAssetId: "auto-row", quantity: 1, releasedQuantity: 0 },
+    ]);
+
+    const a = await getAssetAvailability({
+      assetId: ASSET_ID,
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+      db: tx,
+    });
+
+    // Overlap Jan 3-5: 3 + 5 = 8, never 3 + 6.
+    expect(a.reserved).toBe(8);
+    expect(tx.consumptionLog.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { in: ["b1"] } }),
+      })
+    );
+    expect(tx.bookingAssetSource.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: ORG_ID, bookingAssetId: { in: ["auto-row"] } },
+      })
+    );
+  });
+
   it("clamps a row at 0 when logged dispositions exceed the booked quantity", async () => {
     resetMocks();
     // Defence-in-depth: an over-logged booking (should not happen) must not
@@ -849,6 +913,7 @@ describe("getAssetAvailabilityBatch", () => {
       custody: { groupBy: vitest.fn().mockResolvedValue([]) },
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
       partialBookingCheckout: { findMany: vitest.fn().mockResolvedValue([]) },
       consumptionLog: {
         findMany: vitest.fn().mockResolvedValue([]),
@@ -942,6 +1007,91 @@ describe("getAssetAvailabilityBatch", () => {
     expect(client.bookingAsset.findMany).toHaveBeenCalledTimes(2);
     expect(result.get("a1")?.reservedTotal).toBe(2);
     expect(result.get("a1")?.reservingBookingCount).toBe(1);
+  });
+
+  it("picks the method per group: converted rows read source rows, LEGACY rows read logs", async () => {
+    const client = createMockBatchClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 20 }]);
+    // First call is the checked-out read, second the reserved rows.
+    client.bookingAsset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        // LEGACY: booked 6, 1 returned, so 5 over Jan 1-10.
+        {
+          id: "legacy-row",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          sourceAllocation: "LEGACY",
+          booking: {
+            from: new Date("2026-01-01T00:00:00Z"),
+            to: new Date("2026-01-10T00:00:00Z"),
+            status: "RESERVED",
+          },
+        },
+        // Converted MANUAL over Jan 5-15: rows still hold 7 - 3 = 4.
+        {
+          id: "manual-row",
+          assetId: "a1",
+          bookingId: "b2",
+          quantity: 9,
+          sourceAllocation: "MANUAL",
+          booking: {
+            from: new Date("2026-01-05T00:00:00Z"),
+            to: new Date("2026-01-15T00:00:00Z"),
+            status: "RESERVED",
+          },
+        },
+      ]);
+    client.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b1", assetId: "a1", _sum: { quantity: 1 } },
+      // Already inside the converted rows' released units: must not net again.
+      { bookingId: "b2", assetId: "a1", _sum: { quantity: 3 } },
+    ]);
+    client.bookingAssetSource.findMany.mockResolvedValue([
+      { bookingAssetId: "manual-row", quantity: 7, releasedQuantity: 3 },
+    ]);
+
+    const result = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-20T00:00:00Z"),
+      },
+      db: client,
+    });
+
+    // Overlap Jan 5-10: 5 + 4 = 9.
+    expect(result.get("a1")?.reserved).toBe(9);
+    expect(client.bookingAssetSource.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("issues no source-row read when every reserved row is LEGACY", async () => {
+    const client = createMockBatchClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    client.bookingAsset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 2,
+          booking: {
+            from: new Date("2026-01-01T00:00:00Z"),
+            to: new Date("2026-01-02T00:00:00Z"),
+            status: "RESERVED",
+          },
+        },
+      ]);
+
+    await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client,
+    });
+
+    expect(client.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
+    expect(client.bookingAssetSource.findMany).not.toHaveBeenCalled();
   });
 
   it("scopes the total (asset.findMany) and inCustody (custody.groupBy) queries to the caller's organization", async () => {
@@ -1645,6 +1795,7 @@ describe("assertAssetQuantitiesAvailable", () => {
       custody: { groupBy: vitest.fn().mockResolvedValue([]) },
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
       partialBookingCheckout: { findMany: vitest.fn().mockResolvedValue([]) },
       consumptionLog: {
         findMany: vitest.fn().mockResolvedValue([]),

@@ -222,8 +222,30 @@ const CONVERTED_STANDALONE_MODES: ReadonlySet<BookingSourceAllocation> =
  * answers for its group. A group converted only through orphaned shares has
  * no slices left, so it contributes nothing to any reader here.
  */
-function isConvertedSlice(mode: BookingSourceAllocation | undefined): boolean {
+export function isConvertedSlice(
+  mode: BookingSourceAllocation | undefined
+): boolean {
   return mode !== undefined && mode !== "LEGACY";
+}
+
+/**
+ * Ids of the converted standalone slices among reserved rows, for
+ * {@link loadRemainingReservationBySlice}. Rows must be standalone
+ * (`assetKitId` NULL): a converted standalone slice is AUTO or MANUAL.
+ *
+ * @param rows - Standalone reserved rows with their id and mode
+ * @returns The ids of the rows whose group is converted
+ */
+export function convertedStandaloneIds(
+  rows: Array<{ id?: string; sourceAllocation?: BookingSourceAllocation }>
+): string[] {
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (row.id !== undefined && isConvertedSlice(row.sourceAllocation)) {
+      ids.push(row.id);
+    }
+  }
+  return ids;
 }
 
 /**
@@ -235,7 +257,7 @@ function isConvertedSlice(mode: BookingSourceAllocation | undefined): boolean {
  * @param sliceIds - AUTO / MANUAL slices of converted groups
  * @returns Units still held per slice id; absent means zero
  */
-async function loadRemainingReservationBySlice(
+export async function loadRemainingReservationBySlice(
   tx: ConvertedSliceRowsClient,
   organizationId: string,
   sliceIds: string[]
@@ -618,9 +640,7 @@ export async function assertAssetQuantityNotBelowReservations({
     const legacyRows = reservedRows.filter(
       (r) => !isConvertedSlice(r.sourceAllocation)
     );
-    const convertedIds = reservedRows
-      .filter((r) => isConvertedSlice(r.sourceAllocation))
-      .map((r) => r.id);
+    const convertedIds = convertedStandaloneIds(reservedRows);
     const bookingIds = [...new Set(legacyRows.map((r) => r.bookingId))];
 
     // LEGACY rows mirror every other availability read's logged-dispositions

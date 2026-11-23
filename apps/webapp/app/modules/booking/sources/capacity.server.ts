@@ -187,8 +187,11 @@ export async function loadSourceCapacity(
  * overlaps). Drafts, LEGACY and KIT slices, rows with nothing left to hold,
  * and the excluded booking are left out.
  *
- * Each hold's interval is its booking's `[from, to)`; an OVERDUE booking's
- * runs to the far-future sentinel because its units have no known return.
+ * Each hold's interval is its booking's full `[from, to)`, unclipped to the
+ * window (the window only selects which bookings are read); an OVERDUE
+ * booking's runs to the far-future sentinel because its units have no known
+ * return. {@link computeFreeBySource} clips each interval to the window before
+ * taking the peak.
  *
  * Two queries, in sequence.
  *

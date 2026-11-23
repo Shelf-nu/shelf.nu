@@ -398,6 +398,9 @@ describe("computeFreeBySource", () => {
         row("s-self", "LOCATION", "loc-a", { quantity: 9 }),
         row("s-done", "LOCATION", "loc-a", { quantity: 9, out: 9 }),
         row("s-kit", "KIT", null, { quantity: 5, out: 5 }),
+        // A stray LOCATION row on a LEGACY slice: LEGACY slices hold nothing
+        // at a source, whatever rows they carry.
+        row("s-legacy", "LOCATION", "loc-a", { quantity: 9 }),
         // UNASSIGNED holds no location capacity.
         row("s-r1", "UNASSIGNED", null, { quantity: 6 }),
         row("s-r2", "UNPLACED", null, { quantity: 1 }),
