@@ -131,7 +131,7 @@ import {
   createSystemBookingNotes,
 } from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
-import { getPrimaryCustody, hasCustody } from "../custody/utils";
+import { hasCustody } from "../custody/utils";
 import {
   createAssetLocationMoveNotes,
   createSystemLocationNote,
@@ -7962,9 +7962,9 @@ export async function bulkRemoveAssetsFromKits({
       bookableScope,
     });
 
-    // We pull the parent kit (today: ≤1 pivot row per asset) through
-    // `assetKits.kit`, then flatten back into a synthetic `asset.kit`
-    // shape so the rest of this function reads as it did pre-pivot.
+    // Every kit the asset sits in comes back through the `assetKits` pivot:
+    // one row for an INDIVIDUAL asset, possibly several for a quantity-tracked
+    // one.
     const assetRows = await db.asset.findMany({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing assets from kits is allowed for archived assets
       where: { id: { in: resolvedIds }, organizationId },
@@ -8017,17 +8017,22 @@ export async function bulkRemoveAssetsFromKits({
       },
     });
 
-    const assets = assetRows.map((asset) => ({
-      ...asset,
-      // Defensive `?.` — test fixtures from main's PR #2535 mock the legacy
-      // `kit` directly and omit the `assetKits` array entirely; this avoids a
-      // TypeError reading [0] of undefined for those rows.
-      kit: asset.assetKits?.[0]?.kit ?? null,
-      // Per-row AssetKit.quantity this asset held in the kit being detached
-      // (NOT Asset.quantity) — drives the qty-tracked count in the cascade
-      // ASSET_KIT_CHANGED event meta. `null` for the legacy-mock rows above.
-      kitQuantity: asset.assetKits?.[0]?.quantity ?? null,
-    }));
+    /**
+     * One entry per (asset, kit) membership being removed. A quantity-tracked
+     * asset can sit in several kits at once, and every kit it leaves gets its
+     * own custody release, note and event, exactly as a single-kit removal
+     * does. `kitQuantity` is AssetKit.quantity (the units held in that kit),
+     * NOT Asset.quantity.
+     */
+    const memberships = assetRows.flatMap((asset) =>
+      // `?? []`: an asset with no pivot rows is in no kit and contributes
+      // nothing.
+      (asset.assetKits ?? []).map((assetKit) => ({
+        asset,
+        kit: assetKit.kit,
+        kitQuantity: assetKit.quantity ?? null,
+      }))
+    );
 
     // Collect AssetKit ids being deleted across the bulk removal
     // branches so the post-tx emitter can write per-booking notes for
@@ -8044,63 +8049,53 @@ export async function bulkRemoveAssetsFromKits({
        * to AVAILABLE.
        *
        * Important: only the Custody rows whose `kitCustodyId` matches the
-       * asset's kit's KitCustody.id are kit-allocated. Operator-assigned
-       * per-unit custody (`kitCustodyId IS NULL`, or pointing to a different
-       * kit) must be left alone — that's separate ownership and not part of
-       * this kit-removal.
+       * KitCustody.id of a kit the asset is leaving are kit-allocated.
+       * Operator-assigned per-unit custody (`kitCustodyId IS NULL`) must be
+       * left alone: that is separate ownership and not part of this removal.
+       *
+       * One entry per (membership, kit-allocated custody row), so an asset
+       * leaving several kits in custody releases the custody of each.
        */
-      const assetsWhoseKitsInCustody = assets.filter(
-        (asset) => !!asset.kit?.custody && hasCustody(asset.custody)
-      );
-
-      /** Pairs of (asset, kit-allocated custody row) to delete */
-      const kitAllocatedCustodyToDelete = assetsWhoseKitsInCustody.flatMap(
-        (asset) => {
-          const kitCustodyId = asset.kit?.custody?.id;
+      const kitAllocatedCustodyToDelete = memberships.flatMap(
+        ({ asset, kit }) => {
+          const kitCustodyId = kit.custody?.id;
           if (!kitCustodyId) return [];
           return (asset.custody ?? [])
             .filter((c) => c.kitCustodyId === kitCustodyId)
             .map((c) => ({
               custodyId: c.id,
-              assetId: asset.id,
-              kitId: asset.kit?.id,
+              asset,
+              kitId: kit.id,
               teamMemberId: c.teamMemberId,
-              targetUserId: c.custodian?.user?.id,
-              // Units this row releases — drives the qty-tracked count.
+              custodian: c.custodian,
+              // Custody.quantity: the units this row releases. Drives the
+              // qty-tracked count in the event meta and the note.
               quantity: c.quantity,
             }));
         }
       );
 
-      // Asset shape (type / unitOfMeasure) and released-quantity per asset,
-      // keyed by id, for the qty-tracked unit count in the event + note.
-      const assetById = new Map(assets.map((a) => [a.id, a]));
-      const releasedQtyByAssetId = new Map(
-        kitAllocatedCustodyToDelete.map((row) => [row.assetId, row.quantity])
-      );
-
       if (kitAllocatedCustodyToDelete.length > 0) {
-        // Emit CUSTODY_RELEASED events BEFORE deletion so they roll back
-        // atomically with the mutation if anything fails.
+        // One CUSTODY_RELEASED per released row, emitted BEFORE deletion so
+        // it rolls back atomically with the mutation if anything fails.
+        // `meta.viaKit` mirrors the kit-custody flows in `releaseCustody` /
+        // `bulkReleaseKitCustody`.
         await recordEvents(
-          kitAllocatedCustodyToDelete.map((row) => {
-            const asset = assetById.get(row.assetId);
-            return {
-              organizationId,
-              actorUserId: userId,
-              action: "CUSTODY_RELEASED" as const,
-              entityType: "ASSET" as const,
-              entityId: row.assetId,
-              assetId: row.assetId,
-              kitId: row.kitId ?? undefined,
-              teamMemberId: row.teamMemberId,
-              targetUserId: row.targetUserId ?? undefined,
-              meta: {
-                viaKit: true,
-                ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
-              },
-            };
-          }),
+          kitAllocatedCustodyToDelete.map((row) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED" as const,
+            entityType: "ASSET" as const,
+            entityId: row.asset.id,
+            assetId: row.asset.id,
+            kitId: row.kitId,
+            teamMemberId: row.teamMemberId,
+            targetUserId: row.custodian?.user?.id ?? undefined,
+            meta: {
+              viaKit: true,
+              ...assetQtyMeta(row.asset, row.quantity),
+            },
+          })),
           tx
         );
 
@@ -8116,7 +8111,7 @@ export async function bulkRemoveAssetsFromKits({
        * status to AVAILABLE when no remaining custody exists for the asset
        * (operator-assigned per-unit custody keeps it IN_CUSTODY).
        */
-      const allRemovedAssetIds = assets.map((a) => a.id);
+      const allRemovedAssetIds = assetRows.map((a) => a.id);
       const stillCustodied = await tx.custody.findMany({
         where: { assetId: { in: allRemovedAssetIds } },
         select: { assetId: true },
@@ -8155,10 +8150,10 @@ export async function bulkRemoveAssetsFromKits({
       // "detach from kit" means deleting the pivot rows for these
       // assets within this organization.
       //
-      // The merge was missing here: an asset held BOTH standalone and via the
-      // kit on the same booking made the `SET NULL` cascade trip
-      // `BookingAsset_manual_unique`, rolling back the whole bulk op with a
-      // P2002. Same guard the singular paths already run.
+      // The merge runs first: an asset held BOTH standalone and via the kit
+      // on the same booking would otherwise make the `SET NULL` cascade trip
+      // `BookingAsset_manual_unique` and roll back the whole bulk op with a
+      // P2002. Same guard the singular paths run.
       await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
       await preserveKitDrivenPlacements(tx, aksToDeleteIds);
       await tx.assetKit.deleteMany({
@@ -8175,49 +8170,40 @@ export async function bulkRemoveAssetsFromKits({
         organizationId
       );
 
-      /** Create notes for assets released from custody */
-      if (assetsWhoseKitsInCustody.length > 0) {
+      /**
+       * One note per released custody row, naming the custodian whose
+       * kit-allocated custody ended.
+       */
+      if (kitAllocatedCustodyToDelete.length > 0) {
         await tx.note.createMany({
-          data: assetsWhoseKitsInCustody.map((asset) => {
-            const primaryCustody = getPrimaryCustody(asset.custody);
-            const custodianDisplay = primaryCustody?.custodian
-              ? wrapCustodianForNote({
-                  teamMember: primaryCustody.custodian,
-                })
+          data: kitAllocatedCustodyToDelete.map((row) => {
+            const custodianDisplay = row.custodian
+              ? wrapCustodianForNote({ teamMember: row.custodian })
               : "**Unknown Custodian**";
             // qty-tracked assets name the units released ("custody of 50
-            // units"); INDIVIDUAL phrasing is unchanged.
-            const count = formatUnitCount(
-              asset,
-              releasedQtyByAssetId.get(asset.id)
-            );
+            // units"); INDIVIDUAL assets get the countless wording.
+            const count = formatUnitCount(row.asset, row.quantity);
             const custodyPhrase = count ? `custody of ${count}` : "custody";
             return {
               content: `${actor} released ${custodianDisplay}'s ${custodyPhrase}.`,
               type: "UPDATE",
               userId,
-              assetId: asset.id,
+              assetId: row.asset.id,
             };
           }),
         });
       }
 
-      /** Create notes for assets removed from kit */
-      const assetsRemovedFromKit = assets.filter((asset) => asset.kit);
-      if (assetsRemovedFromKit.length > 0) {
+      if (memberships.length > 0) {
+        /** One note per kit the asset left. */
         await tx.note.createMany({
-          data: assetsRemovedFromKit.map((asset) => {
-            const kitLink = wrapLinkForNote(
-              `/kits/${asset.kit!.id}`,
-              asset.kit!.name.trim()
-            );
-            // Qty-tracked: name the unit count being removed from this
-            // kit ("removed 50 units from Camera Kit") using the per-row
-            // AssetKit.quantity threaded as `kitQuantity` on the asset
-            // shape above. INDIVIDUAL preserves the original countless
-            // wording. Mirrors the singular path in
+          data: memberships.map(({ asset, kit, kitQuantity }) => {
+            const kitLink = wrapLinkForNote(`/kits/${kit.id}`, kit.name.trim());
+            // Qty-tracked: name the units removed from this kit ("removed 50
+            // units from Camera Kit"), from AssetKit.quantity. INDIVIDUAL
+            // assets get the countless wording. Mirrors the singular path in
             // `createKitChangeNote` (note/service.server.ts).
-            const count = formatUnitCount(asset, asset.kitQuantity);
+            const count = formatUnitCount(asset, kitQuantity);
             const content = count
               ? `${actor} removed ${count} from ${kitLink}.`
               : `${actor} removed asset from ${kitLink}.`;
@@ -8229,60 +8215,33 @@ export async function bulkRemoveAssetsFromKits({
             };
           }),
         });
-      }
 
-      // Activity events — one ASSET_KIT_CHANGED per asset that left a kit.
-      if (assetsRemovedFromKit.length > 0) {
+        // Activity events: one ASSET_KIT_CHANGED per kit the asset left.
         await recordEvents(
-          assetsRemovedFromKit.map((asset) => ({
+          memberships.map(({ asset, kit, kitQuantity }) => ({
             organizationId,
             actorUserId: userId,
             action: "ASSET_KIT_CHANGED" as const,
             entityType: "ASSET" as const,
             entityId: asset.id,
             assetId: asset.id,
-            kitId: asset.kit!.id,
+            kitId: kit.id,
             field: "kitId",
-            fromValue: asset.kit!.id,
+            fromValue: kit.id,
             toValue: null,
-            // Qty-tracked: the per-row AssetKit.quantity this asset held in
+            // Qty-tracked: AssetKit.quantity, the units this asset held in
             // the detached kit (NOT Asset.quantity); {} for INDIVIDUAL.
-            meta: { ...assetQtyMeta(asset, asset.kitQuantity) },
+            meta: { ...assetQtyMeta(asset, kitQuantity) },
           })),
           tx
         );
       }
 
-      // Activity events — one CUSTODY_RELEASED per asset whose kit-inherited
-      // custody was cleaned up. `meta.viaKit` mirrors the kit-custody flows
-      // in `releaseCustody` / `bulkReleaseKitCustody`. Phase 2 turned Custody
-      // from 1:1 into 1:N so `asset.custody` is an array now — read the
-      // primary row via the helper.
-      if (assetsWhoseKitsInCustody.length > 0) {
-        await recordEvents(
-          assetsWhoseKitsInCustody.map((asset) => {
-            const primaryCustody = getPrimaryCustody(asset.custody);
-            return {
-              organizationId,
-              actorUserId: userId,
-              action: "CUSTODY_RELEASED" as const,
-              entityType: "ASSET" as const,
-              entityId: asset.id,
-              assetId: asset.id,
-              kitId: asset.kit?.id,
-              teamMemberId: primaryCustody?.custodian?.id,
-              targetUserId: primaryCustody?.custodian?.user?.id ?? undefined,
-              meta: { viaKit: true },
-            };
-          }),
-          tx
-        );
-      }
-
       // What the caller can honestly report: assets that were actually IN
-      // a kit, which is neither the number selected nor — under select-all —
-      // the number of ids it was given.
-      return assetsRemovedFromKit.length;
+      // a kit, which is neither the number selected nor, under select-all,
+      // the number of ids it was given. An asset leaving several kits
+      // counts once.
+      return new Set(memberships.map(({ asset }) => asset.id)).size;
     });
 
     // Notify each affected booking that its kit-driven BookingAsset
