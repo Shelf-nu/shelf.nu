@@ -306,13 +306,17 @@ export function isInvoiceBilled(subscription: Stripe.Subscription): boolean {
 }
 
 /**
- * The metadata that links a subscription to a workspace: its current
- * metadata plus `organizationId`, the `includesAuditAddon` /
- * `includesBarcodeAddon` labels for the add-ons it carries (the same labels
- * Checkout writes), and the "admin was asked" mark removed (an empty value
- * removes a key in Stripe).
+ * The metadata update that links a subscription to a workspace:
+ * `organizationId`, the `includesAuditAddon` / `includesBarcodeAddon` labels
+ * for the add-ons it carries (the same labels Checkout writes), and the
+ * "admin was asked" mark removed (an empty value removes a key in Stripe).
  *
- * @param metadata - The subscription's metadata as Stripe holds it now
+ * Stripe merges metadata by key, so only these keys are sent. Every other key
+ * stays as Stripe holds it, including one an admin edits while the link is
+ * being written.
+ *
+ * @param metadata - The subscription's metadata as last read, to tell whether
+ *   the "admin was asked" mark is there to remove
  * @param organizationId - The workspace it belongs to
  * @param addonTypes - The add-on types among its line items (`addonTypesOf`)
  */
@@ -322,7 +326,6 @@ export function linkedMetadata(
   addonTypes: AddonType[] = []
 ): Stripe.MetadataParam {
   return {
-    ...metadata,
     organizationId,
     ...(addonTypes.includes("audits") && { includesAuditAddon: "true" }),
     ...(addonTypes.includes("barcodes") && { includesBarcodeAddon: "true" }),
@@ -400,7 +403,7 @@ export async function askAdminToPickWorkspaceOnce({
   const askedAt = new Date().toISOString();
   for (const sub of unasked) {
     await stripe.subscriptions.update(sub.id, {
-      metadata: { ...sub.metadata, [WORKSPACE_PICK_REQUESTED_KEY]: askedAt },
+      metadata: { [WORKSPACE_PICK_REQUESTED_KEY]: askedAt },
     });
   }
 
@@ -495,7 +498,14 @@ export async function linkWaitingSubscriptionsToWorkspace({
   // if switching an add-on on fails, the subscription is still unlinked, so
   // the admin's "set metadata.organizationId" fix (or the next workspace
   // creation) still applies.
-  for (const sub of waiting) {
+  // Subscriptions carrying add-ons go first. A plan-only one written first
+  // would stay linked if an add-on then failed, and the next workspace
+  // created would count this one as taken and could take the add-on.
+  const ordered = [
+    ...withAddons,
+    ...waiting.filter((sub) => addonTypesOf(sub).length === 0),
+  ];
+  for (const sub of ordered) {
     // The handlers' creation branch switches the add-on on for the workspace
     // (and records a used trial), whatever the subscription's live status.
     const linked = {

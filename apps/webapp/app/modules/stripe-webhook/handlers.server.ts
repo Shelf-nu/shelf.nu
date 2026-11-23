@@ -101,54 +101,175 @@ async function syncBundledAddons({
 }
 
 /**
- * Switches a subscription's add-ons off in the workspace it was linked to
- * before this update, when the update moved it to another workspace or
- * unlinked it (its `metadata.organizationId` changed).
+ * Switches on the add-ons bundled on a plan subscription created already
+ * linked to a workspace (`metadata.organizationId` set at creation, as a
+ * returning Team owner's Checkout does).
  *
- * An admin links a subscription by editing `metadata.organizationId` in
- * Stripe, and may correct a wrong pick the same way. The new workspace gets
- * the add-ons through the usual update path; the old one has to lose them
- * here, or both workspaces keep a paid add-on. The add-on handlers keep the
- * flag on while another live subscription of the customer still carries the
- * add-on for the old workspace.
+ * Stripe does not deliver events in order: an update that dropped an add-on
+ * or ended the subscription can be handled before the creation event. So the
+ * subscription is read as Stripe holds it now, and only its current add-ons,
+ * status and link count. One that is not live yet (`incomplete`) gets its
+ * add-ons from the update that activates it.
+ *
+ * @param args.eventType - The Stripe event type being handled
+ * @param args.subscription - The subscription from the creation event
+ * @param args.loadSubscriptions - The event's shared read of the customer's
+ *   subscriptions (`createCustomerSubscriptionsLoader`)
+ */
+async function syncBundledAddonsOnCreation({
+  eventType,
+  subscription,
+  loadSubscriptions,
+}: {
+  eventType: string;
+  subscription: Stripe.Subscription;
+  loadSubscriptions: () => Promise<Stripe.Subscription[]>;
+}) {
+  if (!subscription.metadata?.organizationId) return;
+  if (subscription.status !== "active" && subscription.status !== "trialing") {
+    return;
+  }
+
+  const current = (await loadSubscriptions()).find(
+    (sub) => sub.id === subscription.id
+  );
+  if (!current?.metadata?.organizationId) return;
+  if (current.status !== "active" && current.status !== "trialing") return;
+
+  const addonTypes = addonTypesOf(current);
+  await syncBundledAddons({
+    eventType,
+    subscription: current,
+    hasAuditAddon: addonTypes.includes("audits"),
+    hasBarcodeAddon: addonTypes.includes("barcodes"),
+  });
+}
+
+/**
+ * Moves a subscription's add-ons with its workspace link, when an update
+ * changed `metadata.organizationId`: an admin moved it to another workspace
+ * (from the admin dashboard or in Stripe) or unlinked it.
+ *
+ * - The workspace it left loses every add-on the subscription carried before
+ *   the update, including one the same update dropped. The add-on handlers
+ *   keep a flag on while another live subscription of the customer still
+ *   carries the add-on for that workspace.
+ * - The workspace it moved to gets the add-ons the subscription carries now.
+ *   A live subscription switches them on. A `past_due` one keeps what the
+ *   workspace it left had: an add-on still on there (the grace period) moves
+ *   with it, and one already switched off by `invoice.overdue` stays off.
+ *
+ * Stripe does not deliver events in order, so the link is read as Stripe
+ * holds it now. An update older than the current link (moved back to the
+ * workspace it left) changes nothing.
  *
  * @param args.event - The `customer.subscription.updated` event
  * @param args.subscription - The subscription from the event
- * @param args.hasAuditAddon - Whether the subscription carries an Audits item
- * @param args.hasBarcodeAddon - Whether the subscription carries a Barcodes item
+ * @param args.hasAuditAddon - Whether the event's subscription carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the event's subscription carries a Barcodes item
+ * @param args.loadSubscriptions - The event's shared read of the customer's
+ *   subscriptions (`createCustomerSubscriptionsLoader`)
+ * @returns `true` when the update moved or unlinked the subscription. The
+ *   caller then leaves both workspaces' add-ons to this function.
  */
-async function disableAddonsInPreviousWorkspace({
+async function moveAddonsWithWorkspaceLink({
   event,
   subscription,
   hasAuditAddon,
   hasBarcodeAddon,
+  loadSubscriptions,
 }: {
   event: Stripe.Event;
   subscription: Stripe.Subscription;
   hasAuditAddon: boolean;
   hasBarcodeAddon: boolean;
-}) {
+  loadSubscriptions: () => Promise<Stripe.Subscription[]>;
+}): Promise<boolean> {
   // Stripe lists only the changed metadata keys here, with their old values.
   const previous = event.data.previous_attributes as
     | { metadata?: Stripe.Metadata }
     | undefined;
-  const organizationId = previous?.metadata?.organizationId;
-  if (!organizationId) return;
-  if (organizationId === subscription.metadata?.organizationId) return;
+  const previousOrganizationId = previous?.metadata?.organizationId;
+  if (!previousOrganizationId) return false;
+  if (previousOrganizationId === subscription.metadata?.organizationId) {
+    return false;
+  }
+
+  const current = (await loadSubscriptions()).find(
+    (sub) => sub.id === subscription.id
+  );
+  const organizationId = current?.metadata?.organizationId;
+  if (organizationId === previousOrganizationId) return true;
+
+  const removedTypes = (
+    await getProductsRemovedFromSubscription({ event, subscription })
+  )
+    .filter((product) => product.metadata?.product_type === "addon")
+    .map((product) => product.metadata.addon_type);
+  const carriedBefore = {
+    audits: hasAuditAddon || removedTypes.includes("audits"),
+    barcodes: hasBarcodeAddon || removedTypes.includes("barcodes"),
+  };
+
+  // The workspace it moved to first, so a failure leaves the add-ons on in
+  // the workspace it left and Stripe's retry finishes the move.
+  if (organizationId && current) {
+    const carriedNow = addonTypesOf(current);
+    if (current.status === "active" || current.status === "trialing") {
+      const eventType = "customer.subscription.updated";
+      if (carriedNow.includes("audits")) {
+        await handleAuditAddonWebhook({
+          eventType,
+          subscription: current,
+          organizationId,
+        });
+      }
+      if (carriedNow.includes("barcodes")) {
+        await handleBarcodeAddonWebhook({
+          eventType,
+          subscription: current,
+          organizationId,
+        });
+      }
+    } else if (current.status === "past_due") {
+      const left = await db.organization.findUnique({
+        where: { id: previousOrganizationId },
+        select: { auditsEnabled: true, barcodesEnabled: true },
+      });
+      const kept = {
+        ...(carriedNow.includes("audits") &&
+          left?.auditsEnabled && { auditsEnabled: true }),
+        ...(carriedNow.includes("barcodes") &&
+          left?.barcodesEnabled && { barcodesEnabled: true }),
+      };
+      if (Object.keys(kept).length > 0) {
+        await db.organization.update({
+          where: { id: organizationId },
+          data: kept,
+          select: { id: true },
+        });
+      }
+    }
+  }
 
   // The cancellation event type: it switches the flag off unless another
   // live subscription still covers that workspace.
   const eventType = "customer.subscription.deleted";
-  if (hasAuditAddon) {
-    await handleAuditAddonWebhook({ eventType, subscription, organizationId });
+  if (carriedBefore.audits) {
+    await handleAuditAddonWebhook({
+      eventType,
+      subscription,
+      organizationId: previousOrganizationId,
+    });
   }
-  if (hasBarcodeAddon) {
+  if (carriedBefore.barcodes) {
     await handleBarcodeAddonWebhook({
       eventType,
       subscription,
-      organizationId,
+      organizationId: previousOrganizationId,
     });
   }
+  return true;
 }
 
 /**
@@ -777,21 +898,14 @@ export async function handleSubscriptionCreated(
       additionalData: { subscription },
     })
   ) {
-    const organizationId = subscription?.metadata?.organizationId;
-    if (product?.metadata?.addon_type === "audits" && organizationId) {
-      await handleAuditAddonWebhook({
-        eventType: event.type,
-        subscription,
-        organizationId,
-      });
-    }
-    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
-      await handleBarcodeAddonWebhook({
-        eventType: event.type,
-        subscription,
-        organizationId,
-      });
-    }
+    // Every add-on item counts: a subscription made in the Stripe dashboard
+    // can carry Audits and Barcodes without a plan.
+    await syncBundledAddons({
+      eventType: event.type,
+      subscription,
+      hasAuditAddon,
+      hasBarcodeAddon,
+    });
     return OK();
   }
 
@@ -860,22 +974,18 @@ export async function handleSubscriptionCreated(
       });
   }
 
-  // An add-on bundled on a subscription that is not live yet (`incomplete`)
-  // is switched on by the update that activates it.
-  if (subscription.status === "active" || subscription.status === "trialing") {
-    await syncBundledAddons({
-      eventType: event.type,
-      subscription,
-      hasAuditAddon,
-      hasBarcodeAddon,
-    });
-  }
+  const loadSubscriptions = createCustomerSubscriptionsLoader(customerId);
+  await syncBundledAddonsOnCreation({
+    eventType: event.type,
+    subscription,
+    loadSubscriptions,
+  });
   const workspaceLink = await linkSubscriptionToTeamWorkspace({
     eventType: event.type,
     subscription,
     tierId,
     user,
-    loadSubscriptions: createCustomerSubscriptionsLoader(customerId),
+    loadSubscriptions,
   });
 
   if (!isTrialSubscription && !isTransferredSubscription) {
@@ -1015,16 +1125,20 @@ export async function handleSubscriptionUpdated(
     customerId,
     tierId,
     productType,
-    product,
     hasAuditAddon,
     hasBarcodeAddon,
   } = await getDataFromStripeEvent(event);
 
-  await disableAddonsInPreviousWorkspace({
+  // The add-on and plan checks below may each need the customer's
+  // subscriptions; they share one read.
+  const loadSubscriptions = createCustomerSubscriptionsLoader(customerId);
+
+  const moved = await moveAddonsWithWorkspaceLink({
     event,
     subscription,
     hasAuditAddon,
     hasBarcodeAddon,
+    loadSubscriptions,
   });
 
   if (
@@ -1035,33 +1149,27 @@ export async function handleSubscriptionUpdated(
       additionalData: { subscription },
     })
   ) {
-    const organizationId = subscription?.metadata?.organizationId;
-    if (product?.metadata?.addon_type === "audits" && organizationId) {
-      await handleAuditAddonWebhook({
+    // Every add-on item counts: a subscription made in the Stripe dashboard
+    // can carry Audits and Barcodes without a plan.
+    if (!moved) {
+      await syncBundledAddons({
         eventType: event.type,
         subscription,
-        organizationId,
-      });
-    }
-    if (product?.metadata?.addon_type === "barcodes" && organizationId) {
-      await handleBarcodeAddonWebhook({
-        eventType: event.type,
-        subscription,
-        organizationId,
+        hasAuditAddon,
+        hasBarcodeAddon,
       });
     }
     return OK();
   }
 
-  await syncBundledAddons({
-    eventType: event.type,
-    subscription,
-    hasAuditAddon,
-    hasBarcodeAddon,
-  });
-  // The add-on and plan checks below may each need the customer's
-  // subscriptions; they share one read.
-  const loadSubscriptions = createCustomerSubscriptionsLoader(customerId);
+  if (!moved) {
+    await syncBundledAddons({
+      eventType: event.type,
+      subscription,
+      hasAuditAddon,
+      hasBarcodeAddon,
+    });
+  }
 
   const previousStatus = (
     event.data.previous_attributes as
@@ -1089,13 +1197,16 @@ export async function handleSubscriptionUpdated(
     updateCouldLowerPlan({ subscription, tierId, user })
       ? await getProductsRemovedFromSubscription({ event, subscription })
       : [];
-  await disableAddonsRemovedFromSubscription({
-    subscription,
-    removedProducts,
-    hasAuditAddon,
-    hasBarcodeAddon,
-    loadSubscriptions,
-  });
+  // A move has already taken the removed add-ons off the workspace it left.
+  if (!moved) {
+    await disableAddonsRemovedFromSubscription({
+      subscription,
+      removedProducts,
+      hasAuditAddon,
+      hasBarcodeAddon,
+      loadSubscriptions,
+    });
+  }
   await applyPlanDowngrade({
     subscription,
     removedProducts,

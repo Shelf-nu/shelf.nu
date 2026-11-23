@@ -32,17 +32,20 @@ vi.mock(import("~/utils/env"), async (importOriginal) => {
 });
 
 // why: Database module connects to Prisma during import
-const { mockUserUpdate, mockOrgUpdate, mockOrgFindMany } = vi.hoisted(() => ({
-  mockUserUpdate: vi.fn(),
-  mockOrgUpdate: vi.fn(),
-  mockOrgFindMany: vi.fn(),
-}));
+const { mockUserUpdate, mockOrgUpdate, mockOrgFindMany, mockOrgFindUnique } =
+  vi.hoisted(() => ({
+    mockUserUpdate: vi.fn(),
+    mockOrgUpdate: vi.fn(),
+    mockOrgFindMany: vi.fn(),
+    mockOrgFindUnique: vi.fn(),
+  }));
 vi.mock("~/database/db.server", () => ({
   db: {
     user: { update: mockUserUpdate },
     organization: {
       update: mockOrgUpdate,
       findMany: mockOrgFindMany,
+      findUnique: mockOrgFindUnique,
     },
   },
 }));
@@ -344,25 +347,73 @@ describe("handleSubscriptionCreated", () => {
   });
 
   it("switches on the add-ons bundled on a subscription created with a workspace", async () => {
-    const subscription = buildSubscription({
-      productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
-    });
+    const stored = storedSubscription(
+      [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
+      { metadata: { organizationId: "org-1" } }
+    );
+    stripeHolds(stored);
 
     await handleSubscriptionCreated(
-      buildEvent("customer.subscription.created", subscription),
+      buildEvent(
+        "customer.subscription.created",
+        buildSubscription({
+          productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
+        })
+      ),
       user
     );
 
     expect(mockAuditAddonWebhook).toHaveBeenCalledWith({
       eventType: "customer.subscription.created",
-      subscription,
+      subscription: stored,
       organizationId: "org-1",
     });
     expect(mockBarcodeAddonWebhook).toHaveBeenCalledWith({
       eventType: "customer.subscription.created",
-      subscription,
+      subscription: stored,
       organizationId: "org-1",
     });
+  });
+
+  it("switches on only the add-ons Stripe holds now when the creation event arrives late", async () => {
+    // An update that dropped Barcodes was handled before this event.
+    stripeHolds(
+      storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT], {
+        metadata: { organizationId: "org-1" },
+      })
+    );
+
+    await handleSubscriptionCreated(
+      buildEvent(
+        "customer.subscription.created",
+        buildSubscription({
+          productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
+        })
+      ),
+      user
+    );
+
+    expect(mockAuditAddonWebhook).toHaveBeenCalledTimes(1);
+    expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
+  });
+
+  it("switches nothing on when Stripe shows the subscription already ended", async () => {
+    stripeHolds(
+      storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT], {
+        status: "canceled",
+        metadata: { organizationId: "org-1" },
+      })
+    );
+
+    await handleSubscriptionCreated(
+      buildEvent(
+        "customer.subscription.created",
+        buildSubscription({ productIds: [TEAM_PRODUCT, AUDITS_PRODUCT] })
+      ),
+      user
+    );
+
+    expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
   });
 
   it("leaves the add-ons of a subscription that is not live yet to the update that activates it", async () => {
@@ -830,7 +881,7 @@ describe("handleSubscriptionCreated", () => {
       expect(mockSubscriptionsList).not.toHaveBeenCalled();
     });
 
-    it("keeps the metadata Stripe holds now when linking", async () => {
+    it("sends only the link keys, so other metadata stays as Stripe holds it", async () => {
       stripeHolds(
         storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT], {
           metadata: { po_number: "PO-1" },
@@ -847,7 +898,6 @@ describe("handleSubscriptionCreated", () => {
 
       expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
         metadata: {
-          po_number: "PO-1",
           organizationId: "org-9",
           includesAuditAddon: "true",
         },
@@ -1194,61 +1244,104 @@ describe("handleSubscriptionUpdated", () => {
   });
 
   describe("when an admin moves the subscription to another workspace", () => {
-    /** The calls that switch an add-on off, as [handler, workspace] pairs. */
+    /** The calls that switch an add-on off, as [type, workspace] pairs. */
     function switchedOff() {
+      return addonCalls("customer.subscription.deleted");
+    }
+
+    /** The calls that switch an add-on on, as [type, workspace] pairs. */
+    function switchedOn() {
+      return addonCalls("customer.subscription.updated");
+    }
+
+    function addonCalls(eventType: string) {
       return [
         ...mockAuditAddonWebhook.mock.calls.map((c) => ["audits", c[0]]),
         ...mockBarcodeAddonWebhook.mock.calls.map((c) => ["barcodes", c[0]]),
       ]
-        .filter(
-          ([, args]) => args.eventType === "customer.subscription.deleted"
-        )
+        .filter(([, args]) => args.eventType === eventType)
         .map(([type, args]) => [type, args.organizationId]);
     }
 
-    it("switches the bundled add-ons off in the workspace it left", async () => {
-      await handleSubscriptionUpdated(
-        buildEvent(
-          "customer.subscription.updated",
-          buildSubscription({
-            productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
-            metadata: { organizationId: "org-2" },
+    /** An update that moved the subscription from org-1 to org-2. */
+    function movedEvent(
+      productIds: string[],
+      previousItems?: string[]
+    ): Stripe.Event {
+      return buildEvent(
+        "customer.subscription.updated",
+        buildSubscription({
+          productIds,
+          metadata: { organizationId: "org-2" },
+        }),
+        {
+          metadata: { organizationId: "org-1" },
+          ...(previousItems && {
+            items: {
+              data: previousItems.map((product) => ({ price: { product } })),
+            },
           }),
-          { metadata: { organizationId: "org-1" } }
-        ),
-        user
+        }
       );
+    }
+
+    it("moves the bundled add-ons to the new workspace", async () => {
+      const products = [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT];
+      stripeHolds(
+        storedSubscription(products, { metadata: { organizationId: "org-2" } })
+      );
+
+      await handleSubscriptionUpdated(movedEvent(products), user);
 
       expect(switchedOff()).toEqual([
         ["audits", "org-1"],
         ["barcodes", "org-1"],
       ]);
-      // The workspace it moved to gets them through the usual update path.
-      expect(mockAuditAddonWebhook).toHaveBeenCalledWith(
-        expect.objectContaining({
-          eventType: "customer.subscription.updated",
-          organizationId: "org-2",
-        })
-      );
+      expect(switchedOn()).toEqual([
+        ["audits", "org-2"],
+        ["barcodes", "org-2"],
+      ]);
     });
 
-    it("switches a standalone add-on off in the workspace it left", async () => {
+    it("moves both add-ons of a subscription that carries no plan", async () => {
+      const products = [AUDITS_PRODUCT, BARCODES_PRODUCT];
+      stripeHolds(
+        storedSubscription(products, { metadata: { organizationId: "org-2" } })
+      );
+
+      await handleSubscriptionUpdated(movedEvent(products), user);
+
+      expect(switchedOff()).toEqual([
+        ["audits", "org-1"],
+        ["barcodes", "org-1"],
+      ]);
+      expect(switchedOn()).toEqual([
+        ["audits", "org-2"],
+        ["barcodes", "org-2"],
+      ]);
+    });
+
+    it("switches an add-on removed in the same update off in the workspace it left", async () => {
+      stripeHolds(
+        storedSubscription([TEAM_PRODUCT], {
+          metadata: { organizationId: "org-2" },
+        })
+      );
+
       await handleSubscriptionUpdated(
-        buildEvent(
-          "customer.subscription.updated",
-          buildSubscription({
-            productIds: [AUDITS_PRODUCT],
-            metadata: { organizationId: "org-2" },
-          }),
-          { metadata: { organizationId: "org-1" } }
-        ),
+        movedEvent([TEAM_PRODUCT], [TEAM_PRODUCT, AUDITS_PRODUCT]),
         user
       );
 
       expect(switchedOff()).toEqual([["audits", "org-1"]]);
+      expect(switchedOn()).toEqual([]);
+      // The workspace it moved to never had the add-on from it.
+      expect(mockOrgUpdate).not.toHaveBeenCalled();
     });
 
     it("switches the add-ons off when the workspace is removed", async () => {
+      stripeHolds(storedSubscription([TEAM_PRODUCT, AUDITS_PRODUCT]));
+
       await handleSubscriptionUpdated(
         buildEvent(
           "customer.subscription.updated",
@@ -1262,6 +1355,66 @@ describe("handleSubscriptionUpdated", () => {
       );
 
       expect(switchedOff()).toEqual([["audits", "org-1"]]);
+      expect(switchedOn()).toEqual([]);
+    });
+
+    it("changes nothing for a late update when the subscription is back in the workspace it left", async () => {
+      const products = [TEAM_PRODUCT, AUDITS_PRODUCT];
+      stripeHolds(
+        storedSubscription(products, { metadata: { organizationId: "org-1" } })
+      );
+
+      await handleSubscriptionUpdated(movedEvent(products), user);
+
+      expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
+      expect(mockOrgUpdate).not.toHaveBeenCalled();
+    });
+
+    it("carries a past-due subscription's add-ons over as the workspace it left had them", async () => {
+      const products = [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT];
+      stripeHolds(
+        storedSubscription(products, {
+          status: "past_due",
+          metadata: { organizationId: "org-2" },
+        })
+      );
+      // `invoice.overdue` has already switched Barcodes off there.
+      mockOrgFindUnique.mockResolvedValue({
+        auditsEnabled: true,
+        barcodesEnabled: false,
+      });
+
+      await handleSubscriptionUpdated(movedEvent(products), user);
+
+      expect(mockOrgUpdate).toHaveBeenCalledWith({
+        where: { id: "org-2" },
+        data: { auditsEnabled: true },
+        select: { id: true },
+      });
+      expect(switchedOff()).toEqual([
+        ["audits", "org-1"],
+        ["barcodes", "org-1"],
+      ]);
+    });
+
+    it("switches on both add-ons of a subscription without a plan when it is first linked", async () => {
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({
+            productIds: [AUDITS_PRODUCT, BARCODES_PRODUCT],
+            metadata: { organizationId: "org-2" },
+          }),
+          { metadata: { organizationId: "" } }
+        ),
+        user
+      );
+
+      expect(switchedOff()).toEqual([]);
+      expect(switchedOn()).toEqual([
+        ["audits", "org-2"],
+        ["barcodes", "org-2"],
+      ]);
     });
 
     it("leaves other workspaces alone when the first workspace is set", async () => {

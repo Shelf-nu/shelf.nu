@@ -793,6 +793,10 @@ function LinkSubscriptionRow({
           id={selectId}
           name="organizationId"
           style={{ all: "revert" }}
+          // Keyed by the saved link: a revalidation that brings back another
+          // workspace resets the choice, while one that keeps it leaves a
+          // pending pick alone.
+          key={current}
           defaultValue={current}
           disabled={disabled}
           aria-describedby={errorMessage ? `${selectId}-error` : undefined}

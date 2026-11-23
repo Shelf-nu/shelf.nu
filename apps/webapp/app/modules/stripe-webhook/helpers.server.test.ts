@@ -625,6 +625,18 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });
 
+  it("links no plan when an add-on listed after it fails to switch on", async () => {
+    stripeHolds(
+      subscription([TEAM], { id: "sub_plan" }),
+      subscription([AUDITS], { id: "sub_audits" })
+    );
+    mockAuditAddonWebhook.mockRejectedValueOnce(new Error("database down"));
+
+    await expect(linkToNewWorkspace()).rejects.toThrow("database down");
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
   it("switches on the add-ons of a past-due subscription too", async () => {
     stripeHolds(subscription([TEAM, AUDITS], { status: "past_due" }));
 
@@ -638,8 +650,9 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
 
     await linkToNewWorkspace();
 
+    // Only the link is sent: Stripe keeps `po_number` as it holds it.
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
-      metadata: { po_number: "PO-1", organizationId: "org-new" },
+      metadata: { organizationId: "org-new" },
     });
     expect(addonsSwitchedOn()).toEqual([]);
     expect(adminEmailSubjects()).toEqual([]);
