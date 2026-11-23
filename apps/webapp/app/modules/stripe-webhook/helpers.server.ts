@@ -587,8 +587,9 @@ export function sendAdminWorkspaceLinkedEmail({
  * - several free Team workspaces: any of them could be meant;
  * - one free workspace and several subscriptions without one: they may be
  *   meant for different workspaces;
- * - one free workspace and one subscription: it is not the workspace the
- *   customer just created.
+ * - one free workspace and one subscription: Shelf could not be sure it
+ *   belongs there (it is not the workspace the customer just created, or
+ *   the subscription carries add-ons only).
  *
  * @param args.subscriptionCount - How many subscriptions wait for a workspace
  * @param args.ownedCount - How many Team workspaces the customer owns
@@ -639,8 +640,9 @@ function pickWorkspaceReason({
     subject:
       "Needs you: subscription has no workspace, confirm the Team workspace in Stripe metadata",
     reason: [
-      "A subscription has no workspace. One Team workspace is free, but it",
-      "is not the one the customer just created, so none was picked.",
+      "A subscription has no workspace. One Team workspace is free, but",
+      "Shelf could not be sure the subscription belongs to it, so none was",
+      "picked.",
     ],
   };
 }

@@ -116,6 +116,56 @@ async function canCreateAnotherWorkspace(userId: string): Promise<boolean> {
 }
 
 /**
+ * Asks the admin, once, to place an invoice-billed add-on subscription
+ * created without a workspace for a customer who already owns Team
+ * workspaces.
+ *
+ * Such a subscription carries no plan, so nothing else would link it: the
+ * workspace-creation pickup (`linkWaitingSubscriptionsToWorkspace`) runs only
+ * when the customer creates another workspace. A customer with no Team
+ * workspace is left to that pickup. The subscription is read again from
+ * Stripe first, so a retried or late event for one linked since asks nothing.
+ *
+ * @param args.subscription - The subscription from the creation event
+ * @param args.user - The user the customer belongs to
+ * @param args.customerId - The Stripe customer of the subscription
+ */
+async function askAdminToPlaceAddonSubscription({
+  subscription,
+  user,
+  customerId,
+}: {
+  subscription: Stripe.Subscription;
+  user: WebhookUser;
+  customerId: string;
+}) {
+  if (subscription.metadata?.organizationId) return;
+  if (!isInvoiceBilled(subscription)) return;
+  if (subscription.status !== "active" && subscription.status !== "trialing") {
+    return;
+  }
+
+  const owned = await findOwnedTeamWorkspaces(user.id);
+  if (owned.length === 0) return;
+
+  const subscriptions = await getCustomerSubscriptionsWithProducts(customerId);
+  const current = subscriptions.find((sub) => sub.id === subscription.id);
+  if (!current || current.metadata?.organizationId) return;
+
+  const { candidates, unlinkedPlans } = resolveTeamWorkspaceForPlan({
+    owned,
+    subscriptions,
+  });
+  await askAdminToPickWorkspaceOnce({
+    user,
+    subscriptions: [current],
+    related: unlinkedPlans,
+    ownedCount: owned.length,
+    candidates,
+  });
+}
+
+/**
  * Switches on the add-ons bundled on a plan subscription created already
  * linked to a workspace (`metadata.organizationId` set at creation, as a
  * returning Team owner's Checkout does).
@@ -953,6 +1003,7 @@ export async function handleSubscriptionCreated(
       hasAuditAddon,
       hasBarcodeAddon,
     });
+    await askAdminToPlaceAddonSubscription({ subscription, user, customerId });
     return OK();
   }
 
@@ -1667,9 +1718,11 @@ export async function handleInvoiceOverdue(
     const subscription = await fetchStripeSubscription(
       subscriptionId as string
     );
-    const product = subscription.items.data[0].plan.product as Stripe.Product;
-    const tierId = product?.metadata?.shelf_tier;
-    const productType = product?.metadata?.product_type;
+    // The plan can sit on any line item: a subscription built in the Stripe
+    // dashboard may list an add-on first.
+    const tierId = highestPlanTier(
+      subscription.items.data.map((item) => item.plan.product as Stripe.Product)
+    );
 
     // Add-ons on the overdue subscription end with it, whether they are
     // bundled on a tier subscription or bought standalone.
@@ -1681,9 +1734,7 @@ export async function handleInvoiceOverdue(
     // Only downgrade for non-addon subscription products with a tier, and
     // only to what the customer's other live subscriptions still grant.
     const remainingTierId =
-      tierId &&
-      productType !== "addon" &&
-      isHigherOrEqualTier(tierId as TierId, user.tierId)
+      tierId && isHigherOrEqualTier(tierId, user.tierId)
         ? await remainingTierOf(customerId, subscription.id)
         : undefined;
     if (remainingTierId) {

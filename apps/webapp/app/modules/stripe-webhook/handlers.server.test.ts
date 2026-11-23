@@ -440,6 +440,37 @@ describe("handleSubscriptionCreated", () => {
     expect(mockAuditAddonWebhook).not.toHaveBeenCalled();
   });
 
+  describe("an add-on subscription created without a workspace", () => {
+    const addonOnly = () =>
+      buildSubscription({ productIds: [AUDITS_PRODUCT], metadata: {} });
+
+    it("asks the admin to place it when the customer already owns a Team workspace", async () => {
+      mockOrgFindMany.mockResolvedValue([
+        { id: "org-9", name: "ZZ Test Team" },
+      ]);
+      stripeHolds(storedSubscription([AUDITS_PRODUCT]));
+
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", addonOnly()),
+        user
+      );
+
+      expect(adminEmailSubjects()).toEqual([
+        "Needs you: subscription has no workspace, confirm the Team workspace in Stripe metadata",
+      ]);
+      expect(organizationIdsWritten()).toEqual([]);
+    });
+
+    it("leaves it for the next workspace the customer creates when they own none", async () => {
+      await handleSubscriptionCreated(
+        buildEvent("customer.subscription.created", addonOnly()),
+        user
+      );
+
+      expect(adminEmailSubjects()).toEqual([]);
+    });
+  });
+
   describe("a Team subscription created without a workspace", () => {
     const unlinked = () =>
       buildSubscription({
@@ -2294,6 +2325,26 @@ describe("handleInvoiceOverdue", () => {
     ).rejects.toThrow();
 
     expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("finds the plan on any line item of the overdue subscription", async () => {
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(
+      withExpandedProducts(
+        buildSubscription({
+          productIds: [AUDITS_PRODUCT, TEAM_PRODUCT],
+          status: "past_due",
+        })
+      )
+    );
+    stripeHolds(
+      storedSubscription([AUDITS_PRODUCT, TEAM_PRODUCT], { status: "past_due" })
+    );
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    expect(mockUserUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { tierId: TierId.free } })
+    );
   });
 
   it("keeps Team while another live Team subscription still pays for it", async () => {
