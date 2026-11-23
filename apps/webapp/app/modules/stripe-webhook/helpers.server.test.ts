@@ -63,12 +63,17 @@ vi.mock(import("~/utils/stripe.server"), async (importOriginal) => {
 });
 
 // why: Database module connects to Prisma during import
-const { mockFindFirstOrThrow, mockUserFindUnique, mockOrgFindMany } =
-  vi.hoisted(() => ({
-    mockFindFirstOrThrow: vi.fn(),
-    mockUserFindUnique: vi.fn(),
-    mockOrgFindMany: vi.fn(),
-  }));
+const {
+  mockFindFirstOrThrow,
+  mockUserFindUnique,
+  mockOrgFindMany,
+  mockOrgFindFirst,
+} = vi.hoisted(() => ({
+  mockFindFirstOrThrow: vi.fn(),
+  mockUserFindUnique: vi.fn(),
+  mockOrgFindMany: vi.fn(),
+  mockOrgFindFirst: vi.fn(),
+}));
 
 vi.mock("~/database/db.server", () => ({
   db: {
@@ -76,7 +81,7 @@ vi.mock("~/database/db.server", () => ({
       findFirstOrThrow: mockFindFirstOrThrow,
       findUnique: mockUserFindUnique,
     },
-    organization: { findMany: mockOrgFindMany },
+    organization: { findMany: mockOrgFindMany, findFirst: mockOrgFindFirst },
   },
 }));
 
@@ -132,6 +137,7 @@ vi.mock("stripe", () => ({
 import {
   highestPlanTier,
   linkWaitingSubscriptionsToWorkspace,
+  linkSubscriptionToWorkspaceAsAdmin,
   isAddonSubscription,
   isHigherTier,
   isTierId,
@@ -572,6 +578,7 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     vi.clearAllMocks();
     mockAdminEmail.value = "admin@test.com";
     mockUserFindUnique.mockResolvedValue({
+      id: "user-1",
       customerId: "cus_1",
       email: "owner@example.com",
     });
@@ -703,6 +710,12 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     expect(email.subject).toContain("Needs you");
     expect(email.text).toContain("sub_checkout");
     expect(email.text).toContain("sub_invoice");
+    // Each id comes with a link, so the admin does not have to look it up.
+    expect(email.text).toMatch(
+      /dashboard\.stripe\.com(\/test)?\/subscriptions\/sub_invoice/
+    );
+    expect(email.text).toContain("/admin-dashboard/user-1");
+    expect(email.text).toContain("/admin-dashboard/org/org-new");
   });
 
   it("asks the admin instead of putting several add-on subscriptions on one workspace", async () => {
@@ -846,5 +859,78 @@ describe("linkWaitingSubscriptionsToWorkspace", () => {
     await linkToNewWorkspace();
 
     expect(mockSubscriptionsList).not.toHaveBeenCalled();
+  });
+});
+
+describe("linkSubscriptionToWorkspaceAsAdmin", () => {
+  const TEAM = { id: "prod_team", metadata: { shelf_tier: "tier_2" } };
+  const AUDITS = {
+    id: "prod_audits",
+    metadata: { product_type: "addon", addon_type: "audits" },
+  };
+
+  /** Runs the admin action for a subscription and workspace of user-1. */
+  function link(subscriptionId = "sub_1", organizationId = "org-2") {
+    return linkSubscriptionToWorkspaceAsAdmin({
+      userId: "user-1",
+      subscriptionId,
+      organizationId,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUserFindUnique.mockResolvedValue({ customerId: "cus_1" });
+    mockOrgFindFirst.mockResolvedValue({ id: "org-2" });
+    mockGetCustomerSubscriptions.mockResolvedValue([
+      {
+        id: "sub_1",
+        metadata: { organizationId: "org-1", workspacePickRequestedAt: "x" },
+        items: {
+          data: [{ price: { product: TEAM } }, { price: { product: AUDITS } }],
+        },
+      },
+    ]);
+  });
+
+  it("writes the same metadata the automatic linking writes", async () => {
+    await link();
+
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      metadata: {
+        organizationId: "org-2",
+        includesAuditAddon: "true",
+        workspacePickRequestedAt: "",
+      },
+    });
+  });
+
+  it("only accepts a Team workspace the user owns", async () => {
+    mockOrgFindFirst.mockResolvedValue(null);
+
+    await expect(link()).rejects.toMatchObject({ status: 400 });
+
+    expect(mockOrgFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "org-2", userId: "user-1", type: "TEAM" },
+      })
+    );
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a subscription of another customer", async () => {
+    await expect(link("sub_someone_else")).rejects.toMatchObject({
+      status: 404,
+    });
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a user without a Stripe customer", async () => {
+    mockUserFindUnique.mockResolvedValue({ customerId: null });
+
+    await expect(link()).rejects.toMatchObject({ status: 400 });
+
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });
 });

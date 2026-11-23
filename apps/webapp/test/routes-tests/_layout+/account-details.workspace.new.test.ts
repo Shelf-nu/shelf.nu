@@ -43,6 +43,10 @@ vi.mock("~/modules/organization/context.server", () => ({
 // it succeeds is the input these tests vary
 vi.mock("~/modules/stripe-webhook/helpers.server", () => ({
   linkWaitingSubscriptionsToWorkspace: vi.fn(),
+  adminUserUrl: (userId: string) =>
+    `https://shelf.test/admin-dashboard/${userId}`,
+  adminWorkspaceUrl: (organizationId: string) =>
+    `https://shelf.test/admin-dashboard/org/${organizationId}`,
 }));
 
 // why: the link helpers update the Stripe subscription and the workspace
@@ -149,6 +153,9 @@ describe("new workspace action", () => {
     expect(sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         subject: "ACTION REQUIRED: Subscription linking failed",
+        text: expect.stringContaining(
+          "https://shelf.test/admin-dashboard/user-1"
+        ),
       })
     );
   });

@@ -26,7 +26,11 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
-import { linkWaitingSubscriptionsToWorkspace } from "~/modules/stripe-webhook/helpers.server";
+import {
+  adminUserUrl,
+  adminWorkspaceUrl,
+  linkWaitingSubscriptionsToWorkspace,
+} from "~/modules/stripe-webhook/helpers.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -172,10 +176,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           "a subscription without a workspace belongs to it.",
           "",
           `User ID: ${userId}`,
+          `  ${adminUserUrl(userId)}`,
           `Organization ID: ${newOrg.id}`,
+          `  ${adminWorkspaceUrl(newOrg.id)}`,
           "",
-          "Check the user's subscriptions in Stripe and set",
-          "metadata.organizationId where one belongs to this workspace.",
+          "Check the user's subscriptions and link the one that belongs to",
+          "this workspace on their admin page (link above), or set",
+          "metadata.organizationId on it in Stripe.",
         ].join("\n"),
       });
     });

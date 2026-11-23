@@ -426,6 +426,14 @@ describe("handleSubscriptionCreated", () => {
       expect(adminEmailSubjects()).toEqual([
         "Activated: plan + add-ons linked to ZZ Test Team",
       ]);
+      const [activated] = mockSendEmail.mock.calls.map(([email]) => email);
+      expect(activated.text).toContain(
+        "https://app.shelf.nu/admin-dashboard/user-1"
+      );
+      expect(activated.text).toContain(
+        "https://app.shelf.nu/admin-dashboard/org/org-9"
+      );
+      expect(activated.text).toMatch(/dashboard\.stripe\.com.*\/sub_1/);
       expect(mockSubscriptionGrantedText).toHaveBeenCalledWith(
         expect.objectContaining({ needsTeamWorkspace: false })
       );
