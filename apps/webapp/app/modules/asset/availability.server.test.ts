@@ -1878,6 +1878,63 @@ describe("assertAssetQuantityNotBelowReservations", () => {
     };
   }
 
+  describe("a slice sent out again after a full return", () => {
+    /**
+     * A standalone slice of 6 on an ONGOING booking that went out, came back
+     * in full (one RETURN of 6) and went out again. `checkedOutQuantity` is
+     * cumulative, so `secondTrip` units are out.
+     */
+    function txWithRedispatch(secondTrip: number) {
+      const tx = createMockTx();
+      tx.bookingAsset.findMany.mockResolvedValue([
+        {
+          ...reservedRow("b1", 6, "2026-01-01", "2026-01-31", "ONGOING"),
+          checkedOutQuantity: 6 + secondTrip,
+        },
+      ]);
+      tx.consumptionLog.groupBy.mockResolvedValue([
+        { bookingId: "b1", assetId: ASSET_ID, _sum: { quantity: 6 } },
+      ]);
+      return tx;
+    }
+
+    it("refuses a total below the units that are out again", async () => {
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx: txWithRedispatch(6),
+          newTotal: 5,
+          assetTitle: "Widget",
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("allows a total equal to the units that are out again", async () => {
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx: txWithRedispatch(6),
+          newTotal: 6,
+          assetTitle: "Widget",
+        })
+      ).resolves.toBeUndefined();
+    });
+
+    it("allows any total once the slice is back and stays back", async () => {
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx: txWithRedispatch(0),
+          newTotal: 0,
+          assetTitle: "Widget",
+        })
+      ).resolves.toBeUndefined();
+    });
+  });
+
   it("allows any newTotal >= 0 when there are no commitments (custody, kits, or bookings)", async () => {
     const tx = createMockTx();
 

@@ -282,3 +282,59 @@ describe("getPeakReservedUnitsByAsset", () => {
     expect(peaks.get(ASSET)).toBe(50);
   });
 });
+
+describe("getPeakReservedUnitsByAsset, a slice sent out again after a full return", () => {
+  /**
+   * A standalone slice of 6 on an ONGOING booking that went out, came back in
+   * full and went out again. `checkedOutQuantity` is cumulative, so it reads
+   * 12 against 6 returned: 6 units are out.
+   */
+  const redispatched = {
+    ...reservation(ASSET, "b1", 6, "2026-01-01", "2026-01-31", {
+      status: BookingStatus.ONGOING,
+    }),
+    checkedOutQuantity: 12,
+  };
+  const firstTripReturn = {
+    bookingAssetId: "b1-asset-1",
+    bookingId: "b1",
+    assetId: ASSET,
+    _sum: { quantity: 6 },
+  };
+
+  it("counts the units that are out again", async () => {
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx: txWith([redispatched], [firstTripReturn]),
+    });
+
+    expect(peaks.get(ASSET)).toBe(6);
+  });
+
+  it("counts only the units sent out the second time", async () => {
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx: txWith(
+        [{ ...redispatched, checkedOutQuantity: 8 }],
+        [firstTripReturn]
+      ),
+    });
+
+    expect(peaks.get(ASSET)).toBe(2);
+  });
+
+  it("frees a slice that came back in full and stayed back", async () => {
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx: txWith(
+        [{ ...redispatched, checkedOutQuantity: 6 }],
+        [firstTripReturn]
+      ),
+    });
+
+    expect(peaks.get(ASSET)).toBeUndefined();
+  });
+});

@@ -197,8 +197,10 @@ export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
  * `window: null` (OVERDUE included unconditionally, sentinel-extended via
  * {@link resolveIntervalTo} so an unreturned unit keeps counting against
  * every future instant). Each reservation's `qty` is the booked amount minus
- * already-logged {@link RESERVATION_REDUCING_CATEGORIES} dispositions,
- * exactly as every other availability read in this module computes it.
+ * already-logged {@link RESERVATION_REDUCING_CATEGORIES} dispositions, and
+ * never less than the units the row has out right now (see
+ * {@link reservedUnitsStillHeld}): a slice returned in full and checked out
+ * again still commits the units of its second trip.
  *
  * A reduction to EXACTLY `committed` is allowed — only `newTotal < committed`
  * rejects, since the pool is fully (not over-) subscribed at that total.
@@ -215,6 +217,39 @@ export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
  * @param args - See {@link AssertAssetQuantityNotBelowReservationsArgs}.
  * @throws {ShelfError} 400 (`shouldBeCaptured: false`) when `newTotal` would drop below `committed`.
  */
+/**
+ * Units one standalone reservation row still holds against the asset's pool.
+ *
+ * Two readings, and the larger one wins:
+ * - what the row has not yet given back: `quantity - logged`. Before anything
+ *   leaves this is the whole reservation, and each logged RETURN / CONSUME /
+ *   LOSS / DAMAGE unit frees one.
+ * - what is physically out right now: `checkedOutQuantity - logged`, capped at
+ *   the row's quantity. `checkedOutQuantity` is cumulative, so a row that came
+ *   back in full and went out again reads its second trip here while the first
+ *   reading has already dropped to zero.
+ *
+ * `quantity - logged` alone would free units that are out again, and let a
+ * total be set below them.
+ *
+ * @param row.quantity - `BookingAsset.quantity`, the booked units
+ * @param row.checkedOutQuantity - `BookingAsset.checkedOutQuantity`, cumulative
+ *   units sent out; absent or null reads as none
+ * @param logged - RESERVATION_REDUCING_CATEGORIES units attributed to the row
+ * @returns Non-negative units, never more than `row.quantity`
+ */
+function reservedUnitsStillHeld(
+  row: { quantity: number; checkedOutQuantity?: number | null },
+  logged: number
+): number {
+  const notYetGivenBack = Math.max(0, row.quantity - logged);
+  const outRightNow = Math.min(
+    row.quantity,
+    Math.max(0, (row.checkedOutQuantity ?? 0) - logged)
+  );
+  return Math.max(notYetGivenBack, outRightNow);
+}
+
 /**
  * The two reads {@link getPeakReservedUnitsByAsset} issues.
  *
@@ -233,6 +268,7 @@ export type PeakReservedTxClient = {
         bookingId: true;
         quantity: true;
         assetKitId: true;
+        checkedOutQuantity: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
@@ -242,6 +278,7 @@ export type PeakReservedTxClient = {
         bookingId: string;
         quantity: number;
         assetKitId: string | null;
+        checkedOutQuantity: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
@@ -288,6 +325,10 @@ export type PeakReservedTxClient = {
  * predating per-row attribution carry no row id and fill kit-driven slices
  * first, per `ConsumptionLog.bookingAssetId`.
  *
+ * A row never counts for less than the units it has out right now, so a slice
+ * returned in full and checked out again keeps its second trip in the peak
+ * (see {@link reservedUnitsStillHeld}).
+ *
  * @param args.assetIds - Assets to compute for. Empty issues no queries.
  * @param args.organizationId - Caller's organization; scopes every read
  * @param args.tx - Prisma client or active transaction
@@ -322,6 +363,7 @@ export async function getPeakReservedUnitsByAsset({
       bookingId: true,
       quantity: true,
       assetKitId: true,
+      checkedOutQuantity: true,
       booking: { select: { from: true, to: true, status: true } },
     },
   });
@@ -402,7 +444,7 @@ export async function getPeakReservedUnitsByAsset({
     const pair = `${row.bookingId}:${row.assetId}`;
     const logged =
       (loggedByRowId.get(row.id) ?? 0) + (legacyForStandalone.get(pair) ?? 0);
-    const remaining = Math.max(0, row.quantity - logged);
+    const remaining = reservedUnitsStillHeld(row, logged);
     if (remaining === 0) continue;
 
     const to = resolveIntervalTo(
@@ -463,6 +505,7 @@ export async function assertAssetQuantityNotBelowReservations({
         assetId: true,
         bookingId: true,
         quantity: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     }),
@@ -502,9 +545,8 @@ export async function assertAssetQuantityNotBelowReservations({
       if (!row.booking) continue;
 
       const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-      // Clamp at 0 per row, same defence-in-depth as every other primitive
-      // in this module — an over-logged booking can't push demand negative.
-      const remaining = Math.max(0, row.quantity - logged);
+      // Never negative, and never below the units the row has out right now.
+      const remaining = reservedUnitsStillHeld(row, logged);
       if (remaining === 0) continue;
 
       // `windowTo` fallback is unreachable here (`row.booking.to` is always
