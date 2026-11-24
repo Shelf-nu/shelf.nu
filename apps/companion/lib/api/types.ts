@@ -851,12 +851,17 @@ export type UpdateImageResponse = {
 
 /**
  * Response of the three mobile bulk endpoints (bulk-assign-custody,
- * bulk-release-custody, bulk-update-location). Mixed selections skip
- * QUANTITY_TRACKED assets server-side and report the count via
- * `skippedQuantityTracked`; selections that are 100% quantity-tracked
- * surface as an error envelope instead (never a skip count). For every
- * other eligibility rule the client-side blockers (lib/batch-blockers.ts)
- * keep batches clean before submit.
+ * bulk-release-custody, bulk-update-location).
+ *
+ * The two custody endpoints skip QUANTITY_TRACKED assets in a mixed selection
+ * and report the count via `skippedQuantityTracked`; a selection that is 100%
+ * quantity-tracked surfaces as an error envelope instead (never a skip count).
+ *
+ * bulk-update-location never skips: a list holding a QUANTITY_TRACKED asset is
+ * refused with an error envelope that names the assets, and no assets move.
+ *
+ * For every other eligibility rule the client-side blockers
+ * (lib/batch-blockers.ts) keep batches clean before submit.
  */
 export type BulkActionResponse = {
   success: boolean;

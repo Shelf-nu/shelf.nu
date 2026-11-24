@@ -93,6 +93,11 @@ import {
   markArchivedRows,
 } from "@/lib/archived-assets";
 import {
+  rowsLeftAfterLocationSave,
+  savedPartNotice,
+  sendLocationParts,
+} from "@/lib/location-save";
+import {
   computeBlockers,
   blockedQrIds,
   kitBlockerFacts,
@@ -2221,31 +2226,66 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         text: "Move",
         onPress: async () => {
           setIsSubmitting(true);
-          const { assetIds, kitIds } = splitScannedIds();
-          const [assetResult, kitResult] = await Promise.all([
-            assetIds.length > 0
-              ? api.bulkUpdateLocation(currentOrg.id, assetIds, location.id)
-              : Promise.resolve({ error: null }),
-            kitIds.length > 0
-              ? api.bulkUpdateKitLocation(currentOrg.id, kitIds, location.id)
-              : Promise.resolve({ error: null }),
-          ]);
+          // The workspace this save belongs to. A switch while it is in
+          // flight clears this screen, so nothing below may then touch it.
+          const originOrgId = currentOrg.id;
+          const isCurrent = () => activeOrgIdRef.current === originOrgId;
+          // What this save sends. Rows scanned while it is in flight are not
+          // part of it, and are settled by these ids, never by their type.
+          const submitted = splitScannedIds();
+          const { assetIds, kitIds } = submitted;
+          // Assets first, then kits, as the web scanner does. Each part's
+          // answer is kept, so a list that only partly moved keeps exactly
+          // the rows that still need moving.
+          const saved = await sendLocationParts({
+            isCurrent,
+            sendAssets:
+              assetIds.length > 0
+                ? () =>
+                    api.bulkUpdateLocation(currentOrg.id, assetIds, location.id)
+                : null,
+            sendKits:
+              kitIds.length > 0
+                ? () =>
+                    api.bulkUpdateKitLocation(
+                      currentOrg.id,
+                      kitIds,
+                      location.id
+                    )
+                : null,
+          });
           setIsSubmitting(false);
+          // The operator left the workspace: its list is gone, and the result
+          // belongs to a screen they are no longer on.
+          if (!saved || !isCurrent()) return;
 
-          const error = assetResult.error || kitResult.error;
-          if (error) {
+          if (saved.error) {
             // An archived refusal names its rows: mark those, so the operator
-            // removes them and moves the rest.
+            // removes them and moves the rest. Rows of a part that did move
+            // leave the list, so a retry does not send them again.
             const archivedAssetIds = archivedIdsFromError(
-              "errorDetails" in assetResult ? assetResult.errorDetails : null
+              saved.assetErrorDetails
             );
-            setScannedItems((prev) => markArchivedRows(prev, archivedAssetIds));
-            Alert.alert("Error", error);
+            setScannedItems((prev) =>
+              markArchivedRows(
+                rowsLeftAfterLocationSave(prev, submitted, saved.parts),
+                archivedAssetIds
+              )
+            );
+            const notice = savedPartNotice(saved.parts);
+            Alert.alert(
+              "Error",
+              notice ? `${saved.error}\n\n${notice}` : saved.error
+            );
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
             Alert.alert("Done", `Moved ${moveLabel} to ${location.name}.`);
-            setScannedItems([]);
+            // Only what was sent leaves: a row scanned while the save was in
+            // flight has not moved and stays for the next one.
+            setScannedItems((prev) =>
+              rowsLeftAfterLocationSave(prev, submitted, saved.parts)
+            );
             lastScanRef.current = "";
           }
         },
