@@ -18374,7 +18374,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       const findMany = db.consumptionLog.findMany as ReturnType<
         typeof vitest.fn
       >;
-      const fallback = findMany.getMockImplementation();
+      const fallback = findMany.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
       findMany.mockImplementation((args: { select?: object }) => {
         const keys = Object.keys(args?.select ?? {})
           .sort()
@@ -18396,7 +18398,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       const sliceRows = db.bookingAsset.findMany as ReturnType<
         typeof vitest.fn
       >;
-      const genericRows = sliceRows.getMockImplementation();
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
       sliceRows.mockImplementation((args: { where: { assetId?: unknown } }) =>
         args.where.assetId
           ? Promise.resolve([
@@ -18431,7 +18435,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       const sliceRows = db.bookingAsset.findMany as ReturnType<
         typeof vitest.fn
       >;
-      const genericRows = sliceRows.getMockImplementation();
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
       sliceRows.mockImplementation(
         (args: { select?: { checkedOutQuantity?: boolean } }) =>
           args.select?.checkedOutQuantity
