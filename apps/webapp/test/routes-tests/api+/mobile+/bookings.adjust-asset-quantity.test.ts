@@ -534,3 +534,24 @@ describe("POST /api/mobile/bookings/adjust-asset-quantity with sources", () => {
     expect(setManualSources).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/mobile/bookings/adjust-asset-quantity: locked status rule", () => {
+  it("403s when the booking was reserved after the snapshot, for a caller held to DRAFT", async () => {
+    withRole(OrganizationRoles.SELF_SERVICE);
+    // The snapshot still says DRAFT; the locked row says RESERVED.
+    tx.$queryRaw.mockResolvedValue([{ status: BookingStatus.RESERVED }]);
+
+    const response = await action(
+      makeArgs({ bookingId: BOOKING_ID, assetId: ASSET_ID, quantity: 5 })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(403);
+    expect(
+      (response.data as { error: { message: string } }).error.message
+    ).toBe(
+      "Quantities cannot be changed on this booking in its current status."
+    );
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
+  });
+});

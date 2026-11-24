@@ -5,9 +5,11 @@
  * @see {@link file://./booked-quantity.server.ts}
  */
 
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
+import { accessFor } from "@helpers/role-access";
 
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
@@ -22,6 +24,7 @@ import { Logger } from "~/utils/logger";
 import {
   formatSourcesForNote,
   noteBookedQuantityChanges,
+  sourcesMoved,
   setStandaloneBookedQuantities,
   setStandaloneBookedQuantitiesWithinTx,
   setStandaloneBookedQuantity,
@@ -88,6 +91,9 @@ vi.mock("./sources/booking-sources.server", () => ({
 // why: a failed note is logged, never thrown; the spy makes that observable
 // without printing during the run.
 vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
+
+/** An admin manages items in every open status. */
+const ADMIN_ACCESS = accessFor([OrganizationRoles.ADMIN]);
 
 const SCOPE = {
   bookingId: "booking-1",
@@ -329,7 +335,11 @@ describe("setStandaloneBookedQuantity", () => {
     slicesHold({ "slice-a": { quantity: 3 } });
 
     await expect(
-      setStandaloneBookedQuantity({ ...SCOPE, ...change("a", 7) })
+      setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 7),
+      })
     ).resolves.toEqual({ previousQuantity: 3, sourcesChanged: false });
   });
 });
@@ -566,6 +576,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
 
     const result = await setStandaloneBookedQuantity({
       ...SCOPE,
+      access: ADMIN_ACCESS,
       ...change("a", 15),
       sources: { input: MANUAL, userId: "user-1" },
     });
@@ -621,6 +632,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
 
     await setStandaloneBookedQuantity({
       ...SCOPE,
+      access: ADMIN_ACCESS,
       ...change("a", 15),
       sources: { input: { mode: "AUTO" }, userId: "user-1" },
     });
@@ -642,6 +654,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
 
     const result = await setStandaloneBookedQuantity({
       ...SCOPE,
+      access: ADMIN_ACCESS,
       ...change("a", 15),
       sources: { input: { mode: "AUTO" }, userId: "user-1" },
     });
@@ -660,16 +673,24 @@ describe("setStandaloneBookedQuantity with sources", () => {
       ],
       { before: "AUTO", after: "MANUAL" }
     );
-    tx.bookingAsset.findUnique.mockImplementationOnce(() =>
-      Promise.resolve({
-        quantity: 10,
-        checkedOutAt: null,
-        sourceAllocation: "AUTO",
-      })
+    // The locked re-read sees 10 units, so the request for 15 resizes.
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        Promise.resolve(
+          select.quantity
+            ? { quantity: 10, checkedOutAt: null, sourceAllocation: "AUTO" }
+            : {
+                sourceAllocation:
+                  tx.bookingAssetSource.findMany.mock.calls.length === 0
+                    ? "AUTO"
+                    : "MANUAL",
+              }
+        )
     );
 
     await setStandaloneBookedQuantity({
       ...SCOPE,
+      access: ADMIN_ACCESS,
       ...change("a", 15),
       sources: { input: MANUAL, userId: "user-1" },
     });
@@ -684,20 +705,122 @@ describe("setStandaloneBookedQuantity with sources", () => {
     );
   });
 
-  it("refuses a sources change on a closed booking and touches nothing", async () => {
+  it("refuses any change on a closed booking with the manage-items 403 and touches nothing", async () => {
     bookingIs("CANCELLED");
     slicesHold({ "slice-a": { quantity: 15, sourceAllocation: "AUTO" } });
 
     await expect(
       setStandaloneBookedQuantity({
         ...SCOPE,
+        access: ADMIN_ACCESS,
         ...change("a", 15),
         sources: { input: MANUAL, userId: "user-1" },
       })
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ status: 403 });
     expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
     expect(setManualSources).not.toHaveBeenCalled();
     expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("records the state before the quantity change as fromValue", async () => {
+    sourcesMoveFrom(
+      [row("LOCATION", "loc-1", { quantity: 5 })],
+      [
+        row("LOCATION", "loc-1", { quantity: 5 }),
+        row("UNPLACED", null, { quantity: 3 }),
+      ],
+      { before: "AUTO", after: "MANUAL" }
+    );
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        Promise.resolve(
+          select.quantity
+            ? { quantity: 5, checkedOutAt: null, sourceAllocation: "AUTO" }
+            : {
+                sourceAllocation:
+                  tx.bookingAssetSource.findMany.mock.calls.length === 0
+                    ? "AUTO"
+                    : "MANUAL",
+              }
+        )
+    );
+
+    await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 8),
+      sources: {
+        input: {
+          mode: "MANUAL",
+          sources: [
+            { locationId: "loc-1", quantity: 5 },
+            { locationId: null, quantity: 3 },
+          ],
+        },
+        userId: "user-1",
+      },
+    });
+
+    // The snapshot is read before the resize writes anything.
+    expect(
+      tx.bookingAssetSource.findMany.mock.invocationCallOrder[0]
+    ).toBeLessThan(vi.mocked(resizeSlices).mock.invocationCallOrder[0]);
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromValue: [{ kind: "LOCATION", locationId: "loc-1", planned: 5 }],
+        toValue: [
+          { kind: "LOCATION", locationId: "loc-1", planned: 5 },
+          { kind: "UNPLACED", locationId: null, planned: 3 },
+        ],
+      }),
+      tx
+    );
+  });
+
+  it("writes no source note when an AUTO slice only grows on the same sources", async () => {
+    sourcesMoveFrom(
+      [row("UNPLACED", null, { quantity: 5 })],
+      [row("UNPLACED", null, { quantity: 8 })],
+      { before: "AUTO", after: "AUTO" }
+    );
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        Promise.resolve(
+          select.quantity
+            ? { quantity: 5, checkedOutAt: null, sourceAllocation: "AUTO" }
+            : { sourceAllocation: "AUTO" }
+        )
+    );
+
+    const result = await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 8),
+      sources: { input: { mode: "AUTO" }, userId: "user-1" },
+    });
+
+    expect(result).toEqual({ previousQuantity: 5, sourcesChanged: false });
+    expect(createSystemBookingNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a caller held to DRAFT on a RESERVED booking with the mobile route's 403", async () => {
+    bookingIs("RESERVED");
+    slicesHold({ "slice-a": { quantity: 5, sourceAllocation: "AUTO" } });
+
+    await expect(
+      setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        ...change("a", 6),
+      })
+    ).rejects.toMatchObject({
+      status: 403,
+      message:
+        "Quantities cannot be changed on this booking in its current status.",
+    });
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
   });
 
   it("passes a facade refusal through and writes no note or event", async () => {
@@ -715,12 +838,65 @@ describe("setStandaloneBookedQuantity with sources", () => {
     await expect(
       setStandaloneBookedQuantity({
         ...SCOPE,
+        access: ADMIN_ACCESS,
         ...change("a", 15),
         sources: { input: MANUAL, userId: "user-1" },
       })
     ).rejects.toMatchObject({ status: 400 });
     expect(createSystemBookingNote).not.toHaveBeenCalled();
     expect(recordEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("sourcesMoved", () => {
+  /** A part with only the fields the comparison reads. */
+  function part(key: string, planned: number) {
+    return {
+      key,
+      kind: "UNPLACED" as const,
+      locationId: null,
+      label: key,
+      planned,
+      out: 0,
+      short: false,
+    };
+  }
+  const state = (
+    mode: "AUTO" | "MANUAL",
+    parts: ReturnType<typeof part>[]
+  ) => ({
+    mode,
+    parts,
+  });
+
+  it("is false when sources only grow or only shrink with the quantity", () => {
+    expect(
+      sourcesMoved(state("AUTO", [part("A", 5)]), state("AUTO", [part("A", 8)]))
+    ).toBe(false);
+    expect(
+      sourcesMoved(
+        state("MANUAL", [part("A", 5), part("B", 3)]),
+        state("MANUAL", [part("A", 4), part("B", 2)])
+      )
+    ).toBe(false);
+  });
+
+  it("is true when units move between sources or the mode changes", () => {
+    expect(
+      sourcesMoved(state("AUTO", [part("A", 5)]), state("AUTO", [part("B", 5)]))
+    ).toBe(true);
+    expect(
+      sourcesMoved(
+        state("AUTO", [part("A", 5)]),
+        state("AUTO", [part("A", 3), part("B", 4)])
+      )
+    ).toBe(true);
+    expect(
+      sourcesMoved(
+        state("AUTO", [part("A", 5)]),
+        state("MANUAL", [part("A", 5)])
+      )
+    ).toBe(true);
   });
 });
 

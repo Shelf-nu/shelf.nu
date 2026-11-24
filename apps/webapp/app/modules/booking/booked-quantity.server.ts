@@ -13,6 +13,8 @@ import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
   resizeSlices,
   setAutoSources,
@@ -51,6 +53,10 @@ import { lockBookingForStatusCheck } from "./utils.server";
  *   guard.
  * - A set of changes lands together: in a transaction of its own, or inside
  *   the caller's when it must commit with other writes (the mobile re-add).
+ *
+ * The adjust action ({@link setStandaloneBookedQuantity}) also applies the
+ * manage-items status rule against the locked booking status, for web and
+ * mobile alike. The mobile re-add runs the add rule in its own path.
  *
  * The adjust action may also choose where the slice's units come from
  * (`sources`): by hand (MANUAL) or back to the allocation rule (AUTO). That
@@ -108,13 +114,6 @@ type SliceState = {
 const PHYSICAL_STATUSES: ReadonlySet<BookingStatus> = new Set([
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
-]);
-
-/** Booking statuses that never change again. */
-const TERMINAL_STATUSES: ReadonlySet<BookingStatus> = new Set([
-  BookingStatus.COMPLETE,
-  BookingStatus.CANCELLED,
-  BookingStatus.ARCHIVED,
 ]);
 
 /** True for a slice mode that carries loose source rows. */
@@ -440,15 +439,70 @@ export function formatSourcesForNote(parts: BookingSourcePart[]): string {
     .join(", ");
 }
 
+/** A slice's sources and mode at one moment, for the note and the event. */
+export type SourcesState = {
+  mode: BookingSourceAllocation | undefined;
+  parts: BookingSourcePart[];
+};
+
+/** Reads a slice's mode and display parts. */
+async function readSourcesState(
+  tx: BookedQuantityTx,
+  organizationId: string,
+  sliceId: string
+): Promise<SourcesState> {
+  const slice = await tx.bookingAsset.findUnique({
+    where: { id: sliceId },
+    select: { sourceAllocation: true },
+  });
+  return {
+    mode: slice?.sourceAllocation,
+    parts: await describeSliceSources(tx, organizationId, sliceId),
+  };
+}
+
+/**
+ * True when where the units come from changed between two states: the mode
+ * changed, or units moved between sources. A quantity change on its own is
+ * not a move: when every source only grows (the quantity went up) or only
+ * shrinks (it went down), no unit moved. A unit moved when the units gained
+ * at sources exceed the growth of the total planned units.
+ */
+export function sourcesMoved(
+  before: SourcesState,
+  after: SourcesState
+): boolean {
+  if (before.mode !== after.mode) return true;
+  const plannedBefore = new Map(before.parts.map((p) => [p.key, p.planned]));
+  const plannedAfter = new Map(after.parts.map((p) => [p.key, p.planned]));
+  const keys = new Set([...plannedBefore.keys(), ...plannedAfter.keys()]);
+  let gained = 0;
+  for (const key of keys) {
+    gained += Math.max(
+      0,
+      (plannedAfter.get(key) ?? 0) - (plannedBefore.get(key) ?? 0)
+    );
+  }
+  const total = (parts: BookingSourcePart[]) =>
+    parts.reduce((sum, p) => sum + p.planned, 0);
+  const growth = Math.max(0, total(after.parts) - total(before.parts));
+  return gained > growth;
+}
+
 /**
  * Sets where a slice's units come from, inside the caller's transaction,
  * under the booking lock: MANUAL by hand, or AUTO by the allocation rule.
- * When the parts or the mode changed, writes a booking note and a
- * `BOOKING_ASSET_SOURCES_CHANGED` event in the same transaction.
+ * When the final state differs from `before` (see {@link sourcesMoved}),
+ * writes a booking note and a `BOOKING_ASSET_SOURCES_CHANGED` event in the
+ * same transaction.
  *
- * @throws {ShelfError} 400 on a closed booking, a booking without dates, or
- *   any refusal of the facade (a location that is not a placement of the
- *   asset, a split that does not add up, units that do not fit)
+ * @param args.before - The slice's state read before any change of this
+ *   request (quantity included), so the event never records an
+ *   intermediate state
+ * @returns True when a note and an event were written
+ * @throws {ShelfError} 400 on a booking without dates, or any refusal of the
+ *   facade (a location that is not a placement of the asset, a split that
+ *   does not add up, units that do not fit)
  */
 async function applySourcesUnderBookingLock(
   tx: BookedQuantityTx,
@@ -458,9 +512,10 @@ async function applySourcesUnderBookingLock(
     window: BookingScope["window"];
     change: BookedQuantityChange;
     sources: SourcesRequest;
+    before: SourcesState;
   }
 ): Promise<boolean> {
-  const { organizationId, bookingId, window, change, sources } = args;
+  const { organizationId, bookingId, window, change, sources, before } = args;
   if (!window) {
     throw userError(
       "Sources not changed",
@@ -469,16 +524,6 @@ async function applySourcesUnderBookingLock(
     );
   }
   const sliceId = change.bookingAssetId;
-  const readMode = async () =>
-    (
-      await tx.bookingAsset.findUnique({
-        where: { id: sliceId },
-        select: { sourceAllocation: true },
-      })
-    )?.sourceAllocation;
-
-  const modeBefore = await readMode();
-  const before = await describeSliceSources(tx, organizationId, sliceId);
   if (sources.input.mode === "MANUAL") {
     await setManualSources(tx, {
       organizationId,
@@ -490,15 +535,8 @@ async function applySourcesUnderBookingLock(
   } else {
     await setAutoSources(tx, { organizationId, bookingId, sliceId, window });
   }
-  const modeAfter = await readMode();
-  const after = await describeSliceSources(tx, organizationId, sliceId);
-
-  const fromValue = snapshotOf(before);
-  const toValue = snapshotOf(after);
-  const changed =
-    modeBefore !== modeAfter ||
-    JSON.stringify(fromValue) !== JSON.stringify(toValue);
-  if (!changed) return false;
+  const after = await readSourcesState(tx, organizationId, sliceId);
+  if (!sourcesMoved(before, after)) return false;
 
   const actorUser = await getUserByID(sources.userId, {
     select: {
@@ -513,13 +551,13 @@ async function applySourcesUnderBookingLock(
     `/assets/${change.assetId}`,
     stripMarkdocDelimiters(change.assetTitle)
   );
-  const how = modeAfter === "AUTO" ? " (chosen automatically)" : "";
+  const how = after.mode === "AUTO" ? " (chosen automatically)" : "";
   await createSystemBookingNote(
     {
       bookingId,
       organizationId,
       content: `${actor} changed where units come from for ${assetLink}: ${formatSourcesForNote(
-        after
+        after.parts
       )}${how}.`,
     },
     tx
@@ -534,9 +572,9 @@ async function applySourcesUnderBookingLock(
       bookingId,
       assetId: change.assetId,
       field: "sources",
-      fromValue,
-      toValue,
-      meta: { sliceId, mode: modeAfter ?? null },
+      fromValue: snapshotOf(before.parts),
+      toValue: snapshotOf(after.parts),
+      meta: { sliceId, mode: after.mode ?? null },
     },
     tx
   );
@@ -551,11 +589,17 @@ async function applySourcesUnderBookingLock(
  * With sources, the resize admits nothing on its own: the new quantity is
  * admitted once, with the new split (MANUAL) or the re-allocation (AUTO).
  *
- * @param args.sources - Optional sources change; refused on a COMPLETE,
- *   CANCELLED or ARCHIVED booking
+ * The status rule is the manage-items one (`canManageBookingItems`),
+ * checked against the LOCKED status so every entry point (web and mobile)
+ * shares it: COMPLETE, CANCELLED and ARCHIVED bookings refuse every change,
+ * and callers held to DRAFT may only change a DRAFT booking.
+ *
+ * @param args.access - The caller's role access
+ * @param args.sources - Optional sources change
  * @returns the quantity the slice held before the change, read under the
  *   lock, and whether the sources changed
- * @throws {ShelfError} 400 when the sources cannot be changed (see
+ * @throws {ShelfError} 403 when the booking's status does not allow the
+ *   caller to change its items; 400 when the sources cannot be changed (see
  *   {@link applySourcesUnderBookingLock}); otherwise as the quantity guards
  */
 export async function setStandaloneBookedQuantity({
@@ -563,9 +607,13 @@ export async function setStandaloneBookedQuantity({
   organizationId,
   window,
   sources,
+  access,
   ...change
 }: BookingScope &
-  BookedQuantityChange & { sources?: SourcesRequest }): Promise<{
+  BookedQuantityChange & {
+    sources?: SourcesRequest;
+    access: RoleAccess;
+  }): Promise<{
   previousQuantity: number;
   sourcesChanged: boolean;
 }> {
@@ -575,13 +623,12 @@ export async function setStandaloneBookedQuantity({
       bookingId,
       organizationId
     );
-    if (sources && TERMINAL_STATUSES.has(bookingStatus)) {
-      throw userError(
-        "Sources not changed",
-        "Sources cannot be changed on a booking that is complete, cancelled or archived.",
-        { bookingId, status: bookingStatus }
-      );
-    }
+    assertCanChangeBookedQuantity({ access, bookingId, bookingStatus });
+    // Read before the quantity changes, so the event compares committed
+    // states only.
+    const before = sources
+      ? await readSourcesState(tx, organizationId, change.bookingAssetId)
+      : null;
     const [applied] = await applyChangesUnderBookingLock(tx, {
       bookingId,
       organizationId,
@@ -591,16 +638,46 @@ export async function setStandaloneBookedQuantity({
       // The sources call below admits the new quantity with the new split.
       admit: !sources,
     });
-    const sourcesChanged = sources
-      ? await applySourcesUnderBookingLock(tx, {
-          organizationId,
-          bookingId,
-          window,
-          change,
-          sources,
-        })
-      : false;
+    const sourcesChanged =
+      sources && before
+        ? await applySourcesUnderBookingLock(tx, {
+            organizationId,
+            bookingId,
+            window,
+            change,
+            sources,
+            before,
+          })
+        : false;
     return { previousQuantity: applied.previousQuantity, sourcesChanged };
+  });
+}
+
+/**
+ * The manage-items status rule for a booked-quantity change.
+ *
+ * @throws {ShelfError} 403 when the caller may not change this booking's
+ *   items in its current status
+ */
+function assertCanChangeBookedQuantity({
+  access,
+  bookingId,
+  bookingStatus,
+}: {
+  access: RoleAccess;
+  bookingId: string;
+  bookingStatus: BookingStatus;
+}): void {
+  if (canManageBookingItems({ access, bookingStatus })) return;
+  throw new ShelfError({
+    cause: null,
+    title: "Action not allowed",
+    message:
+      "Quantities cannot be changed on this booking in its current status.",
+    additionalData: { bookingId, status: bookingStatus },
+    label: "Booking",
+    status: 403,
+    shouldBeCaptured: false,
   });
 }
 

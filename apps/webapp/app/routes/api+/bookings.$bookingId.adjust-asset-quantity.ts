@@ -16,7 +16,12 @@
  *   `{"mode":"MANUAL","sources":[{"locationId":"loc-1","quantity":8},{"locationId":null,"quantity":7}]}`
  *   to set the planned units per source by hand (`null` is Unplaced). The
  *   units must add up to the slice's planned units after the quantity
- *   change. A blank or missing field leaves the sources alone.
+ *   change. A blank or missing field leaves the sources alone; the literal
+ *   JSON `null` is invalid (400), so omit the field instead.
+ *
+ * Status rule: the manage-items one (`canManageBookingItems`), checked by
+ * the service against the locked booking status, the same gate as the
+ * mobile route (403 with the same message).
  *
  * @see {@link file://./../../components/booking/adjust-booking-asset-quantity-dialog.tsx}
  * @see {@link file://./../../modules/booking/booked-quantity.server.ts}
@@ -176,6 +181,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
       sources: sources ? { input: sources, userId } : undefined,
+      // The manage-items status rule runs against the locked status.
+      access,
     });
 
     // Best-effort: a note failure is logged and never fails the saved change.

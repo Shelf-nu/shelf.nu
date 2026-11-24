@@ -49,8 +49,9 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *   cannot both pass the guard and oversubscribe the pool.
  * - The status rule is the add-items one (`canManageBookingItems`):
  *   COMPLETE / ARCHIVED / CANCELLED bookings reject, and callers held to DRAFT
- *   may only touch a DRAFT booking. Callers who do not write every booking may
- *   only touch their own.
+ *   may only touch a DRAFT booking. Checked here on the snapshot (403 before
+ *   any transaction) and again by the service against the locked status.
+ *   Callers who do not write every booking may only touch their own.
  *
  * Body: { bookingId: string, assetId: string, quantity: number,
  *         sources?: { mode: "AUTO" } | { mode: "MANUAL", sources: Array<{
@@ -195,6 +196,8 @@ export async function action({ request }: ActionFunctionArgs) {
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
       sources: sources ? { input: sources, userId: user.id } : undefined,
+      // The service repeats the status rule against the locked status.
+      access,
     });
 
     await noteBookedQuantityChanges({

@@ -192,7 +192,8 @@ beforeEach(() => {
   // snapshot did (`buildBookingAsset` → 5). Tests that model a concurrent
   // change override this per-scenario.
   dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 5 });
-  dbMocks.queryRaw.mockResolvedValue([{ status: "RESERVED" }]);
+  // A DRAFT booking: every role may change its items.
+  dbMocks.queryRaw.mockResolvedValue([{ status: "DRAFT" }]);
 });
 
 describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", () => {
@@ -464,14 +465,14 @@ describe("api/bookings/:bookingId/adjust-asset-quantity: sources field", () => {
     expect(recordEvent).not.toHaveBeenCalled();
   });
 
-  it("400s a sources change on a closed booking", async () => {
+  it("403s any change on a closed booking", async () => {
     dbMocks.queryRaw.mockResolvedValue([{ status: "COMPLETE" }]);
 
     const response = (await action(
       buildArgs(buildRequest(5, "asset-1", JSON.stringify({ mode: "AUTO" })))
     )) as unknown as Response;
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
     expect(setManualSources).not.toHaveBeenCalled();
   });
 
@@ -490,5 +491,45 @@ describe("api/bookings/:bookingId/adjust-asset-quantity: sources field", () => {
     expect(response.status).toBe(403);
     expect(dbMocks.$transaction).not.toHaveBeenCalled();
     expect(setManualSources).not.toHaveBeenCalled();
+  });
+});
+
+describe("api/bookings/:bookingId/adjust-asset-quantity: status rule", () => {
+  it("refuses a SELF_SERVICE owner on a RESERVED booking like the mobile route does", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // The gate reads the LOCKED status, not the outside-tx snapshot.
+    dbMocks.queryRaw.mockResolvedValue([{ status: "RESERVED" }]);
+
+    const response = (await action(
+      buildArgs(buildRequest())
+    )) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      "Quantities cannot be changed on this booking in its current status."
+    );
+    expect(dbMocks.bookingAssetUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lets an ADMIN change a RESERVED booking", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    dbMocks.queryRaw.mockResolvedValue([{ status: "RESERVED" }]);
+
+    const response = (await action(
+      buildArgs(buildRequest())
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
   });
 });
