@@ -93,6 +93,11 @@ import {
   markArchivedRows,
 } from "@/lib/archived-assets";
 import {
+  rowsLeftAfterLocationSave,
+  savedPartNotice,
+  sendLocationParts,
+} from "@/lib/location-save";
+import {
   computeBlockers,
   blockedQrIds,
   kitBlockerFacts,
@@ -2222,25 +2227,45 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         onPress: async () => {
           setIsSubmitting(true);
           const { assetIds, kitIds } = splitScannedIds();
-          const [assetResult, kitResult] = await Promise.all([
-            assetIds.length > 0
-              ? api.bulkUpdateLocation(currentOrg.id, assetIds, location.id)
-              : Promise.resolve({ error: null }),
-            kitIds.length > 0
-              ? api.bulkUpdateKitLocation(currentOrg.id, kitIds, location.id)
-              : Promise.resolve({ error: null }),
-          ]);
+          // Assets first, then kits, as the web scanner does. Each part's
+          // answer is kept, so a list that only partly moved keeps exactly
+          // the rows that still need moving.
+          const saved = await sendLocationParts({
+            sendAssets:
+              assetIds.length > 0
+                ? () =>
+                    api.bulkUpdateLocation(currentOrg.id, assetIds, location.id)
+                : null,
+            sendKits:
+              kitIds.length > 0
+                ? () =>
+                    api.bulkUpdateKitLocation(
+                      currentOrg.id,
+                      kitIds,
+                      location.id
+                    )
+                : null,
+          });
           setIsSubmitting(false);
 
-          const error = assetResult.error || kitResult.error;
-          if (error) {
+          if (saved.error) {
             // An archived refusal names its rows: mark those, so the operator
-            // removes them and moves the rest.
+            // removes them and moves the rest. Rows of a part that did move
+            // leave the list, so a retry does not send them again.
             const archivedAssetIds = archivedIdsFromError(
-              "errorDetails" in assetResult ? assetResult.errorDetails : null
+              saved.assetErrorDetails
             );
-            setScannedItems((prev) => markArchivedRows(prev, archivedAssetIds));
-            Alert.alert("Error", error);
+            setScannedItems((prev) =>
+              markArchivedRows(
+                rowsLeftAfterLocationSave(prev, saved.parts),
+                archivedAssetIds
+              )
+            );
+            const notice = savedPartNotice(saved.parts);
+            Alert.alert(
+              "Error",
+              notice ? `${saved.error}\n\n${notice}` : saved.error
+            );
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
