@@ -686,6 +686,47 @@ function shortfallBySource(
 }
 
 /**
+ * Allocates the pending units conversion seeded in this call over a window
+ * other than the session's, without refusing (the rest on UNASSIGNED): one
+ * batched free read for every pool with seeded units. Each group's session
+ * free units are restored afterwards.
+ *
+ * @param tx - The caller's transaction
+ * @param ctx - The open call; its pending list is emptied
+ * @param args.bookingId - The booking, excluded from competing holds
+ * @param args.window - The window to allocate over
+ */
+async function allocateSeededOverRemainingWindow(
+  tx: BookingSourcesTx,
+  ctx: CallContext,
+  args: { bookingId: string; window: Window }
+) {
+  const groups = [
+    ...new Set(
+      ctx.session.pending.flatMap((p) => {
+        const group = ctx.session.groups.get(p.groupKey);
+        return group ? [group] : [];
+      })
+    ),
+  ];
+  const freeByPool = await computeFreeBySourceForPools(tx, {
+    organizationId: ctx.session.organizationId,
+    assetIds: groups.map((g) => g.key.assetId),
+    window: args.window,
+    excludeBookingId: args.bookingId,
+  });
+  const sessionFree = new Map(groups.map((g) => [g, g.free]));
+  for (const group of groups) {
+    group.free = freeByPool.get(group.key.assetId) ?? [];
+  }
+  try {
+    await allocateSessionPending(tx, ctx.session, "involuntary");
+  } finally {
+    for (const [group, free] of sessionFree) group.free = free;
+  }
+}
+
+/**
  * Admits a change of a booking's window: new dates, reserving a draft, or an
  * extension.
  *
@@ -702,10 +743,16 @@ function shortfallBySource(
  * (the booking held nothing in the added time). So a booking already short
  * because stock was lost can still shorten its dates.
  *
+ * On `extend`, pending units a converting LEGACY group seeds were accepted
+ * for the old window under legacy rules, so they are allocated over the
+ * whole remaining window `[max(from, now), to)` without refusing (the rest
+ * on UNASSIGNED); that costs one extra batched free read, only when a group
+ * converts. Admission still measures only the added interval.
+ *
  * AUTO slices that do not fit (or have pending on UNASSIGNED) are first moved
  * to sources that fit when there are any. Pending units still on UNASSIGNED
- * refuse `reserve` and `extend`. Refusals name each source with its free
- * units over the measured window.
+ * refuse `reserve` (a draft becoming a hold must have every unit placed).
+ * Refusals name each source with its free units over the measured window.
  *
  * A draft changing dates is not admitted (it holds nothing); `reserve` always
  * is. LEGACY groups convert first when adoption is enabled.
@@ -752,6 +799,21 @@ export async function admitWindowChange(
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
   });
   const voluntary = kind === "reserve" || !ctx.isDraft;
+
+  // On an extension, pending units a converting LEGACY group seeds were
+  // already accepted for the old window under legacy rules: they are placed
+  // over the whole remaining window without refusing, so a source full
+  // before the old end never refuses the extension.
+  const seededSliceIds = new Set(ctx.session.pending.map((p) => p.sliceId));
+  if (kind === "extend" && measured && ctx.session.pending.length > 0) {
+    await allocateSeededOverRemainingWindow(tx, ctx, {
+      bookingId,
+      window: {
+        from: new Date(Math.max(from.getTime(), now.getTime())),
+        to,
+      },
+    });
+  }
   await allocateSessionPending(
     tx,
     ctx.session,
@@ -788,11 +850,13 @@ export async function admitWindowChange(
     }
   }
 
-  // AUTO slices move to sources that fit the measured window.
+  // AUTO slices move to sources that fit the measured window. Slices an
+  // extension just converted were placed over the whole remaining window.
   for (const group of converted) {
     const over = overcommittedKeys(group);
     for (const slice of group.slices) {
       if (slice.mode !== "AUTO") continue;
+      if (kind === "extend" && seededSliceIds.has(slice.id)) continue;
       if (unassignedPending(slice) > 0 || hasPendingAt(slice, over)) {
         tryReallocate(group, slice);
       }
@@ -812,7 +876,7 @@ export async function admitWindowChange(
       if (entry) refused.push(entry);
     }
     const needsLocation =
-      kind !== "dates" && group.slices.some((s) => unassignedPending(s) > 0);
+      kind === "reserve" && group.slices.some((s) => unassignedPending(s) > 0);
     if (refused.length === 0 && needsLocation) {
       refused.push(...availableForBooking(group));
     }

@@ -666,6 +666,60 @@ describe("admitWindowChange", () => {
     expect(h.writes).toHaveLength(1);
   });
 
+  it("places a converting LEGACY group's pending over the whole remaining window on an extension, never refusing", async () => {
+    // Demo Warehouse is full between now and the old end but free in the
+    // added time; Unplaced has nothing. The legacy pending cannot sit at
+    // Demo Warehouse for the whole remaining window, so it waits on
+    // UNASSIGNED, and the extension is still admitted.
+    const measured = { from: PREVIOUS.to, to: NEW_TO };
+    const remaining = { from: NOW, to: NEW_TO };
+    h.freeFor = ({ window }) =>
+      window.from.getTime() === NOW.getTime() ? free(0, 0) : free(0, 5);
+    seedGroup({ slices: [slice({ id: "s1", quantity: 5 })] });
+
+    await admitWindowChange(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      from: WINDOW.from,
+      to: NEW_TO,
+      previous: PREVIOUS,
+      kind: "extend",
+      now: NOW,
+      adoptionEnabled: true,
+    });
+
+    expect(h.windows).toEqual([measured, remaining]);
+    const plan = writtenPlan();
+    expect(plan.setModes).toEqual([{ bookingAssetId: "s1", mode: "AUTO" }]);
+    expect(plan.upsertRows).toContainEqual(
+      expect.objectContaining({ kind: "UNASSIGNED", quantity: 5 })
+    );
+    expect(
+      plan.upsertRows.filter((r) => r.kind === "LOCATION" && r.quantity > 0)
+    ).toEqual([]);
+  });
+
+  it("puts a converting LEGACY group's pending on a source that fits the whole remaining window", async () => {
+    h.freeFor = ({ window }) =>
+      window.from.getTime() === NOW.getTime() ? free(5, 0) : free(5, 5);
+    seedGroup({ slices: [slice({ id: "s1", quantity: 5 })] });
+
+    await admitWindowChange(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      from: WINDOW.from,
+      to: NEW_TO,
+      previous: PREVIOUS,
+      kind: "extend",
+      now: NOW,
+      adoptionEnabled: true,
+    });
+
+    expect(writtenPlan().upsertRows).toContainEqual(
+      expect.objectContaining({ kind: "UNPLACED", quantity: 5 })
+    );
+  });
+
   it("lets a booking already short from lost stock shorten its dates", async () => {
     // Stock was lost: over the old window Demo Warehouse has 2 free for the
     // 5 this booking holds (3 short); over the shorter window it has 3 free
