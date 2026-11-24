@@ -666,4 +666,31 @@ describe("loadPhysicalNow", () => {
       ])
     );
   });
+
+  it("Cancelled ONGOING booking with units out stops counting in physical-now", async () => {
+    // One booking, 4 units out at A. Cancelling changes only its status:
+    // the source row keeps its counters, and physical-now stops counting it.
+    const bookings = [booking("b", "ONGOING", "2026-01-01", "2026-01-20")];
+    const sources = [row("s", "LOCATION", "loc-a", { quantity: 4, out: 4 })];
+    const tx = fakeTx({
+      ...pool(10, [["loc-a", 6]]),
+      bookings,
+      slices: [slice("s", "b", { quantity: 4, checkedOutQuantity: 4 })],
+      sources,
+    });
+
+    const ongoing = await loadPhysicalNow(asTx(tx), {
+      organizationId: ORG,
+      assetIds: [POOL],
+    });
+    bookings[0].status = "CANCELLED";
+    const cancelled = await loadPhysicalNow(asTx(tx), {
+      organizationId: ORG,
+      assetIds: [POOL],
+    });
+
+    expect(ongoing.get(POOL)?.get("LOCATION:loc-a")).toBe(2);
+    expect(cancelled.get(POOL)?.get("LOCATION:loc-a")).toBe(6);
+    expect(sources[0]).toMatchObject({ quantity: 4, outQuantity: 4 });
+  });
 });

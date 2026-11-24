@@ -33,6 +33,7 @@ import {
 } from "@prisma/client";
 import type {
   Booking,
+  BookingSourceAllocation,
   Prisma,
   Organization,
   Asset,
@@ -69,6 +70,10 @@ import type {
   BookingForEmail,
 } from "~/emails/types";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
+import {
+  isConvertedSlice,
+  loadRemainingReservationBySlice,
+} from "~/modules/asset/availability-primitives.server";
 import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
@@ -149,6 +154,7 @@ import {
   assertDeleteConfirmedFor,
 } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isLikeShelfError,
@@ -14198,11 +14204,29 @@ const END_DATE_CHANGE_COPY = {
   }
 >;
 
+/** A quantity-tracked slice as an extension measures it against the pool. */
+type ExtendPoolSlice = {
+  id: string;
+  assetId: string;
+  assetKitId: string | null;
+  quantity: number;
+  checkedOutQuantity: number;
+  checkedOutAt: Date | null;
+  checkedInAt: Date | null;
+  sourceAllocation: BookingSourceAllocation;
+  asset: { title: string; unitOfMeasure: string | null };
+};
+
 /**
  * Moves the end of an ongoing or overdue booking, later or earlier.
  *
  * Only the dates move: items stay checked out until they are checked in, and
  * an item still out at the new end makes the booking overdue then.
+ *
+ * A later end is admitted for quantity-tracked pools twice: pool-wide, and,
+ * when source holds are in play (a converted group, or adoption on), per
+ * source over the added interval through the booking sources facade. An
+ * earlier end shrinks the window and admits nothing.
  *
  * @param params.id - The booking whose end changes
  * @param params.organizationId - The caller's workspace; the lookup is scoped to it
@@ -14223,8 +14247,9 @@ const END_DATE_CHANGE_COPY = {
  *   own the booking
  * @throws {ShelfError} 400 when `newEndDate` is not after the booking's start,
  *   is not in the future, or equals the current end, when a later end overlaps
- *   a reserved booking, or when the booking changed between the read and the
- *   write (another end-date change landed, or the booking was closed)
+ *   a reserved booking, when a later end leaves a pool or one of its sources
+ *   short, or when the booking changed between the read and the write
+ *   (another end-date change landed, or the booking was closed)
  */
 export async function extendBooking({
   id,
@@ -14482,22 +14507,108 @@ export async function extendBooking({
            * booking's own claim is excluded from the read, so it competes
            * against everyone else and not against itself.
            */
+          const preLockPoolSlices: ExtendPoolSlice[] =
+            booking.bookingAssets.filter(
+              (ba) => ba.asset.type === AssetType.QUANTITY_TRACKED
+            );
+          /**
+           * Source holds take part when the booking has a converted pool
+           * group, or when adoption is on (the extension converts LEGACY
+           * groups). With adoption off and every pool slice LEGACY, nothing
+           * below differs from the log-based measure and no source query is
+           * sent.
+           */
+          const sourcesInPlay =
+            preLockPoolSlices.length > 0 &&
+            (BOOKING_SOURCES_ENABLED ||
+              preLockPoolSlices.some((ba) =>
+                isConvertedSlice(ba.sourceAllocation)
+              ));
+          let poolSlices = preLockPoolSlices;
+          if (sourcesInPlay) {
+            /**
+             * Per-source admission of the added interval
+             * `[max(old end, now), new end)` for every slice's remaining
+             * reservation (out plus pending), against everyone else. The
+             * facade locks every pool asset of the booking in one sorted
+             * statement (the booking lock is already held), converts LEGACY
+             * groups when adoption is on, re-places AUTO slices that no
+             * longer fit, and refuses a shortage the extension creates at
+             * any source. The previous end is the stored one: the write below
+             * only lands while `to` is unchanged.
+             */
+            await admitWindowChange(tx, {
+              organizationId,
+              bookingId: booking.id,
+              from: booking.from,
+              to: newEndDate,
+              previous: { from: booking.from, to: booking.to },
+              kind: "extend",
+            });
+            // Read again under the locks and after any conversion, so the
+            // pool measure below picks each group's method from its
+            // current mode.
+            poolSlices = await tx.bookingAsset.findMany({
+              where: {
+                bookingId: booking.id,
+                booking: { organizationId },
+                asset: { type: AssetType.QUANTITY_TRACKED },
+              },
+              select: {
+                id: true,
+                assetId: true,
+                assetKitId: true,
+                quantity: true,
+                checkedOutQuantity: true,
+                checkedOutAt: true,
+                checkedInAt: true,
+                sourceAllocation: true,
+                asset: { select: { title: true, unitOfMeasure: true } },
+              },
+            });
+          }
+
           // Units held through a kit are already taken off the pool as the
-          // kit's allocation; counting them here would deduct them twice. Only
-          // slices still out keep units away past the current end. A partly
-          // checked-out slice claims all of its units: the ones not yet out
-          // stay reserved to this booking until it ends.
-          const countedSlices = booking.bookingAssets.filter(
+          // kit's allocation; counting them here would deduct them twice. In
+          // a LEGACY group only slices still out keep units away past the
+          // current end, and a partly checked-out slice claims all of its
+          // units: the ones not yet out stay reserved to this booking until
+          // it ends. A converted standalone slice claims its remaining
+          // reservation as its source rows hold it (out plus pending),
+          // never a figure replayed from the logs.
+          const countedSlices = poolSlices.filter(
             (ba) =>
-              quantityAssetIdsStillOut.has(ba.assetId) &&
+              !isConvertedSlice(ba.sourceAllocation) &&
               !ba.assetKitId &&
               ba.checkedOutAt &&
               !ba.checkedInAt
+          );
+          const convertedSlices = poolSlices.filter(
+            (ba) => isConvertedSlice(ba.sourceAllocation) && !ba.assetKitId
           );
           const quantityUnitsOut = new Map<
             string,
             { units: number; title: string; unit: string | null }
           >();
+          /** Adds a slice's units to its pool's claim. */
+          const claimUnits = (ba: ExtendPoolSlice, units: number) => {
+            if (units <= 0) return;
+            const entry = quantityUnitsOut.get(ba.assetId) ?? {
+              units: 0,
+              title: ba.asset.title,
+              unit: ba.asset.unitOfMeasure,
+            };
+            entry.units += units;
+            quantityUnitsOut.set(ba.assetId, entry);
+          };
+          const remainingBySlice = await loadRemainingReservationBySlice(
+            tx,
+            organizationId,
+            convertedSlices.map((ba) => ba.id)
+          );
+          for (const ba of convertedSlices) {
+            claimUnits(ba, remainingBySlice.get(ba.id) ?? 0);
+          }
           if (countedSlices.length > 0) {
             const countedAssetIds = [
               ...new Set(countedSlices.map((ba) => ba.assetId)),
@@ -14518,7 +14629,7 @@ export async function extendBooking({
               // log tagged to another slice stays there, and untagged units
               // fill each slice only up to what it sent out.
               const returnedBySlice = attributeDispositionsByBookingAsset({
-                bookingAssetRows: booking.bookingAssets
+                bookingAssetRows: poolSlices
                   .filter((ba) => ba.assetId === assetId)
                   .map((ba) => ({
                     id: ba.id,
@@ -14531,18 +14642,7 @@ export async function extendBooking({
               });
               for (const ba of countedSlices) {
                 if (ba.assetId !== assetId) continue;
-                const units = Math.max(
-                  0,
-                  ba.quantity - (returnedBySlice.get(ba.id) ?? 0)
-                );
-                if (units === 0) continue;
-                const entry = quantityUnitsOut.get(assetId) ?? {
-                  units: 0,
-                  title: ba.asset.title,
-                  unit: ba.asset.unitOfMeasure,
-                };
-                entry.units += units;
-                quantityUnitsOut.set(assetId, entry);
+                claimUnits(ba, ba.quantity - (returnedBySlice.get(ba.id) ?? 0));
               }
             }
           }
@@ -15914,13 +16014,62 @@ export async function removeAssets({
       // are gone and we'd lose the count.
       const rowsBeingDeleted = await tx.bookingAsset.findMany({
         where: rowsToDeleteWhere,
-        // `bookingModelRequestId` drives the reservation rollback below.
-        select: { assetId: true, quantity: true, bookingModelRequestId: true },
+        // `bookingModelRequestId` drives the reservation rollback below;
+        // `sourceAllocation` tells converted pool slices apart.
+        select: {
+          assetId: true,
+          quantity: true,
+          bookingModelRequestId: true,
+          sourceAllocation: true,
+        },
       });
       for (const row of rowsBeingDeleted) {
         removedQtyByAssetId.set(
           row.assetId,
           (removedQtyByAssetId.get(row.assetId) ?? 0) + row.quantity
+        );
+      }
+
+      /**
+       * Deleting a converted slice cascades its source rows and orphans its
+       * disposition shares (`bookingAssetId` and `bookingAssetSourceId` set
+       * NULL). The shares keep every log fully shared, so the surviving
+       * slices' numbers do not change and nothing redistributes the removed
+       * slice's history; a group left with no slice stays converted through
+       * those shares. These are writes to source tables, so they take the
+       * same locks as every source writer: the booking first, then the pools
+       * in one sorted statement, and the status is checked again under the
+       * booking lock. LEGACY slices own no source rows or shares and keep
+       * today's statements.
+       */
+      const convertedPoolAssetIds = [
+        ...new Set(
+          rowsBeingDeleted
+            .filter((row) => isConvertedSlice(row.sourceAllocation))
+            .map((row) => row.assetId)
+        ),
+      ];
+      if (convertedPoolAssetIds.length > 0) {
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
+        if (!canUserRemoveBookingAssets({ status: lockedStatus })) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "Removing items is not allowed for the current status of the booking.",
+            additionalData: { bookingId: id, status: lockedStatus },
+            label,
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
+        await lockEveryAssetForQuantityUpdate(
+          tx,
+          convertedPoolAssetIds,
+          organizationId
         );
       }
 

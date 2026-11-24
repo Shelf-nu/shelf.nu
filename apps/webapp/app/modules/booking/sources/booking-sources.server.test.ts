@@ -2227,3 +2227,178 @@ describe("openSettlement and commitSettlement", () => {
     expect(h.writes).toHaveLength(0);
   });
 });
+
+describe("extension admission", () => {
+  it("X 09-10, Y 10-11 same capacity, extend X to 11: extension refused", async () => {
+    // Demo Warehouse holds 5. X has 3 out and 2 pending there until 10:00;
+    // Y reserves all 5 from 10:00 to 11:00. Over X's own window the units
+    // fit; over the added hour nothing is free, and both X's out and pending
+    // units need room there.
+    const xFrom = new Date("2026-12-01T09:00:00Z");
+    const xTo = new Date("2026-12-01T10:00:00Z");
+    const newTo = new Date("2026-12-01T11:00:00Z");
+    const now = new Date("2026-12-01T09:30:00Z");
+    h.freeFor = ({ window }) =>
+      window.from.getTime() === xTo.getTime() ? free(0, 0) : free(0, 5);
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "x",
+          mode: "AUTO",
+          checkedOutQuantity: 3,
+          rows: [
+            row("x", {
+              kind: "LOCATION",
+              locationId: "loc-a",
+              quantity: 5,
+              outQuantity: 3,
+              dispatchedTotal: 3,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const error = await refusal(
+      admitWindowChange(fakeTx({ slices: [{ id: "x" }], status: "ONGOING" }), {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        from: xFrom,
+        to: newTo,
+        previous: { from: xFrom, to: xTo },
+        kind: "extend",
+        now,
+        adoptionEnabled: false,
+      })
+    );
+
+    expect(error.message).toBe(
+      "Not enough units at Demo Warehouse (0 free) for these dates."
+    );
+    // Only the added interval is measured.
+    expect(h.windows).toEqual([{ from: xTo, to: newTo }]);
+    expect(h.writes).toHaveLength(0);
+  });
+});
+
+describe("slices removed from a converted group", () => {
+  /** An 8-unit return log of the group; its shares live outside the state. */
+  const RETURN_LOG = {
+    id: "log-1",
+    bookingAssetId: null,
+    quantity: 8,
+    createdAt: new Date("2026-11-20T09:00:00Z"),
+  };
+
+  it("Remove the kit slice after it recorded returns, standalone converted: standalone numbers unchanged, nothing redistributed", async () => {
+    // The log was shared 5 on the standalone slice and 3 on the kit slice.
+    // The kit slice is gone, so its 3 units of shares are orphaned; the
+    // standalone slice keeps its rows and its 5 units of history.
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "standalone",
+          mode: "MANUAL",
+          quantity: 10,
+          checkedOutQuantity: 10,
+          rows: [
+            row("standalone", {
+              kind: "LOCATION",
+              locationId: "loc-a",
+              quantity: 10,
+              outQuantity: 5,
+              releasedQuantity: 5,
+              dispatchedTotal: 10,
+              sharedQuantity: 5,
+            }),
+          ],
+        }),
+      ],
+      logs: [RETURN_LOG],
+    });
+    h.freeFor = () => free(0, 10);
+
+    await admitWindowChange(
+      fakeTx({ slices: [{ id: "standalone" }], status: "ONGOING" }),
+      {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        from: WINDOW.from,
+        to: WINDOW.to,
+        previous: WINDOW,
+        kind: "dates",
+        adoptionEnabled: false,
+      }
+    );
+
+    // Still converted with adoption off (the probe found it), and the plan
+    // touches no row, share or mode.
+    expect(h.order[0]).toBe("probe");
+    const plan = writtenPlan();
+    expect(plan.upsertRows).toEqual([]);
+    expect(plan.insertShares).toEqual([]);
+    expect(plan.repointShares).toEqual([]);
+    expect(plan.setModes).toEqual([]);
+  });
+
+  it("Convert, return units, remove every slice, re-add the asset with the flag off: new slice AUTO with its full demand, old shares stay orphaned", async () => {
+    // The group has no slice left but its orphaned shares keep it converted;
+    // the slice just added is the only one.
+    seedGroup({
+      converted: true,
+      slices: [slice({ id: "re-added", quantity: 6 })],
+      logs: [RETURN_LOG],
+    });
+
+    await allocateNewSlices(fakeTx({ slices: [{ id: "re-added" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      sliceIds: ["re-added"],
+      window: WINDOW,
+      holdsNow: true,
+      adoptionEnabled: false,
+    });
+
+    const plan = writtenPlan();
+    expect(plan.setModes).toEqual([
+      { bookingAssetId: "re-added", mode: "AUTO" },
+    ]);
+    expect(plan.upsertRows).toEqual([
+      expect.objectContaining({
+        bookingAssetId: "re-added",
+        kind: "UNPLACED",
+        quantity: 6,
+        outQuantity: 0,
+        releasedQuantity: 0,
+        dispatchedTotal: 0,
+      }),
+    ]);
+    // The earlier returns are never replayed onto the new slice.
+    expect(plan.insertShares).toEqual([]);
+    expect(plan.repointShares).toEqual([]);
+  });
+
+  it("Remove every slice of a converted group with zero dispositions, re-add with the flag off: treated as a new group", async () => {
+    // No share survived the removal, so nothing marks the group converted:
+    // the re-added slice is an ordinary LEGACY slice of a new group.
+    seedGroup({
+      converted: false,
+      slices: [slice({ id: "re-added", quantity: 6 })],
+      logs: [],
+    });
+
+    await allocateNewSlices(fakeTx({ slices: [{ id: "re-added" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      sliceIds: ["re-added"],
+      window: WINDOW,
+      holdsNow: true,
+      adoptionEnabled: false,
+    });
+
+    expect(h.order).toEqual(["probe"]);
+    expect(h.writes).toHaveLength(0);
+  });
+});
