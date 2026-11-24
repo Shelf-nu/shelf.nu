@@ -9064,6 +9064,71 @@ describe("bulk custody paths — kit-derived custody guard", () => {
   });
 });
 
+describe("bulkUpdateAssetLocation, quantity-tracked assets in the selection", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: one INDIVIDUAL and one QUANTITY_TRACKED asset is the smallest
+    // selection where "skip the pool" and "refuse the list" differ.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-individual",
+        title: "Tripod",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        assetLocations: [],
+        assetKits: [],
+      },
+      {
+        id: "asset-qty",
+        title: "Gaffer tape",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetLocations: [],
+        assetKits: [],
+      },
+    ]);
+    // why: the destination is resolved through an org-scoped lookup before
+    // anything is written.
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-new",
+      name: "New Location",
+      organizationId: "org-1",
+    });
+    // why: the placement writes run inside the transaction, so its body has
+    // to run against the same mocked delegates.
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
+      (callback: (tx: unknown) => unknown) => callback(db)
+    );
+  });
+
+  const move = (quantityTracked?: "skip" | "refuse") =>
+    bulkUpdateAssetLocation({
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      userId: "user-1",
+      assetIds: ["asset-individual", "asset-qty"],
+      organizationId: "org-1",
+      newLocationId: "loc-new",
+      settings: ASSET_INDEX_SETTINGS,
+      ...(quantityTracked ? { quantityTracked } : {}),
+    });
+
+  it("refuses the whole list when asked to, and moves nothing", async () => {
+    await expect(move("refuse")).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining(
+        "1 quantity-tracked asset can't be moved"
+      ),
+    });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("skips them and moves the rest by default", async () => {
+    await expect(move()).resolves.toBeDefined();
+    expect(db.$transaction).toHaveBeenCalled();
+  });
+});
+
 describe("bulkUpdateAssetLocation — location activity notes", () => {
   beforeEach(() => {
     vitest.clearAllMocks();

@@ -8004,11 +8004,22 @@ export async function bulkUpdateAssetLocation({
   lastAuditDateAccess,
   bookableScope,
   timeZone = "UTC",
+  quantityTracked = "skip",
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
+  /**
+   * What to do with QUANTITY_TRACKED assets in the selection, which this path
+   * cannot place (a placement needs a unit count per location):
+   * - `"skip"` (default): move the rest and leave them where they are. For a
+   *   caller that has told the user up front, as the asset index dialog does.
+   * - `"refuse"`: move nothing and name how many there are. For a caller that
+   *   submits an explicit list and reports one result for it, such as a
+   *   scanner, where a skipped row would read as moved.
+   */
+  quantityTracked?: "skip" | "refuse";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   /**
@@ -8088,20 +8099,41 @@ export async function bulkUpdateAssetLocation({
     ]);
 
     /**
-     * Filter out QUANTITY_TRACKED assets FIRST — they always skip the
-     * bulk path (no per-asset qty input here), so they shouldn't be
-     * counted against the kit-guard below. A qty-tracked asset that
-     * happens to be in a kit would otherwise trip the kit-guard error
-     * even though it would have been skipped anyway. Mirror of the
-     * bulk-custody pattern (`bulkCheckOutAssets` line ~4099-4113):
-     * silently skip qty-tracked rows, throw early when the whole
-     * selection is qty-tracked. The dialog shows a `WarningBox`
-     * summarising the skip so users know what happened.
+     * Filter out QUANTITY_TRACKED assets FIRST: this path never places them
+     * (there is no unit count per asset here), so they must not be counted
+     * against the kit-guard below. A qty-tracked asset that happens to be in
+     * a kit would otherwise trip the kit-guard error although it is not being
+     * moved. Same shape as the bulk-custody path (`bulkCheckOutAssets`).
+     *
+     * A selection that is ALL qty-tracked always throws. A mixed one follows
+     * `quantityTracked`: skipped for a caller that warned the user up front
+     * (the asset index dialog shows a `WarningBox`), refused for one that
+     * reports a single result for an explicit list.
      */
     const nonQtyTracked = assets.filter(
       (a) => a.type !== AssetType.QUANTITY_TRACKED
     );
     const skippedQuantityTracked = assets.length - nonQtyTracked.length;
+    if (quantityTracked === "refuse" && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        message: `${skippedQuantityTracked} quantity-tracked ${
+          skippedQuantityTracked === 1 ? "asset" : "assets"
+        } can't be moved this way, so nothing was moved. Remove ${
+          skippedQuantityTracked === 1 ? "it" : "them"
+        } from the list, then set ${
+          skippedQuantityTracked === 1 ? "its" : "their"
+        } placements, with a quantity per location, on the asset page.`,
+        additionalData: {
+          userId,
+          organizationId,
+          skippedQuantityTracked,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
     if (nonQtyTracked.length === 0 && skippedQuantityTracked > 0) {
       throw new ShelfError({
         cause: null,

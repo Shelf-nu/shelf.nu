@@ -28,7 +28,11 @@ const EXPECTED_ADD_IDS = [
 ];
 
 /** Every blocker the update-location drawer declares, in order. */
-const EXPECTED_UPDATE_IDS = ["assets-archived", "invalid-codes"];
+const EXPECTED_UPDATE_IDS = [
+  "assets-archived",
+  "assets-quantity-tracked",
+  "invalid-codes",
+];
 
 /** A scanned asset row, cut down to the fields the blockers read. */
 function assetItem(asset: Partial<AssetFromQr> & { id: string }) {
@@ -174,6 +178,32 @@ describe("buildUpdateLocationBlockers", () => {
     expect(activeIds(built)).toEqual(["assets-archived"]);
     built.blockerConfigs.find((b) => b.id === "assets-archived")?.onResolve();
     expect(removedBy(built.removeAssetsFromList)).toEqual(["a1"]);
+  });
+
+  it("assets-quantity-tracked: a quantity-tracked asset, which this drawer cannot place", () => {
+    // The drawer has no unit count per row and the bulk service moves whole
+    // assets only, so a quantity-tracked row left in the list would be
+    // skipped while the save reports success.
+    const built = buildUpdate({
+      qr1: assetItem({ id: "pool-1", type: "QUANTITY_TRACKED" }),
+      qr2: assetItem({ id: "a2" }),
+    });
+    expect(activeIds(built)).toEqual(["assets-quantity-tracked"]);
+    built.blockerConfigs
+      .find((b) => b.id === "assets-quantity-tracked")
+      ?.onResolve();
+    expect(removedBy(built.removeAssetsFromList)).toEqual(["pool-1"]);
+  });
+
+  it("an archived quantity-tracked asset raises only the archived blocker", () => {
+    const built = buildUpdate({
+      qr1: assetItem({
+        id: "pool-1",
+        type: "QUANTITY_TRACKED",
+        archivedAt: new Date(),
+      }),
+    });
+    expect(activeIds(built)).toEqual(["assets-archived"]);
   });
 
   it("invalid-codes: a code that resolved to nothing", () => {
