@@ -208,6 +208,17 @@ vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
+  // Every picked slice is reported LEGACY: the LEGACY source path runs as it
+  // did before dispatch existed.
+  dispatchUnits: vitest
+    .fn()
+    .mockImplementation(
+      (_tx: unknown, args: { picks: { sliceId: string }[] }) =>
+        Promise.resolve({
+          dispatched: [],
+          legacySliceIds: args.picks.map((pick) => pick.sliceId),
+        })
+    ),
 }));
 
 // why: the archive lock is a raw `SELECT … FOR UPDATE` a fake client cannot

@@ -192,6 +192,10 @@ describe("POST /api/mobile/bookings/checkout", () => {
       // An app that sends no `sourceLocations` reaches the service with no
       // answers, so every pool gets the default source.
       sourceLocations: new Map(),
+      // No `X-Shelf-Capabilities` header: an older build, never asked about a
+      // split slice.
+      clientSupportsSources: false,
+      onDispatched: expect.any(Function),
     });
   });
 

@@ -1,6 +1,7 @@
 /**
  * The booking-sources facade: new slices, resizes, window changes, silent
- * re-allocation of AUTO slices that no longer fit, and the display summary.
+ * re-allocation of AUTO slices that no longer fit, check-out dispatch, and
+ * the display summary.
  *
  * The transaction is a small fake answering the facade's own reads (the
  * touched slices, the booking status, location names) and the real asset
@@ -19,6 +20,7 @@ import { ShelfError } from "~/utils/error";
 import {
   admitWindowChange,
   allocateNewSlices,
+  dispatchUnits,
   getSliceSourceSummaries,
   resizeSlices,
   setAutoSources,
@@ -42,6 +44,8 @@ const h = vi.hoisted(() => ({
   windows: [] as Array<{ from: Date; to: Date }>,
   db: {} as Record<string, unknown>,
   capacity: new Map<string, Map<string, number>>(),
+  holds: new Map<string, unknown[]>(),
+  physical: new Map<string, Map<string, number>>(),
 }));
 
 // why: the summary reads through the root client; this stand-in answers the
@@ -81,7 +85,8 @@ vi.mock("./capacity.server", () => ({
     }
   ),
   loadSourceCapacity: vi.fn(() => h.capacity),
-  loadCompetingHoldsByPool: vi.fn(() => new Map()),
+  loadCompetingHoldsByPool: vi.fn(() => h.holds),
+  loadPhysicalNow: vi.fn(() => h.physical),
 }));
 
 // why: a held-back group logs; the tests do not need log lines.
@@ -128,11 +133,19 @@ function fakeTx(args: {
       ),
     },
     booking: {
-      findFirst: vi.fn(() => ({ status: args.status ?? "RESERVED" })),
+      findFirst: vi.fn(() => ({
+        status: args.status ?? "RESERVED",
+        from: WINDOW.from,
+        createdAt: new Date("2026-11-01T09:00:00Z"),
+      })),
     },
     location: {
-      findMany: vi.fn(() => [{ id: "loc-a", name: "Demo Warehouse" }]),
+      findMany: vi.fn(() => [
+        { id: "loc-a", name: "Demo Warehouse" },
+        { id: "loc-b", name: "Back Room" },
+      ]),
     },
+    asset: { findFirst: vi.fn(() => ({ title: "Cables" })) },
   } as unknown as BookingSourcesTx;
 }
 
@@ -209,6 +222,8 @@ beforeEach(() => {
   h.windows = [];
   h.freeFor = () => free(20, 0);
   h.capacity = new Map();
+  h.holds = new Map();
+  h.physical = new Map();
 });
 
 describe("allocateNewSlices", () => {
@@ -1061,5 +1076,430 @@ describe("getSliceSourceSummaries", () => {
       short: false,
       mode: "LEGACY",
     });
+  });
+});
+
+describe("dispatchUnits", () => {
+  const LOC_B_KEY = { kind: "LOCATION", locationId: "loc-b", createdOrder: 1 };
+  /** Before the window: re-claims are admitted over the whole window. */
+  const NOW = new Date("2026-11-30T09:00:00Z");
+
+  /** Free units over the window at Unplaced, Demo Warehouse and Back Room. */
+  function free3(unplaced: number, locA: number, locB: number) {
+    return [
+      { ...UNPLACED_KEY, free: unplaced },
+      { ...LOC_A_KEY, free: locA },
+      { ...LOC_B_KEY, free: locB },
+    ];
+  }
+
+  /** Capacity and units on hand now per source key of the pool. */
+  function stageShelf(onHand: Record<string, number>, capacity = 100) {
+    h.capacity = new Map([
+      [
+        POOL,
+        new Map([
+          ["UNPLACED:", capacity],
+          ["LOCATION:loc-a", capacity],
+          ["LOCATION:loc-b", capacity],
+        ]),
+      ],
+    ]);
+    h.physical = new Map([[POOL, new Map(Object.entries(onHand))]]);
+  }
+
+  /** One converted AUTO slice with the given rows. */
+  function seedConverted(
+    rows: Array<Partial<SourceRowRecord>>,
+    overrides: Partial<GroupState["slices"][number]> = {}
+  ) {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          quantity: rows.reduce((sum, r) => sum + (r.quantity ?? 0), 0),
+          rows: rows.map((r) => row("s1", r)),
+          ...overrides,
+        }),
+      ],
+    });
+  }
+
+  /** Runs a dispatch of slice s1 on the fake transaction. */
+  function dispatch(
+    pick: { units: number; fromLocationId?: string | null },
+    extra: { status?: string; clientSupportsSources?: boolean } = {}
+  ) {
+    return dispatchUnits(
+      fakeTx({ slices: [{ id: "s1" }], status: extra.status ?? "RESERVED" }),
+      {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        picks: [{ sliceId: "s1", ...pick }],
+        window: WINDOW,
+        now: NOW,
+        adoptionEnabled: true,
+        clientSupportsSources: extra.clientSupportsSources,
+      }
+    );
+  }
+
+  /** The written row of slice s1 at a source key. */
+  function writtenRow(kind: string, locationId: string | null) {
+    return writtenPlan().upsertRows.find(
+      (r) =>
+        r.bookingAssetId === "s1" &&
+        r.kind === kind &&
+        r.locationId === locationId
+    );
+  }
+
+  /** Runs a dispatch expected to refuse and returns the error. */
+  async function dispatchRefusal(call: Promise<unknown>): Promise<ShelfError> {
+    return refusal(call.then(() => undefined));
+  }
+
+  it("dispatches by allocation: pending from LOCATION rows in row order, then UNPLACED", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "UNPLACED:": 20, "LOCATION:loc-a": 20 });
+    // Unplaced first in row order: LOCATION rows still go first.
+    seedConverted([
+      { kind: "UNPLACED", quantity: 3 },
+      { kind: "LOCATION", locationId: "loc-a", quantity: 5 },
+    ]);
+
+    const result = await dispatch({ units: 6 });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      outQuantity: 5,
+      dispatchedTotal: 5,
+    });
+    expect(writtenRow("UNPLACED", null)).toMatchObject({
+      outQuantity: 1,
+      dispatchedTotal: 1,
+    });
+    expect(writtenPlan().setModes).toEqual([]);
+    expect(result).toEqual({
+      dispatched: [
+        {
+          sliceId: "s1",
+          assetId: POOL,
+          sources: [
+            {
+              kind: "LOCATION",
+              locationId: "loc-a",
+              name: "Demo Warehouse",
+              quantity: 5,
+            },
+            {
+              kind: "UNPLACED",
+              locationId: null,
+              name: "Unplaced",
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+      legacySliceIds: [],
+    });
+  });
+
+  it("sends K from the chosen source's pending when it covers K", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "UNPLACED:": 20, "LOCATION:loc-a": 20 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 5 },
+      { kind: "UNPLACED", quantity: 3 },
+    ]);
+
+    await dispatch({ units: 4, fromLocationId: "loc-a" });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      quantity: 5,
+      outQuantity: 4,
+    });
+    // The other source keeps its plan, and the slice stays AUTO.
+    expect(writtenRow("UNPLACED", null)).toBeUndefined();
+    expect(writtenPlan().setModes).toEqual([]);
+  });
+
+  it("moves the allocation into the chosen source when it is admitted and on hand, and the slice becomes MANUAL", async () => {
+    h.freeFor = () => free3(20, 10, 20);
+    stageShelf({ "UNPLACED:": 20, "LOCATION:loc-a": 10 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
+      { kind: "UNPLACED", quantity: 6 },
+    ]);
+
+    await dispatch({ units: 5, fromLocationId: "loc-a" });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      quantity: 5,
+      outQuantity: 5,
+      dispatchedTotal: 5,
+    });
+    // Only the missing units moved: the rest of the split stays.
+    expect(writtenRow("UNPLACED", null)).toMatchObject({ quantity: 3 });
+    expect(writtenPlan().setModes).toEqual([
+      { bookingAssetId: "s1", mode: "MANUAL" },
+    ]);
+  });
+
+  it("refuses naming the chosen source when the move does not fit, and writes nothing", async () => {
+    h.freeFor = () => free3(20, 3, 20);
+    stageShelf({ "UNPLACED:": 20, "LOCATION:loc-a": 10 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
+      { kind: "UNPLACED", quantity: 6 },
+    ]);
+
+    const error = await dispatchRefusal(
+      dispatch({ units: 5, fromLocationId: "loc-a" })
+    );
+
+    expect(error.message).toBe(
+      "Not enough units at Demo Warehouse (1 free) for these dates."
+    );
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("refuses a source that is not a placement of the pool", async () => {
+    h.freeFor = () => free(20, 20);
+    stageShelf({ "UNPLACED:": 20 });
+    seedConverted([{ kind: "UNPLACED", quantity: 5 }]);
+
+    const error = await dispatchRefusal(
+      dispatch({ units: 5, fromLocationId: "loc-foreign" })
+    );
+
+    expect(error.message).toBe("The chosen location does not hold this asset.");
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("checks physical-now only for the units leaving now", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    // 10 planned at Demo Warehouse, only 4 on the shelf: 4 may leave now.
+    stageShelf({ "LOCATION:loc-a": 4 });
+    seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 10 }]);
+
+    await dispatch({ units: 4 });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({ outQuantity: 4 });
+  });
+
+  it("refuses units leaving a source that does not have them on hand", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "LOCATION:loc-a": 3 });
+    seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 10 }]);
+
+    const error = await dispatchRefusal(dispatch({ units: 5 }));
+
+    expect(error.message).toBe("Only 3 units are at Demo Warehouse right now.");
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("X returns 5 at A, Y reserves them, X re-dispatches: refused (re-claim fails admission)", async () => {
+    // A holds 10. X took 10, returned 5 (released). Y now holds those 5 over
+    // the window, so 5 are free for X, which already holds its 5 out.
+    h.freeFor = () => free3(0, 5, 0);
+    stageShelf({ "LOCATION:loc-a": 5 });
+    seedConverted(
+      [
+        {
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 10,
+          outQuantity: 5,
+          releasedQuantity: 5,
+          dispatchedTotal: 10,
+          sharedQuantity: 5,
+        },
+      ],
+      { checkedOutQuantity: 10 }
+    );
+
+    const error = await dispatchRefusal(
+      dispatch({ units: 5 }, { status: "ONGOING" })
+    );
+
+    expect(error.message).toBe(
+      "Not enough units at Demo Warehouse (0 free) for these dates."
+    );
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("re-claims released units when the source still has room", async () => {
+    h.freeFor = () => free3(0, 10, 0);
+    stageShelf({ "LOCATION:loc-a": 5 });
+    seedConverted(
+      [
+        {
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 10,
+          outQuantity: 5,
+          releasedQuantity: 5,
+          dispatchedTotal: 10,
+          sharedQuantity: 5,
+        },
+      ],
+      { checkedOutQuantity: 10 }
+    );
+
+    await dispatch({ units: 5 }, { status: "ONGOING" });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      quantity: 10,
+      outQuantity: 10,
+      releasedQuantity: 0,
+      dispatchedTotal: 15,
+    });
+  });
+
+  it("refuses a slice with units that need a location", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "LOCATION:loc-a": 20 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
+      { kind: "UNASSIGNED", quantity: 3 },
+    ]);
+
+    const error = await dispatchRefusal(dispatch({ units: 2 }));
+
+    expect(error.message).toBe(
+      "Cables needs a location for 3 units. Choose where they come from, then check out again."
+    );
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("refuses a slice short at its source, naming the source", async () => {
+    h.freeFor = () => free3(20, 0, 20);
+    // Demo Warehouse holds 5; an earlier booking's 5 pending come first.
+    stageShelf({ "LOCATION:loc-a": 5 }, 5);
+    h.holds = new Map([
+      [
+        POOL,
+        [
+          {
+            sliceId: "other",
+            sourceKey: "LOCATION:loc-a",
+            bookingFrom: new Date("2026-11-20T09:00:00Z"),
+            bookingCreatedAt: new Date("2026-10-01T09:00:00Z"),
+            bookingId: "booking-earlier",
+            from: new Date("2026-11-20T09:00:00Z"),
+            to: new Date("2026-12-05T09:00:00Z"),
+            out: 0,
+            pending: 5,
+          },
+        ],
+      ],
+    ]);
+    seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 5 }]);
+
+    const error = await dispatchRefusal(dispatch({ units: 5 }));
+
+    expect(error.message).toBe(
+      "Cables is short at Demo Warehouse and needs a location. Change where its units come from, then check out again."
+    );
+  });
+
+  it("early check-out with A's units out and B free: refused at A, succeeds from B", async () => {
+    h.freeFor = () => free3(0, 5, 10);
+    // A's 5 are still out on a booking that returns them before this window.
+    stageShelf({ "LOCATION:loc-a": 0, "LOCATION:loc-b": 10 });
+    seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 5 }]);
+
+    const error = await dispatchRefusal(dispatch({ units: 5 }));
+    expect(error.message).toBe("Only 0 units are at Demo Warehouse right now.");
+    expect(h.writes).toHaveLength(0);
+
+    const result = await dispatch({ units: 5, fromLocationId: "loc-b" });
+
+    expect(writtenRow("LOCATION", "loc-b")).toMatchObject({
+      quantity: 5,
+      outQuantity: 5,
+    });
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({ quantity: 0 });
+    expect(writtenPlan().setModes).toEqual([
+      { bookingAssetId: "s1", mode: "MANUAL" },
+    ]);
+    expect(result.dispatched[0].sources).toEqual([
+      { kind: "LOCATION", locationId: "loc-b", name: "Back Room", quantity: 5 },
+    ]);
+  });
+
+  it("ignores an older phone's pick for a split slice and dispatches by allocation", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "UNPLACED:": 20, "LOCATION:loc-a": 20, "LOCATION:loc-b": 20 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 5 },
+      { kind: "UNPLACED", quantity: 3 },
+    ]);
+
+    const result = await dispatch(
+      { units: 6, fromLocationId: "loc-b" },
+      { clientSupportsSources: false }
+    );
+
+    expect(result.dispatched[0].sources.map((s) => s.name)).toEqual([
+      "Demo Warehouse",
+      "Unplaced",
+    ]);
+    expect(writtenPlan().setModes).toEqual([]);
+  });
+
+  it("converts a legacy slice that checks out against A held by a new booking, and sends it from B", async () => {
+    // Demo Warehouse is fully held by a newer booking; Back Room is free.
+    h.freeFor = () => free3(0, 0, 5);
+    stageShelf({ "LOCATION:loc-b": 5 });
+    seedGroup({ slices: [slice({ id: "s1", quantity: 5 })] });
+
+    const result = await dispatch({ units: 5 });
+
+    expect(writtenPlan().setModes).toEqual([
+      { bookingAssetId: "s1", mode: "AUTO" },
+    ]);
+    expect(writtenRow("LOCATION", "loc-b")).toMatchObject({
+      quantity: 5,
+      outQuantity: 5,
+      dispatchedTotal: 5,
+    });
+    expect(result.dispatched[0].sources).toEqual([
+      { kind: "LOCATION", locationId: "loc-b", name: "Back Room", quantity: 5 },
+    ]);
+  });
+
+  it("dispatches a kit slice from its KIT row without the physical check", async () => {
+    seedConverted([{ kind: "KIT", quantity: 4 }], {
+      mode: "KIT",
+      assetKitId: "ak-1",
+    });
+
+    const result = await dispatch({ units: 4 });
+
+    expect(writtenRow("KIT", null)).toMatchObject({
+      outQuantity: 4,
+      dispatchedTotal: 4,
+    });
+    expect(result.dispatched).toEqual([
+      { sliceId: "s1", assetId: POOL, sources: [] },
+    ]);
+  });
+
+  it("leaves a slice whose group stays LEGACY to the caller", async () => {
+    seedGroup({ slices: [slice({ id: "s1", quantity: 5 })] });
+
+    const result = await dispatchUnits(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      picks: [{ sliceId: "s1", units: 5 }],
+      window: WINDOW,
+      now: NOW,
+      adoptionEnabled: false,
+    });
+
+    expect(result).toEqual({ dispatched: [], legacySliceIds: ["s1"] });
   });
 });

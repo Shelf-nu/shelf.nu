@@ -508,6 +508,17 @@ vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
+  // Every picked slice is reported LEGACY, so check-outs record their source
+  // through `recordCheckoutSourceLocations` exactly as they did before.
+  dispatchUnits: vitest
+    .fn()
+    .mockImplementation(
+      (_tx: unknown, args: { picks: { sliceId: string }[] }) =>
+        Promise.resolve({
+          dispatched: [],
+          legacySliceIds: args.picks.map((pick) => pick.sliceId),
+        })
+    ),
 }));
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and

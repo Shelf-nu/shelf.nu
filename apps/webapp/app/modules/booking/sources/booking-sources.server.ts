@@ -26,6 +26,10 @@
  * {@link resizeSlices}: the facade reads the stored quantity as the pre-change
  * value, which is what conversion seeds from.
  *
+ * {@link dispatchUnits} is the check-out path: it sends units out of the rows
+ * (by allocation, or from the operator's chosen source) and checks units
+ * leaving now against what is physically on hand.
+ *
  * {@link getSliceSourceSummaries} is the read-only display path: no lock, no
  * conversion.
  *
@@ -39,6 +43,7 @@ import {
   computeShortSlices,
   decreaseSliceQuantity,
   describeBookingSources,
+  dispatchFromRow,
   pendingOf,
   resolveIntervalTo,
   sourceKey,
@@ -56,6 +61,7 @@ import { ShelfError } from "~/utils/error";
 import {
   computeFreeBySourceForPools,
   loadCompetingHoldsByPool,
+  loadPhysicalNow,
   loadSourceCapacity,
 } from "./capacity.server";
 import {
@@ -78,6 +84,7 @@ import type {
   GroupSession,
   RefusalEntry,
   WorkingGroup,
+  WorkingRow,
   WorkingSlice,
 } from "./conversion.server";
 import { resizeKitRow } from "./kit-quantity";
@@ -113,6 +120,8 @@ type CallContext = {
   groupBySlice: Map<string, WorkingGroup>;
   /** True when the booking is a DRAFT (holds nothing). */
   isDraft: boolean;
+  /** The booking's stored start and creation time: its short-sweep priority. */
+  booking: { from: Date; createdAt: Date };
 };
 
 /**
@@ -158,7 +167,7 @@ async function openCall(
     }),
     tx.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { status: true },
+      select: { status: true, from: true, createdAt: true },
     }),
   ]);
   const wanted = sliceIds ? new Set(sliceIds) : null;
@@ -201,6 +210,7 @@ async function openCall(
     session,
     groupBySlice,
     isDraft: booking.status === BookingStatus.DRAFT,
+    booking: { from: booking.from, createdAt: booking.createdAt },
   };
 }
 
@@ -911,6 +921,630 @@ export async function admitWindowChange(
   }
 
   await finishCall(tx, ctx);
+}
+
+/** One slice a check-out sends units out of. */
+export type DispatchPick = {
+  /** The slice (`BookingAsset.id`). */
+  sliceId: string;
+  /**
+   * Units leaving now. The caller adds the same number to the slice's
+   * `checkedOutQuantity` in the same transaction, so the rows'
+   * `dispatchedTotal` keeps summing to it.
+   */
+  units: number;
+  /**
+   * The operator's choice for this dispatch: a manual placement's location
+   * id, or null for the unplaced units. Omitted to dispatch by allocation.
+   */
+  fromLocationId?: string | null;
+};
+
+/** Units of one slice that left from one loose source in a dispatch. */
+export type DispatchedSource = {
+  kind: "LOCATION" | "UNPLACED";
+  /** Set for a location; null for the unplaced units. */
+  locationId: string | null;
+  /** The location's name, or "Unplaced". */
+  name: string;
+  /** Units that left from this source in this dispatch. */
+  quantity: number;
+};
+
+/** Where one converted slice's units left from in a dispatch. */
+export type DispatchedSlice = {
+  sliceId: string;
+  assetId: string;
+  /** Loose sources only; units of a kit slice leave from its KIT row. */
+  sources: DispatchedSource[];
+};
+
+/** What {@link dispatchUnits} did. */
+export type DispatchResult = {
+  /** Every converted slice that sent units out, with the sources used. */
+  dispatched: DispatchedSlice[];
+  /**
+   * Picked slices the facade left alone: their group stays LEGACY (adoption
+   * off, or held back), or the asset is not quantity-tracked. The caller
+   * records their source the LEGACY way.
+   */
+  legacySliceIds: string[];
+};
+
+/** Display name of the unplaced units, in summaries and refusals. */
+const UNPLACED_NAME = "Unplaced";
+
+/** Units taken from each source key of one slice in this dispatch. */
+type Taken = Map<string, number>;
+
+/** A refusal for units asked beyond what the slice holds; a caller bug. */
+function overBooked(sliceId: string): ShelfError {
+  return userError(
+    "More units were asked to go out than this booking item holds.",
+    { sliceId }
+  );
+}
+
+/** LOCATION rows in row order, then the UNPLACED row: the dispatch order. */
+function knownRowsInDispatchOrder(slice: WorkingSlice): WorkingRow[] {
+  return [
+    ...slice.rows.filter((r) => r.kind === "LOCATION"),
+    ...slice.rows.filter((r) => r.kind === "UNPLACED"),
+  ];
+}
+
+/** A slice whose pending units sit at more than one loose source. */
+function isSplitSlice(slice: WorkingSlice): boolean {
+  return (
+    slice.rows.filter((r) => LOOSE_KINDS.has(r.kind) && pendingOf(r) > 0)
+      .length > 1
+  );
+}
+
+/** Sends `k` units out of one known row and records them as taken. */
+function dispatchRow(row: WorkingRow, k: number, taken: Taken) {
+  if (k <= 0) return;
+  Object.assign(row, dispatchFromRow(row, k).row);
+  taken.set(sourceKey(row), (taken.get(sourceKey(row)) ?? 0) + k);
+}
+
+/** Location names by id, in one query; empty input reads nothing. */
+async function locationNames(
+  tx: BookingSourcesTx,
+  organizationId: string,
+  ids: Array<string | null>
+): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((id): id is string => id !== null))];
+  if (unique.length === 0) return new Map();
+  const rows = await tx.location.findMany({
+    where: { id: { in: unique }, organizationId },
+    select: { id: true, name: true },
+  });
+  return new Map(rows.map((l) => [l.id, l.name]));
+}
+
+/** The name of a loose source key, for messages. */
+function sourceName(key: string, names: Map<string, string>): string {
+  const [kind, locationId] = key.split(":");
+  if (kind === "UNPLACED") return UNPLACED_NAME;
+  return names.get(locationId) ?? "Unknown location";
+}
+
+/**
+ * The 400 a short slice gets at check-out, naming the source it is short at
+ * and saying it needs a location, or saying how many of its units have none.
+ *
+ * @param shortKeys - Loose source keys the slice is short at
+ */
+async function buildShortRefusal(
+  tx: BookingSourcesTx,
+  organizationId: string,
+  group: WorkingGroup,
+  slice: WorkingSlice,
+  shortKeys: ReadonlySet<string>
+): Promise<ShelfError> {
+  const [asset, names] = await Promise.all([
+    tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: names an asset already on this booking in a refusal; archived or not
+      where: { id: group.key.assetId, organizationId },
+      select: { title: true },
+    }),
+    locationNames(
+      tx,
+      organizationId,
+      [...shortKeys].map((key) => key.split(":")[1] || null)
+    ),
+  ]);
+  const title = asset?.title ?? "This asset";
+  const message =
+    shortKeys.size > 0
+      ? `${title} is short at ${[...shortKeys]
+          .map((key) => sourceName(key, names))
+          .join(
+            ", "
+          )} and needs a location. Change where its units come from, then check out again.`
+      : `${title} needs a location for ${unassignedPending(
+          slice
+        )} units. Choose where they come from, then check out again.`;
+  return userError(message, { sliceId: slice.id, ...group.key });
+}
+
+/**
+ * Sends units of a slice out by its allocation: pending units first, from
+ * LOCATION rows in row order and then the UNPLACED row; beyond pending,
+ * released units on those rows in the same order (a re-claim); then released
+ * units on the UNASSIGNED row, first given a known source by the allocation
+ * rule against the free units left for this booking.
+ *
+ * @throws {ShelfError} 400 when the released units on UNASSIGNED fit no source
+ */
+async function dispatchByAllocation(
+  tx: BookingSourcesTx,
+  organizationId: string,
+  group: WorkingGroup,
+  slice: WorkingSlice,
+  units: number,
+  taken: Taken
+) {
+  let left = units;
+  const known = knownRowsInDispatchOrder(slice);
+  for (const row of known) {
+    const k = Math.min(pendingOf(row), left);
+    dispatchRow(row, k, taken);
+    left -= k;
+  }
+  for (const row of known) {
+    const k = Math.min(row.releasedQuantity, left);
+    dispatchRow(row, k, taken);
+    left -= k;
+  }
+  const unassigned = slice.rows.find((r) => r.kind === "UNASSIGNED");
+  const movable = Math.min(unassigned?.releasedQuantity ?? 0, left);
+  if (unassigned && movable > 0) {
+    // Released units on UNASSIGNED are re-claimed only after their share of
+    // the plan moves to a known row, admitted like any added demand.
+    const result = allocateSources({
+      quantity: movable,
+      sources: availableForBooking(group),
+    });
+    if (!result.ok) {
+      throw await buildSourceRefusal(
+        tx,
+        organizationId,
+        group.key,
+        result.freeBySource
+      );
+    }
+    unassigned.quantity -= movable;
+    unassigned.releasedQuantity -= movable;
+    for (const part of result.parts) {
+      addToRow(slice, part.kind, part.locationId, part.quantity);
+      const row = slice.rows.find((r) => sourceKey(r) === sourceKey(part));
+      if (row) dispatchRow(row, part.quantity, taken);
+    }
+    left -= movable;
+  }
+  if (left > 0) throw overBooked(slice.id);
+}
+
+/**
+ * Sends units of a slice out from the source the operator chose. Taken from
+ * that source's pending units when they cover the dispatch. Otherwise the
+ * missing units of the plan move into that source first (pending units from
+ * UNASSIGNED, then from the other known rows, last in dispatch order first;
+ * then the source's own released units are re-claimed; then released units
+ * of the other rows move in), and the slice becomes MANUAL when pending or
+ * released units moved. The admission check after every pick decides whether
+ * the source can take them. Never replaces the slice's whole split: rows the
+ * dispatch does not need keep their units.
+ *
+ * @throws {ShelfError} 400 when the source is not a placement of the pool, or
+ *   the slice is short there
+ */
+async function dispatchFromChoice(
+  tx: BookingSourcesTx,
+  organizationId: string,
+  group: WorkingGroup,
+  slice: WorkingSlice,
+  units: number,
+  fromLocationId: string | null,
+  shortKeys: ReadonlySet<string>,
+  taken: Taken
+) {
+  const kind = fromLocationId === null ? "UNPLACED" : "LOCATION";
+  const key = sourceKey({ kind, locationId: fromLocationId });
+  if (!group.free.some((s) => sourceKey(s) === key)) {
+    throw userError("The chosen location does not hold this asset.", {
+      sliceId: slice.id,
+    });
+  }
+  if (shortKeys.has(key)) {
+    throw await buildShortRefusal(
+      tx,
+      organizationId,
+      group,
+      slice,
+      new Set([key])
+    );
+  }
+  let row = slice.rows.find((r) => sourceKey(r) === key);
+  if (!row) {
+    row = {
+      kind,
+      locationId: fromLocationId,
+      quantity: 0,
+      outQuantity: 0,
+      releasedQuantity: 0,
+      dispatchedTotal: 0,
+      sharedQuantity: 0,
+    };
+    slice.rows.push(row);
+  }
+  const target = row;
+
+  let need = Math.max(0, units - pendingOf(target));
+  let moved = false;
+  const unassignedRows = slice.rows.filter((r) => r.kind === "UNASSIGNED");
+  const otherKnown = knownRowsInDispatchOrder(slice)
+    .filter((r) => r !== target)
+    .reverse();
+  for (const other of [...unassignedRows, ...otherKnown]) {
+    const t = Math.min(pendingOf(other), need);
+    if (t <= 0) continue;
+    other.quantity -= t;
+    target.quantity += t;
+    need -= t;
+    moved = true;
+  }
+  // The source's own released units are re-claimed by the dispatch itself.
+  need -= Math.min(target.releasedQuantity, need);
+  for (const other of [...otherKnown, ...unassignedRows]) {
+    const t = Math.min(other.releasedQuantity, need);
+    if (t <= 0) continue;
+    other.quantity -= t;
+    other.releasedQuantity -= t;
+    target.quantity += t;
+    target.releasedQuantity += t;
+    need -= t;
+    moved = true;
+  }
+  if (need > 0) throw overBooked(slice.id);
+  if (moved) slice.mode = "MANUAL";
+  dispatchRow(target, units, taken);
+}
+
+/**
+ * Short source keys per slice of one group, by the short sweep over the
+ * window: other active bookings' holds plus this booking's own rows, units
+ * out granted first, pending units by priority. Pending units on UNASSIGNED
+ * are reported by {@link unassignedPending}, not here.
+ */
+function shortKeysBySlice(
+  group: WorkingGroup,
+  args: {
+    capacity: Map<string, number>;
+    competing: SourceHold[];
+    bookingId: string;
+    booking: { from: Date; createdAt: Date };
+    window: Window;
+  }
+): Map<string, Set<string>> {
+  const own: SourceHold[] = [];
+  const unassignedPendingBySlice = new Map<string, number>();
+  for (const slice of group.slices) {
+    if (slice.mode !== "AUTO" && slice.mode !== "MANUAL") continue;
+    for (const row of slice.rows) {
+      const pending = Math.max(0, pendingOf(row));
+      if (row.kind === "UNASSIGNED" && pending > 0) {
+        unassignedPendingBySlice.set(
+          slice.id,
+          (unassignedPendingBySlice.get(slice.id) ?? 0) + pending
+        );
+      }
+      if (!LOOSE_KINDS.has(row.kind) || row.outQuantity + pending === 0) {
+        continue;
+      }
+      own.push({
+        sliceId: slice.id,
+        sourceKey: sourceKey(row),
+        bookingFrom: args.booking.from,
+        bookingCreatedAt: args.booking.createdAt,
+        bookingId: args.bookingId,
+        from: args.window.from,
+        to: args.window.to,
+        out: row.outQuantity,
+        pending,
+      });
+    }
+  }
+  const result = new Map<string, Set<string>>();
+  for (const shortage of computeShortSlices({
+    capacityBySource: args.capacity,
+    holds: [...args.competing, ...own],
+    unassignedPendingBySlice,
+  })) {
+    if (
+      !shortage.sourceKey.startsWith("LOCATION:") &&
+      !shortage.sourceKey.startsWith("UNPLACED:")
+    ) {
+      continue;
+    }
+    const keys = result.get(shortage.sliceId) ?? new Set<string>();
+    keys.add(shortage.sourceKey);
+    result.set(shortage.sliceId, keys);
+  }
+  return result;
+}
+
+/**
+ * Sends units of a booking's slices out (check-out, on every surface).
+ *
+ * Converted slices dispatch from their rows, in one plan written once:
+ * - KIT slices from their KIT row (no admission, no physical check: kit units
+ *   stay under the kit and pool checks);
+ * - AUTO and MANUAL slices by allocation (pending first from LOCATION rows in
+ *   row order then UNPLACED, then re-claims of released units), or from the
+ *   source the operator chose (see `fromLocationId` on {@link DispatchPick}).
+ *   A client that does not announce the `booking-sources` capability
+ *   (`clientSupportsSources: false`) is never asked about a split slice, so
+ *   any choice it sends for one is ignored and the slice dispatches by
+ *   allocation.
+ *
+ * A LEGACY group touched here converts first when adoption is enabled, and
+ * the pending units it seeds are allocated and admitted (voluntary). A slice
+ * whose group stays LEGACY is returned in `legacySliceIds` for the caller.
+ *
+ * Refusals (400, nothing written), in the order checked:
+ * - a short slice (pending at a source the short sweep flags for it, or
+ *   pending on UNASSIGNED) names the source and says it needs a location;
+ * - a re-claim or a move into the chosen source must fit the free units over
+ *   the rest of the window `[max(from, now), to)`, naming the source and its
+ *   free units;
+ * - units leaving a loose source now must be there now (physical-now):
+ *   `Only 3 units are at Demo Warehouse right now.`
+ *
+ * Queries beyond {@link openCall}: when an AUTO or MANUAL slice is picked,
+ * capacity (three), competing holds (two) and physical-now (four to six) in
+ * one parallel round; location names for the summary (one, only with
+ * LOCATION sources); the write.
+ *
+ * @param tx - The caller's transaction; the caller holds the booking lock and
+ *   locked every picked slice's asset in its first sorted asset lock
+ * @param args.organizationId - The trusted workspace id
+ * @param args.bookingId - The booking
+ * @param args.picks - Units per slice leaving now, quantity-tracked slices
+ * @param args.window - The booking window the check-out commits
+ * @param args.clientSupportsSources - False for a client without the
+ *   `booking-sources` capability; defaults to true
+ * @param args.now - The current time (defaults to now)
+ * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @returns The sources each converted slice dispatched from, and the slices
+ *   left LEGACY
+ * @throws {ShelfError} 400 as listed above; 404 for a slice not on this booking
+ */
+export async function dispatchUnits(
+  tx: BookingSourcesTx,
+  args: {
+    organizationId: string;
+    bookingId: string;
+    picks: DispatchPick[];
+    window: Window;
+    clientSupportsSources?: boolean;
+    now?: Date;
+    adoptionEnabled?: boolean;
+  }
+): Promise<DispatchResult> {
+  const { organizationId, bookingId } = args;
+  const picks = args.picks.filter((p) => p.units > 0);
+  if (picks.length === 0) return { dispatched: [], legacySliceIds: [] };
+  const clientSupportsSources = args.clientSupportsSources ?? true;
+  const now = args.now ?? new Date();
+
+  // Re-claims and moves are admitted over the rest of the window.
+  const start = new Date(Math.max(args.window.from.getTime(), now.getTime()));
+  const window: Window =
+    start.getTime() < args.window.to.getTime()
+      ? { from: start, to: args.window.to }
+      : args.window;
+
+  const ctx = await openCall(tx, {
+    organizationId,
+    bookingId,
+    sliceIds: [...new Set(picks.map((p) => p.sliceId))],
+    window,
+    adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
+  });
+  await allocateSessionPending(tx, ctx.session, "voluntary");
+
+  const converted = picks.flatMap((pick) => {
+    const found = convertedSlice(ctx, pick.sliceId);
+    return found ? [{ pick, ...found }] : [];
+  });
+  const legacySliceIds = picks
+    .filter((pick) => !convertedSlice(ctx, pick.sliceId))
+    .map((pick) => pick.sliceId);
+  if (converted.length === 0) return { dispatched: [], legacySliceIds };
+
+  const looseAssetIds = [
+    ...new Set(
+      converted
+        .filter(({ slice }) => slice.mode === "AUTO" || slice.mode === "MANUAL")
+        .map(({ group }) => group.key.assetId)
+    ),
+  ];
+  let capacity = new Map<string, Map<string, number>>();
+  let holdsByPool = new Map<string, SourceHold[]>();
+  let physical = new Map<string, Map<string, number>>();
+  if (looseAssetIds.length > 0) {
+    [capacity, holdsByPool, physical] = await Promise.all([
+      loadSourceCapacity(tx, { organizationId, assetIds: looseAssetIds }),
+      loadCompetingHoldsByPool(tx, {
+        organizationId,
+        assetIds: looseAssetIds,
+        window,
+        excludeBookingId: bookingId,
+      }),
+      loadPhysicalNow(tx, { organizationId, assetIds: looseAssetIds }),
+    ]);
+  }
+
+  const groups = [...new Set(converted.map(({ group }) => group))];
+  const shortByGroup = new Map(
+    groups.map((group) => [
+      group,
+      shortKeysBySlice(group, {
+        capacity: capacity.get(group.key.assetId) ?? new Map(),
+        competing: holdsByPool.get(group.key.assetId) ?? [],
+        bookingId,
+        booking: ctx.booking,
+        window,
+      }),
+    ])
+  );
+  const holdsBefore = new Map(groups.map((g) => [g, ownHoldBySource(g)]));
+
+  const takenBySlice = new Map<string, Taken>();
+  for (const { pick, group, slice } of converted) {
+    const taken = takenBySlice.get(slice.id) ?? new Map<string, number>();
+    takenBySlice.set(slice.id, taken);
+    if (slice.mode === "KIT") {
+      const kitRow = slice.rows.find((r) => r.kind === "KIT");
+      if (!kitRow || pick.units > pendingOf(kitRow) + kitRow.releasedQuantity) {
+        throw overBooked(slice.id);
+      }
+      dispatchRow(kitRow, pick.units, taken);
+      continue;
+    }
+    const shortKeys =
+      shortByGroup.get(group)?.get(slice.id) ?? new Set<string>();
+    const choice =
+      pick.fromLocationId !== undefined &&
+      (clientSupportsSources || !isSplitSlice(slice))
+        ? pick.fromLocationId
+        : undefined;
+    if (choice !== undefined) {
+      await dispatchFromChoice(
+        tx,
+        organizationId,
+        group,
+        slice,
+        pick.units,
+        choice,
+        shortKeys,
+        taken
+      );
+      continue;
+    }
+    if (shortKeys.size > 0 || unassignedPending(slice) > 0) {
+      throw await buildShortRefusal(
+        tx,
+        organizationId,
+        group,
+        slice,
+        shortKeys
+      );
+    }
+    await dispatchByAllocation(
+      tx,
+      organizationId,
+      group,
+      slice,
+      pick.units,
+      taken
+    );
+  }
+
+  // Re-claims and moves add to the booking's hold at a source: admitted
+  // against the free units over the rest of the window.
+  for (const group of groups) {
+    const before = holdsBefore.get(group) ?? new Map<string, number>();
+    const freeByKey = new Map<string, RefusalEntry>(
+      group.free.map((s) => [sourceKey(s), s])
+    );
+    const refused: RefusalEntry[] = [];
+    for (const [key, held] of ownHoldBySource(group)) {
+      const previous = before.get(key) ?? 0;
+      if (held <= previous || held <= (freeByKey.get(key)?.free ?? 0)) {
+        continue;
+      }
+      const entry = refusalEntryFor(group, key, freeByKey);
+      if (entry) {
+        refused.push({ ...entry, free: Math.max(0, entry.free - previous) });
+      }
+    }
+    if (refused.length > 0) {
+      throw await buildSourceRefusal(tx, organizationId, group.key, refused);
+    }
+  }
+
+  // Physical-now: units leaving a loose source must be on hand there now.
+  const leaving = new Map<string, Map<string, number>>();
+  for (const { group, slice } of converted) {
+    for (const [key, units] of takenBySlice.get(slice.id) ?? []) {
+      if (!key.startsWith("LOCATION:") && !key.startsWith("UNPLACED:")) {
+        continue;
+      }
+      const perKey =
+        leaving.get(group.key.assetId) ?? new Map<string, number>();
+      perKey.set(key, (perKey.get(key) ?? 0) + units);
+      leaving.set(group.key.assetId, perKey);
+    }
+  }
+  const shortNow: Array<{ key: string; onHand: number }> = [];
+  for (const [assetId, perKey] of leaving) {
+    for (const [key, units] of perKey) {
+      const onHand = physical.get(assetId)?.get(key) ?? 0;
+      if (units > onHand) shortNow.push({ key, onHand: Math.max(0, onHand) });
+    }
+  }
+  const allKeys = [
+    ...shortNow.map((s) => s.key),
+    ...[...takenBySlice.values()].flatMap((t) => [...t.keys()]),
+  ];
+  const names = await locationNames(
+    tx,
+    organizationId,
+    allKeys
+      .filter((key) => key.startsWith("LOCATION:"))
+      .map((key) => key.split(":")[1])
+  );
+  if (shortNow.length > 0) {
+    throw userError(
+      shortNow
+        .map(({ key, onHand }) =>
+          key.startsWith("UNPLACED:")
+            ? `Only ${onHand} units are unplaced right now.`
+            : `Only ${onHand} units are at ${sourceName(key, names)} right now.`
+        )
+        .join(" "),
+      { bookingId }
+    );
+  }
+
+  reallocateConflictingAutoSlices(
+    ctx.session,
+    new Set(converted.map(({ slice }) => slice.id))
+  );
+  await finishCall(tx, ctx);
+
+  const dispatched: DispatchedSlice[] = [];
+  for (const { group, slice } of converted) {
+    const taken = takenBySlice.get(slice.id);
+    if (!taken || dispatched.some((d) => d.sliceId === slice.id)) continue;
+    const sources: DispatchedSource[] = [];
+    for (const [key, quantity] of taken) {
+      const [kind, locationId] = key.split(":");
+      if (kind !== "LOCATION" && kind !== "UNPLACED") continue;
+      sources.push({
+        kind,
+        locationId: kind === "LOCATION" ? locationId : null,
+        name: sourceName(key, names),
+        quantity,
+      });
+    }
+    dispatched.push({ sliceId: slice.id, assetId: group.key.assetId, sources });
+  }
+  return { dispatched, legacySliceIds };
 }
 
 /** What the booking page shows for one slice. */

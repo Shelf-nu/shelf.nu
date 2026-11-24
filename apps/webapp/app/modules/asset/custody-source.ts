@@ -60,11 +60,13 @@ export type SourceCustodyRow = {
 
 /**
  * Units of a pool still out on an ONGOING or OVERDUE booking, having left
- * from one location (the slice's recorded `BookingAsset.sourceLocationId`).
+ * from one source: a location (a LEGACY slice's recorded
+ * `BookingAsset.sourceLocationId`, or a converted slice's LOCATION row), or
+ * the unplaced units (`null`, a converted slice's UNPLACED row only).
  * Standalone slices only: kit units never come from a manual placement.
  */
 export type SourceBookedOutRow = {
-  locationId: string;
+  locationId: string | null;
   quantity: number;
 };
 
@@ -118,16 +120,17 @@ export function custodyFromSource(
 }
 
 /**
- * Units out on bookings that left from `locationId`. Always 0 for the
- * unplaced units: a booking slice with no recorded location cannot be told
- * apart from one checked out before locations were recorded, so the
- * pool-level availability check covers those.
+ * Units out on bookings that left from `locationId`, or from the unplaced
+ * units for NULL. Only a converted booking slice records the unplaced units
+ * as its source (an UNPLACED source row); a LEGACY slice with no recorded
+ * location cannot be told apart from one checked out before locations were
+ * recorded, so it is charged to no source and the pool-level availability
+ * check covers it.
  */
 export function bookedOutFromSource(
   state: CustodySourceState,
   locationId: string | null
 ): number {
-  if (locationId === null) return 0;
   return (state.bookedOut ?? [])
     .filter((row) => row.locationId === locationId)
     .reduce((sum, row) => sum + row.quantity, 0);

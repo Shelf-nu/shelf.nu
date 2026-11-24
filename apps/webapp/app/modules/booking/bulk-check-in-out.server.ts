@@ -422,14 +422,18 @@ export async function bulkCheckoutBookings(
 
     // One booking at a time: each lookup is a handful of queries, and a
     // select-all can name a whole page, which fired at once would flood the
-    // connection pool before anything is validated.
+    // connection pool before anything is validated. A slice with planned
+    // sources goes out by that plan when nobody picks, so only LEGACY
+    // questions send a booking to its page.
     const needingSourceChoice: SelectedBooking[] = [];
     for (const booking of bookings) {
       const questions = await getCheckoutSourceQuestions({
         organizationId,
         bookingId: booking.id,
       });
-      if (questions.length > 0) needingSourceChoice.push(booking);
+      if (questions.some((question) => !question.fromAllocation)) {
+        needingSourceChoice.push(booking);
+      }
     }
     if (needingSourceChoice.length > 0) {
       refuseBatch({

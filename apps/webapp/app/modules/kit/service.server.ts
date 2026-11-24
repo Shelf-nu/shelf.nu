@@ -122,7 +122,10 @@ import type {
   AllowedCustodianFilterIds,
   ArchivedFilter,
 } from "../asset/utils.server";
-import { recordCheckoutSourceLocations } from "../booking/checkout-source-location.server";
+import {
+  dispatchCheckoutSources,
+  recordCheckoutSourceLocations,
+} from "../booking/checkout-source-location.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
@@ -7800,22 +7803,66 @@ export async function updateKitAssets({
                   }
                 }
                 /**
-                 * A pool member goes out with its kit, so it leaves from the
-                 * kit's location. Recorded before its counter is set, while
-                 * the counter still reads 0 (see
-                 * `recordCheckoutSourceLocations`).
+                 * Each new kit slice goes out with its kit, before its counter
+                 * is set to the same units. In a converted group a pool
+                 * member's slice dispatches from its KIT row, so the rows'
+                 * `dispatchedTotal` keeps summing to `checkedOutQuantity`; a
+                 * LEGACY slice records the kit's location while its counter
+                 * still reads 0 (see `dispatchCheckoutSources`). LEGACY groups
+                 * never convert here: adding a member is not a check-out of
+                 * the booking's other units.
                  */
                 const departingKitSlices = await tx.bookingAsset.findMany({
                   where: {
                     bookingId: { in: eligibleBookingIds },
                     assetKitId: { in: stampable.map((s) => s.assetKitId) },
                   },
-                  select: { id: true },
+                  select: {
+                    id: true,
+                    bookingId: true,
+                    assetId: true,
+                    quantity: true,
+                  },
                 });
-                await recordCheckoutSourceLocations(tx, {
-                  organizationId,
-                  sliceIds: departingKitSlices.map((slice) => slice.id),
-                });
+                const poolAssetIds = new Set(
+                  assetsToPropagate
+                    .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
+                    .map((a) => a.id)
+                );
+                if (
+                  !departingKitSlices.some((slice) =>
+                    poolAssetIds.has(slice.assetId)
+                  )
+                ) {
+                  await recordCheckoutSourceLocations(tx, {
+                    organizationId,
+                    sliceIds: departingKitSlices.map((slice) => slice.id),
+                  });
+                } else {
+                  // One window read for the bookings, then one dispatch per
+                  // booking (the bookings holding this kit: few).
+                  const windows = await tx.booking.findMany({
+                    where: { id: { in: eligibleBookingIds }, organizationId },
+                    select: { id: true, from: true, to: true },
+                    orderBy: { id: "asc" },
+                  });
+                  for (const booking of windows) {
+                    await dispatchCheckoutSources(tx, {
+                      organizationId,
+                      bookingId: booking.id,
+                      departures: departingKitSlices
+                        .filter((slice) => slice.bookingId === booking.id)
+                        .map((slice) => ({
+                          sliceId: slice.id,
+                          assetId: slice.assetId,
+                          units: slice.quantity,
+                        })),
+                      poolAssetIds,
+                      window: { from: booking.from, to: booking.to },
+                      adoptionEnabled: false,
+                    });
+                  }
+                }
 
                 for (const [quantity, assetKitIds] of assetKitIdsByQuantity) {
                   await tx.bookingAsset.updateMany({

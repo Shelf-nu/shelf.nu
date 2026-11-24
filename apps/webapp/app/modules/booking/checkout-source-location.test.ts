@@ -5,6 +5,7 @@ import type {
   SliceSourceInput,
 } from "./checkout-source-location";
 import {
+  ALLOCATION_SOURCE_FORM_VALUE,
   checkinPlacementSources,
   checkinStockEvents,
   isManualSourceSlice,
@@ -288,6 +289,20 @@ describe("submissions", () => {
     expect(sourceSubmissionFromRecord(undefined).size).toBe(0);
   });
 
+  it('drops "as planned" from a form and from the mobile record, as if nothing was picked', () => {
+    const formData = new FormData();
+    formData.set(sourceLocationFieldName("ba-1"), ALLOCATION_SOURCE_FORM_VALUE);
+    formData.set(sourceLocationFieldName("ba-2"), "loc-studio");
+    expect([...parseSourceLocationsFromFormData(formData).entries()]).toEqual([
+      ["ba-2", "loc-studio"],
+    ]);
+    expect([
+      ...sourceSubmissionFromRecord({
+        "ba-1": ALLOCATION_SOURCE_FORM_VALUE,
+      }).entries(),
+    ]).toEqual([]);
+  });
+
   it("prefers a slice-keyed answer over an asset-keyed one", () => {
     const submission = sourceSubmissionFromRecord({
       "ba-1": "loc-camera",
@@ -520,6 +535,20 @@ describe("checkoutSourceOptions", () => {
       "Studio · 40 pcs",
       "Unplaced · 5 pcs",
     ]);
+  });
+
+  it('lists "As planned" first when the question defaults to the plan', () => {
+    const options = checkoutSourceOptions({
+      unitOfMeasure: "pcs",
+      unplaced: 5,
+      placements: [cameraRoom, studio],
+      defaultLocationId: ALLOCATION_SOURCE_FORM_VALUE,
+    });
+    expect(options[0]).toEqual({
+      value: ALLOCATION_SOURCE_FORM_VALUE,
+      label: "As planned",
+    });
+    expect(options).toHaveLength(4);
   });
 });
 

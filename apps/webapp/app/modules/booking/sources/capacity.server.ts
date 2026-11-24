@@ -46,7 +46,11 @@ import type {
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { buildActiveBookingWhere } from "~/modules/asset/availability-primitives.server";
 
-import { loadBookedOutBySource } from "../units-out-by-source.server";
+import {
+  bookedOutFromLegacySourcedSlices,
+  LEGACY_SOURCED_SLICE_WHERE,
+  loadBookedOutBySource,
+} from "../units-out-by-source.server";
 
 /** The transaction client these readers need. */
 export type CapacityTx = Pick<
@@ -506,6 +510,12 @@ export async function loadPhysicalNow(
   return result;
 }
 
+/** The client {@link loadUnitsOutBySource} reads through. */
+type UnitsOutTx = Pick<
+  ExtendedPrismaClient,
+  "bookingAsset" | "bookingAssetSource" | "consumptionLog"
+>;
+
 /**
  * Units out now on converted slices, per pool and loose source: LOCATION and
  * UNPLACED rows of AUTO / MANUAL slices on ONGOING or OVERDUE bookings.
@@ -560,4 +570,131 @@ async function loadConvertedOutNow(
     out.push({ assetId, key: sourceKey(row), quantity: row.outQuantity });
   }
   return out;
+}
+
+/** Units of one pool out on bookings from one loose source; NULL is Unplaced. */
+export type UnitsOutFromSource = {
+  locationId: string | null;
+  quantity: number;
+};
+
+/**
+ * Units of each pool out on ONGOING or OVERDUE bookings right now, per loose
+ * source they left from, over every group of every booking: LEGACY groups by
+ * their recorded `sourceLocationId` (minus what came back, as
+ * `loadBookedOutBySource` counts them), converted groups by the `outQuantity`
+ * of their LOCATION and UNPLACED rows. A `locationId` of NULL is the unplaced
+ * units; only converted rows know that source, so LEGACY units never appear
+ * there. Kit units never appear.
+ *
+ * The custody "From location" numbers and the check-out source snapshot read
+ * this, so a unit out on a converted booking is not offered again by either.
+ *
+ * Queries: one slice read for both kinds of group, then the LEGACY siblings
+ * and logs (two, only with LEGACY sourced slices) and the converted rows
+ * (one, only with converted slices), in parallel.
+ *
+ * @param tx - The caller's transaction, or `db` for a read-only loader
+ * @param args.assetIds - Pools the caller has already proven belong to the
+ *   workspace (a locked row or an org-scoped list)
+ * @param args.organizationId - Extra scope when the caller has it
+ * @returns Per asset id, the non-zero units out per source
+ */
+export async function loadUnitsOutBySource(
+  tx: UnitsOutTx,
+  { assetIds, organizationId }: { assetIds: string[]; organizationId?: string }
+): Promise<Map<string, UnitsOutFromSource[]>> {
+  const ids = [...new Set(assetIds)];
+  const result = new Map<string, UnitsOutFromSource[]>();
+  if (ids.length === 0) return result;
+
+  const slices = await tx.bookingAsset.findMany({
+    where: {
+      assetId: { in: ids },
+      booking: {
+        ...(organizationId ? { organizationId } : {}),
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+      },
+      OR: [
+        LEGACY_SOURCED_SLICE_WHERE,
+        { sourceAllocation: { in: ["AUTO", "MANUAL"] } },
+      ],
+    },
+    select: {
+      id: true,
+      bookingId: true,
+      assetId: true,
+      quantity: true,
+      assetKitId: true,
+      checkedOutQuantity: true,
+      sourceLocationId: true,
+      sourceAllocation: true,
+      booking: { select: { status: true } },
+    },
+  });
+  const isConverted = (s: (typeof slices)[number]) =>
+    s.sourceAllocation === "AUTO" || s.sourceAllocation === "MANUAL";
+  // Terminal and reserved bookings have nothing physically out, whatever
+  // their rows still say.
+  const assetBySlice = new Map(
+    slices
+      .filter(
+        (s) =>
+          isConverted(s) &&
+          s.booking !== null &&
+          s.booking !== undefined &&
+          PHYSICAL_STATUSES.has(s.booking.status)
+      )
+      .map((s) => [s.id, s.assetId])
+  );
+
+  const [legacyOut, rows] = await Promise.all([
+    bookedOutFromLegacySourcedSlices(
+      tx,
+      slices.filter((s) => !isConverted(s))
+    ),
+    assetBySlice.size === 0
+      ? Promise.resolve([])
+      : tx.bookingAssetSource.findMany({
+          where: {
+            // The slice ids come from the scoped read above.
+            ...(organizationId ? { organizationId } : {}),
+            bookingAssetId: { in: [...assetBySlice.keys()] },
+            kind: { in: ["LOCATION", "UNPLACED"] },
+            outQuantity: { gt: 0 },
+          },
+          select: {
+            bookingAssetId: true,
+            kind: true,
+            locationId: true,
+            outQuantity: true,
+          },
+        }),
+  ]);
+
+  const totals = new Map<string, Map<string | null, number>>();
+  const add = (assetId: string, locationId: string | null, units: number) => {
+    if (units <= 0) return;
+    const perSource = totals.get(assetId) ?? new Map<string | null, number>();
+    perSource.set(locationId, (perSource.get(locationId) ?? 0) + units);
+    totals.set(assetId, perSource);
+  };
+  for (const [assetId, perLocation] of legacyOut) {
+    for (const row of perLocation) add(assetId, row.locationId, row.quantity);
+  }
+  for (const row of rows) {
+    const assetId = assetBySlice.get(row.bookingAssetId);
+    if (!assetId) continue;
+    if (row.kind === "UNPLACED") add(assetId, null, row.outQuantity);
+    else if (row.kind === "LOCATION") {
+      add(assetId, row.locationId, row.outQuantity);
+    }
+  }
+  for (const [assetId, perSource] of totals) {
+    result.set(
+      assetId,
+      [...perSource].map(([locationId, quantity]) => ({ locationId, quantity }))
+    );
+  }
+  return result;
 }

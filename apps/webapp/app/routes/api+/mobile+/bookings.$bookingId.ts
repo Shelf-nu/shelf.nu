@@ -17,6 +17,7 @@ import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { clientHasCapability } from "~/modules/api/capabilities.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -1017,7 +1018,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * gone out yet, with the options a "From location" picker needs. The same
      * data the web check-out dialogs read, so the phone can ask the same
      * question and send the answers as `sourceLocations`. Empty unless the
-     * booking can still check out. Additive: older apps ignore it.
+     * booking can still check out. Additive: older apps ignore it. An app
+     * without the `booking-sources` capability gets no question for a slice
+     * split across sources: it cannot answer one, so the server dispatches
+     * that slice by its allocation.
      */
     const checkoutSourceQuestions = (
       [
@@ -1029,6 +1033,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? await getCheckoutSourceQuestions({
           organizationId,
           bookingId: booking.id,
+          clientSupportsSources: clientHasCapability(
+            request,
+            "booking-sources"
+          ),
         })
       : [];
 

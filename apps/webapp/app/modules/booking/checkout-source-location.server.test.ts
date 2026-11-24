@@ -11,17 +11,34 @@
  */
 
 import { AssetType } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
-import { sourceSubmissionFromRecord } from "./checkout-source-location";
-import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
+import {
+  ALLOCATION_SOURCE_FORM_VALUE,
+  sourceSubmissionFromRecord,
+} from "./checkout-source-location";
+import {
+  dispatchCheckoutSources,
+  getCheckoutSourceQuestions,
+  loadPoolSourceSnapshots,
+  recordCheckoutSourceLocations,
+} from "./checkout-source-location.server";
+import { dispatchUnits } from "./sources/booking-sources.server";
 
-// why: the module imports `db` for its read-only loaders; the function under
-// test only ever uses the transaction it is handed, so the root client must
-// never be reached.
+// why: the module imports `db` for its read-only loaders. The transaction
+// functions only ever use the client they are handed; the question loader
+// tests install the few delegates it reads on this object.
 vi.mock("~/database/db.server", () => ({ db: {} }));
+
+// why: the booking sources facade (conversion, allocation, admission, the
+// physical check) has its own suite; here it is the seam the check-out
+// dispatch hands converted slices to.
+vi.mock("./sources/booking-sources.server", () => ({
+  dispatchUnits: vi.fn(),
+}));
 
 const ORG = "org-1";
 const OTHER_ORG = "org-2";
@@ -451,5 +468,331 @@ describe("recordCheckoutSourceLocations", () => {
 
     expect(decisions.size).toBe(0);
     expect(slice.sourceLocationId).toBeNull();
+  });
+});
+
+describe("loadPoolSourceSnapshots", () => {
+  it("takes units out on a converted booking off the location and the unplaced units they left from", async () => {
+    // 60 at Camera Room, 40 at Studio, 20 unplaced. A converted ONGOING
+    // booking has 10 out from Camera Room and 5 out from the unplaced units.
+    const tx = {
+      asset: {
+        findMany: vi.fn(() =>
+          resolved([
+            {
+              id: "pool-1",
+              title: "Cables",
+              quantity: 120,
+              unitOfMeasure: null,
+            },
+          ])
+        ),
+      },
+      assetLocation: {
+        findMany: vi.fn(() =>
+          resolved([
+            {
+              assetId: "pool-1",
+              locationId: "loc-camera",
+              quantity: 60,
+              location: { name: "Camera Room" },
+            },
+            {
+              assetId: "pool-1",
+              locationId: "loc-studio",
+              quantity: 40,
+              location: { name: "Studio" },
+            },
+          ])
+        ),
+      },
+      custody: { findMany: vi.fn(() => resolved([])) },
+      consumptionLog: { findMany: vi.fn(() => resolved([])) },
+      bookingAsset: {
+        // The one out-units slice read finds a converted slice only.
+        findMany: vi.fn(() =>
+          resolved([
+            {
+              id: "ba-other",
+              bookingId: "booking-other",
+              assetId: "pool-1",
+              quantity: 15,
+              assetKitId: null,
+              checkedOutQuantity: 15,
+              sourceLocationId: null,
+              sourceAllocation: "AUTO",
+              booking: { status: "ONGOING" },
+            },
+          ])
+        ),
+      },
+      bookingAssetSource: {
+        findMany: vi.fn(() =>
+          resolved([
+            {
+              bookingAssetId: "ba-other",
+              kind: "LOCATION",
+              locationId: "loc-camera",
+              outQuantity: 10,
+            },
+            {
+              bookingAssetId: "ba-other",
+              kind: "UNPLACED",
+              locationId: null,
+              outQuantity: 5,
+            },
+          ])
+        ),
+      },
+    };
+
+    const snapshots = await loadPoolSourceSnapshots(tx as never, {
+      organizationId: ORG,
+      assetIds: ["pool-1"],
+    });
+
+    const snapshot = snapshots.get("pool-1");
+    expect(
+      snapshot?.placements.map((p) => [p.locationId, p.onBooking, p.left])
+    ).toEqual([
+      ["loc-camera", 10, 50],
+      ["loc-studio", 0, 40],
+    ]);
+    expect(snapshot?.unplacedLeft).toBe(15);
+  });
+});
+
+describe("dispatchCheckoutSources", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hands pool slices to the facade with their picks, and records only what stays LEGACY the LEGACY way", async () => {
+    const { tx } = scenario();
+    vi.mocked(dispatchUnits).mockResolvedValue({
+      dispatched: [
+        {
+          sliceId: "ba-converted",
+          assetId: "pool-2",
+          sources: [
+            {
+              kind: "UNPLACED",
+              locationId: null,
+              name: "Unplaced",
+              quantity: 3,
+            },
+          ],
+        },
+      ],
+      legacySliceIds: ["ba-1"],
+    });
+    const window = { from: new Date("2026-12-01"), to: new Date("2026-12-03") };
+
+    const dispatched = await dispatchCheckoutSources(tx as never, {
+      organizationId: ORG,
+      bookingId: "booking-1",
+      departures: [
+        { sliceId: "ba-1", assetId: "pool-1", units: 10 },
+        { sliceId: "ba-converted", assetId: "pool-2", units: 3 },
+        { sliceId: "ba-camera", assetId: "camera-1", units: 1 },
+        { sliceId: "ba-nothing", assetId: "pool-2", units: 0 },
+      ],
+      poolAssetIds: new Set(["pool-1", "pool-2"]),
+      // Keyed by slice for one, by asset for the other.
+      submission: sourceSubmissionFromRecord({
+        "ba-1": "loc-studio",
+        "pool-2": null,
+      }),
+      window,
+      clientSupportsSources: false,
+    });
+
+    expect(dispatchUnits).toHaveBeenCalledWith(tx, {
+      organizationId: ORG,
+      bookingId: "booking-1",
+      window,
+      clientSupportsSources: false,
+      picks: [
+        { sliceId: "ba-1", units: 10, fromLocationId: "loc-studio" },
+        { sliceId: "ba-converted", units: 3, fromLocationId: null },
+      ],
+    });
+    // The LEGACY recorder sees the LEGACY pool slice and the INDIVIDUAL one.
+    expect(tx.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: ["ba-1", "ba-camera"] },
+        }),
+      })
+    );
+    expect(dispatched.map((d) => d.sliceId)).toEqual(["ba-converted"]);
+  });
+
+  it("never calls the facade when no pool slice leaves", async () => {
+    const { tx } = scenario();
+
+    const dispatched = await dispatchCheckoutSources(tx as never, {
+      organizationId: ORG,
+      bookingId: "booking-1",
+      departures: [{ sliceId: "ba-camera", assetId: "camera-1", units: 1 }],
+      poolAssetIds: new Set(),
+      window: { from: new Date("2026-12-01"), to: new Date("2026-12-03") },
+    });
+
+    expect(dispatchUnits).not.toHaveBeenCalled();
+    expect(dispatched).toEqual([]);
+  });
+
+  it("propagates a facade refusal before anything LEGACY is written", async () => {
+    const { tx } = scenario();
+    vi.mocked(dispatchUnits).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+        message: "Only 3 units are at Demo Warehouse right now.",
+      })
+    );
+
+    await expect(
+      dispatchCheckoutSources(tx as never, {
+        organizationId: ORG,
+        bookingId: "booking-1",
+        departures: [{ sliceId: "ba-1", assetId: "pool-1", units: 10 }],
+        poolAssetIds: new Set(["pool-1"]),
+        window: { from: new Date("2026-12-01"), to: new Date("2026-12-03") },
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Only 3 units are at Demo Warehouse right now.",
+    });
+    expect(tx.bookingAsset.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("getCheckoutSourceQuestions for slices with planned sources", () => {
+  /**
+   * Installs the reads the question loader makes on the root client: one
+   * converted slice of a pool at Camera Room and Studio, whose rows plan
+   * `rows` (pending units only).
+   */
+  function stageConverted(
+    rows: Array<{
+      kind: "LOCATION" | "UNPLACED";
+      locationId: string | null;
+      quantity: number;
+    }>
+  ) {
+    Object.assign(db, {
+      bookingAsset: {
+        findMany: vi.fn(({ where }: { where: { bookingId?: string } }) =>
+          resolved(
+            where.bookingId
+              ? [
+                  {
+                    id: "ba-1",
+                    assetId: "pool-1",
+                    quantity: 15,
+                    sourceAllocation: "AUTO",
+                  },
+                ]
+              : []
+          )
+        ),
+      },
+      bookingAssetSource: {
+        findMany: vi.fn(() =>
+          resolved(
+            rows.map((row) => ({
+              bookingAssetId: "ba-1",
+              ...row,
+              outQuantity: 0,
+              releasedQuantity: 0,
+            }))
+          )
+        ),
+      },
+      asset: {
+        findMany: vi.fn(() =>
+          resolved([
+            {
+              id: "pool-1",
+              title: "Cables",
+              quantity: 120,
+              unitOfMeasure: null,
+            },
+          ])
+        ),
+      },
+      assetLocation: {
+        findMany: vi.fn(() =>
+          resolved([
+            {
+              assetId: "pool-1",
+              locationId: "loc-camera",
+              quantity: 60,
+              location: { name: "Camera Room" },
+            },
+            {
+              assetId: "pool-1",
+              locationId: "loc-studio",
+              quantity: 40,
+              location: { name: "Studio" },
+            },
+          ])
+        ),
+      },
+      custody: { findMany: vi.fn(() => resolved([])) },
+      consumptionLog: { findMany: vi.fn(() => resolved([])) },
+    });
+  }
+
+  it('defaults a split plan to "as planned"', async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 8 },
+      { kind: "UNPLACED", locationId: null, quantity: 7 },
+    ]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+    });
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toMatchObject({
+      sliceId: "ba-1",
+      defaultLocationId: ALLOCATION_SOURCE_FORM_VALUE,
+      fromAllocation: true,
+    });
+  });
+
+  it("asks an older phone nothing about a split slice", async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 8 },
+      { kind: "UNPLACED", locationId: null, quantity: 7 },
+    ]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      clientSupportsSources: false,
+    });
+
+    expect(questions).toEqual([]);
+  });
+
+  it("still asks an older phone about a slice planned at one source, defaulting to it", async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-camera", quantity: 15 },
+    ]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      clientSupportsSources: false,
+    });
+
+    expect(questions.map((q) => q.defaultLocationId)).toEqual(["loc-camera"]);
   });
 });

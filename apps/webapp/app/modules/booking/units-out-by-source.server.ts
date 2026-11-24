@@ -153,36 +153,72 @@ export async function loadBookedOutBySource(
   const ids = [...new Set(assetIds)];
   if (ids.length === 0) return result;
 
-  const sliceSelect = {
-    id: true,
-    bookingId: true,
-    assetId: true,
-    quantity: true,
-    assetKitId: true,
-  } as const;
   const sourced = await client.bookingAsset.findMany({
     where: {
       assetId: { in: ids },
-      // Standalone slices that never came with a kit: kit slices and detached
-      // kit residue record the kit's location, not a manual placement (see
-      // `isManualSourceSlice`).
-      assetKitId: null,
-      sourceKitId: null,
-      sourceAllocation: "LEGACY",
+      ...LEGACY_SOURCED_SLICE_WHERE,
       sourceLocationId: locationId ?? { not: null },
-      checkedOutQuantity: { gt: 0 },
       booking: {
         ...(organizationId ? { organizationId } : {}),
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
       },
     },
     select: {
-      ...sliceSelect,
+      ...SLICE_SELECT,
       checkedOutQuantity: true,
       sourceLocationId: true,
     },
   });
+  return bookedOutFromLegacySourcedSlices(client, sourced);
+}
+
+/** The slice fields the booked-out counters read. */
+const SLICE_SELECT = {
+  id: true,
+  bookingId: true,
+  assetId: true,
+  quantity: true,
+  assetKitId: true,
+} as const;
+
+/**
+ * The filter of a LEGACY slice whose units left from a recorded manual
+ * placement: standalone, never came with a kit (kit slices and detached kit
+ * residue record the kit's location, see `isManualSourceSlice`), with a
+ * recorded source and something sent out. Callers add the asset and booking
+ * scope.
+ */
+export const LEGACY_SOURCED_SLICE_WHERE = {
+  assetKitId: null,
+  sourceKitId: null,
+  sourceAllocation: "LEGACY",
+  sourceLocationId: { not: null },
+  checkedOutQuantity: { gt: 0 },
+} as const;
+
+/** A LEGACY slice with a recorded source, as the booked-out counter reads it. */
+export type LegacySourcedSlice = CountedSlice & {
+  checkedOutQuantity: number;
+  sourceLocationId: string | null;
+};
+
+/**
+ * Units still out per pool and location for LEGACY slices already read with
+ * {@link LEGACY_SOURCED_SLICE_WHERE} on ONGOING or OVERDUE bookings: what each
+ * checked out minus what came back on it (see {@link unitsStillOutBySlice}).
+ * Two queries (siblings and logs, in parallel), none when no slice is given.
+ *
+ * @param client - `db`, or the caller's transaction
+ * @param sourced - The sourced LEGACY slices
+ * @returns Per asset id, the non-zero units out per location
+ */
+export async function bookedOutFromLegacySourcedSlices(
+  client: BookedOutClient,
+  sourced: LegacySourcedSlice[]
+): Promise<Map<string, BookedOutFromLocation[]>> {
+  const result = new Map<string, BookedOutFromLocation[]>();
   if (sourced.length === 0) return result;
+  const sliceSelect = SLICE_SELECT;
 
   const bookingIds = [...new Set(sourced.map((slice) => slice.bookingId))];
   const sourcedAssetIds = [...new Set(sourced.map((slice) => slice.assetId))];

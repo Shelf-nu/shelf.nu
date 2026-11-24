@@ -222,7 +222,7 @@ import {
   sliceForDisposition,
   untaggedCheckinPlacementSources,
 } from "./checkout-source-location";
-import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
+import { dispatchCheckoutSources } from "./checkout-source-location.server";
 import {
   findClashingReservations,
   resolveHeldKits,
@@ -292,6 +292,7 @@ import {
   allocateNewSlices,
   resizeSlices,
 } from "./sources/booking-sources.server";
+import type { DispatchedSlice } from "./sources/booking-sources.server";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -3335,6 +3336,26 @@ async function readFullCheckoutDepartures(
 }
 
 /**
+ * Source-dispatch options every check-out service takes: whether the client
+ * can answer the source question for a split slice, and a callback for the
+ * sources the units left from.
+ */
+export type CheckoutDispatchOptions = {
+  /**
+   * False for a phone build that does not announce the `booking-sources`
+   * capability (`X-Shelf-Capabilities`): a pick it sends for a split slice is
+   * ignored and the slice dispatches by allocation. Defaults to true.
+   */
+  clientSupportsSources?: boolean;
+  /**
+   * Called once the check-out has committed, with where each converted pool
+   * slice's units left from, so the mobile response can list the real
+   * sources. Not called when the check-out fails.
+   */
+  onDispatched?: (dispatched: DispatchedSlice[]) => void;
+};
+
+/**
  * Transaction-body helper shared by {@link checkoutBooking} and
  * {@link fulfilModelRequestsAndCheckout}.
  *
@@ -3372,10 +3393,13 @@ async function readFullCheckoutDepartures(
  * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
  * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
  * @param args.storedWindow - The booking's stored window, before `dataToUpdate` moves it
+ * @param args.poolAssetIds - Every quantity-tracked asset on the booking, standalone and kit; read here when omitted
+ * @param args.clientSupportsSources - False for a phone build without the `booking-sources` capability
  * @returns `departedSlices`: every slice whose units left in this call, each
  *   with its asset, read before the stamps made them indistinguishable from
  *   slices an earlier batch sent out. Callers name these assets in the
- *   post-commit "checked out" line.
+ *   post-commit "checked out" line. `dispatchedSources`: where each converted
+ *   pool slice's units left from.
  * @throws {ShelfError} 400 when the booking holds no items to check out
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
@@ -3396,6 +3420,8 @@ async function checkoutBookingWritesWithinTx(
     from,
     to,
     storedWindow,
+    poolAssetIds: givenPoolAssetIds,
+    clientSupportsSources = true,
     checkedOutById,
     sourceLocations,
     hints,
@@ -3409,6 +3435,21 @@ async function checkoutBookingWritesWithinTx(
      * measures the move from it.
      */
     storedWindow: { from: Date; to: Date };
+    /**
+     * Every quantity-tracked asset on the booking, standalone and kit-driven.
+     * Their departing slices dispatch from their source rows, and they are
+     * locked in one sorted statement before the pool guard. A caller that
+     * read the slices inside this transaction after the booking lock passes
+     * them; otherwise they are read here, under the caller's booking lock, so
+     * no slice added concurrently is missed.
+     */
+    poolAssetIds?: Asset["id"][];
+    /**
+     * False for a phone build that does not announce the `booking-sources`
+     * capability: a pick it sends for a split slice is ignored and the slice
+     * dispatches by allocation. Defaults to true.
+     */
+    clientSupportsSources?: boolean;
     /** Acting user's locale and time zone, for the day a pool refusal names. */
     hints?: ClientHint;
     /**
@@ -3454,12 +3495,15 @@ async function checkoutBookingWritesWithinTx(
     to: Booking["to"];
     /**
      * Where each pool's units come from, as picked in the check-out dialog
-     * or sent by the phone. Missing answers resolve to the default; see
-     * {@link recordCheckoutSourceLocations}.
+     * or sent by the phone. Missing answers dispatch by allocation, or the
+     * LEGACY default; see {@link dispatchCheckoutSources}.
      */
     sourceLocations?: SourceLocationSubmission;
   }
-): Promise<{ departedSlices: Array<{ id: string; assetId: string }> }> {
+): Promise<{
+  departedSlices: Array<{ id: string; assetId: string }>;
+  dispatchedSources: DispatchedSlice[];
+}> {
   /**
    * A check-out sends at least one item out. `bookingAssetIds` is read after
    * any scan in the same transaction has landed, so a reservation-only booking
@@ -3498,6 +3542,14 @@ async function checkoutBookingWritesWithinTx(
    * refusal (400 naming each source's free units) stops the check-out before
    * anything is written.
    */
+  // Read under the booking lock the caller holds, when not handed in.
+  const poolSlicesInTx = givenPoolAssetIds
+    ? null
+    : await findPoolSlices(tx, { bookingId, organizationId });
+  const poolAssetIds = givenPoolAssetIds ?? [
+    ...new Set((poolSlicesInTx ?? []).map((slice) => slice.assetId)),
+  ];
+
   const committedWindow = windowAfterUpdate(dataToUpdate, storedWindow);
   const admissionKind =
     bookingStatus === BookingStatus.DRAFT
@@ -3506,13 +3558,16 @@ async function checkoutBookingWritesWithinTx(
       ? "dates"
       : null;
   if (admissionKind) {
-    const poolSlices = await findPoolSlices(tx, { bookingId, organizationId });
+    const poolSlices =
+      poolSlicesInTx ??
+      (await findPoolSlices(tx, { bookingId, organizationId }));
     if (poolSlices.length > 0) {
       await lockEveryAssetForQuantityUpdate(
         tx,
         [
           ...new Set([
             ...uniqueQtyTrackedAssetIds,
+            ...poolAssetIds,
             ...poolSlices.map((slice) => slice.assetId),
           ]),
         ],
@@ -3563,6 +3618,21 @@ async function checkoutBookingWritesWithinTx(
    * still-open writer is blocked on the same row lock until we commit or
    * roll back.
    */
+  /**
+   * A pool held only through kits is not among the standalone assets the
+   * guard below locks, but its departing kit slices dispatch from their source
+   * rows, which locks it. All pools are locked here first, in one sorted
+   * statement, so every later asset lock only re-takes rows already held.
+   */
+  const standaloneQtyIds = new Set(uniqueQtyTrackedAssetIds);
+  if (!admissionKind && poolAssetIds.some((id) => !standaloneQtyIds.has(id))) {
+    await lockEveryAssetForQuantityUpdate(
+      tx,
+      [...new Set([...uniqueQtyTrackedAssetIds, ...poolAssetIds])],
+      organizationId
+    );
+  }
+
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
 
@@ -3690,16 +3760,35 @@ async function checkoutBookingWritesWithinTx(
   });
 
   /**
-   * Record where each pool slice's units leave from, before the counters
-   * below grow: only a slice still at 0 gets a source, so a slice going out
-   * again keeps the one it has. The placements are read in this transaction,
-   * after the standalone pools' row locks above. An invalid pick throws and
-   * rolls the whole check-out back.
+   * Send each pool slice's units out of its sources, before the counters
+   * below grow by the same units: whole departing slices by their booked
+   * quantity, partly-sent slices by their residue. Converted slices dispatch
+   * from their source rows (by allocation, or from the picked source), with
+   * the short, re-claim and physical-now refusals; LEGACY slices record a
+   * source only when still at 0, so a slice going out again keeps the one it
+   * has. Read and written after the pool locks above. A refusal or an
+   * invalid pick throws and rolls the whole check-out back.
    */
-  await recordCheckoutSourceLocations(tx, {
+  const departingIds = new Set(
+    departingSlices.map((s: { id: string }) => s.id)
+  );
+  const dispatchedSources = await dispatchCheckoutSources(tx, {
     organizationId,
-    sliceIds: departingSlices.map((s: { id: string }) => s.id),
+    bookingId,
+    departures: [
+      ...departingSlices.map((s) => ({
+        sliceId: s.id,
+        assetId: s.assetId,
+        units: s.quantity,
+      })),
+      ...checkoutTopUps
+        .filter((t) => !departingIds.has(t.id))
+        .map((t) => ({ sliceId: t.id, assetId: t.assetId, units: t.residue })),
+    ],
+    poolAssetIds: new Set(poolAssetIds),
     submission: sourceLocations,
+    window: committedWindow,
+    clientSupportsSources,
   });
 
   /**
@@ -3857,7 +3946,7 @@ async function checkoutBookingWritesWithinTx(
   for (const slice of [...departingSlices, ...checkoutTopUps]) {
     departedSlices.set(slice.id, { id: slice.id, assetId: slice.assetId });
   }
-  return { departedSlices: [...departedSlices.values()] };
+  return { departedSlices: [...departedSlices.values()], dispatchedSources };
 }
 
 /**
@@ -4350,6 +4439,8 @@ export async function checkoutBooking({
   userId,
   provenance,
   sourceLocations,
+  clientSupportsSources,
+  onDispatched,
   seesAllBookings = false,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
@@ -4375,10 +4466,15 @@ export async function checkoutBooking({
   provenance?: BookingMethodProvenance;
   /**
    * Where each pool's units come from, keyed by slice or asset id. Only
-   * pools at two or more placements are asked; anything missing resolves to
-   * the default (see {@link recordCheckoutSourceLocations}).
+   * pools at two or more placements are asked; anything missing dispatches
+   * by allocation or resolves to the LEGACY default (see
+   * {@link dispatchCheckoutSources}).
    */
   sourceLocations?: SourceLocationSubmission;
+  /** See {@link CheckoutDispatchOptions}. */
+  clientSupportsSources?: CheckoutDispatchOptions["clientSupportsSources"];
+  /** See {@link CheckoutDispatchOptions}. */
+  onDispatched?: CheckoutDispatchOptions["onDispatched"];
 }) {
   try {
     /**
@@ -4698,6 +4794,8 @@ export async function checkoutBooking({
 
     /** The slices this check-out sent out, set inside the transaction. */
     let departedSlices: Array<{ id: string; assetId: string }> = [];
+    /** Where converted pool slices' units left from, set inside the transaction. */
+    let dispatchedSources: DispatchedSlice[] = [];
 
     await db.$transaction(
       async (tx) => {
@@ -4787,7 +4885,7 @@ export async function checkoutBooking({
           });
         }
 
-        ({ departedSlices } = await checkoutBookingWritesWithinTx(tx, {
+        const writes = await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
           // The status this transaction holds, not the pre-transaction read:
           // it decides whether the model-reservation guard runs.
@@ -4808,11 +4906,14 @@ export async function checkoutBooking({
           from: checkoutWindow.from,
           to: checkoutWindow.to,
           storedWindow: { from: bookingFound.from, to: bookingFound.to },
+          // Pool assets are read inside the helper, after the booking lock.
+          clientSupportsSources,
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
-        }));
+        });
+        ({ departedSlices, dispatchedSources } = writes);
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
         // booking. Map through the deduped asset ids so a multi-row asset
@@ -4872,6 +4973,8 @@ export async function checkoutBooking({
       },
       { timeout: 15000 }
     );
+
+    onDispatched?.(dispatchedSources);
 
     /** The post-checkout values, taken from `dataToUpdate` where it changed
      * them and from `bookingFound` otherwise. Avoids re-reading the row, and
@@ -4976,8 +5079,10 @@ export async function fulfilModelRequestsAndCheckout({
   to,
   provenance,
   sourceLocations,
+  clientSupportsSources,
+  onDispatched,
   seesAllBookings = false,
-}: {
+}: CheckoutDispatchOptions & {
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
@@ -5211,6 +5316,8 @@ export async function fulfilModelRequestsAndCheckout({
     let unscannedSliceIds = new Set<string>();
     /** The slices this check-out sent out, set inside the transaction. */
     let departedSlices: Array<{ id: string; assetId: string }> = [];
+    /** Where converted pool slices' units left from, set inside the transaction. */
+    let dispatchedSources: DispatchedSlice[] = [];
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
@@ -5243,6 +5350,9 @@ export async function fulfilModelRequestsAndCheckout({
          * facade's and the pool guard's only re-take rows already held.
          */
         const storedWindow = { from: bookingFound.from, to: bookingFound.to };
+        const knownPoolAssetIds = bookingFound.bookingAssets
+          .filter((ba) => isQuantityTracked(ba.asset))
+          .map((ba) => ba.asset.id);
         if (
           lockedStatus === BookingStatus.DRAFT ||
           windowMoved(
@@ -5260,6 +5370,19 @@ export async function fulfilModelRequestsAndCheckout({
               ...assetIds,
               ...kitSlices.map((slice) => slice.assetId),
               ...poolSlices.map((slice) => slice.assetId),
+            ],
+            organizationId
+          );
+        } else if (knownPoolAssetIds.some((id) => !assetIds.includes(id))) {
+          // The check-out dispatches the booking's pool slices from their
+          // sources, which locks their assets: taken here with the scan's,
+          // in one sorted statement, before the scan locks anything.
+          await lockAssetsForArchiveGuard(
+            tx,
+            [
+              ...assetIds,
+              ...kitSlices.map((slice) => slice.assetId),
+              ...knownPoolAssetIds,
             ],
             organizationId
           );
@@ -5330,7 +5453,7 @@ export async function fulfilModelRequestsAndCheckout({
         );
         const hasKits = unionKitIds.length > 0;
 
-        ({ departedSlices } = await checkoutBookingWritesWithinTx(tx, {
+        const writes = await checkoutBookingWritesWithinTx(tx, {
           bookingId,
           organizationId,
           // Read under the booking's row lock above, so a concurrent reserve
@@ -5349,11 +5472,20 @@ export async function fulfilModelRequestsAndCheckout({
           from: bookingFound.from,
           to: bookingFound.to,
           storedWindow,
+          poolAssetIds: [
+            ...new Set(
+              postScanBookingAssets
+                .filter((ba) => isQuantityTracked(ba.asset))
+                .map((ba) => ba.asset.id)
+            ),
+          ],
+          clientSupportsSources,
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,
           revealOtherBookings: seesAllBookings,
-        }));
+        });
+        ({ departedSlices, dispatchedSources } = writes);
 
         /**
          * Activity events — mirrors `checkoutBooking`'s emission so the
@@ -5410,6 +5542,8 @@ export async function fulfilModelRequestsAndCheckout({
       },
       { timeout: 15000 }
     );
+
+    onDispatched?.(dispatchedSources);
 
     /** Post-commit: activity notes for the assets that actually arrived */
     await createNotesForScannedAssetsAndKits({
@@ -10183,6 +10317,8 @@ export async function partialCheckoutBooking({
   intentChoice,
   provenance,
   sourceLocations,
+  clientSupportsSources,
+  onDispatched,
 }: Pick<Booking, "id" | "organizationId"> & {
   /** Legacy payload — asset IDs only, no per-asset quantities. INDIVIDUAL rows
    *  implicitly carry quantity = 1. */
@@ -10201,11 +10337,15 @@ export async function partialCheckoutBooking({
    */
   provenance?: BookingMethodProvenance;
   /**
-   * Where each pool's units come from, keyed by slice or asset id. Recorded
-   * on a slice the first time it goes out; see
-   * {@link recordCheckoutSourceLocations}.
+   * Where each pool's units come from, keyed by slice or asset id. A
+   * converted slice dispatches from the picked source; a LEGACY slice records
+   * it the first time it goes out. See {@link dispatchCheckoutSources}.
    */
   sourceLocations?: SourceLocationSubmission;
+  /** See {@link CheckoutDispatchOptions}. */
+  clientSupportsSources?: CheckoutDispatchOptions["clientSupportsSources"];
+  /** See {@link CheckoutDispatchOptions}. */
+  onDispatched?: CheckoutDispatchOptions["onDispatched"];
 }) {
   try {
     // Dedupe once up front so counts, the PartialBookingCheckout record, and the
@@ -10607,6 +10747,8 @@ export async function partialCheckoutBooking({
         // here, so what the route said about them travels with the delegate.
         provenance,
         sourceLocations,
+        clientSupportsSources,
+        onDispatched,
       });
 
       // Record the final batch in the partial-checkout source of truth.
@@ -11638,17 +11780,28 @@ export async function partialCheckoutBooking({
         }
 
         /**
-         * Record where each pool slice's units leave from, before the counter
-         * below grows: only a slice still at 0 gets a source, so a slice this
-         * booking sent out in an earlier session keeps the one it has. An
-         * invalid pick throws and rolls the whole session back.
+         * Send each pool slice's units out of its sources, before the counter
+         * below grows by the same units. Converted slices dispatch from their
+         * source rows (by allocation, or from the picked source) with the
+         * short, re-claim and physical-now refusals; a LEGACY slice records a
+         * source only while still at 0, so one this booking sent out in an
+         * earlier session keeps it. The pools were locked above. A refusal or
+         * an invalid pick throws and rolls the whole session back.
          */
-        await recordCheckoutSourceLocations(tx, {
+        const assetIdBySliceId = new Map(
+          bookingFound.bookingAssets.map((ba) => [ba.id, ba.asset.id])
+        );
+        const dispatchedSources = await dispatchCheckoutSources(tx, {
           organizationId,
-          sliceIds: [...unitsBySliceId]
-            .filter(([, units]) => units > 0)
-            .map(([sliceId]) => sliceId),
+          bookingId: id,
+          departures: [...unitsBySliceId].flatMap(([sliceId, units]) => {
+            const assetId = assetIdBySliceId.get(sliceId);
+            return assetId ? [{ sliceId, assetId, units }] : [];
+          }),
+          poolAssetIds: new Set(qtyDispositionAssetIds),
           submission: sourceLocations,
+          window: { from: bookingFound.from, to: bookingFound.to },
+          clientSupportsSources,
         });
 
         for (const [sliceId, units] of unitsBySliceId) {
@@ -12038,6 +12191,7 @@ export async function partialCheckoutBooking({
           // asset-level remaining and render the pre-Layer-3 phrasing.
           qtySummaries,
           individualAssetIds: individualToFlip,
+          dispatchedSources,
         };
         // Defense-in-depth: match the 15s timeout the sibling checkout/checkin
         // transactions in this file use. The per-asset query fan-out above is now
@@ -12046,6 +12200,8 @@ export async function partialCheckoutBooking({
       },
       { timeout: 15000 }
     );
+
+    onDispatched?.(result.dispatchedSources);
 
     /**
      * Per-slice qty-tracked asset-timeline notes (post-tx, best-effort). Uses
@@ -12141,6 +12297,8 @@ export async function partialCheckoutBooking({
       bookingStatusChanged: _ignored,
       qtySummaries: _qty,
       individualAssetIds: _individual,
+      // Reported through `onDispatched`, never in the returned payload.
+      dispatchedSources: _dispatched,
       ...publicResult
     } = result;
     return publicResult;

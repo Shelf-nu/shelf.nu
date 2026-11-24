@@ -23,6 +23,7 @@ import {
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
+import { sourceSubmissionFromRecord } from "./checkout-source-location";
 import {
   buildOverriddenReservationNotes,
   computeBookingAssetRemainingToCheckOut,
@@ -31,6 +32,7 @@ import {
   getRemainingCheckoutPayload,
   partialCheckoutBooking,
 } from "./service.server";
+import { dispatchUnits } from "./sources/booking-sources.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -293,6 +295,21 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
     unitOfMeasure: null,
     quantity: 0,
   }),
+  // why: a full check-out reached through the delegate locks pools held only
+  // through kits in one raw `SELECT … FOR UPDATE`, which this fake cannot run.
+  lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: the booking sources facade reads, locks and writes source rows through
+// raw SQL and its own repository, which this model-shaped fake cannot serve;
+// its behaviour is covered by `sources/booking-sources.server.test.ts`. Here
+// it reports every picked slice LEGACY by default, so the LEGACY source path
+// runs as it does without sources, and the dispatch tests below override it.
+vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
+  resizeSlices: vitest.fn().mockResolvedValue(undefined),
+  admitWindowChange: vitest.fn().mockResolvedValue(undefined),
+  dispatchUnits: vitest.fn(),
 }));
 
 // why: the scan check-out reads each pool's free stock through this batched
@@ -486,6 +503,20 @@ const baseParams = {
   userId: "user-1",
   hints: mockHints,
 };
+
+/** The facade's default answer: every picked slice stays LEGACY. */
+function dispatchAllLegacy() {
+  vitest.mocked(dispatchUnits).mockImplementation((_tx, args) =>
+    Promise.resolve({
+      dispatched: [],
+      legacySliceIds: args.picks.map((pick) => pick.sliceId),
+    })
+  );
+}
+
+beforeEach(() => {
+  dispatchAllLegacy();
+});
 
 describe("partialCheckoutBooking", () => {
   beforeEach(() => {
@@ -3978,6 +4009,162 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
 
     // Sanity: the batch still records every slice (1 of 10 each → none complete).
     expect(result.isComplete).toBe(false);
+  });
+
+  describe("source dispatch", () => {
+    /** A converted slice's dispatch, as the facade reports it. */
+    const dispatchedFromWarehouse = {
+      sliceId: "ba-qty-1",
+      assetId: "asset-qty-1",
+      sources: [
+        {
+          kind: "LOCATION" as const,
+          locationId: "loc-warehouse",
+          name: "Demo Warehouse",
+          quantity: 5,
+        },
+      ],
+    };
+
+    it("dispatches the pool slice's units through the facade before its counter grows, with the pick and the client's capability", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      vitest.mocked(dispatchUnits).mockResolvedValue({
+        dispatched: [dispatchedFromWarehouse],
+        legacySliceIds: [],
+      });
+      const reported: unknown[] = [];
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        sourceLocations: sourceSubmissionFromRecord({
+          "ba-qty-1": "loc-warehouse",
+        }),
+        clientSupportsSources: false,
+        onDispatched: (slices) => reported.push(...slices),
+      });
+
+      expect(dispatchUnits).toHaveBeenCalledTimes(1);
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1]).toEqual({
+        organizationId: "org-1",
+        bookingId: "booking-1",
+        window: { from: futureFrom, to: futureTo },
+        clientSupportsSources: false,
+        picks: [
+          { sliceId: "ba-qty-1", units: 5, fromLocationId: "loc-warehouse" },
+        ],
+      });
+      // The rows' dispatchedTotal and the slice counter grow together.
+      const counterWrite = vitest
+        .mocked(db.bookingAsset.updateMany)
+        .mock.calls.findIndex(
+          ([args]) =>
+            (args as { data?: { checkedOutQuantity?: unknown } }).data
+              ?.checkedOutQuantity !== undefined
+        );
+      expect(counterWrite).toBeGreaterThanOrEqual(0);
+      expect(
+        vitest.mocked(dispatchUnits).mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        vitest.mocked(db.bookingAsset.updateMany).mock.invocationCallOrder[
+          counterWrite
+        ]
+      );
+      // A converted slice records no LEGACY source.
+      expect(db.bookingAsset.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            sourceLocationId: expect.anything(),
+          }),
+        })
+      );
+      // Reported after the commit, for the phone's response summary.
+      expect(reported).toEqual([dispatchedFromWarehouse]);
+    });
+
+    it("dispatches by allocation when nothing was picked", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1].picks).toEqual([
+        { sliceId: "ba-qty-1", units: 5 },
+      ]);
+    });
+
+    it("refuses the batch with the facade's reason and writes no counter when a short slice cannot go out", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      vitest.mocked(dispatchUnits).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+          message:
+            "Pens is short at Demo Warehouse and needs a location. Change where its units come from, then check out again.",
+        })
+      );
+      const reported: unknown[] = [];
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            {
+              assetId: "asset-qty-1",
+              bookingAssetId: "ba-qty-1",
+              quantity: 5,
+            },
+          ],
+          onDispatched: (slices) => reported.push(...slices),
+        })
+      ).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("short at Demo Warehouse"),
+      });
+      expect(db.bookingAsset.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { checkedOutQuantity: expect.anything() },
+        })
+      );
+      expect(reported).toEqual([]);
+    });
+
+    it("hands a slice the facade leaves LEGACY to the LEGACY source path", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      // The LEGACY recorder reads the slice still at 0 to give it a source.
+      expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ["ba-qty-1"] },
+            checkedOutQuantity: 0,
+          }),
+        })
+      );
+    });
   });
 });
 
