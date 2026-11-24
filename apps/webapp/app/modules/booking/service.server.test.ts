@@ -6822,6 +6822,20 @@ describe("checkoutBooking", () => {
 describe("fulfilModelRequestsAndCheckout", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: the booking row lock is a raw `FOR UPDATE` read that returns the
+    // status and the window it locked. By default it answers ONGOING with the
+    // window every pre-transaction fixture carries, i.e. nothing changed
+    // between the read and the lock; a race case overrides it.
+    (db.$queryRaw as unknown as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ status: "ONGOING", from: futureFromDate, to: futureToDate }]
+    );
+  });
+
+  afterEach(() => {
+    vitest.useRealTimers();
+    (db.$queryRaw as unknown as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      [{ status: "ONGOING" }]
+    );
   });
 
   const mockFulfilParams = {
@@ -7796,6 +7810,61 @@ describe("fulfilModelRequestsAndCheckout", () => {
       (db.asset.findMany as ReturnType<typeof vitest.fn>).mock
         .invocationCallOrder[0]
     );
+  });
+
+  it("decides the pool lock from the window read under the booking lock, not the earlier read", async () => {
+    expect.assertions(3);
+
+    // why: an early check-out moves `from` to now; pinning now makes that
+    // instant exact, so the case can stage a locked window that already starts
+    // there.
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    const now = new Date("2030-03-04T15:00:00.000Z");
+    vitest.setSystemTime(now);
+    const to = new Date("2030-03-06T15:00:00.000Z");
+
+    // The earlier read sees a start a day away, so the check-out is early and
+    // moves `from` to now. A concurrent edit has already moved the stored
+    // start to now by the time the lock is taken: the window does not move,
+    // and no pool outside the scan needs locking.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce({
+      ...buildPreTxBooking({ from: new Date("2030-03-05T15:00:00.000Z") }),
+      to,
+    });
+    // why: the booking row lock answers with the window a concurrent edit
+    // committed before it; every later raw statement is a lock whose rows
+    // this flow does not read.
+    (db.$queryRaw as unknown as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([{ status: "ONGOING", from: now, to }])
+      .mockResolvedValue([]);
+    // why: the pool read under the booking lock finds no quantity-tracked slice
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    // why: the scan's first read is its org guard; answering "not found" stops
+    // the flow right there, after the lock decision under test
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      []
+    );
+
+    await expect(
+      fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+        checkoutIntentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      })
+    ).rejects.toThrow(/do not exist in your workspace/);
+
+    // The lock statement reads the window together with the status.
+    const queryRaw = db.$queryRaw as unknown as ReturnType<typeof vitest.fn>;
+    const bookingLock = (queryRaw.mock.calls[0]?.[0] as readonly string[]).join(
+      ""
+    );
+    expect(bookingLock).toContain('"from", "to"');
+    // Measured against the locked window the start does not move, so the
+    // scan's own locks suffice.
+    expect(lockAssetsForArchiveGuard).not.toHaveBeenCalled();
   });
 
   /**
@@ -17678,6 +17747,51 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       data: { quantity: { decrement: 6 } },
     });
   });
+
+  it("settles a converted slice the read before the locks did not see", async () => {
+    expect.assertions(3);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    // why: the booking read before the locks holds only the standalone
+    // slice. By the time the settlement opens under the locks, a kit slice
+    // of the same converted group has joined with 4 units out from another
+    // location; the check-in walks the slices the settlement read.
+    vitest
+      .mocked(bookingSources.openSettlement)
+      .mockResolvedValueOnce(
+        convertedSettlement(mockQtyAssetId, [
+          settlementSlice("ba-pens-standalone", null, [
+            { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
+          ]),
+          settlementSlice("ba-pens-late-kit", "ak-pens-late", [
+            { kind: "LOCATION", locationId: "loc-b", quantity: 4, out: 4 },
+          ]),
+        ])
+      );
+
+    await checkinBooking(baseParams);
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        quantity: 6,
+        bookingAssetId: "ba-pens-standalone",
+        locationId: "loc-a",
+      })
+    );
+    // The late slice gets its own log, tagged with it and returned to the
+    // location its units left from.
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: mockQtyAssetId,
+        category: "RETURN",
+        quantity: 4,
+        bookingAssetId: "ba-pens-late-kit",
+        locationId: "loc-b",
+      })
+    );
+    expect(bookingSources.commitSettlement).toHaveBeenCalledTimes(1);
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -23329,6 +23443,61 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       expect.objectContaining({
         where: expect.objectContaining({ id: { in: ["ba-kit"] } }),
       })
+    );
+  });
+
+  it("finishes a converted slice the read before the locks did not see", async () => {
+    expect.assertions(3);
+
+    arrange([poolSlice("ba-loose", null, 2), fillerSlice]);
+    // why: a pool large enough that the custody guard lets 5 units go.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pool",
+      title: "Batteries",
+      quantity: 20,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.ONE_WAY,
+    });
+    // why: the booking read before the locks holds only the loose slice. The
+    // settlement, read under the locks, also holds a kit slice of the same
+    // converted group with 3 units out, which joined in between.
+    vitest
+      .mocked(bookingSources.openSettlement)
+      .mockResolvedValueOnce(
+        convertedSettlement("asset-pool", [
+          settlementSlice("ba-loose", null, [
+            { kind: "UNPLACED", locationId: null, quantity: 2, out: 2 },
+          ]),
+          settlementSlice("ba-late-kit", "ak-late", [
+            { kind: "KIT", locationId: null, quantity: 3, out: 3 },
+          ]),
+        ])
+      );
+
+    await partialCheckinBooking(
+      params([{ assetId: "asset-pool", consumed: 5 }])
+    );
+
+    // Both slices have nothing left out, the late one included.
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: expect.arrayContaining(["ba-loose", "ba-late-kit"]) },
+        }),
+      })
+    );
+    // Its used-up units leave its kit.
+    expect(removeDestroyedUnitsFromKits).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        destroyedUnitsByAssetKitId: new Map([["ak-late", 3]]),
+      })
+    );
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({ category: "CONSUME", change: -5 })
     );
   });
 

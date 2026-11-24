@@ -5337,13 +5337,19 @@ export async function fulfilModelRequestsAndCheckout({
         // transaction, so the assignment below cannot interleave with a
         // concurrent check-out or reservation edit on the same booking. The
         // booking's lock comes from the shared helper, which returns the status
-        // it locked: read any other way it is a pre-lock snapshot, and the
-        // model-reservation guard downstream keys off whether this is a draft.
-        const lockedStatus = await lockBookingForStatusCheck(
+        // and window it locked: read any other way they are a pre-lock
+        // snapshot. The model-reservation guard downstream keys off whether
+        // this is a draft, and the pool-lock decision, the source admission
+        // and the availability guard below measure the locked window, which a
+        // concurrent extension cannot move while this transaction holds the row.
+        const locked = await lockBookingWithWindow(
           tx,
           bookingId,
           organizationId
         );
+        const lockedStatus = locked.status;
+        /** The booking's stored window, read under the lock above. */
+        const storedWindow = { from: locked.from, to: locked.to };
         // Models before request rows. The reservation writers lock the model
         // first and hold no booking lock, so taking the request rows first
         // inverts that pair and deadlocks the two transactions against each
@@ -5364,7 +5370,6 @@ export async function fulfilModelRequestsAndCheckout({
          * one sorted statement, so the scan's locks, the facade's and the
          * pool guard's only re-take rows already held.
          */
-        const storedWindow = { from: bookingFound.from, to: bookingFound.to };
         const poolAssetIdsInTx = (
           await findPoolSlices(tx, { bookingId, organizationId })
         ).map((slice) => slice.assetId);
@@ -5465,11 +5470,11 @@ export async function fulfilModelRequestsAndCheckout({
           dataToUpdate,
           kitIds: unionKitIds,
           hasKits,
-          // The booking's own committed window: it windows the QT
-          // availability guard (see the doc comment on
+          // The booking's own committed window, read under the lock: it
+          // windows the QT availability guard (see the doc comment on
           // `checkoutBookingWritesWithinTx`).
-          from: bookingFound.from,
-          to: bookingFound.to,
+          from: storedWindow.from,
+          to: storedWindow.to,
           storedWindow,
           poolAssetIds: [
             ...new Set(

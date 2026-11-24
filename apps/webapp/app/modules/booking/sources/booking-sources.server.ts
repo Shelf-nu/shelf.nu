@@ -166,10 +166,16 @@ function emptyCallContext(organizationId: string): CallContext {
 /**
  * True when any group of the booking is converted: a slice that is not
  * LEGACY, or a share row (shares outlive their slices, so a group whose
- * slices were all removed stays converted). One statement, two indexed
- * EXISTS probes (`BookingAsset.bookingId`, `BookingDispositionShare
- * (bookingId, assetId)`). Booking-wide on purpose: a superset of the touched
- * groups only sends a call down the full path, never the other way.
+ * slices were all removed stays converted). One statement, three EXISTS
+ * probes, each led by `bookingId` on an existing index. `BookingAsset` has
+ * no plain `bookingId` index, only the two partial uniques, so the slice
+ * lookup is split on `assetKitId` to match them: standalone slices probe
+ * `BookingAsset_manual_unique` (`bookingId`, `assetId`) WHERE `assetKitId`
+ * IS NULL, kit slices probe `BookingAsset_kit_unique` (`bookingId`,
+ * `assetKitId`) WHERE `assetKitId` IS NOT NULL. The share lookup probes
+ * `BookingDispositionShare_bookingId_assetId_idx`. Booking-wide on purpose:
+ * a superset of the touched groups only sends a call down the full path,
+ * never the other way.
  *
  * @param tx - The caller's transaction
  * @param organizationId - The trusted workspace id
@@ -186,6 +192,15 @@ async function bookingHasConvertedGroup(
         SELECT 1 FROM "BookingAsset" ba
         JOIN "Booking" b ON b.id = ba."bookingId"
         WHERE ba."bookingId" = ${bookingId}
+          AND ba."assetKitId" IS NULL
+          AND b."organizationId" = ${organizationId}
+          AND ba."sourceAllocation" <> 'LEGACY'
+      )
+      OR EXISTS (
+        SELECT 1 FROM "BookingAsset" ba
+        JOIN "Booking" b ON b.id = ba."bookingId"
+        WHERE ba."bookingId" = ${bookingId}
+          AND ba."assetKitId" IS NOT NULL
           AND b."organizationId" = ${organizationId}
           AND ba."sourceAllocation" <> 'LEGACY'
       )
@@ -225,7 +240,9 @@ async function bookingHasConvertedGroup(
  * @param args.assetsLocked - True when the caller already holds the sorted
  *   asset lock of every touched quantity-tracked asset; only with `sliceIds`
  *   omitted (the slice read then keeps to quantity-tracked assets)
- * @throws {ShelfError} 404 when a slice is not on this booking in this workspace
+ * @throws {ShelfError} 404 when a slice is not on this booking in this
+ *   workspace; not raised when adoption is off and the booking has no
+ *   converted group (the call returns the empty context first)
  */
 async function openCall(
   tx: BookingSourcesTx,
@@ -440,7 +457,8 @@ async function finishCall(tx: BookingSourcesTx, ctx: CallContext) {
  *   false for a draft (never refuses, the rest waits on UNASSIGNED)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
  * @throws {ShelfError} 400 naming each source's free units (rule 7.4); 404 for
- *   a slice not on this booking
+ *   a slice not on this booking, except when adoption is off and the booking
+ *   has no converted group (nothing is planned or written then)
  */
 export async function allocateNewSlices(
   tx: BookingSourcesTx,
@@ -1484,7 +1502,9 @@ function shortKeysBySlice(
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
  * @returns The sources each converted slice dispatched from, and the slices
  *   left LEGACY
- * @throws {ShelfError} 400 as listed above; 404 for a slice not on this booking
+ * @throws {ShelfError} 400 as listed above; 404 for a slice not on this
+ *   booking, except when adoption is off and the booking has no converted
+ *   group (every pick is then returned as LEGACY)
  */
 export async function dispatchUnits(
   tx: BookingSourcesTx,
@@ -1744,7 +1764,9 @@ export async function dispatchUnits(
  * @param args.now - The current time (defaults to now)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
  * @returns The settlement to pass to `settleUnits` and {@link commitSettlement}
- * @throws {ShelfError} 404 when the booking is not in this workspace
+ * @throws {ShelfError} 404 when the booking is not in this workspace, except
+ *   when adoption is off and the booking has no converted group (the empty
+ *   settlement is returned then)
  */
 export async function openSettlement(
   tx: BookingSourcesTx,

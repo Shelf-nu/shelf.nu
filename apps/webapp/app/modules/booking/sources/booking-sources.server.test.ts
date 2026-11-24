@@ -50,6 +50,7 @@ const h = vi.hoisted(() => ({
   holds: new Map<string, unknown[]>(),
   physical: new Map<string, Map<string, number>>(),
   sql: [] as string[],
+  probeSql: [] as string[],
 }));
 
 // why: the summary reads through the root client; this stand-in answers the
@@ -152,6 +153,7 @@ function fakeTx(args: {
       const text = sqlText(query);
       if (text.includes('AS "converted"')) {
         h.order.push("probe");
+        h.probeSql.push(text);
         return [{ converted: seededGroupConverted() }];
       }
       if (text.includes('FROM "ConsumptionLog"')) {
@@ -255,6 +257,7 @@ async function refusal(call: Promise<void>): Promise<ShelfError> {
 beforeEach(() => {
   h.order = [];
   h.sql = [];
+  h.probeSql = [];
   h.writes = [];
   h.windows = [];
   h.freeFor = () => free(20, 0);
@@ -2147,6 +2150,22 @@ describe("openSettlement and commitSettlement", () => {
     expect(h.sql[0]).toContain('b."organizationId"');
   });
 
+  it("probes for a converted group with one EXISTS per partial BookingAsset index", async () => {
+    seedGroup({ slices: [slice({ id: "s1", mode: "LEGACY" })] });
+    const tx = settleTx(["s1"], []);
+
+    await open(tx, false);
+
+    expect(h.probeSql).toHaveLength(1);
+    const probe = h.probeSql[0];
+    // BookingAsset has no plain bookingId index: each slice probe carries the
+    // predicate of one partial unique so the planner can use it.
+    expect(probe).toContain('ba."assetKitId" IS NULL');
+    expect(probe).toContain('ba."assetKitId" IS NOT NULL');
+    expect(probe.match(/FROM "BookingAsset" ba/g)).toHaveLength(2);
+    expect(probe).toContain('FROM "BookingDispositionShare" sh');
+  });
+
   it("refuses the commit when a converted group gained a log it never settled", async () => {
     seedConverted();
     const tx = settleTx(["s1"], [log({ id: "stray", quantity: 1 })]);
@@ -2201,7 +2220,6 @@ describe("openSettlement and commitSettlement", () => {
       organizationId: ORG,
       bookingId: BOOKING,
       assetIds: [],
-      booking: WINDOW,
     });
     await commitSettlement(tx, settlement);
 
