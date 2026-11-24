@@ -18303,6 +18303,119 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  describe("a disposition that names no slice, on an asset with two slices", () => {
+    /**
+     * The booking holds the pool twice: a standalone slice of 4 that left from
+     * Studio, and a kit slice of 6. Both went out.
+     */
+    function arrangeLooseAndKitSlices() {
+      setupQtyMocks();
+      const booking = makeQtyBooking();
+      const [base] = booking.bookingAssets;
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          {
+            ...base,
+            id: "ba-kit",
+            quantity: 6,
+            checkedOutQuantity: 6,
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            sourceLocationId: "loc-kit-shelf",
+          },
+          {
+            ...base,
+            id: "ba-loose",
+            quantity: 4,
+            checkedOutQuantity: 4,
+            assetKitId: null,
+            sourceKitId: null,
+            sourceLocationId: "loc-studio",
+          },
+        ],
+      });
+      installStatefulPlacements([
+        { id: "al-store", locationId: "loc-store", quantity: 60 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+    }
+
+    /** The slice and units of every RETURN log the check-in wrote. */
+    const returnLogs = () =>
+      vitest
+        .mocked(consumptionLogService.createConsumptionLog)
+        .mock.calls.map(([log]) => log)
+        .filter((log) => log.category === "RETURN")
+        .map((log) => [log.bookingAssetId, log.quantity]);
+
+    it("tags each RETURN with the slice it is split onto, loose slice first", async () => {
+      arrangeLooseAndKitSlices();
+
+      // 6 back with no slice named: 4 fill the loose slice, 2 go to the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 6 }],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 4],
+        ["ba-kit", 2],
+      ]);
+    });
+
+    it("tags the ledger rows of used-up units the same way", async () => {
+      arrangeLooseAndKitSlices();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, consumed: 6 }],
+      });
+
+      expect(
+        recordedStockEvents().map((event) => [
+          event.category,
+          event.bookingAssetId,
+          event.change,
+        ])
+      ).toEqual([
+        ["CONSUME", "ba-loose", -4],
+        ["CONSUME", "ba-kit", -2],
+      ]);
+    });
+  });
+
+  it("tags an unnamed disposition with the asset's only slice", async () => {
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        {
+          ...booking.bookingAssets[0],
+          id: "ba-pens",
+          assetKitId: null,
+          sourceLocationId: "loc-studio",
+        },
+      ],
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        bookingAssetId: "ba-pens",
+        quantity: 10,
+      })
+    );
+  });
+
   it("changes no placement when everything checked in is returned", async () => {
     expect.assertions(1);
 

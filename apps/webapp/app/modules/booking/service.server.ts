@@ -231,7 +231,9 @@ import {
   checkinStockEvents,
   parseSourceLocationsFromFormData,
   sliceForDisposition,
+  spreadUntaggedCheckin,
   untaggedCheckinPlacementSources,
+  type UntaggedCheckinShare,
 } from "./checkout-source-location";
 import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
 import {
@@ -9250,25 +9252,44 @@ export async function partialCheckinBooking({
           }
         }
 
-        // One ConsumptionLog per non-zero category, all scoped to this booking.
-        // `bookingAssetId` carries per-row attribution when the caller knows
-        // the slice (drawer post-Polish-6); legacy callers leave it null and
-        // the loader's greedy-fill handles them on read.
-        const dispBookingAssetId = disp.bookingAssetId ?? null;
         /**
          * The slice these units belong to, for the location they left from.
-         * A disposition that names no slice (an older phone app) resolves
-         * only when the asset has a single slice on this booking.
+         * A disposition that names no slice (an older phone app, or a
+         * check-in that sends only asset ids) resolves when the asset has a
+         * single slice on this booking.
          */
         const sourceSlice = sliceForDisposition(bookingFound.bookingAssets, {
           assetId: disp.assetId,
           bookingAssetId: disp.bookingAssetId,
         });
         /**
-         * Where used-up, lost and damaged units come off. With no single
-         * slice (untagged, several slices) the units are spread over the
-         * slices the way the readers will attribute the logs written below,
-         * so read the asset's earlier logs first, under the asset lock.
+         * The disposition as the logs record it: one share per slice, each
+         * tagged with its `bookingAssetId`. Every log names its slice, so no
+         * reader has to guess later which slice the units came back to.
+         *
+         * A disposition that names its slice, or whose asset has one slice
+         * here, is a single share. One that names none on an asset with
+         * several slices is split by {@link spreadUntaggedCheckin}, in the
+         * order every reader uses, against the asset's earlier logs read
+         * under the asset lock.
+         */
+        let shares: Array<
+          UntaggedCheckinShare & {
+            slice: (typeof bookingFound.bookingAssets)[number] | null;
+          }
+        > = [
+          {
+            slice: sourceSlice,
+            bookingAssetId: disp.bookingAssetId ?? sourceSlice?.id ?? null,
+            returned: disp.returned ?? 0,
+            consumed: disp.consumed ?? 0,
+            lost: disp.lost ?? 0,
+            damaged: disp.damaged ?? 0,
+          },
+        ];
+        /**
+         * Where used-up, lost and damaged units come off: the manual source
+         * of each share's slice.
          */
         let placementSources = checkinPlacementSources({
           slice: sourceSlice,
@@ -9276,7 +9297,10 @@ export async function partialCheckinBooking({
           lost: disp.lost,
           damaged: disp.damaged,
         });
-        if (!sourceSlice && !disp.bookingAssetId && poolDecrement > 0) {
+        if (!sourceSlice && !disp.bookingAssetId) {
+          const assetSlices = bookingFound.bookingAssets.filter(
+            (ba) => ba.assetId === disp.assetId
+          );
           const priorLogs = await tx.consumptionLog.findMany({
             where: {
               bookingId: id,
@@ -9285,40 +9309,51 @@ export async function partialCheckinBooking({
             },
             select: { bookingAssetId: true, quantity: true },
           });
-          placementSources = untaggedCheckinPlacementSources({
-            slices: bookingFound.bookingAssets.filter(
-              (ba) => ba.assetId === disp.assetId
-            ),
+          const spreadArgs = {
+            slices: assetSlices,
             priorLogs,
             returned: disp.returned,
             consumed: disp.consumed,
             lost: disp.lost,
             damaged: disp.damaged,
-          });
+          };
+          shares = spreadUntaggedCheckin(spreadArgs).map((share) => ({
+            ...share,
+            slice:
+              assetSlices.find((slice) => slice.id === share.bookingAssetId) ??
+              null,
+          }));
+          placementSources = untaggedCheckinPlacementSources(spreadArgs);
         }
-        if ((disp.returned ?? 0) > 0) {
+
+        // One RETURN log per share. CONSUME / LOSS / DAMAGE are written with
+        // the stock ledger below.
+        for (const share of shares) {
+          if (share.returned <= 0) continue;
           await createConsumptionLog({
             assetId: disp.assetId,
             category: "RETURN",
-            quantity: disp.returned!,
+            quantity: share.returned,
             userId,
             bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
+            bookingAssetId: share.bookingAssetId,
+            locationId: share.slice?.sourceLocationId ?? null,
             tx,
           });
         }
 
         if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
           const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
-          for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
-            const quantity = disp[CATEGORY_FIELD[category]] ?? 0;
-            if (quantity > 0) {
-              sessionLogs.push({
-                bookingAssetId: dispBookingAssetId,
-                category,
-                quantity,
-              });
+          for (const share of shares) {
+            for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
+              const quantity = share[CATEGORY_FIELD[category]] ?? 0;
+              if (quantity > 0) {
+                sessionLogs.push({
+                  bookingAssetId: share.bookingAssetId,
+                  category,
+                  quantity,
+                });
+              }
             }
           }
           sessionLogsByAssetId.set(disp.assetId, sessionLogs);
@@ -9383,12 +9418,14 @@ export async function partialCheckinBooking({
               {
                 assetId: disp.assetId,
                 before: stockBefore,
-                events: checkinStockEvents({
-                  slice: sourceSlice,
-                  disposition: disp,
-                  bookingId: id,
-                  bookingAssetId: dispBookingAssetId,
-                }),
+                events: shares.flatMap((share) =>
+                  checkinStockEvents({
+                    slice: share.slice,
+                    disposition: share,
+                    bookingId: id,
+                    bookingAssetId: share.bookingAssetId,
+                  })
+                ),
               },
             ],
           });

@@ -15,6 +15,7 @@ import {
   resolveSliceSource,
   sliceForDisposition,
   sourceLocationFieldName,
+  spreadUntaggedCheckin,
   untaggedCheckinPlacementSources,
   sourceSubmissionFromRecord,
   submittedSourceForSlice,
@@ -581,5 +582,98 @@ describe("untaggedCheckinPlacementSources", () => {
         consumed: 6,
       })
     ).toEqual([{ locationId: "loc-studio", quantity: 6 }]);
+  });
+});
+
+describe("spreadUntaggedCheckin", () => {
+  const loose = {
+    id: "ba-loose",
+    quantity: 4,
+    checkedOutQuantity: 4,
+    assetKitId: null,
+    sourceKitId: null,
+    sourceLocationId: "loc-studio",
+  };
+  const kit = {
+    id: "ba-kit",
+    quantity: 6,
+    checkedOutQuantity: 6,
+    assetKitId: "ak-1",
+    sourceKitId: "kit-1",
+    sourceLocationId: "loc-kit-shelf",
+  };
+  const share = (
+    bookingAssetId: string | null,
+    units: Partial<Record<"returned" | "consumed" | "lost" | "damaged", number>>
+  ) => ({
+    bookingAssetId,
+    returned: 0,
+    consumed: 0,
+    lost: 0,
+    damaged: 0,
+    ...units,
+  });
+
+  it("fills the standalone slice first, then the kit slice", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [kit, loose],
+        priorLogs: [],
+        returned: 6,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 4 }),
+      share("ba-kit", { returned: 2 }),
+    ]);
+  });
+
+  it("gives nothing to a slice that never went out", () => {
+    // The loose units are still on the shelf: only the kit's can come back.
+    expect(
+      spreadUntaggedCheckin({
+        slices: [{ ...loose, checkedOutQuantity: 0, checkedOutAt: null }, kit],
+        priorLogs: [],
+        returned: 5,
+      })
+    ).toEqual([share("ba-kit", { returned: 5 })]);
+  });
+
+  it("lets a slice that went out twice take both trips", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [{ ...loose, checkedOutQuantity: 8 }, kit],
+        priorLogs: [{ bookingAssetId: "ba-loose", quantity: 4 }],
+        returned: 4,
+      })
+    ).toEqual([share("ba-loose", { returned: 4 })]);
+  });
+
+  it("counts earlier logs before filling, and fills the categories in log order", () => {
+    // 3 already back on the loose slice leaves it 1; returned fills first.
+    expect(
+      spreadUntaggedCheckin({
+        slices: [loose, kit],
+        priorLogs: [{ bookingAssetId: "ba-loose", quantity: 3 }],
+        returned: 2,
+        consumed: 1,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 1 }),
+      share("ba-kit", { returned: 1, consumed: 1 }),
+    ]);
+  });
+
+  it("leaves units beyond every slice's room untagged", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [loose, kit],
+        priorLogs: [],
+        returned: 12,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 4 }),
+      share("ba-kit", { returned: 6 }),
+      share(null, { returned: 2 }),
+    ]);
   });
 });
