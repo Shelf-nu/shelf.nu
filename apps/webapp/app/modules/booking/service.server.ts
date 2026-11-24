@@ -287,6 +287,11 @@ import {
   isSliceOutByMarker,
   makeIsIndividualSliceOutstanding,
 } from "./slice-return";
+import {
+  admitWindowChange,
+  allocateNewSlices,
+  resizeSlices,
+} from "./sources/booking-sources.server";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -334,6 +339,52 @@ type BookingTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
  */
 function assetBatchTx<T>(fn: (tx: BookingTx) => Promise<T>): Promise<T> {
   return db.$transaction(fn, { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS });
+}
+
+/**
+ * Slice ids of a booking's quantity-tracked assets, standalone and kit-driven:
+ * the slices the booking sources facade gives source rows to. INDIVIDUAL
+ * assets never have source rows, so their slices are never handed to it.
+ *
+ * @param tx - The caller's transaction
+ * @param args.bookingId - The booking
+ * @param args.organizationId - The trusted workspace id; scopes the read
+ * @param args.only - Narrows the read to standalone slices of these assets
+ *   and kit slices of these memberships; every pool slice of the booking
+ *   when omitted
+ * @returns The slice ids, empty when there are none
+ */
+async function findPoolSliceIds(
+  tx: Pick<BookingTx, "bookingAsset">,
+  args: {
+    bookingId: string;
+    organizationId: string;
+    only?: { standaloneAssetIds: string[]; assetKitIds: string[] };
+  }
+): Promise<string[]> {
+  const { bookingId, organizationId, only } = args;
+  const narrowed: Prisma.BookingAssetWhereInput[] = only
+    ? [
+        ...(only.standaloneAssetIds.length > 0
+          ? [{ assetKitId: null, assetId: { in: only.standaloneAssetIds } }]
+          : []),
+        ...(only.assetKitIds.length > 0
+          ? [{ assetKitId: { in: only.assetKitIds } }]
+          : []),
+      ]
+    : [];
+  if (only && narrowed.length === 0) return [];
+
+  const rows = await tx.bookingAsset.findMany({
+    where: {
+      bookingId,
+      booking: { organizationId },
+      asset: { type: AssetType.QUANTITY_TRACKED },
+      ...(only ? { OR: narrowed } : {}),
+    },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
 }
 
 /**
@@ -1555,6 +1606,27 @@ export async function createBooking({
             }),
             tx
           );
+
+          /**
+           * Pool slices get their sources as soon as they exist, in one call.
+           * A new booking is a DRAFT and holds nothing, so this allocation
+           * never refuses: units that fit nowhere wait on UNASSIGNED until the
+           * booking is reserved. The booking row was inserted by this
+           * transaction, so no other transaction can see or lock it, which is
+           * the booking lock the facade expects.
+           */
+          if (assetTypes.some((a) => a.type === AssetType.QUANTITY_TRACKED)) {
+            await allocateNewSlices(tx, {
+              organizationId: booking.organizationId,
+              bookingId: created.id,
+              sliceIds: await findPoolSliceIds(tx, {
+                bookingId: created.id,
+                organizationId: booking.organizationId,
+              }),
+              window: { from: created.from, to: created.to },
+              holdsNow: false,
+            });
+          }
         }
 
         /**
@@ -1841,11 +1913,51 @@ export async function updateBasicBooking({
       }
     }
 
-    const updatedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L619; this is the write on that same proven id
-      where: { id: booking.id },
-      data: dataToUpdate,
-    });
+    const writeBooking = (client: Pick<ExtendedPrismaClient, "booking">) =>
+      client.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: booking.id },
+        data: dataToUpdate,
+      });
+
+    /**
+     * A draft's new dates move its pool allocation with them. The date write
+     * and the re-allocation share one transaction, under the booking lock
+     * (the facade expects it and takes the asset lock itself). AUTO slices
+     * are re-allocated for the new window; a draft holds nothing, so nothing
+     * is refused. Only DRAFT bookings take new dates here.
+     */
+    // Same test as the date notes below: a date counts as changed only when
+    // it is provided and differs from the stored one. Renames and tag edits
+    // pass no dates and take the plain write.
+    const datesChange =
+      booking.status === BookingStatus.DRAFT &&
+      ((!!from &&
+        !!booking.from &&
+        from.getTime() !== booking.from.getTime()) ||
+        (!!to && !!booking.to && to.getTime() !== booking.to.getTime()));
+
+    const updatedBooking = datesChange
+      ? await db.$transaction(async (tx) => {
+          await lockBookingForStatusCheck(tx, booking.id, organizationId);
+          const written = await writeBooking(tx);
+          const poolSliceIds = await findPoolSliceIds(tx, {
+            bookingId: booking.id,
+            organizationId,
+          });
+          if (poolSliceIds.length > 0) {
+            await admitWindowChange(tx, {
+              organizationId,
+              bookingId: booking.id,
+              from: written.from,
+              to: written.to,
+              previous: { from: booking.from, to: booking.to },
+              kind: "dates",
+            });
+          }
+          return written;
+        })
+      : await writeBooking(db);
 
     // BOOKING ACTIVITY LOG: Create separate notes for each change
     // This approach creates individual notes for each field change with proper user attribution
@@ -2557,7 +2669,17 @@ export async function reserveBooking({
     // every model on the booking, so the body grows with the booking. They
     // must stay inside the transaction that flips the status, which needs
     // the long budget rather than Prisma's five-second default.
+    /** The window being reserved; both ends were validated above. */
+    const reservedWindow = { from, to };
+
     const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * The booking lock comes first: every booking writer locks the booking
+       * row before any asset row (one direction only, so two writers cannot
+       * deadlock), and the source admission below expects it held.
+       */
+      await lockBookingForStatusCheck(tx, bookingFound.id, organizationId);
+
       /**
        * Eligibility, re-read through `tx` immediately before the status write.
        *
@@ -2717,6 +2839,26 @@ export async function reserveBooking({
         userId,
         revealOtherBookings: seesAllBookings,
       });
+
+      /**
+       * Reserving makes the draft's pool allocation a hold, so every pool
+       * slice is admitted over the window being reserved, before the status
+       * flip. AUTO slices are re-allocated to sources that fit; a MANUAL
+       * slice that does not fit refuses the reservation with a 400 naming
+       * each source's free units, which reaches the user as the error.
+       */
+      if (
+        bookingFound.bookingAssets.some((ba) => isQuantityTracked(ba.asset))
+      ) {
+        await admitWindowChange(tx, {
+          organizationId,
+          bookingId: bookingFound.id,
+          from: reservedWindow.from,
+          to: reservedWindow.to,
+          previous: { from: bookingFound.from, to: bookingFound.to },
+          kind: "reserve",
+        });
+      }
 
       return tx.booking.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
@@ -3261,6 +3403,30 @@ async function checkoutBookingWritesWithinTx(
   // out elsewhere since the caller's read is still refused.
   if (hasKits) {
     await assertKitsCheckoutable(tx, { kitIds, bookingId, organizationId });
+  }
+
+  /**
+   * A draft checked out directly becomes a hold in this step, so its pool
+   * slices are admitted over the window first, as reserving one would. The
+   * callers hold the booking lock (`bookingStatus` is what it read); the
+   * facade takes the asset lock itself. A refusal (400 naming each source's
+   * free units) stops the check-out before anything is written.
+   */
+  if (bookingStatus === BookingStatus.DRAFT && from && to) {
+    const poolSliceIds = await findPoolSliceIds(tx, {
+      bookingId,
+      organizationId,
+    });
+    if (poolSliceIds.length > 0) {
+      await admitWindowChange(tx, {
+        organizationId,
+        bookingId,
+        from,
+        to,
+        previous: { from, to },
+        kind: "reserve",
+      });
+    }
   }
 
   // What this call sends out, read before any write below: the guard measures
@@ -12443,13 +12609,22 @@ export async function updateBookingAssets({
        *   `fulfilModelRequestsForAssets`, which the survivors are handed to.
        */
       const preExistingRows: Array<{
+        id: string;
         assetId: string;
         assetKitId: string | null;
+        quantity: number;
       }> =
         addedAssetIds.length > 0
           ? await tx.bookingAsset.findMany({
               where: { bookingId: id, assetId: { in: addedAssetIds } },
-              select: { assetId: true, assetKitId: true },
+              // `id` and `quantity` let the source resize below name the
+              // slices the upsert re-quantifies, with their stored quantity.
+              select: {
+                id: true,
+                assetId: true,
+                assetKitId: true,
+                quantity: true,
+              },
             })
           : [];
 
@@ -12556,6 +12731,52 @@ export async function updateBookingAssets({
         revealOtherBookings: access.bookings.seeAll,
       });
 
+      /**
+       * Pool sources for this call, in two batched facade calls under the
+       * booking lock taken above (the facade takes the asset lock itself):
+       * existing standalone pool slices the upsert re-quantifies are resized
+       * here, before the upsert writes the new quantity, because the facade
+       * reads the stored quantity as the pre-change value; slices this call
+       * creates are allocated after the inserts. INDIVIDUAL assets never
+       * reach the facade. A refusal (400 naming each source's free units)
+       * rolls the whole change back and reaches the user as the error.
+       */
+      const poolAssetIds = new Set(
+        validAssets
+          .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
+          .map((asset) => asset.id)
+      );
+      const sourcesWindow = { from: b.from, to: b.to };
+      const holdsNow = (
+        ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]
+      ).includes(lockedStatus);
+      const standaloneQuantityByAssetId = new Map(
+        standaloneAssetIds.map((assetId, index) => [
+          assetId,
+          standaloneQuantities[index],
+        ])
+      );
+      const poolResizes = preExistingRows
+        .filter(
+          (row) =>
+            row.assetKitId === null &&
+            poolAssetIds.has(row.assetId) &&
+            standaloneQuantityByAssetId.has(row.assetId) &&
+            standaloneQuantityByAssetId.get(row.assetId) !== row.quantity
+        )
+        .map((row) => ({
+          sliceId: row.id,
+          quantity: standaloneQuantityByAssetId.get(row.assetId) ?? 1,
+        }));
+      if (poolResizes.length > 0) {
+        await resizeSlices(tx, {
+          organizationId,
+          bookingId: id,
+          changes: poolResizes,
+          window: sourcesWindow,
+        });
+      }
+
       await Promise.all([
         // Standalone branch: upsert against the manual partial unique
         // `(bookingId, assetId) WHERE assetKitId IS NULL`. Re-submitting
@@ -12585,6 +12806,32 @@ export async function updateBookingAssets({
           data: { updatedAt: new Date() },
         }),
       ]);
+
+      const newPoolSliceIds = await findPoolSliceIds(tx, {
+        bookingId: id,
+        organizationId,
+        only: {
+          standaloneAssetIds: [...newlyStandaloneAssetIds].filter((assetId) =>
+            poolAssetIds.has(assetId)
+          ),
+          assetKitIds: effectiveSlices
+            .filter(
+              (slice) =>
+                poolAssetIds.has(slice.assetId) &&
+                !preExistingAssetKitIds.has(slice.assetKitId)
+            )
+            .map((slice) => slice.assetKitId),
+        },
+      });
+      if (newPoolSliceIds.length > 0) {
+        await allocateNewSlices(tx, {
+          organizationId,
+          bookingId: id,
+          sliceIds: newPoolSliceIds,
+          window: sourcesWindow,
+          holdsNow,
+        });
+      }
 
       /**
        * Progressive checkout: assets added to an ONGOING/OVERDUE booking are
@@ -13290,6 +13537,9 @@ export async function revertBookingToDraft({
      * booking back to DRAFT (where its `archivedWithoutCheckin` flag would
      * linger on a booking that later goes out).
      */
+    // Pool source rows are left as they are: a draft holds nothing, so its
+    // allocation stops counting against anyone the moment the status changes,
+    // and reserving it again re-admits every slice.
     const draftBooking = await db.booking
       .update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
@@ -18874,6 +19124,40 @@ async function addScannedAssetsToBookingWithinTx(
   });
 
   /**
+   * The pool slices this scan created get their sources in one facade call,
+   * under the booking lock taken above (the facade takes the asset lock
+   * itself). A rescan of a unit already on the booking creates nothing and
+   * allocates nothing. A draft holds nothing, so its allocation never
+   * refuses; an active booking's is admitted, and a refusal (400 naming each
+   * source's free units) rolls the scan back and reaches the operator.
+   */
+  const isPoolAsset = (assetId: string) =>
+    scannedAssetsMetaById.get(assetId)?.type === AssetType.QUANTITY_TRACKED;
+  const newPoolSliceIds = await findPoolSliceIds(tx, {
+    bookingId,
+    organizationId,
+    only: {
+      standaloneAssetIds: newStandaloneScans
+        .map((meta) => meta.id)
+        .filter(isPoolAsset),
+      assetKitIds: newKitSlices
+        .filter((slice) => isPoolAsset(slice.assetId))
+        .map((slice) => slice.assetKitId),
+    },
+  });
+  if (newPoolSliceIds.length > 0 && bookingWindow?.from && bookingWindow.to) {
+    await allocateNewSlices(tx, {
+      organizationId,
+      bookingId,
+      sliceIds: newPoolSliceIds,
+      window: { from: bookingWindow.from, to: bookingWindow.to },
+      holdsNow: (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(
+        scanTargetStatus
+      ),
+    });
+  }
+
+  /**
    * Per-asset event for each newly attached asset. Mirrors the
    * `BOOKING_ASSETS_ADDED` emission in `updateBookingAssets` so the
    * scanner-driven path produces the same audit-trail rows as the
@@ -20201,6 +20485,38 @@ export async function duplicateBooking({
           })),
           tx
         );
+      }
+
+      /**
+       * The copy's pool slices get a fresh AUTO allocation for the new
+       * window, in one facade call. Source rows are never copied from the
+       * original: its sources answered its own window, and its MANUAL
+       * choices were made for it. The copy is a DRAFT and holds nothing, so
+       * this never refuses. The booking row was inserted by this
+       * transaction, so no other transaction can see or lock it, which is
+       * the booking lock the facade expects.
+       */
+      const copiesPoolAssets = [
+        ...standaloneSourceSlices.map((ba) => ({
+          assetId: ba.assetId,
+          type: ba.asset.type,
+        })),
+        ...kitDrivenCreateRows.map((row) => ({
+          assetId: row.assetId,
+          type: row.asset.type,
+        })),
+      ].some((row) => isActive(row) && row.type === AssetType.QUANTITY_TRACKED);
+      if (copiesPoolAssets) {
+        await allocateNewSlices(tx, {
+          organizationId,
+          bookingId: created.id,
+          sliceIds: await findPoolSliceIds(tx, {
+            bookingId: created.id,
+            organizationId,
+          }),
+          window: { from: created.from, to: created.to },
+          holdsNow: false,
+        });
       }
 
       return {

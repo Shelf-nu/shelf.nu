@@ -500,6 +500,16 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
 }));
 
+// why: the booking sources facade reads and locks through raw SQL and its own
+// repository, which this model-shaped db mock cannot serve. Its behaviour is
+// covered by `sources/booking-sources.server.test.ts`, and the writers' calls
+// into it by `service.server.sources.test.ts`; here it accepts everything.
+vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
+  resizeSlices: vitest.fn().mockResolvedValue(undefined),
+  admitWindowChange: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
 // friends) keep their behavior, but ConsumptionLog writes are stubbed so
 // we can assert on calls without running real Prisma writes.
