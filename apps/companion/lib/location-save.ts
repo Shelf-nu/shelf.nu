@@ -44,17 +44,27 @@ export type LocationSaveResult<TDetails = unknown> = {
  * in any part fails the save, and a later part that saves does not hide it.
  * When both fail, the kits' message is the one reported.
  *
+ * The kits are sent only while the save is still the current one. The assets
+ * request takes time, and the operator can leave the workspace meanwhile: a
+ * kit request started after that would move kits in a workspace they have
+ * left.
+ *
  * @param args.sendAssets - Sends the assets part, or `null` when it has none
  * @param args.sendKits - Sends the kits part, or `null` when it has none
- * @returns The message to show and where each part ended
+ * @param args.isCurrent - Whether this save still belongs to the screen the
+ *   operator is on
+ * @returns The message to show and where each part ended, or `null` when the
+ *   save stopped being current before its kits were sent
  */
 export async function sendLocationParts<TDetails = unknown>({
   sendAssets,
   sendKits,
+  isCurrent,
 }: {
   sendAssets: (() => Promise<LocationPartAnswer<TDetails>>) | null;
   sendKits: (() => Promise<LocationPartAnswer>) | null;
-}): Promise<LocationSaveResult<TDetails>> {
+  isCurrent: () => boolean;
+}): Promise<LocationSaveResult<TDetails> | null> {
   const result: LocationSaveResult<TDetails> = {
     error: null,
     parts: { assets: "skipped", kits: "skipped" },
@@ -71,6 +81,7 @@ export async function sendLocationParts<TDetails = unknown>({
   }
 
   if (sendKits) {
+    if (!isCurrent()) return null;
     const answer = await sendKits();
     result.parts.kits = answer.error ? "error" : "success";
     if (answer.error) result.error = answer.error;
@@ -82,20 +93,31 @@ export async function sendLocationParts<TDetails = unknown>({
 /**
  * The scan list after a location save.
  *
- * Rows of a part that saved leave the list, so a retry sends only what still
- * needs moving. Rows of a part that was refused stay.
+ * Rows that were submitted in a part that saved leave the list, so a retry
+ * sends only what still needs moving. Rows of a part that was refused stay.
+ * So does a row scanned while the save was in flight: it was never sent, so
+ * rows are matched by the ids each part submitted, never by their type alone.
  *
- * @param items - The scan list that was submitted
+ * @param items - The scan list as it is now, which may hold rows scanned
+ *   after the save was sent
+ * @param submitted - The asset ids and kit ids the save sent
  * @param parts - Where each part ended
  * @returns The rows to keep, in their original order
  */
 export function rowsLeftAfterLocationSave<
-  TItem extends { type: "asset" | "kit" },
->(items: TItem[], parts: LocationSaveResult["parts"]): TItem[] {
-  return items.filter((item) =>
-    item.type === "asset"
-      ? parts.assets !== "success"
-      : parts.kits !== "success"
+  TItem extends { type: "asset" | "kit"; targetId: string },
+>(
+  items: TItem[],
+  submitted: { assetIds: readonly string[]; kitIds: readonly string[] },
+  parts: LocationSaveResult["parts"]
+): TItem[] {
+  const savedAssetIds = new Set(
+    parts.assets === "success" ? submitted.assetIds : []
+  );
+  const savedKitIds = new Set(parts.kits === "success" ? submitted.kitIds : []);
+  return items.filter(
+    (item) =>
+      !(item.type === "kit" ? savedKitIds : savedAssetIds).has(item.targetId)
   );
 }
 

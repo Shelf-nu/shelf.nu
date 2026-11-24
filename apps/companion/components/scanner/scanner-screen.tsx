@@ -2226,11 +2226,19 @@ function ScannerContent({ booking }: ScannerScreenProps) {
         text: "Move",
         onPress: async () => {
           setIsSubmitting(true);
-          const { assetIds, kitIds } = splitScannedIds();
+          // The workspace this save belongs to. A switch while it is in
+          // flight clears this screen, so nothing below may then touch it.
+          const originOrgId = currentOrg.id;
+          const isCurrent = () => activeOrgIdRef.current === originOrgId;
+          // What this save sends. Rows scanned while it is in flight are not
+          // part of it, and are settled by these ids, never by their type.
+          const submitted = splitScannedIds();
+          const { assetIds, kitIds } = submitted;
           // Assets first, then kits, as the web scanner does. Each part's
           // answer is kept, so a list that only partly moved keeps exactly
           // the rows that still need moving.
           const saved = await sendLocationParts({
+            isCurrent,
             sendAssets:
               assetIds.length > 0
                 ? () =>
@@ -2247,6 +2255,9 @@ function ScannerContent({ booking }: ScannerScreenProps) {
                 : null,
           });
           setIsSubmitting(false);
+          // The operator left the workspace: its list is gone, and the result
+          // belongs to a screen they are no longer on.
+          if (!saved || !isCurrent()) return;
 
           if (saved.error) {
             // An archived refusal names its rows: mark those, so the operator
@@ -2257,7 +2268,7 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             );
             setScannedItems((prev) =>
               markArchivedRows(
-                rowsLeftAfterLocationSave(prev, saved.parts),
+                rowsLeftAfterLocationSave(prev, submitted, saved.parts),
                 archivedAssetIds
               )
             );
@@ -2270,7 +2281,11 @@ function ScannerContent({ booking }: ScannerScreenProps) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
             Alert.alert("Done", `Moved ${moveLabel} to ${location.name}.`);
-            setScannedItems([]);
+            // Only what was sent leaves: a row scanned while the save was in
+            // flight has not moved and stays for the next one.
+            setScannedItems((prev) =>
+              rowsLeftAfterLocationSave(prev, submitted, saved.parts)
+            );
             lastScanRef.current = "";
           }
         },
