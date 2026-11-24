@@ -156,7 +156,7 @@ describe("POST /api/assets/bulk-update-location", () => {
 
     expect(sendNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "Your assets' locations have been successfully updated",
+        message: "Your assets' locations have been successfully updated.",
       })
     );
   });

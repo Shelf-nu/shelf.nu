@@ -3,10 +3,14 @@
  *
  * @see {@link file://./quantity-tracked-skip-warning.tsx}
  */
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ALL_SELECTED_KEY } from "~/utils/list";
-import { quantityTrackedSkipMessage } from "./quantity-tracked-skip-warning";
+import {
+  QuantityTrackedSkipWarning,
+  quantityTrackedSkipMessage,
+} from "./quantity-tracked-skip-warning";
 
 const INSTEAD = "Set their placements on each asset's page.";
 const individual = { id: "a1", type: "INDIVIDUAL" };
@@ -33,7 +37,7 @@ describe("quantityTrackedSkipMessage", () => {
     // The selection reaches assets on other pages, which the dialog cannot
     // see: staying silent would let them be skipped with no warning.
     expect(quantityTrackedSkipMessage([individual, selectAll], INSTEAD)).toBe(
-      "Quantity-tracked assets in your selection will be skipped. Set their placements on each asset's page."
+      "Any quantity-tracked assets in your selection will be skipped. Set their placements on each asset's page."
     );
   });
 
@@ -43,5 +47,33 @@ describe("quantityTrackedSkipMessage", () => {
     ).toBe(
       "Quantity-tracked assets in your selection will be skipped (1 on this page, and any on others). Set their placements on each asset's page."
     );
+  });
+});
+
+describe("QuantityTrackedSkipWarning", () => {
+  it("shows the warning for a select-all selection", () => {
+    render(
+      <QuantityTrackedSkipWarning
+        selectedItems={[individual, pool, selectAll]}
+        instead={INSTEAD}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        "Quantity-tracked assets in your selection will be skipped (1 on this page, and any on others). Set their placements on each asset's page."
+      )
+    ).toBeTruthy();
+  });
+
+  it("renders nothing when the selection needs no warning", () => {
+    const { container } = render(
+      <QuantityTrackedSkipWarning
+        selectedItems={[individual]}
+        instead={INSTEAD}
+      />
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 });

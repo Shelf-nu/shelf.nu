@@ -22,11 +22,11 @@ export default function BulkAddToKitDialog() {
   const zo = useZorm("BulkAddToKit", BulkAddToKitSchema);
 
   const selectedAssets = useAtomValue(selectedBulkItemsCountAtom);
-  const selectedItems = useAtomValue(selectedBulkItemsAtom);
   // why: bulk add-to-kit can't carry a per-asset quantity input, so qty-tracked
   // assets in the selection are skipped server-side (same as
-  // `bulkUpdateAssetLocation`). The warning below says so before the user
-  // confirms.
+  // `bulkUpdateAssetLocation`). The warning rendered from these rows says so
+  // before the user confirms.
+  const selectedItems = useAtomValue(selectedBulkItemsAtom);
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
 
   const isOpen = bulkDialogOpenState["add-to-kit"] === true;

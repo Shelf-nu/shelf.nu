@@ -88,12 +88,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // assets is reported here.
     const skippedNote =
       skippedQuantityTracked > 0
-        ? `. ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Set their placements, with a quantity per location, on each asset's page.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Set their placements, with a quantity per location, on each asset's page.`
         : "";
 
     sendNotification({
       title: "Assets updated",
-      message: `Your assets' locations have been successfully updated${skippedNote}`,
+      message: `Your assets' locations have been successfully updated.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });

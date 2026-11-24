@@ -10,7 +10,9 @@
  * rows are all in memory, so it can give an exact count. With "select all",
  * only the loaded page is in memory and the server expands the selection to
  * every asset the filters match, so the dialog warns in general terms and
- * gives the count it can see.
+ * gives the count it can see. Every route behind these dialogs expands
+ * "select all" that way; a dialog whose route did not would have to keep the
+ * exact count.
  *
  * @see {@link file://./bulk-location-update-dialog.tsx}
  * @see {@link file://./bulk-assign-custody-dialog.tsx}
@@ -40,10 +42,11 @@ export function quantityTrackedSkipMessage(
 
   if (isSelectingAllItems(selectedItems)) {
     // The rows in memory are one page of a larger selection, so their count
-    // is a floor, never the total.
-    const seen =
-      onThisPage > 0 ? ` (${onThisPage} on this page, and any on others)` : "";
-    return `Quantity-tracked assets in your selection will be skipped${seen}. ${instead}`;
+    // is a floor, never the total. With none in sight the selection may hold
+    // none at all, so the sentence says "any".
+    return onThisPage > 0
+      ? `Quantity-tracked assets in your selection will be skipped (${onThisPage} on this page, and any on others). ${instead}`
+      : `Any quantity-tracked assets in your selection will be skipped. ${instead}`;
   }
 
   if (onThisPage === 0) return null;
