@@ -26,8 +26,9 @@
  *
  * This leaf imports NEITHER `booking/service.server` NOR `consumption-log`
  * (only the dependency-free `@shelf/quantity-control` package, `@prisma/client`
- * enums, `~/utils/error`, and TYPE-only shapes from `availability.server`,
- * which are erased at build time), so `consumption-log` can import the guard
+ * enums, `~/utils/error`, the pure `booking/checkout-attribution` helpers, and
+ * TYPE-only shapes from `availability.server`, which are erased at build
+ * time), so `consumption-log` can import the guard
  * from here without forming a runtime cycle. `availability.server` re-exports
  * everything here, so every existing consumer keeps importing these symbols
  * from `~/modules/asset/availability.server` unchanged.
@@ -46,6 +47,10 @@ import {
   resolveIntervalTo,
 } from "@shelf/quantity-control";
 import type { AvailabilityInterval } from "@shelf/quantity-control";
+import {
+  attributeDispositionsByBookingAsset,
+  type CheckoutAttributionLog,
+} from "~/modules/booking/checkout-attribution";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -171,7 +176,7 @@ type AssertAssetQuantityNotBelowReservationsArgs = {
  * @param logged - RESERVATION_REDUCING_CATEGORIES units attributed to the row
  * @returns Non-negative units, never more than `row.quantity`
  */
-function reservedUnitsStillHeld(
+export function reservedUnitsStillHeld(
   row: { quantity: number; checkedOutQuantity: number | null },
   logged: number
 ): number {
@@ -254,9 +259,12 @@ export type PeakReservedTxClient = {
  * booking's remaining footprint first. They are attributed per
  * `BookingAsset` ROW: one (booking, asset) pair can hold a standalone slice
  * and kit-driven ones at once, so a return logged against a kit slice must not
- * shrink the standalone reservation this guard is protecting. Dispositions
- * predating per-row attribution carry no row id and fill kit-driven slices
- * first, per `ConsumptionLog.bookingAssetId`.
+ * shrink the standalone reservation this guard is protecting. A disposition
+ * logged without a row id is placed by
+ * {@link attributeDispositionsByBookingAsset}: standalone slice first, then
+ * kit-driven ones, each taking up to the units it has sent out. That is the
+ * order the check-out markers and every booking surface use, so this read
+ * agrees with the units they show as out.
  *
  * A row never counts for less than the units it has out right now, so a slice
  * returned in full and checked out again keeps its second trip in the peak
@@ -280,9 +288,9 @@ export async function getPeakReservedUnitsByAsset({
   if (assetIds.length === 0) return peaks;
 
   // Both kinds of row are fetched, not just standalone. Kit-driven rows are
-  // never summed into the peak — they are counted through `AssetKit.quantity`
-  // by every caller — but they are needed to place legacy dispositions, which
-  // attribute kit-driven-first (see `ConsumptionLog.bookingAssetId`).
+  // never summed into the peak (every caller counts them through
+  // `AssetKit.quantity`), but they are needed to place untagged dispositions:
+  // what the standalone slice cannot have given back belongs to them.
   const rows = await tx.bookingAsset.findMany({
     where: {
       assetId: { in: assetIds },
@@ -313,69 +321,42 @@ export async function getPeakReservedUnitsByAsset({
     _sum: { quantity: true },
   });
 
-  /** Dispositions attributed to one specific `BookingAsset` row. */
-  const loggedByRowId = new Map<string, number>();
-  /**
-   * Dispositions from before per-row attribution existed, keyed by the
-   * (booking, asset) pair they belong to. These have to be placed by hand.
-   */
-  const legacyLoggedByPair = new Map<string, number>();
-
+  // Dispositions of each (booking, asset) pair, tagged with the row they were
+  // logged on, or `null` when the writer did not name one.
+  const dispositionsByPair = new Map<string, CheckoutAttributionLog[]>();
   for (const group of loggedGroups) {
     const quantity = group._sum.quantity ?? 0;
-    if (quantity === 0) continue;
+    if (quantity === 0 || !group.bookingId) continue;
 
-    if (group.bookingAssetId) {
-      loggedByRowId.set(
-        group.bookingAssetId,
-        (loggedByRowId.get(group.bookingAssetId) ?? 0) + quantity
-      );
-      continue;
-    }
-
-    if (!group.bookingId) continue;
     const pair = `${group.bookingId}:${group.assetId}`;
-    legacyLoggedByPair.set(
-      pair,
-      (legacyLoggedByPair.get(pair) ?? 0) + quantity
-    );
+    const dispositions = dispositionsByPair.get(pair) ?? [];
+    dispositions.push({ bookingAssetId: group.bookingAssetId, quantity });
+    dispositionsByPair.set(pair, dispositions);
   }
 
-  // Legacy dispositions fill kit-driven slices before standalone ones, so a
-  // pair's kit-driven capacity absorbs them first and only the remainder
-  // reaches the standalone row. Attributing the whole legacy total to the
-  // standalone row would shrink the reservation this guard is protecting.
-  const legacyForStandalone = new Map<string, number>();
-  for (const [pair, legacyQuantity] of legacyLoggedByPair) {
-    // What the kit slices can still absorb, not what they hold: a kit row
-    // whose units were already returned under its own row id has nothing left
-    // to soak up, and treating its full quantity as capacity would swallow the
-    // legacy total before any of it reached the standalone row.
-    //
-    // A kit row's room is the larger of what it booked and what it has sent
-    // out. `checkedOutQuantity` is cumulative, so a row sent out twice can
-    // take two trips' worth of returns; sizing it by the booked quantity alone
-    // would push the second trip's untagged returns onto the standalone row.
-    // The booked quantity stays the floor for rows whose counter is unset.
-    const kitDrivenCapacity = rows
-      .filter(
-        (r) => r.assetKitId !== null && `${r.bookingId}:${r.assetId}` === pair
-      )
-      .reduce(
-        (sum, r) =>
-          sum +
-          Math.max(
-            0,
-            Math.max(r.quantity, r.checkedOutQuantity ?? 0) -
-              (loggedByRowId.get(r.id) ?? 0)
-          ),
-        0
-      );
+  const rowsByPair = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const pair = `${row.bookingId}:${row.assetId}`;
+    const pairRows = rowsByPair.get(pair) ?? [];
+    pairRows.push(row);
+    rowsByPair.set(pair, pairRows);
+  }
 
-    legacyForStandalone.set(
-      pair,
-      Math.max(0, legacyQuantity - kitDrivenCapacity)
-    );
+  /** Dispositions attributed to each `BookingAsset` row, by row id. */
+  const loggedByRowId = new Map<string, number>();
+  for (const [pair, pairRows] of rowsByPair) {
+    const attributed = attributeDispositionsByBookingAsset({
+      // A row's room for untagged dispositions is what it has sent out, not
+      // what it booked: a slice that never left has nothing to give back, and
+      // one sent out twice can take two trips' worth.
+      bookingAssetRows: pairRows.map((row) => ({
+        id: row.id,
+        assetKitId: row.assetKitId,
+        quantity: row.checkedOutQuantity ?? 0,
+      })),
+      consumptionLogs: dispositionsByPair.get(pair) ?? [],
+    });
+    for (const [rowId, logged] of attributed) loggedByRowId.set(rowId, logged);
   }
 
   const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
@@ -385,10 +366,10 @@ export async function getPeakReservedUnitsByAsset({
     if (row.assetKitId !== null) continue;
     if (!row.booking) continue;
 
-    const pair = `${row.bookingId}:${row.assetId}`;
-    const logged =
-      (loggedByRowId.get(row.id) ?? 0) + (legacyForStandalone.get(pair) ?? 0);
-    const remaining = reservedUnitsStillHeld(row, logged);
+    const remaining = reservedUnitsStillHeld(
+      row,
+      loggedByRowId.get(row.id) ?? 0
+    );
     if (remaining === 0) continue;
 
     const to = resolveIntervalTo(
@@ -423,7 +404,7 @@ export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
 
 /**
  * STOCK-LOWERING guard: blocks reducing a QUANTITY_TRACKED asset's total
- * `quantity` below what is ALREADY committed elsewhere — operator custody,
+ * `quantity` below what is ALREADY committed elsewhere: operator custody,
  * kit allocations, or an overlapping active booking. Without this guard, an
  * admin editing the asset overview (or a CSV update-existing import, which
  * routes through the same `updateAsset` call) could shrink the pool

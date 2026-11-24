@@ -536,6 +536,57 @@ describe("flagBookingStockConflicts", () => {
     expect(result).toEqual(new Set());
   });
 
+  it("counts the units of a slice that came back in full and went out again", async () => {
+    const client = createMockClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    client.bookingAsset.findMany.mockResolvedValue([
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b1",
+        quantity: 6,
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-10T00:00:00Z",
+      }),
+      {
+        // b2 sent its 6 out, got all 6 back and sent them out again:
+        // `checkedOutQuantity` is cumulative, so 6 are out.
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b2",
+          quantity: 6,
+          from: "2026-01-05T00:00:00Z",
+          to: "2026-01-15T00:00:00Z",
+        }),
+        checkedOutQuantity: 12,
+      },
+    ]);
+    client.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b2", assetId: "a1", _sum: { quantity: 6 } },
+    ]);
+
+    const result = await flagBookingStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings: [
+        booking({
+          id: "b1",
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-10T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+        booking({
+          id: "b2",
+          from: new Date("2026-01-05T00:00:00Z"),
+          to: new Date("2026-01-15T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+      ],
+    });
+
+    // 6 (b1) + 6 (b2, out again) = 12 over a pool of 10 in [Jan 5, Jan 10).
+    expect(result).toEqual(new Set(["b1", "b2"]));
+  });
+
   it("treats an OVERDUE booking as occupying every future window (sentinel-extended)", async () => {
     const client = createMockClient();
     client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);

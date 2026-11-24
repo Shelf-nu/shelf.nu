@@ -521,6 +521,41 @@ describe("getAssetAvailability", () => {
     expect(a.reservedTotal).toBe(3);
   });
 
+  it("keeps the units of a slice that came back in full and went out again", async () => {
+    resetMocks();
+    // Booked 6: 6 out, 6 back, 6 out again. `checkedOutQuantity` is
+    // cumulative (12), so 6 units are out and another booking over the same
+    // window must not be offered them.
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        bookingId: "b1",
+        quantity: 6,
+        checkedOutQuantity: 12,
+        booking: {
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-05T00:00:00Z"),
+          status: "ONGOING",
+        },
+      },
+    ]);
+    // @ts-expect-error mocked
+    db.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b1", _sum: { quantity: 6 } },
+    ]);
+
+    const a = await getAssetAvailability({
+      assetId: ASSET_ID,
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+    });
+
+    expect(a.reserved).toBe(6);
+  });
+
   it("clamps a row at 0 when logged dispositions exceed the booked quantity", async () => {
     resetMocks();
     // Defence-in-depth: an over-logged booking (should not happen) must not
@@ -942,6 +977,42 @@ describe("getAssetAvailabilityBatch", () => {
     expect(client.bookingAsset.findMany).toHaveBeenCalledTimes(2);
     expect(result.get("a1")?.reservedTotal).toBe(2);
     expect(result.get("a1")?.reservingBookingCount).toBe(1);
+  });
+
+  it("keeps the units of a slice that came back in full and went out again", async () => {
+    const client = createMockBatchClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    // First call is the checked-out read, second the reserved rows. Booked 6:
+    // 6 out, 6 back, 6 out again, so the cumulative counter reads 12.
+    client.bookingAsset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          checkedOutQuantity: 12,
+          booking: {
+            from: new Date("2026-01-01T00:00:00Z"),
+            to: new Date("2026-01-05T00:00:00Z"),
+            status: "ONGOING",
+          },
+        },
+      ]);
+    client.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b1", assetId: "a1", _sum: { quantity: 6 } },
+    ]);
+
+    const result = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+      db: client,
+    });
+
+    expect(result.get("a1")?.reserved).toBe(6);
   });
 
   it("scopes the total (asset.findMany) and inCustody (custody.groupBy) queries to the caller's organization", async () => {
@@ -1886,6 +1957,9 @@ describe("assertAssetQuantityNotBelowReservations", () => {
      * A standalone slice of 6 on an ONGOING booking that went out, came back
      * in full (one RETURN of 6) and went out again. `checkedOutQuantity` is
      * cumulative, so `secondTrip` units are out.
+     *
+     * why: the guard's arithmetic is under test, not Prisma. The rows mirror
+     * the select of the peak read the guard takes its booking term from.
      */
     function txWithRedispatch(secondTrip: number) {
       const tx = createMockTx();
@@ -2125,9 +2199,19 @@ describe("assertAssetQuantityNotBelowReservations", () => {
 
   it("nets already-logged dispositions (RETURN/CONSUME/LOSS/DAMAGE) out of a booking's remaining commitment", async () => {
     const tx = createMockTx();
-    // Booked 5, but 3 already returned via partial check-in — remaining 2.
+    // Booked 5 and all 5 went out; 3 came back via partial check-in, so 2
+    // remain.
     tx.bookingAsset.findMany.mockResolvedValue([
-      reservedRow("b1", 5, "2026-01-01T00:00:00Z", "2026-01-05T00:00:00Z"),
+      {
+        ...reservedRow(
+          "b1",
+          5,
+          "2026-01-01T00:00:00Z",
+          "2026-01-05T00:00:00Z",
+          "ONGOING"
+        ),
+        checkedOutQuantity: 5,
+      },
     ]);
     tx.consumptionLog.groupBy.mockResolvedValue([
       { bookingId: "b1", assetId: ASSET_ID, _sum: { quantity: 3 } },

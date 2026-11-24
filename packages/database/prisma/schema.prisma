@@ -1759,10 +1759,12 @@ model ConsumptionLog {
   // `ON DELETE SET NULL` so removing a BookingAsset row doesn't lose
   // history — the log stays but loses its per-row attribution.
   //
-  // Legacy rows (pre-Polish-6, pre-this-migration) keep `NULL` and are
-  // handled by a greedy-fill fallback in readers (kit-driven slices
-  // attribute first, then standalone) so existing bookings still
-  // render sensibly.
+  // `NULL` when the writer did not name a row: rows from before per-row
+  // attribution, and check-ins that send only asset ids. Readers place
+  // those with `attributeDispositionsByBookingAsset`
+  // (`apps/webapp/app/modules/booking/checkout-attribution.ts`):
+  // standalone slice first, then kit-driven ones. Every reader uses that
+  // one order, so the stock reads and the booking surfaces agree.
   bookingAssetId String?
 
   // The location the units left or arrived at, when the movement had one:

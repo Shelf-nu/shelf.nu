@@ -211,76 +211,112 @@ describe("getPeakReservedUnitsByAsset", () => {
     });
   });
 
-  it("only lets a kit slice absorb what it has not already returned", async () => {
-    // The kit row's 40 units were returned under its own row id, so it can
-    // soak up none of the legacy total — all 10 reaches the standalone row.
-    const tx = txWith(
-      [
-        reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10", {
-          id: "standalone-row",
-        }),
-        reservation(ASSET, "b1", 40, "2026-01-01", "2026-01-10", {
-          id: "kit-row",
-          assetKitId: "ak-1",
-        }),
-      ],
-      [
+  describe("a return logged without a row id", () => {
+    /**
+     * Booking b1 holds the asset loose (60) and through a kit (40). Each slice
+     * can be given the units it has sent out so far.
+     */
+    function mixedBooking(sentOut: {
+      loose: number | null;
+      kit: number | null;
+    }) {
+      return [
         {
-          bookingAssetId: "kit-row",
-          bookingId: "b1",
-          assetId: ASSET,
-          _sum: { quantity: 40 },
+          ...reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10", {
+            id: "standalone-row",
+            status: BookingStatus.ONGOING,
+          }),
+          checkedOutQuantity: sentOut.loose,
         },
         {
-          bookingAssetId: null,
-          bookingId: "b1",
-          assetId: ASSET,
-          _sum: { quantity: 10 },
+          ...reservation(ASSET, "b1", 40, "2026-01-01", "2026-01-10", {
+            id: "kit-row",
+            assetKitId: "ak-1",
+            status: BookingStatus.ONGOING,
+          }),
+          checkedOutQuantity: sentOut.kit,
         },
-      ]
-    );
+      ];
+    }
 
-    const peaks = await getPeakReservedUnitsByAsset({
-      assetIds: [ASSET],
-      organizationId: "org",
-      tx,
+    /** One untagged disposition of `quantity` units on booking b1. */
+    const untagged = (quantity: number) => ({
+      bookingAssetId: null,
+      bookingId: "b1",
+      assetId: ASSET,
+      _sum: { quantity },
     });
 
-    expect(peaks.get(ASSET)).toBe(50);
-  });
+    const peakFor = async (rows: unknown[], logs: unknown[]) =>
+      (
+        await getPeakReservedUnitsByAsset({
+          assetIds: [ASSET],
+          organizationId: "org",
+          tx: txWith(rows, logs),
+        })
+      ).get(ASSET);
 
-  it("fills kit slices first with a disposition that predates row attribution", async () => {
-    // Legacy logs carry no row id. Per `ConsumptionLog.bookingAssetId` they
-    // attribute kit-driven-first, so only what exceeds the kit capacity may
-    // reduce the standalone row.
-    const tx = txWith(
-      [
-        reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10", {
-          id: "standalone-row",
-        }),
-        reservation(ASSET, "b1", 40, "2026-01-01", "2026-01-10", {
-          id: "kit-row",
-          assetKitId: "ak-1",
-        }),
-      ],
-      [
-        {
-          bookingAssetId: null,
-          bookingId: "b1",
-          assetId: ASSET,
-          _sum: { quantity: 50 },
-        },
-      ]
-    );
-
-    const peaks = await getPeakReservedUnitsByAsset({
-      assetIds: [ASSET],
-      organizationId: "org",
-      tx,
+    it("comes off the loose slice first", async () => {
+      // Loose items are returned one by one and a kit comes back whole, so an
+      // untagged return is read as the loose slice's. It is the order the
+      // check-out markers and every booking surface use.
+      await expect(
+        peakFor(mixedBooking({ loose: 60, kit: 40 }), [untagged(50)])
+      ).resolves.toBe(10);
     });
 
-    // 40 absorbed by the kit slice, 10 left to reduce the standalone 60.
-    expect(peaks.get(ASSET)).toBe(50);
+    it("reaches the kit slice only once the loose slice has given back all it sent out", async () => {
+      // 70 back: 60 from the loose slice, the other 10 from the kit slice.
+      await expect(
+        peakFor(mixedBooking({ loose: 60, kit: 40 }), [untagged(70)])
+      ).resolves.toBeUndefined();
+    });
+
+    it("never comes off a loose slice that has not gone out", async () => {
+      // The loose 60 is still on the shelf, reserved. Only the kit went out,
+      // so the 40 that came back can only be the kit's.
+      await expect(
+        peakFor(mixedBooking({ loose: 0, kit: 40 }), [untagged(40)])
+      ).resolves.toBe(60);
+    });
+
+    it("comes off the loose slice after the kit slice returned under its own id", async () => {
+      await expect(
+        peakFor(mixedBooking({ loose: 60, kit: 40 }), [
+          {
+            bookingAssetId: "kit-row",
+            bookingId: "b1",
+            assetId: ASSET,
+            _sum: { quantity: 40 },
+          },
+          untagged(10),
+        ])
+      ).resolves.toBe(50);
+    });
+
+    it("is taken by a kit slice sent out twice when the loose slice has not gone out", async () => {
+      // The kit went out twice (80 sent) and came back twice: once tagged,
+      // once untagged. Its room is what it sent out, so it takes both.
+      await expect(
+        peakFor(mixedBooking({ loose: 0, kit: 80 }), [
+          {
+            bookingAssetId: "kit-row",
+            bookingId: "b1",
+            assetId: ASSET,
+            _sum: { quantity: 40 },
+          },
+          untagged(40),
+        ])
+      ).resolves.toBe(60);
+    });
+
+    it("treats a slice with no counter as not having gone out", async () => {
+      // Nothing can be given back by a slice that sent nothing out, so the
+      // loose reservation stays whole.
+      await expect(
+        peakFor(mixedBooking({ loose: null, kit: null }), [untagged(40)])
+      ).resolves.toBe(60);
+    });
   });
 });
 
@@ -366,51 +402,5 @@ describe("getPeakReservedUnitsByAsset, a slice sent out again after a full retur
     });
 
     expect(peaks.get(ASSET)).toBeUndefined();
-  });
-});
-
-describe("getPeakReservedUnitsByAsset, untagged returns on a kit slice sent out twice", () => {
-  it("keeps them on the kit slice, so the loose slice still holds its units", async () => {
-    // Booking b1: 6 loose units, all out, and a 4-unit kit slice that went out
-    // twice (8 sent out) and came back twice. One return of 4 is tagged to the
-    // kit row, the other carries no row id. Both belong to the kit slice.
-    const loose = {
-      ...reservation(ASSET, "b1", 6, "2026-01-01", "2026-01-31", {
-        status: BookingStatus.ONGOING,
-      }),
-      checkedOutQuantity: 6,
-    };
-    const kitSlice = {
-      ...reservation(ASSET, "b1", 4, "2026-01-01", "2026-01-31", {
-        id: "b1-kit",
-        assetKitId: "asset-kit-1",
-        status: BookingStatus.ONGOING,
-      }),
-      checkedOutQuantity: 8,
-    };
-
-    const peaks = await getPeakReservedUnitsByAsset({
-      assetIds: [ASSET],
-      organizationId: "org",
-      tx: txWith(
-        [loose, kitSlice],
-        [
-          {
-            bookingAssetId: "b1-kit",
-            bookingId: "b1",
-            assetId: ASSET,
-            _sum: { quantity: 4 },
-          },
-          {
-            bookingAssetId: null,
-            bookingId: "b1",
-            assetId: ASSET,
-            _sum: { quantity: 4 },
-          },
-        ]
-      ),
-    });
-
-    expect(peaks.get(ASSET)).toBe(6);
   });
 });
