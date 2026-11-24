@@ -18,6 +18,7 @@ const slice = {
   quantity: 10,
   assetKitId: null,
   checkedOutQuantity: 10,
+  checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
 };
 
 describe("unitsStillOutBySlice", () => {
@@ -118,7 +119,10 @@ describe("unitsStillOutBySlice", () => {
     };
     const out = unitsStillOutBySlice({
       sourced: [kitSlice],
-      siblings: [{ ...slice, checkedOutQuantity: 0 }, kitSlice],
+      siblings: [
+        { ...slice, checkedOutQuantity: 0, checkedOutAt: null },
+        kitSlice,
+      ],
       logs: [
         {
           bookingId: "b-1",

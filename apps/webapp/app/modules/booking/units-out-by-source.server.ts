@@ -34,9 +34,9 @@ export type CountedSlice = {
   quantity: number;
   assetKitId: string | null;
   /** Units sent out on it so far, cumulative across trips. */
-  checkedOutQuantity?: number;
+  checkedOutQuantity: number;
   /** When the slice was last dispatched; `null` when it never was. */
-  checkedOutAt?: Date | null;
+  checkedOutAt: Date | null;
 };
 
 /**
@@ -59,7 +59,7 @@ export function unitsStillOutBySlice({
   siblings,
   logs,
 }: {
-  sourced: Array<CountedSlice & { checkedOutQuantity: number }>;
+  sourced: CountedSlice[];
   siblings: CountedSlice[];
   logs: Array<{
     bookingId: string | null;
@@ -101,8 +101,8 @@ export function unitsStillOutBySlice({
             assetKitId: row.assetKitId,
             quantity: resolveSentUnits({
               quantity: row.quantity,
-              checkedOutAt: row.checkedOutAt ?? null,
-              checkedOutQuantity: row.checkedOutQuantity ?? null,
+              checkedOutAt: row.checkedOutAt,
+              checkedOutQuantity: row.checkedOutQuantity,
             }),
           })
         ),
