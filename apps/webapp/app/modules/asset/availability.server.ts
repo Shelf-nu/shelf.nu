@@ -92,6 +92,7 @@ import {
   computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 } from "./availability-primitives.server";
 import type {
@@ -114,6 +115,7 @@ export {
   computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 };
 export type {
@@ -177,12 +179,16 @@ export type PrismaClientOrTx = {
       select: {
         bookingId: true;
         quantity: true;
+        // Sizes a slice that came back and went out again; see
+        // `reservedUnitsStillHeld`.
+        checkedOutQuantity: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
       Array<{
         bookingId: string;
         quantity: number;
+        checkedOutQuantity?: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
@@ -388,6 +394,7 @@ export async function getAssetAvailability({
       select: {
         bookingId: true,
         quantity: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     });
@@ -426,9 +433,16 @@ export async function getAssetAvailability({
 
       for (const row of reservedRows) {
         const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-        // Clamp at 0 per row so an over-logged booking (should not happen,
-        // but defence-in-depth) can't push `reserved` negative.
-        const remaining = Math.max(0, row.quantity - logged);
+        // Never negative, and never below the units the row has out right
+        // now: a slice returned in full and checked out again still holds
+        // the units of its second trip.
+        const remaining = reservedUnitsStillHeld(
+          {
+            quantity: row.quantity,
+            checkedOutQuantity: row.checkedOutQuantity ?? null,
+          },
+          logged
+        );
         if (remaining === 0) continue;
 
         // Every active booking occupies its window for the peak-concurrency
@@ -779,6 +793,7 @@ export async function getAssetAvailabilityBatch(
         assetId: true,
         bookingId: true,
         quantity: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     });
@@ -819,9 +834,15 @@ export async function getAssetAvailabilityBatch(
 
       for (const row of reservedRows) {
         const logged = loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0;
-        // Clamp at 0 per row so an over-logged booking can't push a single
-        // asset's reserved total negative — mirrors the singular primitive.
-        const remaining = Math.max(0, row.quantity - logged);
+        // Never negative, and never below the units the row has out right
+        // now. Mirrors the singular primitive.
+        const remaining = reservedUnitsStillHeld(
+          {
+            quantity: row.quantity,
+            checkedOutQuantity: row.checkedOutQuantity ?? null,
+          },
+          logged
+        );
         if (remaining === 0) continue;
 
         // Every active booking occupies its window (peak-concurrency sweep +
