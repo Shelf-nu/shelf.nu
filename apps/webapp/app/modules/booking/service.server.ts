@@ -342,7 +342,7 @@ function assetBatchTx<T>(fn: (tx: BookingTx) => Promise<T>): Promise<T> {
 }
 
 /**
- * Slice ids of a booking's quantity-tracked assets, standalone and kit-driven:
+ * Slices of a booking's quantity-tracked assets, standalone and kit-driven:
  * the slices the booking sources facade gives source rows to. INDIVIDUAL
  * assets never have source rows, so their slices are never handed to it.
  *
@@ -352,16 +352,16 @@ function assetBatchTx<T>(fn: (tx: BookingTx) => Promise<T>): Promise<T> {
  * @param args.only - Narrows the read to standalone slices of these assets
  *   and kit slices of these memberships; every pool slice of the booking
  *   when omitted
- * @returns The slice ids, empty when there are none
+ * @returns Each slice's id and asset id, empty when there are none
  */
-async function findPoolSliceIds(
+async function findPoolSlices(
   tx: Pick<BookingTx, "bookingAsset">,
   args: {
     bookingId: string;
     organizationId: string;
     only?: { standaloneAssetIds: string[]; assetKitIds: string[] };
   }
-): Promise<string[]> {
+): Promise<Array<{ id: string; assetId: string }>> {
   const { bookingId, organizationId, only } = args;
   const narrowed: Prisma.BookingAssetWhereInput[] = only
     ? [
@@ -375,16 +375,54 @@ async function findPoolSliceIds(
     : [];
   if (only && narrowed.length === 0) return [];
 
-  const rows = await tx.bookingAsset.findMany({
+  return tx.bookingAsset.findMany({
     where: {
       bookingId,
       booking: { organizationId },
       asset: { type: AssetType.QUANTITY_TRACKED },
       ...(only ? { OR: narrowed } : {}),
     },
-    select: { id: true },
+    select: { id: true, assetId: true },
   });
-  return rows.map((row) => row.id);
+}
+
+/**
+ * Slice ids of a booking's quantity-tracked assets. See {@link findPoolSlices}.
+ *
+ * @returns The slice ids, empty when there are none
+ */
+async function findPoolSliceIds(
+  ...args: Parameters<typeof findPoolSlices>
+): Promise<string[]> {
+  return (await findPoolSlices(...args)).map((slice) => slice.id);
+}
+
+/**
+ * The window a check-out writes: the stored one, with each end that
+ * `dataToUpdate` moves (an early start, a rescheduled window) replaced.
+ *
+ * @param data - The booking update the check-out commits
+ * @param stored - The booking's stored window
+ * @returns The window the booking holds once the update commits
+ */
+function windowAfterUpdate(
+  data: Prisma.BookingUpdateInput,
+  stored: { from: Date; to: Date }
+): { from: Date; to: Date } {
+  return {
+    from: data.from instanceof Date ? data.from : stored.from,
+    to: data.to instanceof Date ? data.to : stored.to,
+  };
+}
+
+/** True when two windows differ at either end. */
+function windowMoved(
+  a: { from: Date; to: Date },
+  b: { from: Date; to: Date }
+): boolean {
+  return (
+    a.from.getTime() !== b.from.getTime() || a.to.getTime() !== b.to.getTime()
+  );
 }
 
 /**
@@ -1939,7 +1977,25 @@ export async function updateBasicBooking({
 
     const updatedBooking = datesChange
       ? await db.$transaction(async (tx) => {
-          await lockBookingForStatusCheck(tx, booking.id, organizationId);
+          // The status read above predates the lock: a booking reserved since
+          // then must not take draft-only dates or a draft's re-allocation.
+          const lockedStatus = await lockBookingForStatusCheck(
+            tx,
+            booking.id,
+            organizationId
+          );
+          if (lockedStatus !== BookingStatus.DRAFT) {
+            throw new ShelfError({
+              cause: null,
+              title: "Update failed",
+              message:
+                "The dates can only change while the booking is a draft. Reload the booking and try again.",
+              additionalData: { bookingId: booking.id, lockedStatus },
+              label,
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
           const written = await writeBooking(tx);
           const poolSliceIds = await findPoolSliceIds(tx, {
             bookingId: booking.id,
@@ -2739,6 +2795,32 @@ export async function reserveBooking({
         }
       }
 
+      /**
+       * The booking's pool slices, standalone and kit, read after the booking
+       * lock so none can join or leave before the source admission below.
+       */
+      const poolSlices = await findPoolSlices(tx, {
+        bookingId: bookingFound.id,
+        organizationId,
+      });
+
+      // One statement locks every quantity-tracked asset on the booking,
+      // standalone and kit, in a deterministic (sorted) global order, so two
+      // concurrent transactions touching the same assets can never deadlock by
+      // locking them in opposite orders. The legacy guard and the source
+      // admission below only re-take rows this transaction already holds.
+      // Mirrors `updateBookingAssets` and the checkout guard.
+      await lockEveryAssetForQuantityUpdate(
+        tx,
+        [
+          ...new Set([
+            ...uniqueQtyTrackedAssetIds,
+            ...poolSlices.map((slice) => slice.assetId),
+          ]),
+        ],
+        organizationId
+      );
+
       if (uniqueQtyTrackedAssetIds.length > 0) {
         const assetById = new Map(
           qtyTrackedBookingAssets.map((ba) => [ba.asset.id, ba.asset])
@@ -2753,16 +2835,6 @@ export async function reserveBooking({
             (requestedQtyByAssetId.get(ba.asset.id) ?? 0) + ba.quantity
           );
         }
-
-        // One statement locks every asset in a deterministic (sorted) global
-        // order, so two concurrent transactions touching the same assets can
-        // never deadlock by locking them in opposite orders. Mirrors
-        // `updateBookingAssets` and the checkout guard.
-        await lockEveryAssetForQuantityUpdate(
-          tx,
-          uniqueQtyTrackedAssetIds,
-          organizationId
-        );
 
         await assertAssetQuantitiesAvailable(
           uniqueQtyTrackedAssetIds.map((assetId) => ({
@@ -2847,9 +2919,7 @@ export async function reserveBooking({
        * slice that does not fit refuses the reservation with a 400 naming
        * each source's free units, which reaches the user as the error.
        */
-      if (
-        bookingFound.bookingAssets.some((ba) => isQuantityTracked(ba.asset))
-      ) {
+      if (poolSlices.length > 0) {
         await admitWindowChange(tx, {
           organizationId,
           bookingId: bookingFound.id,
@@ -3301,6 +3371,7 @@ async function readFullCheckoutDepartures(
  * @param args.hasKits - Whether the kit update should fire
  * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
  * @param args.revealOtherBookings - Whether a pool refusal may name other members' bookings
+ * @param args.storedWindow - The booking's stored window, before `dataToUpdate` moves it
  * @returns `departedSlices`: every slice whose units left in this call, each
  *   with its asset, read before the stamps made them indistinguishable from
  *   slices an earlier batch sent out. Callers name these assets in the
@@ -3324,6 +3395,7 @@ async function checkoutBookingWritesWithinTx(
     hasKits,
     from,
     to,
+    storedWindow,
     checkedOutById,
     sourceLocations,
     hints,
@@ -3331,6 +3403,12 @@ async function checkoutBookingWritesWithinTx(
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
+    /**
+     * The booking's stored window, before this check-out moves it (an early
+     * start or a rescheduled window in `dataToUpdate`). The source admission
+     * measures the move from it.
+     */
+    storedWindow: { from: Date; to: Date };
     /** Acting user's locale and time zone, for the day a pool refusal names. */
     hints?: ClientHint;
     /**
@@ -3406,25 +3484,47 @@ async function checkoutBookingWritesWithinTx(
   }
 
   /**
-   * A draft checked out directly becomes a hold in this step, so its pool
-   * slices are admitted over the window first, as reserving one would. The
-   * callers hold the booking lock (`bookingStatus` is what it read); the
-   * facade takes the asset lock itself. A refusal (400 naming each source's
-   * free units) stops the check-out before anything is written.
+   * Pool source admission for what this check-out commits to:
+   * - a DRAFT becomes a hold here, so its pool slices are admitted as
+   *   reserving one would (kind `reserve`);
+   * - any other booking whose window this check-out moves (an early start, a
+   *   rescheduled expired reservation) is admitted for the move from its
+   *   stored window (kind `dates`).
+   * Both measure the window that will actually be written. Every
+   * quantity-tracked asset on the booking is locked first in one sorted
+   * statement, together with the standalone assets the pool guard below
+   * locks, so the facade and the guard only re-take rows already held. The
+   * callers hold the booking lock (`bookingStatus` is what it read). A
+   * refusal (400 naming each source's free units) stops the check-out before
+   * anything is written.
    */
-  if (bookingStatus === BookingStatus.DRAFT && from && to) {
-    const poolSliceIds = await findPoolSliceIds(tx, {
-      bookingId,
-      organizationId,
-    });
-    if (poolSliceIds.length > 0) {
+  const committedWindow = windowAfterUpdate(dataToUpdate, storedWindow);
+  const admissionKind =
+    bookingStatus === BookingStatus.DRAFT
+      ? "reserve"
+      : windowMoved(committedWindow, storedWindow)
+      ? "dates"
+      : null;
+  if (admissionKind) {
+    const poolSlices = await findPoolSlices(tx, { bookingId, organizationId });
+    if (poolSlices.length > 0) {
+      await lockEveryAssetForQuantityUpdate(
+        tx,
+        [
+          ...new Set([
+            ...uniqueQtyTrackedAssetIds,
+            ...poolSlices.map((slice) => slice.assetId),
+          ]),
+        ],
+        organizationId
+      );
       await admitWindowChange(tx, {
         organizationId,
         bookingId,
-        from,
-        to,
-        previous: { from, to },
-        kind: "reserve",
+        from: committedWindow.from,
+        to: committedWindow.to,
+        previous: storedWindow,
+        kind: admissionKind,
       });
     }
   }
@@ -4707,6 +4807,7 @@ export async function checkoutBooking({
           // guard; see the doc comment on `checkoutBookingWritesWithinTx`.
           from: checkoutWindow.from,
           to: checkoutWindow.to,
+          storedWindow: { from: bookingFound.from, to: bookingFound.to },
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,
@@ -5134,6 +5235,36 @@ export async function fulfilModelRequestsAndCheckout({
         });
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
+        /**
+         * When the check-out below admits pool sources (a draft becoming a
+         * hold, or a moved window), the facade locks every quantity-tracked
+         * asset on the booking. Those assets and every scanned one are locked
+         * here first, in one sorted statement, so the scan's locks, the
+         * facade's and the pool guard's only re-take rows already held.
+         */
+        const storedWindow = { from: bookingFound.from, to: bookingFound.to };
+        if (
+          lockedStatus === BookingStatus.DRAFT ||
+          windowMoved(
+            windowAfterUpdate(dataToUpdate, storedWindow),
+            storedWindow
+          )
+        ) {
+          const poolSlices = await findPoolSlices(tx, {
+            bookingId,
+            organizationId,
+          });
+          await lockAssetsForArchiveGuard(
+            tx,
+            [
+              ...assetIds,
+              ...kitSlices.map((slice) => slice.assetId),
+              ...poolSlices.map((slice) => slice.assetId),
+            ],
+            organizationId
+          );
+        }
+
         const scanResult = await addScannedAssetsToBookingWithinTx(tx, {
           assetIds,
           kitIds,
@@ -5217,6 +5348,7 @@ export async function fulfilModelRequestsAndCheckout({
           // `checkoutBookingWritesWithinTx`).
           from: bookingFound.from,
           to: bookingFound.to,
+          storedWindow,
           checkedOutById: userId ?? null,
           sourceLocations,
           hints,

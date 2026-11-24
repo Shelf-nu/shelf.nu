@@ -2614,6 +2614,12 @@ describe("updateBasicBooking", () => {
       name: "New Name",
     });
 
+    // The draft's new dates are written under the booking lock, which must
+    // still read DRAFT.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.DRAFT },
+    ]);
+
     await updateBasicBooking({
       ...mockUpdateBookingParams,
       name: "New Name",
@@ -2660,6 +2666,12 @@ describe("updateBasicBooking", () => {
 
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    // The draft's new dates are written under the booking lock, which must
+    // still read DRAFT.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.DRAFT },
+    ]);
 
     await updateBasicBooking({
       ...mockUpdateBookingParams,
@@ -2796,6 +2808,12 @@ describe("updateBasicBooking", () => {
     });
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    // The draft's new dates are written under the booking lock, which must
+    // still read DRAFT.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.DRAFT },
+    ]);
 
     await updateBasicBooking({
       id: "booking-1",
@@ -7423,14 +7441,17 @@ describe("fulfilModelRequestsAndCheckout", () => {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
       []
     );
-    (
-      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-    ).mockResolvedValueOnce([
-      {
-        quantity: 1,
-        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
-      },
-    ]);
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      // why: the adjusted start moves the window, so before the scan the
+      // check-out reads the booking's quantity-tracked slices to lock their
+      // assets for the source admission. This booking has none.
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          quantity: 1,
+          asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+        },
+      ]);
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
 

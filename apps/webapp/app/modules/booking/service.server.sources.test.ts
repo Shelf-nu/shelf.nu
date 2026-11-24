@@ -25,8 +25,10 @@ import { allocateSources } from "@shelf/quantity-control";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { accessFor } from "@helpers/role-access";
 
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import type * as availabilityModule from "~/modules/asset/availability.server";
+import { lockEveryAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { ShelfError } from "~/utils/error";
 
 import {
@@ -536,6 +538,22 @@ describe("updateBasicBooking", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  it("refuses new dates when the booking stopped being a draft before the lock", async () => {
+    stageBooking(BookingStatus.DRAFT);
+    store.lockedStatus = BookingStatus.RESERVED;
+    store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
+    store.slices = [
+      { id: "ba-qt-1", assetId: "qt-1", assetKitId: null, quantity: 3 },
+    ];
+    const tx = openTx();
+
+    await expect(
+      updateBasicBooking({ ...params, from, to })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(tx.booking.update).not.toHaveBeenCalled();
+    expect(admitWindowChange).not.toHaveBeenCalled();
+  });
+
   it("does not call the facade for a draft with no pool slices", async () => {
     stageBooking(BookingStatus.DRAFT);
     store.slices = [
@@ -626,6 +644,20 @@ describe("reserveBooking", () => {
     custodianUserId: "user-1",
   };
 
+  /** The slices the in-transaction read finds, after the booking lock. */
+  function stageSlices(...ids: Array<"qt-1" | "qt-kit" | "ind-1">) {
+    store.assetTypes = {
+      "qt-1": "QUANTITY_TRACKED",
+      "qt-kit": "QUANTITY_TRACKED",
+    };
+    store.slices = ids.map((assetId) => ({
+      id: `ba-${assetId}`,
+      assetId,
+      assetKitId: assetId === "qt-kit" ? "ak-1" : null,
+      quantity: 2,
+    }));
+  }
+
   it("admits every pool slice over the reserved window, after the booking lock and before the status flip", async () => {
     vitest
       .mocked(db.booking.findUniqueOrThrow)
@@ -635,6 +667,7 @@ describe("reserveBooking", () => {
           loadedSlice("ind-1", AssetType.INDIVIDUAL),
         ]) as never
       );
+    stageSlices("qt-1", "qt-kit", "ind-1");
     const tx = openTx();
     vitest.mocked(tx.booking.update).mockResolvedValue(reservedRow as never);
 
@@ -653,6 +686,39 @@ describe("reserveBooking", () => {
     expect(firstCallOrder(admitWindowChange)).toBeLessThan(
       firstCallOrder(tx.booking.update)
     );
+    // Standalone and kit pool assets are locked in the one sorted statement
+    // before the facade, so its own lock only re-takes rows already held.
+    expect(lockEveryAssetForQuantityUpdate).toHaveBeenCalledTimes(1);
+    expect(lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
+      tx,
+      ["qt-1", "qt-kit"],
+      ORG_ID
+    );
+    expect(firstCallOrder(lockEveryAssetForQuantityUpdate)).toBeLessThan(
+      firstCallOrder(admitWindowChange)
+    );
+  });
+
+  it("decides from the slices read under the lock, not from the earlier read", async () => {
+    // The outer read saw only an INDIVIDUAL asset; a pool slice joined before
+    // the lock was taken.
+    vitest
+      .mocked(db.booking.findUniqueOrThrow)
+      .mockResolvedValue(
+        bookingRow(BookingStatus.DRAFT, [
+          loadedSlice("ind-1", AssetType.INDIVIDUAL),
+        ]) as never
+      );
+    stageSlices("ind-1", "qt-1");
+    const tx = openTx();
+    vitest.mocked(tx.booking.update).mockResolvedValue(reservedRow as never);
+
+    await reserveBooking(params);
+
+    expect(admitWindowChange).toHaveBeenCalledTimes(1);
+    expect(bookingLockOrder()).toBeLessThan(
+      firstCallOrder(db.bookingAsset.findMany)
+    );
   });
 
   it("refuses with the facade's reason and leaves the booking a draft when a MANUAL slice does not fit", async () => {
@@ -663,6 +729,7 @@ describe("reserveBooking", () => {
           loadedSlice("qt-1", AssetType.QUANTITY_TRACKED),
         ]) as never
       );
+    stageSlices("qt-1");
     const tx = openTx();
     vitest.mocked(tx.booking.update).mockResolvedValue(reservedRow as never);
     vitest.mocked(admitWindowChange).mockRejectedValue(
@@ -690,6 +757,7 @@ describe("reserveBooking", () => {
           loadedSlice("ind-1", AssetType.INDIVIDUAL),
         ]) as never
       );
+    stageSlices("ind-1");
     const tx = openTx();
     vitest.mocked(tx.booking.update).mockResolvedValue(reservedRow as never);
 
@@ -699,45 +767,172 @@ describe("reserveBooking", () => {
   });
 });
 
-describe("checkoutBooking (DRAFT straight to ONGOING)", () => {
-  it("admits the draft's pool slices as a reservation before it goes out", async () => {
-    vitest
-      .mocked(db.booking.findUniqueOrThrow)
-      .mockResolvedValue(
-        bookingRow(BookingStatus.DRAFT, [
-          loadedSlice("ind-1", AssetType.INDIVIDUAL),
-        ]) as never
-      );
-    // The pool slices are read in the transaction, so the fixture stages
-    // them there rather than on the outer read.
+describe("checkoutBooking source admission", () => {
+  /** A pool slice the in-transaction read finds. */
+  function stagePool() {
     store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
     store.slices = [
       { id: "ba-qt-1", assetId: "qt-1", assetKitId: null, quantity: 2 },
     ];
-    const tx = openTx();
-    vitest
-      .mocked(tx.booking.update)
-      .mockResolvedValue({ id: BOOKING_ID } as never);
+  }
 
-    await checkoutBooking({
+  /**
+   * The outer read. Its slice is INDIVIDUAL so the legacy pool guard stays
+   * out of the way; the pool slice is read in the transaction (`stagePool`).
+   */
+  function stageBooking(
+    status: BookingStatus,
+    window: { from: Date; to: Date } = { from, to }
+  ) {
+    store.lockedStatus = status;
+    vitest.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+      ...bookingRow(status, [loadedSlice("ind-1", AssetType.INDIVIDUAL)]),
+      ...window,
+    } as never);
+  }
+
+  /** The window the check-out wrote onto the booking row. */
+  function writtenWindow(stored: { from: Date; to: Date }) {
+    const write = vitest
+      .mocked(db.booking.update)
+      .mock.calls.map(([args]) => args as { data?: Record<string, unknown> })
+      .find((args) => args?.data?.status);
+    return {
+      from: (write?.data?.from as Date | undefined) ?? stored.from,
+      to: (write?.data?.to as Date | undefined) ?? stored.to,
+    };
+  }
+
+  const checkout = (
+    extra: Partial<Parameters<typeof checkoutBooking>[0]> = {}
+  ) =>
+    checkoutBooking({
       id: BOOKING_ID,
       organizationId: ORG_ID,
       hints,
       from,
       to,
       userId: "user-1",
+      ...extra,
     });
 
+  it("admits a draft's pool slices as a reservation over its window, after the locks", async () => {
+    stageBooking(BookingStatus.DRAFT);
+    stagePool();
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID } as never);
+
+    await checkout();
+
     expect(admitWindowChange).toHaveBeenCalledTimes(1);
-    expect(admitWindowChange).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        organizationId: ORG_ID,
-        bookingId: BOOKING_ID,
-        kind: "reserve",
-      })
-    );
+    expect(admitWindowChange).toHaveBeenCalledWith(tx, {
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from,
+      to,
+      previous: { from, to },
+      kind: "reserve",
+    });
     expect(bookingLockOrder()).toBeLessThan(firstCallOrder(admitWindowChange));
+    expect(lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
+      tx,
+      ["qt-1"],
+      ORG_ID
+    );
+    expect(firstCallOrder(lockEveryAssetForQuantityUpdate)).toBeLessThan(
+      firstCallOrder(admitWindowChange)
+    );
+  });
+
+  it("admits a draft's early check-out over the window it writes", async () => {
+    stageBooking(BookingStatus.DRAFT);
+    stagePool();
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID } as never);
+
+    await checkout({ intentChoice: CheckoutIntentEnum["with-adjusted-date"] });
+
+    const written = writtenWindow({ from, to });
+    expect(written.from.getTime()).toBeLessThan(from.getTime());
+    expect(admitWindowChange).toHaveBeenCalledWith(tx, {
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from: written.from,
+      to,
+      previous: { from, to },
+      kind: "reserve",
+    });
+  });
+
+  it("admits a reservation's early check-out as a date change from its stored window", async () => {
+    stageBooking(BookingStatus.RESERVED);
+    stagePool();
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID } as never);
+
+    await checkout({ intentChoice: CheckoutIntentEnum["with-adjusted-date"] });
+
+    const written = writtenWindow({ from, to });
+    expect(written.from.getTime()).toBeLessThan(from.getTime());
+    expect(admitWindowChange).toHaveBeenCalledTimes(1);
+    expect(admitWindowChange).toHaveBeenCalledWith(tx, {
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from: written.from,
+      to,
+      previous: { from, to },
+      kind: "dates",
+    });
+  });
+
+  it("admits a rescheduled expired reservation as a date change to its new window", async () => {
+    const pastFrom = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const pastTo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const newEndDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    stageBooking(BookingStatus.RESERVED, { from: pastFrom, to: pastTo });
+    stagePool();
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID } as never);
+
+    await checkout({
+      from: pastFrom,
+      to: pastTo,
+      intentChoice: CheckoutIntentEnum["with-new-end-date"],
+      newEndDate,
+    });
+
+    const written = writtenWindow({ from: pastFrom, to: pastTo });
+    expect(written.to).toEqual(newEndDate);
+    expect(admitWindowChange).toHaveBeenCalledTimes(1);
+    expect(admitWindowChange).toHaveBeenCalledWith(tx, {
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from: written.from,
+      to: newEndDate,
+      previous: { from: pastFrom, to: pastTo },
+      kind: "dates",
+    });
+  });
+
+  it("admits nothing when a reservation checks out on its own window", async () => {
+    stageBooking(BookingStatus.RESERVED);
+    stagePool();
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID } as never);
+
+    await checkout();
+
+    expect(admitWindowChange).not.toHaveBeenCalled();
   });
 });
 
