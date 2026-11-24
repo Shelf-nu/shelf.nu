@@ -187,3 +187,6 @@ BEGIN
   END IF;
 END
 $$;
+
+-- Activity action for a change of a booking slice's source locations.
+ALTER TYPE "ActivityAction" ADD VALUE IF NOT EXISTS 'BOOKING_ASSET_SOURCES_CHANGED';

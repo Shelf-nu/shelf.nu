@@ -33,7 +33,7 @@
  * @see {@link file://./capacity.server.ts} free units, capacity and holds
  */
 
-import { BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus } from "@prisma/client";
 import {
   allocateSources,
   computeShortSlices,
@@ -59,6 +59,7 @@ import {
   loadSourceCapacity,
 } from "./capacity.server";
 import {
+  addToRow,
   allocateSessionPending,
   allocateToSlice,
   applyAllocation,
@@ -118,8 +119,14 @@ type CallContext = {
  * Steps 1 and 2 of every write: read the touched slices and the booking's
  * status, lock the assets, open the session.
  *
+ * Only quantity-tracked assets are read and locked when `sliceIds` is
+ * omitted: an INDIVIDUAL asset has no source rows, and a caller that locked
+ * the booking's pool assets in one sorted statement beforehand finds this
+ * lock already held (no second lock set, so no lock-order inversion).
+ *
  * @param tx - The caller's transaction; the caller holds the booking lock
- * @param args.sliceIds - Slices to touch; all of the booking's when omitted
+ * @param args.sliceIds - Slices to touch; every quantity-tracked slice of the
+ *   booking when omitted
  * @throws {ShelfError} 404 when a slice is not on this booking in this workspace
  */
 async function openCall(
@@ -143,7 +150,9 @@ async function openCall(
       where: {
         bookingId,
         booking: { organizationId },
-        ...(sliceIds ? { id: { in: sliceIds } } : {}),
+        ...(sliceIds
+          ? { id: { in: sliceIds } }
+          : { asset: { type: AssetType.QUANTITY_TRACKED } }),
       },
       select: { id: true, assetId: true },
     }),
@@ -350,12 +359,21 @@ export async function allocateNewSlices(
  * allocated without refusing: a decrease never adds demand. LEGACY slices
  * (LEGACY or held-back groups) are left alone.
  *
+ * `admit: false` is for a caller that sets the slice's sources in the same
+ * transaction right after ({@link setManualSources} or
+ * {@link setAutoSources}), which admit the combined result once. The
+ * increase of an AUTO or MANUAL slice then goes to its UNASSIGNED row and
+ * pending units conversion seeds are allocated without refusing; nothing is
+ * admitted here. Never leave the result like that: pending units on
+ * UNASSIGNED are short.
+ *
  * @param tx - The caller's transaction; the caller holds the booking lock
  * @param args.changes - New quantity per slice
  * @param args.window - The booking window, half-open
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
- * @throws {ShelfError} 400 when an increase does not fit or a decrease goes
- *   below the units out
+ * @param args.admit - Defaults to true; false only when sources are set next
+ * @throws {ShelfError} 400 when an increase does not fit (admitted calls) or
+ *   a decrease goes below the units out
  */
 export async function resizeSlices(
   tx: BookingSourcesTx,
@@ -365,15 +383,19 @@ export async function resizeSlices(
     changes: Array<{ sliceId: string; quantity: number }>;
     window: Window;
     adoptionEnabled?: boolean;
+    admit?: boolean;
   }
 ): Promise<void> {
   if (args.changes.length === 0) return;
+  const admit = args.admit ?? true;
   const ctx = await openCall(tx, {
     ...args,
     sliceIds: args.changes.map((c) => c.sliceId),
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
   });
-  const how: AllocationHow = ctx.isDraft ? "draft" : "voluntary";
+  let how: AllocationHow = "voluntary";
+  if (!admit) how = "involuntary";
+  else if (ctx.isDraft) how = "draft";
 
   // A decrease adds no demand: it first takes the pending units conversion
   // seeded (they hold no source yet), and whatever pending is left on a
@@ -418,6 +440,9 @@ export async function resizeSlices(
         );
       }
       Object.assign(kitRow, resized.row);
+    } else if (delta > 0 && !admit) {
+      // The sources call that follows places and admits these units.
+      addToRow(slice, "UNASSIGNED", null, delta);
     } else if (delta > 0) {
       const own = new Set(
         slice.rows.filter((r) => LOOSE_KINDS.has(r.kind)).map(sourceKey)

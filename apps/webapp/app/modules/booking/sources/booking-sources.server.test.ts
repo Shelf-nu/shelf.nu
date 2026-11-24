@@ -467,6 +467,40 @@ describe("resizeSlices", () => {
     expect(h.writes).toHaveLength(0);
   });
 
+  it("with admit: false, puts an increase on UNASSIGNED for the sources call to place and admit", async () => {
+    // Too little free anywhere for the increase: an admitted call refuses.
+    h.freeFor = () => free(6, 0);
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "MANUAL",
+          rows: [row("s1", { quantity: 5 })],
+        }),
+      ],
+    });
+
+    await resizeSlices(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      changes: [{ sliceId: "s1", quantity: 8 }],
+      window: WINDOW,
+      adoptionEnabled: true,
+      admit: false,
+    });
+
+    const plan = writtenPlan();
+    expect(plan.upsertRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "UNASSIGNED", quantity: 3 }),
+      ])
+    );
+    expect(plan.upsertRows).not.toContainEqual(
+      expect.objectContaining({ kind: "UNPLACED", quantity: 8 })
+    );
+  });
+
   it("lets a draft grow past its sources, the rest waiting on UNASSIGNED", async () => {
     h.freeFor = () => free(6, 0);
     seedAutoSlice();

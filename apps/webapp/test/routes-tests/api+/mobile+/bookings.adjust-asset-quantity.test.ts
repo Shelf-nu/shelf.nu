@@ -7,7 +7,8 @@
  * covered in `availability.server.test.ts`), the pivot-row write, the two
  * activity notes (and their absence on a no-op save), and every refusal —
  * INDIVIDUAL asset, missing slice, closed booking, non-owner SELF_SERVICE
- * caller, and an availability shortfall.
+ * caller, and an availability shortfall. The optional `sources` body field
+ * reaches the sources facade after every route guard.
  *
  * The ownership guard is the REAL `validateBookingOwnership`, not a stub, so
  * the SELF_SERVICE cases prove the gate rejects on ownership rather than on
@@ -28,7 +29,12 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
+import {
+  setAutoSources,
+  setManualSources,
+} from "~/modules/booking/sources/booking-sources.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -98,6 +104,20 @@ vi.mock("~/modules/booking-note/service.server", () => ({
   createSystemBookingNote: vi.fn().mockResolvedValue(undefined),
 }));
 
+// why: the sources facade (locks, conversion, allocation, admission) has its
+// own suite; here we assert what the route hands it and that a refusal
+// reaches the caller.
+vi.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  resizeSlices: vi.fn().mockResolvedValue(undefined),
+  setManualSources: vi.fn().mockResolvedValue(undefined),
+  setAutoSources: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: the event insert has its own suite; asserted by payload only.
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
 // why: the actor lookup only feeds the note text; a fixed user keeps the
 // note assertions deterministic.
 vi.mock("~/modules/user/service.server", () => ({
@@ -131,10 +151,14 @@ const BOOKING_TO = new Date("2026-09-12T17:00:00.000Z");
 
 /** The client the mocked transaction hands to the route's callback. */
 const tx = {
+  // The booking row lock reads the booking's status.
+  $queryRaw: vi.fn(),
   bookingAsset: {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  bookingAssetSource: { findMany: vi.fn() },
+  location: { findMany: vi.fn() },
 };
 
 /** Build a POST request for this endpoint with a JSON body. */
@@ -209,6 +233,9 @@ beforeEach(() => {
   // The re-read under the lock sees the same 2 units the snapshot did.
   tx.bookingAsset.findUnique.mockResolvedValue({ quantity: 2 });
   tx.bookingAsset.update.mockResolvedValue(undefined);
+  tx.$queryRaw.mockResolvedValue([{ status: BookingStatus.DRAFT }]);
+  tx.bookingAssetSource.findMany.mockResolvedValue([]);
+  tx.location.findMany.mockResolvedValue([]);
   transactionMock.mockImplementation((async (
     callback: (client: typeof tx) => Promise<unknown>
   ) => callback(tx)) as never);
@@ -388,5 +415,122 @@ describe("POST /api/mobile/bookings/adjust-asset-quantity", () => {
     expect(tx.bookingAsset.update).not.toHaveBeenCalled();
     expect(createNotesMock).not.toHaveBeenCalled();
     expect(createSystemBookingNoteMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/mobile/bookings/adjust-asset-quantity with sources", () => {
+  const MANUAL = {
+    mode: "MANUAL",
+    sources: [
+      { locationId: "loc-1", quantity: 1 },
+      { locationId: null, quantity: 1 },
+    ],
+  };
+
+  it("hands a MANUAL split to the facade on the transaction client", async () => {
+    const response = await action(
+      makeArgs({
+        bookingId: BOOKING_ID,
+        assetId: ASSET_ID,
+        quantity: 2,
+        sources: MANUAL,
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status ?? 200).toBe(200);
+    expect(setManualSources).toHaveBeenCalledWith(tx, {
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      sliceId: SLICE_ID,
+      sources: MANUAL.sources,
+      window: { from: BOOKING_FROM, to: BOOKING_TO },
+    });
+  });
+
+  it("returns the slice to AUTO", async () => {
+    await action(
+      makeArgs({
+        bookingId: BOOKING_ID,
+        assetId: ASSET_ID,
+        quantity: 2,
+        sources: { mode: "AUTO" },
+      })
+    );
+
+    expect(setAutoSources).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ sliceId: SLICE_ID })
+    );
+  });
+
+  it("400s a malformed split before opening the transaction", async () => {
+    const response = await action(
+      makeArgs({
+        bookingId: BOOKING_ID,
+        assetId: ASSET_ID,
+        quantity: 2,
+        sources: {
+          mode: "MANUAL",
+          sources: [
+            { locationId: null, quantity: 1 },
+            { locationId: null, quantity: 1 },
+          ],
+        },
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("passes the facade's refusal of a foreign location through and records nothing", async () => {
+    vi.mocked(setManualSources).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "One of the chosen locations does not hold this asset.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const response = await action(
+      makeArgs({
+        bookingId: BOOKING_ID,
+        assetId: ASSET_ID,
+        quantity: 2,
+        sources: MANUAL,
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(
+      (response.data as { error: { message: string } }).error.message
+    ).toBe("One of the chosen locations does not hold this asset.");
+    expect(recordEvent).not.toHaveBeenCalled();
+    expect(createSystemBookingNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ownership guard in front of a sources change", async () => {
+    withRole(OrganizationRoles.SELF_SERVICE);
+    findFirstMock.mockResolvedValue(
+      buildSlice({ creatorId: OTHER_ID, custodianUserId: OTHER_ID }) as never
+    );
+
+    const response = await action(
+      makeArgs({
+        bookingId: BOOKING_ID,
+        assetId: ASSET_ID,
+        quantity: 2,
+        sources: MANUAL,
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(403);
+    expect(setManualSources).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,18 @@
  * a booking, on its standalone slice. The change itself is the shared
  * booked-quantity service: a reduction always passes, an increase is
  * measured against windowed availability over the booking's own
- * `[from, to]`, and a slice whose units are checked out keeps its amount.
+ * `[from, to]`, and a slice whose units are checked out keeps its amount
+ * (except the pending units of a pool slice on an ONGOING or OVERDUE
+ * booking).
+ *
+ * Form fields:
+ * - `assetId`, `quantity` (required)
+ * - `sources` (optional): JSON text, either `{"mode":"AUTO"}` to return the
+ *   slice to the allocation rule, or
+ *   `{"mode":"MANUAL","sources":[{"locationId":"loc-1","quantity":8},{"locationId":null,"quantity":7}]}`
+ *   to set the planned units per source by hand (`null` is Unplaced). The
+ *   units must add up to the slice's planned units after the quantity
+ *   change. A blank or missing field leaves the sources alone.
  *
  * @see {@link file://./../../components/booking/adjust-booking-asset-quantity-dialog.tsx}
  * @see {@link file://./../../modules/booking/booked-quantity.server.ts}
@@ -19,6 +30,10 @@ import {
   noteBookedQuantityChanges,
   setStandaloneBookedQuantity,
 } from "~/modules/booking/booked-quantity.server";
+import {
+  SOURCES_FORM_FIELD,
+  sourcesFormFieldSchema,
+} from "~/modules/booking/sources/sources-input";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -35,12 +50,14 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/** The adjust form: asset, new quantity and an optional sources change. */
 export const AdjustBookingAssetQuantitySchema = z.object({
   assetId: z.string().min(1, "Asset ID is required"),
   quantity: z.coerce
     .number()
     .int()
     .positive("Quantity must be a positive integer"),
+  [SOURCES_FORM_FIELD]: sourcesFormFieldSchema,
 });
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -61,7 +78,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const { assetId, quantity } = parseData(
+    const { assetId, quantity, sources } = parseData(
       formData,
       AdjustBookingAssetQuantitySchema
     );
@@ -143,8 +160,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Locked, re-read and directionally guarded in one transaction, and
-    // refused once the slice's units have been checked out. See the module.
+    // Locked, re-read and directionally guarded in one transaction, with the
+    // checked-out and sources rules of the module. A sources change commits
+    // its own booking note and activity event in that transaction.
     const { previousQuantity } = await setStandaloneBookedQuantity({
       bookingAssetId: bookingAsset.id,
       assetId,
@@ -157,6 +175,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       quantity,
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
+      sources: sources ? { input: sources, userId } : undefined,
     });
 
     // Best-effort: a note failure is logged and never fails the saved change.

@@ -98,6 +98,15 @@ vitest.mock("~/modules/booking/checked-out.server", () => ({
   computeCheckedOutBreakdownForAsset: vitest.fn(),
 }));
 
+// why: the pool sources facade (asset lock, conversion, allocation) has its
+// own suite and needs models this tx mock does not stand in for; these tests
+// target the pool-wide availability guard only.
+vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  resizeSlices: vitest.fn(),
+  setManualSources: vitest.fn(),
+  setAutoSources: vitest.fn(),
+}));
+
 // why: `vitest.mock` calls above are hoisted above all imports by Vitest's
 // transform regardless of source position, so importing the module under
 // test here (after the mocks are declared) is only for readability.
@@ -423,7 +432,7 @@ describe("action (adjust-asset-quantity)", () => {
     // reduction against the stale 8), and the write did NOT happen.
     expect(tx.bookingAsset.findUnique).toHaveBeenCalledWith({
       where: { id: BOOKING_ASSET_ID },
-      select: { quantity: true, checkedOutAt: true },
+      select: { quantity: true, checkedOutAt: true, sourceAllocation: true },
     });
     expect(tx.bookingAsset.findMany).toHaveBeenCalled();
     expect(tx.bookingAsset.update).not.toHaveBeenCalled();

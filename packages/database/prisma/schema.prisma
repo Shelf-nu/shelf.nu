@@ -3254,6 +3254,9 @@ enum ActivityAction {
   BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
+  // Where one standalone slice's planned units come from (its source
+  // locations) changed: a field change with field "sources".
+  BOOKING_ASSET_SOURCES_CHANGED
 
   // Booking — model-level reservations (Book-by-Model). The reserved
   // `AssetModel` travels in `meta.assetModelId` because ActivityEvent has no
