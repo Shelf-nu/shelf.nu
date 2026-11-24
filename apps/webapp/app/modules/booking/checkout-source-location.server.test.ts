@@ -18,6 +18,8 @@ import { ShelfError } from "~/utils/error";
 
 import {
   ALLOCATION_SOURCE_FORM_VALUE,
+  parseSourceLocationsFromFormData,
+  sourceLocationFieldName,
   sourceSubmissionFromRecord,
 } from "./checkout-source-location";
 import {
@@ -672,17 +674,23 @@ describe("dispatchCheckoutSources", () => {
 });
 
 describe("getCheckoutSourceQuestions for slices with planned sources", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   /**
    * Installs the reads the question loader makes on the root client: one
-   * converted slice of a pool at Camera Room and Studio, whose rows plan
-   * `rows` (pending units only).
+   * slice of a pool at Camera Room and Studio, converted (`AUTO`, its rows
+   * planning `rows`) unless `mode` says LEGACY.
    */
   function stageConverted(
     rows: Array<{
       kind: "LOCATION" | "UNPLACED";
       locationId: string | null;
       quantity: number;
-    }>
+      releasedQuantity?: number;
+    }>,
+    mode: "AUTO" | "LEGACY" = "AUTO"
   ) {
     Object.assign(db, {
       bookingAsset: {
@@ -694,7 +702,7 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
                     id: "ba-1",
                     assetId: "pool-1",
                     quantity: 15,
-                    sourceAllocation: "AUTO",
+                    sourceAllocation: mode,
                   },
                 ]
               : []
@@ -706,9 +714,9 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
           resolved(
             rows.map((row) => ({
               bookingAssetId: "ba-1",
-              ...row,
               outQuantity: 0,
               releasedQuantity: 0,
+              ...row,
             }))
           )
         ),
@@ -782,7 +790,7 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     expect(questions).toEqual([]);
   });
 
-  it("still asks an older phone about a slice planned at one source, defaulting to it", async () => {
+  it('still asks an older phone about a slice planned at one source, defaulting to "as planned"', async () => {
     stageConverted([
       { kind: "LOCATION", locationId: "loc-camera", quantity: 15 },
     ]);
@@ -793,6 +801,117 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
       clientSupportsSources: false,
     });
 
+    expect(questions.map((q) => q.defaultLocationId)).toEqual([
+      ALLOCATION_SOURCE_FORM_VALUE,
+    ]);
+  });
+
+  it('defaults a slice planned at one source to "as planned" too', async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-camera", quantity: 15 },
+    ]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+    });
+
+    expect(questions.map((q) => q.defaultLocationId)).toEqual([
+      ALLOCATION_SOURCE_FORM_VALUE,
+    ]);
+  });
+
+  it('dispatches a fully returned converted slice departing again by its plan when the "as planned" default is submitted', async () => {
+    // Everything went out and came back: no pending units are left anywhere.
+    stageConverted([
+      {
+        kind: "LOCATION",
+        locationId: "loc-camera",
+        quantity: 15,
+        releasedQuantity: 15,
+      },
+    ]);
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+    });
+    expect(question.defaultLocationId).toBe(ALLOCATION_SOURCE_FORM_VALUE);
+
+    // The dialog submits its select untouched.
+    const form = new FormData();
+    form.set(sourceLocationFieldName("ba-1"), question.defaultLocationId ?? "");
+    const { tx } = scenario();
+    vi.mocked(dispatchUnits).mockResolvedValue({
+      dispatched: [],
+      legacySliceIds: [],
+    });
+
+    await dispatchCheckoutSources(tx as never, {
+      organizationId: ORG,
+      bookingId: "booking-1",
+      departures: [{ sliceId: "ba-1", assetId: "pool-1", units: 15 }],
+      poolAssetIds: new Set(["pool-1"]),
+      submission: parseSourceLocationsFromFormData(form),
+      window: { from: new Date("2026-12-01"), to: new Date("2026-12-03") },
+    });
+
+    // No pick: the facade re-claims the released units by allocation instead
+    // of moving them into a shelf default and making the slice MANUAL.
+    expect(vi.mocked(dispatchUnits).mock.calls[0][1].picks).toEqual([
+      { sliceId: "ba-1", units: 15 },
+    ]);
+  });
+
+  it('defaults a LEGACY slice to "as planned" when adoption is on, and submitting it sends no pick', async () => {
+    // The "legacy slice checks out against A held by a new booking" case: the
+    // shelf default would be Camera Room (most units left), which a newer
+    // booking holds. Submitting it unchanged would force the slice into it.
+    stageConverted([], "LEGACY");
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      adoptionEnabled: true,
+    });
+    expect(question).toMatchObject({
+      defaultLocationId: ALLOCATION_SOURCE_FORM_VALUE,
+      fromAllocation: false,
+    });
+
+    const form = new FormData();
+    form.set(sourceLocationFieldName("ba-1"), question.defaultLocationId ?? "");
+    const { tx } = scenario();
+    vi.mocked(dispatchUnits).mockResolvedValue({
+      dispatched: [],
+      legacySliceIds: [],
+    });
+
+    await dispatchCheckoutSources(tx as never, {
+      organizationId: ORG,
+      bookingId: "booking-1",
+      departures: [{ sliceId: "ba-1", assetId: "pool-1", units: 15 }],
+      poolAssetIds: new Set(["pool-1"]),
+      submission: parseSourceLocationsFromFormData(form),
+      window: { from: new Date("2026-12-01"), to: new Date("2026-12-03") },
+      adoptionEnabled: true,
+    });
+
+    // By allocation: the facade converts the group and sends it from the
+    // source that fits (Back Room, or a split), as its own suite proves.
+    expect(vi.mocked(dispatchUnits).mock.calls[0][1].picks).toEqual([
+      { sliceId: "ba-1", units: 15 },
+    ]);
+  });
+
+  it("keeps the shelf default for a LEGACY slice when adoption is off", async () => {
+    stageConverted([], "LEGACY");
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      adoptionEnabled: false,
+    });
+
+    // Camera Room has the most units left.
     expect(questions.map((q) => q.defaultLocationId)).toEqual(["loc-camera"]);
   });
 });

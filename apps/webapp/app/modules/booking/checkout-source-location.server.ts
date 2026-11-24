@@ -27,6 +27,7 @@ import {
   custodyFromSource,
   unitsLeftAtSource,
 } from "~/modules/asset/custody-source";
+import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -358,9 +359,11 @@ export async function recordCheckoutSourceLocations(
  *
  * Read-only; the dialogs use it to render one "From location" select per pool.
  *
- * A slice with planned sources (a converted group) defaults to its plan: its
- * one source, or "as planned" (`ALLOCATION_SOURCE_FORM_VALUE`) when its
- * pending units are split, which dispatches by allocation like no pick.
+ * A slice with planned sources (a converted group), and a LEGACY slice when
+ * adoption is on (it converts at check-out), defaults to "as planned"
+ * (`ALLOCATION_SOURCE_FORM_VALUE`): submitting the default dispatches by
+ * allocation like no pick, so a source the plan avoids is never forced. Only a
+ * LEGACY slice with adoption off defaults to the shelf (the most units left).
  *
  * @param args.organizationId - Scopes every read
  * @param args.bookingId - The booking being checked out
@@ -373,6 +376,7 @@ export async function getCheckoutSourceQuestions({
   bookingId,
   sliceIds,
   clientSupportsSources = true,
+  adoptionEnabled = BOOKING_SOURCES_ENABLED,
 }: {
   organizationId: string;
   bookingId: string;
@@ -383,6 +387,11 @@ export async function getCheckoutSourceQuestions({
    * split across sources (the server dispatches those by allocation).
    */
   clientSupportsSources?: boolean;
+  /**
+   * Whether a LEGACY group converts at check-out; defaults to
+   * `BOOKING_SOURCES_ENABLED`. Decides the default of a LEGACY slice.
+   */
+  adoptionEnabled?: boolean;
 }): Promise<CheckoutSourceQuestion[]> {
   const slices = await db.bookingAsset.findMany({
     where: {
@@ -402,8 +411,8 @@ export async function getCheckoutSourceQuestions({
   });
   if (slices.length === 0) return [];
 
-  // Converted slices already have sources planned: the question pre-fills
-  // from that plan instead of guessing from the shelf.
+  // Converted slices already have sources planned. Their rows are read only
+  // for an older phone, which is asked nothing about a split plan.
   const convertedIds = slices
     .filter(
       (slice) =>
@@ -415,7 +424,7 @@ export async function getCheckoutSourceQuestions({
       organizationId,
       assetIds: slices.map((slice) => slice.assetId),
     }),
-    convertedIds.length === 0
+    convertedIds.length === 0 || clientSupportsSources
       ? Promise.resolve([])
       : db.bookingAssetSource.findMany({
           where: {
@@ -425,13 +434,10 @@ export async function getCheckoutSourceQuestions({
           },
           select: {
             bookingAssetId: true,
-            kind: true,
-            locationId: true,
             quantity: true,
             outQuantity: true,
             releasedQuantity: true,
           },
-          orderBy: { id: "asc" },
         }),
   ]);
   const convertedSet = new Set(convertedIds);
@@ -442,25 +448,24 @@ export async function getCheckoutSourceQuestions({
   for (const slice of slices) {
     const snapshot = snapshots.get(slice.assetId);
     if (!snapshot || !poolAsksForSource(snapshot)) continue;
-    let defaultLocationId = defaultSourceLocationId(snapshot);
     const fromAllocation = convertedSet.has(slice.id);
-    if (fromAllocation) {
-      const pendingRows = sourceRows
-        .filter((row) => row.bookingAssetId === slice.id)
-        .map((row) => ({
-          locationId: row.kind === "UNPLACED" ? null : row.locationId,
-          pending: row.quantity - row.releasedQuantity - row.outQuantity,
-        }))
-        .filter((row) => row.pending > 0);
-      if (pendingRows.length > 1) {
-        // A split plan: an older phone cannot answer for it, and a new client
-        // defaults to "as planned" so leaving the select alone keeps the split.
-        if (!clientSupportsSources) continue;
-        defaultLocationId = ALLOCATION_SOURCE_FORM_VALUE;
-      } else if (pendingRows.length === 1) {
-        defaultLocationId = pendingRows[0].locationId;
-      }
+    if (fromAllocation && !clientSupportsSources) {
+      const pendingSources = sourceRows.filter(
+        (row) =>
+          row.bookingAssetId === slice.id &&
+          row.quantity - row.releasedQuantity - row.outQuantity > 0
+      ).length;
+      // A split plan: an older phone cannot answer for it, so it is not asked
+      // and the slice goes out by its plan.
+      if (pendingSources > 1) continue;
     }
+    // "As planned" whenever the slice dispatches through its source rows
+    // (converted, or converting now): a shelf default submitted unchanged
+    // would read as the operator's choice and move the plan into it.
+    const defaultLocationId =
+      fromAllocation || adoptionEnabled
+        ? ALLOCATION_SOURCE_FORM_VALUE
+        : defaultSourceLocationId(snapshot);
     questions.push({
       sliceId: slice.id,
       assetId: slice.assetId,

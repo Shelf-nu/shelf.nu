@@ -32,7 +32,10 @@ import {
   getRemainingCheckoutPayload,
   partialCheckoutBooking,
 } from "./service.server";
-import { dispatchUnits } from "./sources/booking-sources.server";
+import {
+  admitWindowChange,
+  dispatchUnits,
+} from "./sources/booking-sources.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -4084,6 +4087,78 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       );
       // Reported after the commit, for the phone's response summary.
       expect(reported).toEqual([dispatchedFromWarehouse]);
+    });
+
+    it("admits an early scan that moves the start to now, then dispatches over the moved window", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // The row lock reads the booking RESERVED: this is its first scan.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+      // why: the booking's pool slices are read under the booking lock to
+      // lock their assets before the admission; every other slice read keeps
+      // the shared fake's answer.
+      const findMany = vitest.mocked(db.bookingAsset.findMany);
+      const shared = findMany.getMockImplementation();
+      findMany.mockImplementation(((args?: {
+        where?: { id?: unknown; asset?: { type?: unknown } };
+      }) =>
+        args?.where?.asset?.type && !args.where.id
+          ? Promise.resolve([{ id: "ba-qty-1", assetId: "asset-qty-1" }])
+          : shared?.(args as never) ??
+            Promise.resolve([{ quantity: 1 }])) as never);
+      onTestFinished(() => {
+        if (shared) findMany.mockImplementation(shared);
+      });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      expect(admitWindowChange).toHaveBeenCalledTimes(1);
+      const admitted = vitest.mocked(admitWindowChange).mock.calls[0][1];
+      expect(admitted).toMatchObject({
+        organizationId: "org-1",
+        bookingId: "booking-1",
+        to: futureTo,
+        previous: { from: futureFrom, to: futureTo },
+        kind: "dates",
+      });
+      expect(admitted.from.getTime()).toBeLessThan(futureFrom.getTime());
+      // The dispatch measures the window the booking is written with.
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1].window).toEqual({
+        from: admitted.from,
+        to: futureTo,
+      });
+      expect(
+        vitest.mocked(admitWindowChange).mock.invocationCallOrder[0]
+      ).toBeLessThan(vitest.mocked(dispatchUnits).mock.invocationCallOrder[0]);
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ from: admitted.from }),
+        })
+      );
+    });
+
+    it("admits nothing when the scan keeps the booking's window", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      expect(admitWindowChange).not.toHaveBeenCalled();
     });
 
     it("dispatches by allocation when nothing was picked", async () => {

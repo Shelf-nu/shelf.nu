@@ -5844,6 +5844,147 @@ describe("checkoutBooking", () => {
     });
   });
 
+  it("dispatches each pool slice by the units its counter grows by: whole slices by quantity, partly-sent ones by residue, once each", async () => {
+    expect.assertions(1);
+
+    // Three kit-driven pool slices (kit-driven keeps the free-pool sweep out):
+    // - ba-whole never left: departs whole, 6 units;
+    // - ba-part sent 3 of 8 by a scan: only its residue of 5 leaves;
+    // - ba-both sent 1 of 4, came back in full and departs again whole: it is
+    //   both a departure and a top-up, and goes out once, by its quantity.
+    const preTxSlice = (
+      id: string,
+      assetId: string,
+      quantity: number,
+      checkedOutAt: Date | null,
+      checkedInAt: Date | null
+    ) => ({
+      asset: {
+        id: assetId,
+        assetKits: [{ kitId: "kit-1" }],
+        title: assetId,
+        type: AssetType.QUANTITY_TRACKED,
+        status: "AVAILABLE",
+        bookingAssets: [],
+      },
+      assetId,
+      quantity,
+      id,
+      assetKitId: `ak-${id}`,
+      checkedOutAt,
+      checkedInAt,
+    });
+    const sentAt = new Date("2026-01-01T10:00:00.000Z");
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        preTxSlice("ba-whole", "asset-a", 6, null, null),
+        preTxSlice("ba-part", "asset-b", 8, sentAt, null),
+        preTxSlice(
+          "ba-both",
+          "asset-c",
+          4,
+          sentAt,
+          new Date("2026-01-02T10:00:00.000Z")
+        ),
+      ],
+    };
+    // why: the pre-tx load, then the post-commit read, which must report
+    // ONGOING for the flow to continue past the status write.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: the status write only has to resolve; it is not what this asserts.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: the slice reads are told apart by their filters: pre-stamped
+    // slices (`checkedOutAt`), departing slices (`OR`), the LEGACY recorder's
+    // read (`checkedOutQuantity`, nothing to record here) and the booking's
+    // pool slices (`asset.type`).
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation(
+      (args?: {
+        where?: {
+          checkedOutAt?: unknown;
+          OR?: unknown;
+          checkedOutQuantity?: unknown;
+          asset?: { type?: unknown };
+        };
+      }) => {
+        const where = args?.where;
+        if (where?.checkedOutAt) {
+          return Promise.resolve([
+            {
+              id: "ba-part",
+              assetId: "asset-b",
+              quantity: 8,
+              assetKitId: "ak-ba-part",
+            },
+            {
+              id: "ba-both",
+              assetId: "asset-c",
+              quantity: 4,
+              assetKitId: "ak-ba-both",
+            },
+          ]);
+        }
+        if (where?.OR) {
+          return Promise.resolve([
+            {
+              id: "ba-whole",
+              assetId: "asset-a",
+              assetKitId: "ak-ba-whole",
+              quantity: 6,
+            },
+            {
+              id: "ba-both",
+              assetId: "asset-c",
+              assetKitId: "ak-ba-both",
+              quantity: 4,
+            },
+          ]);
+        }
+        if (where?.checkedOutQuantity !== undefined) return Promise.resolve([]);
+        if (where?.asset?.type) {
+          return Promise.resolve([
+            { id: "ba-whole", assetId: "asset-a" },
+            { id: "ba-part", assetId: "asset-b" },
+            { id: "ba-both", assetId: "asset-c" },
+          ]);
+        }
+        return Promise.resolve([]);
+      }
+    );
+    onTestFinished(() => {
+      (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+    });
+    // why: the earlier scan recorded 3 units of ba-part and 1 of ba-both.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-b", "asset-c"],
+        quantities: [3, 1],
+        bookingAssetIds: ["ba-part", "ba-both"],
+      },
+    ]);
+
+    await checkoutBooking(mockCheckoutParams);
+
+    // The same units the counters grow by, so the rows' dispatched totals
+    // keep summing to `checkedOutQuantity`.
+    expect(
+      vitest.mocked(bookingSources.dispatchUnits).mock.calls[0][1].picks
+    ).toEqual([
+      { sliceId: "ba-whole", units: 6 },
+      { sliceId: "ba-both", units: 4 },
+      { sliceId: "ba-part", units: 5 },
+    ]);
+  });
+
   it("clears the stale check-in marker on a slice that departs a second time", async () => {
     expect.assertions(3);
 
@@ -6803,6 +6944,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
         assetModelId: "am-dell",
       },
     ]);
+    // why: the check-out first reads the booking's quantity-tracked slices,
+    // under the booking lock, to lock their assets with the scan's. None here.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
     // why: post-scan snapshot inside the tx. All 4 BookingAssets are on the
     // why: `addScannedAssetsToBookingWithinTx` first reads which scanned assets
     // ALREADY hold a standalone row, so only newly-arrived ones can discharge a
@@ -6903,9 +7049,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
           args?.where?.archivedAt?.not === null ? [] : [scannedUnit]
         )
     );
-    // why: first the rows the scan already holds (none), then the post-scan
-    // snapshot the check-out reads.
+    // why: first the booking's quantity-tracked slices (none), read to lock
+    // their assets, then the rows the scan already holds (none), then the
+    // post-scan snapshot the check-out reads.
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -7062,6 +7210,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
         assetModelId: "am-dell",
       },
     ]);
+    // why: the check-out first reads the booking's quantity-tracked slices,
+    // under the booking lock, to lock their assets with the scan's. None here.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
     // why: post-scan snapshot inside the tx. All 4 BookingAssets are on the
     // why: `addScannedAssetsToBookingWithinTx` first reads which scanned assets
     // ALREADY hold a standalone row, so only newly-arrived ones can discharge a
@@ -7152,10 +7305,12 @@ describe("fulfilModelRequestsAndCheckout", () => {
         assetModelId: "am-dell",
       },
     ]);
-    // why: the rows the scan already holds (none), then the post-scan
+    // why: the booking's quantity-tracked slices (none), read to lock their
+    // assets, the rows the scan already holds (none), then the post-scan
     // snapshot. Every later pivot read is routed by its shape: the departing
     // slices answer the `OR` read, and nothing else is pre-stamped.
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -7253,6 +7408,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
           }))
         )
     );
+    // why: the check-out first reads the booking's quantity-tracked slices,
+    // under the booking lock, to lock their assets with the scan's. None here.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
     // why: the scan helper first reads which scanned assets already hold a
     // standalone row: the printer does, so no row is added for it.
     (
@@ -7338,7 +7498,9 @@ describe("fulfilModelRequestsAndCheckout", () => {
     // added and the post-commit note pass has no arrivals to narrate. This
     // test is about the two locks that open the transaction, which both run
     // before any of that.
+    // The booking's quantity-tracked slices come first (none).
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ assetId: "hp-1", assetKitId: null }])
       .mockResolvedValueOnce([
         {
@@ -7395,6 +7557,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
       .mockResolvedValueOnce([scannedDell])
       .mockResolvedValueOnce([scannedDell])
       .mockResolvedValueOnce([scannedDell]);
+    // why: the check-out first reads the booking's quantity-tracked slices,
+    // under the booking lock, to lock their assets with the scan's. None here.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
     // why: `addScannedAssetsToBookingWithinTx` first reads which scanned
     // assets already hold a standalone row; none do.
     (
@@ -7543,6 +7710,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
       []
     );
+    // why: the check-out first reads the booking's quantity-tracked slices,
+    // under the booking lock, to lock their assets with the scan's. None here.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValueOnce([

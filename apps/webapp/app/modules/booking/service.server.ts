@@ -5351,46 +5351,32 @@ export async function fulfilModelRequestsAndCheckout({
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
         /**
-         * When the check-out below admits pool sources (a draft becoming a
-         * hold, or a moved window), the facade locks every quantity-tracked
-         * asset on the booking. Those assets and every scanned one are locked
-         * here first, in one sorted statement, so the scan's locks, the
-         * facade's and the pool guard's only re-take rows already held.
+         * The check-out below dispatches the booking's pool slices from their
+         * sources, and when it admits pool sources (a draft becoming a hold,
+         * or a moved window) the facade locks every quantity-tracked asset on
+         * the booking. Those assets are read here, under the booking lock so
+         * no slice is added meanwhile, and locked with every scanned one in
+         * one sorted statement, so the scan's locks, the facade's and the
+         * pool guard's only re-take rows already held.
          */
         const storedWindow = { from: bookingFound.from, to: bookingFound.to };
-        const knownPoolAssetIds = bookingFound.bookingAssets
-          .filter((ba) => isQuantityTracked(ba.asset))
-          .map((ba) => ba.asset.id);
+        const poolAssetIdsInTx = (
+          await findPoolSlices(tx, { bookingId, organizationId })
+        ).map((slice) => slice.assetId);
         if (
           lockedStatus === BookingStatus.DRAFT ||
           windowMoved(
             windowAfterUpdate(dataToUpdate, storedWindow),
             storedWindow
-          )
+          ) ||
+          poolAssetIdsInTx.some((id) => !assetIds.includes(id))
         ) {
-          const poolSlices = await findPoolSlices(tx, {
-            bookingId,
-            organizationId,
-          });
           await lockAssetsForArchiveGuard(
             tx,
             [
               ...assetIds,
               ...kitSlices.map((slice) => slice.assetId),
-              ...poolSlices.map((slice) => slice.assetId),
-            ],
-            organizationId
-          );
-        } else if (knownPoolAssetIds.some((id) => !assetIds.includes(id))) {
-          // The check-out dispatches the booking's pool slices from their
-          // sources, which locks their assets: taken here with the scan's,
-          // in one sorted statement, before the scan locks anything.
-          await lockAssetsForArchiveGuard(
-            tx,
-            [
-              ...assetIds,
-              ...kitSlices.map((slice) => slice.assetId),
-              ...knownPoolAssetIds,
+              ...poolAssetIdsInTx,
             ],
             organizationId
           );
@@ -11298,6 +11284,59 @@ export async function partialCheckoutBooking({
           ),
         ].sort();
 
+        /**
+         * The window this session commits. An early first scan with the
+         * adjusted-date intent moves `from` to now (written with the status
+         * flip below); pool sources are admitted for that move and dispatched
+         * over it. Every quantity-tracked asset on the booking is locked
+         * first, in one sorted statement with this batch's pools, so the
+         * facade and the per-asset locks below only re-take rows already held.
+         */
+        const storedWindow = { from: bookingFound.from, to: bookingFound.to };
+        const adjustedFrom =
+          lockedStatus === BookingStatus.RESERVED &&
+          bookingFound.from &&
+          isBookingEarlyCheckout(bookingFound.from) &&
+          intentChoice === CheckoutIntentEnum["with-adjusted-date"]
+            ? DateTime.fromFormat(
+                DateTime.fromJSDate(new Date(), {
+                  zone: hints.timeZone,
+                }).toFormat(DATE_TIME_FORMAT),
+                DATE_TIME_FORMAT,
+                { zone: hints.timeZone }
+              ).toJSDate()
+            : null;
+        const committedWindow = {
+          from: adjustedFrom ?? storedWindow.from,
+          to: storedWindow.to,
+        };
+        if (windowMoved(committedWindow, storedWindow)) {
+          const poolSlices = await findPoolSlices(tx, {
+            bookingId: id,
+            organizationId,
+          });
+          if (poolSlices.length > 0) {
+            await lockEveryAssetForQuantityUpdate(
+              tx,
+              [
+                ...new Set([
+                  ...qtyDispositionAssetIds,
+                  ...poolSlices.map((slice) => slice.assetId),
+                ]),
+              ],
+              organizationId
+            );
+            await admitWindowChange(tx, {
+              organizationId,
+              bookingId: id,
+              from: committedWindow.from,
+              to: committedWindow.to,
+              previous: storedWindow,
+              kind: "dates",
+            });
+          }
+        }
+
         // Row-lock every qty asset BEFORE reading committed remaining, preserving
         // the lock-before-read ordering the per-disposition loop relied on: a
         // concurrent checkout on the same asset can't slip a claim between our
@@ -11969,7 +12008,7 @@ export async function partialCheckoutBooking({
           }),
           poolAssetIds: new Set(qtyDispositionAssetIds),
           submission: sourceLocations,
-          window: { from: bookingFound.from, to: bookingFound.to },
+          window: committedWindow,
           clientSupportsSources,
         });
 
@@ -12111,20 +12150,9 @@ export async function partialCheckoutBooking({
           // and preserve the original start in `originalFrom`. Mirrors the
           // all-at-once checkoutBooking path so a partial early checkout doesn't
           // leave a future start time while custody has already begun.
-          if (
-            bookingFound.from &&
-            isBookingEarlyCheckout(bookingFound.from) &&
-            intentChoice === CheckoutIntentEnum["with-adjusted-date"]
-          ) {
+          if (adjustedFrom) {
             transitionData.originalFrom = plannedStartToPreserve(bookingFound);
-            const fromDateStr = DateTime.fromJSDate(new Date(), {
-              zone: hints.timeZone,
-            }).toFormat(DATE_TIME_FORMAT);
-            transitionData.from = DateTime.fromFormat(
-              fromDateStr,
-              DATE_TIME_FORMAT,
-              { zone: hints.timeZone }
-            ).toJSDate();
+            transitionData.from = adjustedFrom;
           }
 
           await tx.booking.update({

@@ -49,9 +49,10 @@ export const UNPLACED_SOURCE_FORM_VALUE = "";
 /**
  * Form value (and question default) that means "as planned": the slice's
  * units go out by its allocation, exactly as when no pick is sent. The
- * default for a slice whose planned units are split across sources, so
- * leaving the select alone never consolidates the split into one source.
- * Parsers drop it, so it reaches the server as "not picked".
+ * default for every slice that dispatches through its source rows (a
+ * converted group, or a LEGACY group that converts at check-out), so leaving
+ * the select alone never forces a source the plan avoids. Parsers drop it,
+ * so it reaches the server as "not picked".
  */
 export const ALLOCATION_SOURCE_FORM_VALUE = "__allocation__";
 
@@ -221,13 +222,13 @@ export type CheckoutSourceQuestion = {
   /**
    * The option to pre-select: the server's answer when nothing is picked. A
    * location id, null for Unplaced, or {@link ALLOCATION_SOURCE_FORM_VALUE}
-   * ("as planned") for a slice whose planned units are split across sources.
+   * ("as planned") for a slice that dispatches through its source rows.
    */
   defaultLocationId: string | null;
   /**
    * True when the slice already has sources planned (its group is
-   * converted): the default is its largest pending source, and a check-out
-   * that picks nothing dispatches by that plan. Surfaces that cannot ask the
+   * converted): the default is "as planned", and a check-out that picks
+   * nothing dispatches by that plan. Surfaces that cannot ask the
    * question may check such a slice out without refusing it. Absent means
    * false (a LEGACY slice).
    */
@@ -277,7 +278,7 @@ export function checkoutSourceOptions(
       label: `Unplaced · ${question.unplaced} ${unit}`,
     });
   }
-  // A split slice defaults to its plan, which has to be an option to select.
+  // A slice that defaults to its plan needs that plan as an option to select.
   if (question.defaultLocationId === ALLOCATION_SOURCE_FORM_VALUE) {
     options.unshift({
       value: ALLOCATION_SOURCE_FORM_VALUE,

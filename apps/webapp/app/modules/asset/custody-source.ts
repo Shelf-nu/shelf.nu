@@ -291,7 +291,8 @@ export function buildCustodySourceOptions(
       label: "Unplaced",
       placed: unplaced,
       inCustody: custodyFromSource(state, null),
-      onBooking: 0,
+      // Converted bookings' units out from Unplaced; LEGACY rows never name it.
+      onBooking: bookedOutFromSource(state, null),
       left: unitsLeftAtSource(state, null),
     });
   }

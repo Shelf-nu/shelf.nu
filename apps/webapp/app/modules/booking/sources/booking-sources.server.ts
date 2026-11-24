@@ -1088,13 +1088,51 @@ async function buildShortRefusal(
 }
 
 /**
+ * The short rule, the same for a dispatch by allocation and from a chosen
+ * source: a slice is refused only when units leaving now come from a source
+ * the short sweep flags for it. Units with no source (pending on UNASSIGNED)
+ * are refused where they would leave, in {@link dispatchByAllocation}.
+ *
+ * @param taken - Units taken from each source key of the slice in this call
+ * @param shortKeys - Loose source keys the slice is short at
+ * @throws {ShelfError} 400 naming the short sources the units left from
+ */
+async function assertNotLeavingShort(
+  tx: BookingSourcesTx,
+  organizationId: string,
+  group: WorkingGroup,
+  slice: WorkingSlice,
+  taken: Taken,
+  shortKeys: ReadonlySet<string>
+) {
+  const leavingShort = new Set(
+    [...taken.keys()].filter((key) => shortKeys.has(key))
+  );
+  if (leavingShort.size > 0) {
+    throw await buildShortRefusal(
+      tx,
+      organizationId,
+      group,
+      slice,
+      leavingShort
+    );
+  }
+}
+
+/**
  * Sends units of a slice out by its allocation: pending units first, from
  * LOCATION rows in row order and then the UNPLACED row; beyond pending,
  * released units on those rows in the same order (a re-claim); then released
  * units on the UNASSIGNED row, first given a known source by the allocation
  * rule against the free units left for this booking.
  *
- * @throws {ShelfError} 400 when the released units on UNASSIGNED fit no source
+ * Units beyond the known rows' pending would come from pending on UNASSIGNED,
+ * which has no source yet: refused as needing a location. Pending on
+ * UNASSIGNED that the dispatch does not reach stays where it is.
+ *
+ * @param shortKeys - Loose source keys the slice is short at
+ * @throws {ShelfError} 400 when units leaving need a location or leave a
+ *   short source, or the released units on UNASSIGNED fit no source
  */
 async function dispatchByAllocation(
   tx: BookingSourcesTx,
@@ -1102,6 +1140,7 @@ async function dispatchByAllocation(
   group: WorkingGroup,
   slice: WorkingSlice,
   units: number,
+  shortKeys: ReadonlySet<string>,
   taken: Taken
 ) {
   let left = units;
@@ -1110,6 +1149,9 @@ async function dispatchByAllocation(
     const k = Math.min(pendingOf(row), left);
     dispatchRow(row, k, taken);
     left -= k;
+  }
+  if (left > 0 && unassignedPending(slice) > 0) {
+    throw await buildShortRefusal(tx, organizationId, group, slice, new Set());
   }
   for (const row of known) {
     const k = Math.min(row.releasedQuantity, left);
@@ -1143,6 +1185,14 @@ async function dispatchByAllocation(
     left -= movable;
   }
   if (left > 0) throw overBooked(slice.id);
+  await assertNotLeavingShort(
+    tx,
+    organizationId,
+    group,
+    slice,
+    taken,
+    shortKeys
+  );
 }
 
 /**
@@ -1155,6 +1205,9 @@ async function dispatchByAllocation(
  * released units moved. The admission check after every pick decides whether
  * the source can take them. Never replaces the slice's whole split: rows the
  * dispatch does not need keep their units.
+ *
+ * Moving pending units off UNASSIGNED into the source gives them that
+ * source, so a slice needing a location may still go out from a choice.
  *
  * @throws {ShelfError} 400 when the source is not a placement of the pool, or
  *   the slice is short there
@@ -1175,15 +1228,6 @@ async function dispatchFromChoice(
     throw userError("The chosen location does not hold this asset.", {
       sliceId: slice.id,
     });
-  }
-  if (shortKeys.has(key)) {
-    throw await buildShortRefusal(
-      tx,
-      organizationId,
-      group,
-      slice,
-      new Set([key])
-    );
   }
   let row = slice.rows.find((r) => sourceKey(r) === key);
   if (!row) {
@@ -1229,6 +1273,14 @@ async function dispatchFromChoice(
   if (need > 0) throw overBooked(slice.id);
   if (moved) slice.mode = "MANUAL";
   dispatchRow(target, units, taken);
+  await assertNotLeavingShort(
+    tx,
+    organizationId,
+    group,
+    slice,
+    taken,
+    shortKeys
+  );
 }
 
 /**
@@ -1313,11 +1365,14 @@ function shortKeysBySlice(
  * whose group stays LEGACY is returned in `legacySliceIds` for the caller.
  *
  * Refusals (400, nothing written), in the order checked:
- * - a short slice (pending at a source the short sweep flags for it, or
- *   pending on UNASSIGNED) names the source and says it needs a location;
+ * - units leaving now from a source the short sweep flags for the slice, or
+ *   units that would come from pending on UNASSIGNED, name the source or say
+ *   the slice needs a location (one rule for allocation and for a choice; a
+ *   choice may first move UNASSIGNED pending into the chosen source);
  * - a re-claim or a move into the chosen source must fit the free units over
  *   the rest of the window `[max(from, now), to)`, naming the source and its
- *   free units;
+ *   free units. When nothing remains of the window (now at or past `to`),
+ *   neither this nor the short rule applies;
  * - units leaving a loose source now must be there now (physical-now):
  *   `Only 3 units are at Demo Warehouse right now.`
  *
@@ -1358,12 +1413,17 @@ export async function dispatchUnits(
   const clientSupportsSources = args.clientSupportsSources ?? true;
   const now = args.now ?? new Date();
 
-  // Re-claims and moves are admitted over the rest of the window.
-  const start = new Date(Math.max(args.window.from.getTime(), now.getTime()));
-  const window: Window =
-    start.getTime() < args.window.to.getTime()
-      ? { from: start, to: args.window.to }
-      : args.window;
+  // Re-claims and moves are admitted over the rest of the window. Once now
+  // reaches its end (an overdue check-out) nothing remains of it: nothing is
+  // admitted or swept, and the empty window [now, now) counts no other
+  // booking's holds. Physical-now still guards the units leaving.
+  const windowOver = now.getTime() >= args.window.to.getTime();
+  const window: Window = windowOver
+    ? { from: now, to: now }
+    : {
+        from: new Date(Math.max(args.window.from.getTime(), now.getTime())),
+        to: args.window.to,
+      };
 
   const ctx = await openCall(tx, {
     organizationId,
@@ -1396,12 +1456,14 @@ export async function dispatchUnits(
   if (looseAssetIds.length > 0) {
     [capacity, holdsByPool, physical] = await Promise.all([
       loadSourceCapacity(tx, { organizationId, assetIds: looseAssetIds }),
-      loadCompetingHoldsByPool(tx, {
-        organizationId,
-        assetIds: looseAssetIds,
-        window,
-        excludeBookingId: bookingId,
-      }),
+      windowOver
+        ? Promise.resolve(new Map<string, SourceHold[]>())
+        : loadCompetingHoldsByPool(tx, {
+            organizationId,
+            assetIds: looseAssetIds,
+            window,
+            excludeBookingId: bookingId,
+          }),
       loadPhysicalNow(tx, { organizationId, assetIds: looseAssetIds }),
     ]);
   }
@@ -1410,13 +1472,15 @@ export async function dispatchUnits(
   const shortByGroup = new Map(
     groups.map((group) => [
       group,
-      shortKeysBySlice(group, {
-        capacity: capacity.get(group.key.assetId) ?? new Map(),
-        competing: holdsByPool.get(group.key.assetId) ?? [],
-        bookingId,
-        booking: ctx.booking,
-        window,
-      }),
+      windowOver
+        ? new Map<string, Set<string>>()
+        : shortKeysBySlice(group, {
+            capacity: capacity.get(group.key.assetId) ?? new Map(),
+            competing: holdsByPool.get(group.key.assetId) ?? [],
+            bookingId,
+            booking: ctx.booking,
+            window,
+          }),
     ])
   );
   const holdsBefore = new Map(groups.map((g) => [g, ownHoldBySource(g)]));
@@ -1453,28 +1517,20 @@ export async function dispatchUnits(
       );
       continue;
     }
-    if (shortKeys.size > 0 || unassignedPending(slice) > 0) {
-      throw await buildShortRefusal(
-        tx,
-        organizationId,
-        group,
-        slice,
-        shortKeys
-      );
-    }
     await dispatchByAllocation(
       tx,
       organizationId,
       group,
       slice,
       pick.units,
+      shortKeys,
       taken
     );
   }
 
   // Re-claims and moves add to the booking's hold at a source: admitted
-  // against the free units over the rest of the window.
-  for (const group of groups) {
+  // against the free units over the rest of the window, when any remains.
+  for (const group of windowOver ? [] : groups) {
     const before = holdsBefore.get(group) ?? new Map<string, number>();
     const freeByKey = new Map<string, RefusalEntry>(
       group.free.map((s) => [sourceKey(s), s])

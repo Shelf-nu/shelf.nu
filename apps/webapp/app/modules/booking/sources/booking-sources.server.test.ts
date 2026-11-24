@@ -1133,7 +1133,11 @@ describe("dispatchUnits", () => {
   /** Runs a dispatch of slice s1 on the fake transaction. */
   function dispatch(
     pick: { units: number; fromLocationId?: string | null },
-    extra: { status?: string; clientSupportsSources?: boolean } = {}
+    extra: {
+      status?: string;
+      clientSupportsSources?: boolean;
+      now?: Date;
+    } = {}
   ) {
     return dispatchUnits(
       fakeTx({ slices: [{ id: "s1" }], status: extra.status ?? "RESERVED" }),
@@ -1142,7 +1146,7 @@ describe("dispatchUnits", () => {
         bookingId: BOOKING,
         picks: [{ sliceId: "s1", ...pick }],
         window: WINDOW,
-        now: NOW,
+        now: extra.now ?? NOW,
         adoptionEnabled: true,
         clientSupportsSources: extra.clientSupportsSources,
       }
@@ -1361,7 +1365,7 @@ describe("dispatchUnits", () => {
     });
   });
 
-  it("refuses a slice with units that need a location", async () => {
+  it("refuses when units leaving would come from pending that needs a location", async () => {
     h.freeFor = () => free3(20, 20, 20);
     stageShelf({ "LOCATION:loc-a": 20 });
     seedConverted([
@@ -1369,12 +1373,44 @@ describe("dispatchUnits", () => {
       { kind: "UNASSIGNED", quantity: 3 },
     ]);
 
-    const error = await dispatchRefusal(dispatch({ units: 2 }));
+    const error = await dispatchRefusal(dispatch({ units: 5 }));
 
     expect(error.message).toBe(
       "Cables needs a location for 3 units. Choose where they come from, then check out again."
     );
     expect(h.writes).toHaveLength(0);
+  });
+
+  it("lets the units with a source leave while the rest still need a location", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "LOCATION:loc-a": 20 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
+      { kind: "UNASSIGNED", quantity: 3 },
+    ]);
+
+    await dispatch({ units: 2 });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({ outQuantity: 2 });
+  });
+
+  it("lets a choice give pending that needs a location the chosen source, and send it out", async () => {
+    h.freeFor = () => free3(20, 20, 20);
+    stageShelf({ "LOCATION:loc-a": 20 });
+    seedConverted([
+      { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
+      { kind: "UNASSIGNED", quantity: 3 },
+    ]);
+
+    await dispatch({ units: 5, fromLocationId: "loc-a" });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      quantity: 5,
+      outQuantity: 5,
+    });
+    expect(writtenPlan().setModes).toEqual([
+      { bookingAssetId: "s1", mode: "MANUAL" },
+    ]);
   });
 
   it("refuses a slice short at its source, naming the source", async () => {
@@ -1406,6 +1442,158 @@ describe("dispatchUnits", () => {
     expect(error.message).toBe(
       "Cables is short at Demo Warehouse and needs a location. Change where its units come from, then check out again."
     );
+  });
+
+  /**
+   * Demo Warehouse holds 5 and an earlier booking's 5 pending there come
+   * first, so slice s1 is short at Demo Warehouse; Back Room has room.
+   */
+  function stageShortAtA() {
+    h.freeFor = () => free3(20, 0, 20);
+    h.capacity = new Map([
+      [
+        POOL,
+        new Map([
+          ["UNPLACED:", 100],
+          ["LOCATION:loc-a", 5],
+          ["LOCATION:loc-b", 100],
+        ]),
+      ],
+    ]);
+    h.physical = new Map([
+      [
+        POOL,
+        new Map([
+          ["LOCATION:loc-a", 5],
+          ["LOCATION:loc-b", 20],
+        ]),
+      ],
+    ]);
+    h.holds = new Map([
+      [
+        POOL,
+        [
+          {
+            sliceId: "other",
+            sourceKey: "LOCATION:loc-a",
+            bookingFrom: new Date("2026-11-20T09:00:00Z"),
+            bookingCreatedAt: new Date("2026-10-01T09:00:00Z"),
+            bookingId: "booking-earlier",
+            from: new Date("2026-11-20T09:00:00Z"),
+            to: new Date("2026-12-05T09:00:00Z"),
+            out: 0,
+            pending: 5,
+          },
+        ],
+      ],
+    ]);
+    seedConverted([
+      { id: "s1-b", kind: "LOCATION", locationId: "loc-b", quantity: 3 },
+      { id: "s1-a", kind: "LOCATION", locationId: "loc-a", quantity: 5 },
+    ]);
+  }
+
+  it("by allocation, lets units leave a source that is not short while another source is", async () => {
+    stageShortAtA();
+
+    const result = await dispatch({ units: 3 });
+
+    expect(result.dispatched[0].sources).toEqual([
+      { kind: "LOCATION", locationId: "loc-b", name: "Back Room", quantity: 3 },
+    ]);
+  });
+
+  it("by allocation, refuses once the units leaving reach the short source", async () => {
+    stageShortAtA();
+
+    const error = await dispatchRefusal(dispatch({ units: 4 }));
+
+    expect(error.message).toBe(
+      "Cables is short at Demo Warehouse and needs a location. Change where its units come from, then check out again."
+    );
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("applies the same short rule to a choice: Back Room goes, Demo Warehouse is refused", async () => {
+    stageShortAtA();
+
+    const error = await dispatchRefusal(
+      dispatch({ units: 3, fromLocationId: "loc-a" })
+    );
+    expect(error.message).toBe(
+      "Cables is short at Demo Warehouse and needs a location. Change where its units come from, then check out again."
+    );
+    expect(h.writes).toHaveLength(0);
+
+    await dispatch({ units: 3, fromLocationId: "loc-b" });
+    expect(writtenRow("LOCATION", "loc-b")).toMatchObject({ outQuantity: 3 });
+  });
+
+  it("past the end of the window, skips admission and the short sweep but still checks physical-now", async () => {
+    /** After the window's end: an overdue check-out. */
+    const LATE = new Date("2026-12-03T09:00:00Z");
+    // Over the old window this re-claim would fail admission (0 free beyond
+    // what the slice holds) and the slice would be short at Demo Warehouse.
+    stageShortAtA();
+    h.freeFor = () => free3(0, 5, 0);
+    seedConverted(
+      [
+        {
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 10,
+          outQuantity: 5,
+          releasedQuantity: 5,
+          dispatchedTotal: 10,
+          sharedQuantity: 5,
+        },
+      ],
+      { checkedOutQuantity: 10 }
+    );
+
+    await dispatch({ units: 5 }, { status: "OVERDUE", now: LATE });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      outQuantity: 10,
+      releasedQuantity: 0,
+    });
+    // The window the session measures free units over is empty.
+    expect(h.windows.at(-1)).toEqual({ from: LATE, to: LATE });
+
+    // Units not on the shelf still cannot leave.
+    h.writes = [];
+    h.physical = new Map([[POOL, new Map([["LOCATION:loc-a", 3]])]]);
+    const error = await dispatchRefusal(
+      dispatch({ units: 5 }, { status: "OVERDUE", now: LATE })
+    );
+    expect(error.message).toBe("Only 3 units are at Demo Warehouse right now.");
+  });
+
+  it("re-claims a fully returned slice by its plan when it departs again, staying AUTO", async () => {
+    h.freeFor = () => free3(0, 5, 20);
+    stageShelf({ "LOCATION:loc-a": 5, "LOCATION:loc-b": 20 });
+    seedConverted(
+      [
+        {
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 5,
+          releasedQuantity: 5,
+          dispatchedTotal: 5,
+        },
+      ],
+      { checkedOutQuantity: 5 }
+    );
+
+    await dispatch({ units: 5 }, { status: "ONGOING" });
+
+    expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+      quantity: 5,
+      outQuantity: 5,
+      releasedQuantity: 0,
+      dispatchedTotal: 10,
+    });
+    expect(writtenPlan().setModes).toEqual([]);
   });
 
   it("early check-out with A's units out and B free: refused at A, succeeds from B", async () => {
