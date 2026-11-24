@@ -5,6 +5,11 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import { bookingEmailSubject } from "~/modules/push/messages";
+import {
+  BOOKING_APPROVAL_SWITCHES_SELECT,
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { resolveFormatPrefs } from "~/utils/date-format";
 import { isNotFoundError, ShelfError } from "~/utils/error";
@@ -51,8 +56,26 @@ const checkoutReminder = async ({ data }: PgBoss.Job<SchedulerData>) => {
 
   // Only a reserved booking is waiting to be checked out. Cancelling or
   // checking out cancels this job on a best-effort basis, so a job that still
-  // runs for any other status notifies nobody.
-  if (booking.status === BookingStatus.RESERVED && booking.from && booking.to) {
+  // runs for any other status notifies nobody. A request still waiting for
+  // approval cannot be checked out either, so it is not reminded to be.
+  const approvalSwitches =
+    booking.status === BookingStatus.RESERVED
+      ? await db.bookingSettings.findUnique({
+          where: { organizationId: booking.organizationId },
+          select: BOOKING_APPROVAL_SWITCHES_SELECT,
+        })
+      : null;
+  const isPendingApproval = isBookingPendingApproval({
+    status: booking.status,
+    approvedAt: booking.approvedAt,
+    requireBookingApproval: isBookingApprovalEnabled(approvalSwitches),
+  });
+  if (
+    booking.status === BookingStatus.RESERVED &&
+    !isPendingApproval &&
+    booking.from &&
+    booking.to
+  ) {
     // Resolve recipients with isScheduledJob: true so no editor is excluded
     // (scheduled jobs have no human actor to filter out)
     const recipients = await getBookingNotificationRecipients({

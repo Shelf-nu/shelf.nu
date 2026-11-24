@@ -144,8 +144,8 @@ pnpm db:reset
    DATABASE_URL="postgres://..." # Supabase connection pooling URL
    DIRECT_URL="postgres://..."   # Supabase direct connection URL
    SUPABASE_URL="https://..."    # Supabase project URL
-   SUPABASE_ANON_PUBLIC="..."    # Supabase anon key
-   SUPABASE_SERVICE_ROLE="..."   # Supabase service role key
+   SUPABASE_ANON_PUBLIC="sb_publishable_..." # Supabase publishable key
+   SUPABASE_SECRET_KEY="sb_secret_..."       # Supabase secret key
    SESSION_SECRET="..."          # Random secret for sessions
    SERVER_URL="http://localhost:3000" # For local development
    ```

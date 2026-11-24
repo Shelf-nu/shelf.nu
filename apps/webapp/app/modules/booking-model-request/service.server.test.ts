@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { db } from "~/database/db.server";
+import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
@@ -41,6 +42,12 @@ import {
   upsertBookingModelRequests,
 } from "./service.server";
 import type { ModelPoolClaim } from "./service.server";
+
+// why: whether a grown request clears its approval is decided by the approval
+// helper, which has its own suite; here only when it is asked.
+vitest.mock("~/modules/booking/request-change.server", () => ({
+  applyRequestGrowthRule: vitest.fn().mockResolvedValue(false),
+}));
 
 vitest.mock("~/database/db.server", () => ({
   db: {
@@ -81,6 +88,9 @@ vitest.mock("~/database/db.server", () => ({
     },
     booking: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: a transaction changing a booking's model reservations moves the
+      // booking's version (`updatedAt`) before it takes any lock.
+      updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
       // why: the pool reads the OTHER bookings that touch the window, each
       // with the units it names and the reservations it is owed, so the
       // pool can be measured at the instant demand peaks.
@@ -1412,7 +1422,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("creates the row when quantity is within availability", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     stageTotal(5);
 
     await upsertBookingModelRequest({
@@ -1440,6 +1450,37 @@ describe("upsertBookingModelRequest", () => {
       // row — existing is undefined, so existingFulfilled defaults to 0).
       update: { quantity: 3, fulfilledAt: null },
     });
+    // A new model reservation asks for more than an approval covered.
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(expect.anything(), {
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      actorUserId: USER_ID,
+    });
+  });
+
+  it("refuses the whole write when the growth rule refuses it", async () => {
+    // why: a requester asking for more on a booking already out is refused
+    // inside the transaction, so no extra reservation exists to check out.
+    stageTotal(5);
+    vitest.mocked(applyRequestGrowthRule).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Booking",
+        status: 400,
+        message:
+          "Ask someone who can approve bookings to add it, or make a new booking request for the extra items.",
+      })
+    );
+
+    await expect(
+      upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(/make a new booking request/);
   });
 
   it("rejects over-reservation when quantity > available", async () => {
@@ -1535,7 +1576,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("lets a reservation come down even when the pool no longer covers it", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
@@ -1578,6 +1619,8 @@ describe("upsertBookingModelRequest", () => {
         update: expect.objectContaining({ quantity: 8 }),
       })
     );
+    // Asking for less keeps any approval.
+    expect(applyRequestGrowthRule).not.toHaveBeenCalled();
   });
 
   it("refuses to drop a live booking's reservation below the units already assigned", async () => {
@@ -2733,7 +2776,7 @@ describe("removeBookingModelRequest", () => {
   });
 
   it("deletes the row on a DRAFT booking", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
@@ -2761,6 +2804,12 @@ describe("removeBookingModelRequest", () => {
         assetModelId: MODEL_ID,
         fulfilledQuantity: 0,
       },
+    });
+    // The booking's version moves, so a pending request cannot be approved
+    // from a page that still showed this reservation.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, organizationId: ORG_ID },
+      data: { updatedAt: expect.any(Date) },
     });
   });
 

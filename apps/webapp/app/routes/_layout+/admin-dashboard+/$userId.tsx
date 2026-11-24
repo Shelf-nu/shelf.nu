@@ -26,6 +26,7 @@ import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { resetPersonalWorkspaceBranding } from "~/modules/organization/service.server";
+import { linkSubscriptionToWorkspaceAsAdmin } from "~/modules/stripe-webhook/helpers.server";
 import { updateUserTierId } from "~/modules/tier/service.server";
 import { softDeleteUser, getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -33,6 +34,7 @@ import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import {
   payload,
   error,
@@ -260,6 +262,7 @@ export const action = async ({
           "deleteUser",
           "toggleSubscriptionCheck",
           "toggleBooleanField",
+          "linkSubscriptionToWorkspace",
         ]),
       })
     );
@@ -411,6 +414,31 @@ export const action = async ({
         sendNotification({
           title: "Field updated",
           message: `${fieldName} has been set to ${fieldValue}`,
+          icon: { name: "check", variant: "success" },
+          senderId: userId,
+        });
+        break;
+      }
+      case "linkSubscriptionToWorkspace": {
+        const { subscriptionId, organizationId } = parseData(
+          await request.formData(),
+          z.object({
+            subscriptionId: z.string().min(1),
+            organizationId: z.string().min(1, "Pick a workspace"),
+          })
+        );
+
+        // The helper checks both ids against the viewed user before writing.
+        await linkSubscriptionToWorkspaceAsAdmin({
+          userId: shelfUserId,
+          subscriptionId,
+          organizationId,
+        });
+
+        sendNotification({
+          title: "Subscription linked",
+          message:
+            "Stripe confirms the change in a few seconds, and the add-ons follow it.",
           icon: { name: "check", variant: "success" },
           senderId: userId,
         });
@@ -618,6 +646,12 @@ export default function Area51UserPage() {
                 organizations={organizations}
               />
             )}
+            <LinkSubscriptionsToWorkspace
+              subscriptions={subscriptionsWithProducts}
+              workspaces={organizations.filter(
+                (org) => org.type === "TEAM" && org.userId === user.id
+              )}
+            />
           </div>
         </div>
       </div>
@@ -670,6 +704,123 @@ export default function Area51UserPage() {
       </div>
     </div>
   ) : null;
+}
+
+/** The parts of a Stripe subscription the link form reads. */
+type LinkableSubscription = {
+  id: string;
+  status: string;
+  metadata: Record<string, string> | null;
+  items: { data: { price: { id: string; product: unknown } }[] };
+};
+
+/** A line item's product name, or its price id when the product is not expanded. */
+function lineItemName(item: LinkableSubscription["items"]["data"][number]) {
+  const product = item.price.product;
+  return product && typeof product === "object" && "name" in product
+    ? String(product.name)
+    : item.price.id;
+}
+
+/**
+ * Lets an admin link each of the user's subscriptions to one of the Team
+ * workspaces the user owns, or move it to another one. The action writes
+ * `metadata.organizationId` in Stripe, and the subscription update webhook
+ * then switches the add-ons on for that workspace (and off in the old one).
+ *
+ * @param props.subscriptions - The user's subscriptions, products expanded
+ * @param props.workspaces - The Team workspaces the user owns
+ */
+function LinkSubscriptionsToWorkspace({
+  subscriptions,
+  workspaces,
+}: {
+  subscriptions: LinkableSubscription[];
+  workspaces: { id: string; name: string }[];
+}) {
+  if (subscriptions.length === 0 || workspaces.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <h4 className="font-semibold">Link subscriptions to workspaces</h4>
+      <ul className="mt-2 space-y-3">
+        {subscriptions.map((subscription) => (
+          <LinkSubscriptionRow
+            key={subscription.id}
+            subscription={subscription}
+            workspaces={workspaces}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * One subscription with a workspace picker and a submit button.
+ *
+ * @param props.subscription - The subscription to link
+ * @param props.workspaces - The Team workspaces the user owns
+ */
+function LinkSubscriptionRow({
+  subscription,
+  workspaces,
+}: {
+  subscription: LinkableSubscription;
+  workspaces: { id: string; name: string }[];
+}) {
+  const fetcher = useFetcher<DataOrErrorResponse>();
+  const disabled = useDisabled(fetcher);
+  const current = subscription.metadata?.organizationId ?? "";
+  const selectId = `link-workspace-${subscription.id}`;
+  const errorMessage = fetcher.data?.error?.message ?? null;
+
+  return (
+    <li>
+      <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+        <input
+          type="hidden"
+          name="intent"
+          value="linkSubscriptionToWorkspace"
+        />
+        <input type="hidden" name="subscriptionId" value={subscription.id} />
+        <label htmlFor={selectId} className="text-sm">
+          {subscription.items.data.map(lineItemName).join(" + ")}{" "}
+          <span className="text-gray-600">
+            ({subscription.id}, {subscription.status})
+          </span>
+        </label>
+        <select
+          id={selectId}
+          name="organizationId"
+          style={{ all: "revert" }}
+          // Keyed by the saved link: a revalidation that brings back another
+          // workspace resets the choice, while one that keeps it leaves a
+          // pending pick alone.
+          key={current}
+          defaultValue={current}
+          disabled={disabled}
+          aria-describedby={errorMessage ? `${selectId}-error` : undefined}
+        >
+          <option value="" disabled>
+            Pick a workspace
+          </option>
+          {workspaces.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.name}
+            </option>
+          ))}
+        </select>
+        <Button type="submit" variant="secondary" size="sm" disabled={disabled}>
+          {disabled ? "Linking..." : current ? "Move" : "Link"}
+        </Button>
+      </fetcher.Form>
+      {errorMessage ? (
+        <p id={`${selectId}-error`} className="mt-1 text-sm text-error-500">
+          {errorMessage}
+        </p>
+      ) : null}
+    </li>
+  );
 }
 
 function TierUpdateForm({ tierId }: { tierId: TierId }) {

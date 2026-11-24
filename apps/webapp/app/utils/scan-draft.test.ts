@@ -13,6 +13,8 @@ import {
 import {
   clearScanDraft,
   readScanDraft,
+  readScanDraftChoices,
+  readScanDraftContext,
   saveScanDraft,
   scanDraftKey,
 } from "./scan-draft";
@@ -63,12 +65,23 @@ describe("scanDraftKey", () => {
 });
 
 describe("saveScanDraft / readScanDraft", () => {
-  it("round-trips a scanned code", () => {
+  /**
+   * A restored code comes back like one that has just been scanned and is
+   * still being looked up: its code type, and nothing a drawer would read
+   * `data` off. Scanner drawers treat a `type` as a promise of `data`.
+   */
+  it("round-trips a scanned code as one still owed its lookup", () => {
     saveScanDraft(KEY, { "qr-1": scanned() });
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
+      "qr-1": { codeType: "qr", pendingLookup: true },
     });
+  });
+
+  it("restores no type, so no drawer reads data that is not there yet", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraft(KEY)?.["qr-1"]).not.toHaveProperty("type");
   });
 
   /**
@@ -85,27 +98,37 @@ describe("saveScanDraft / readScanDraft", () => {
   });
 
   /**
-   * The regression that first broke this: a restored entry carries a type and
-   * no data, so re-saving the list it was restored into must keep it. Testing
-   * for `data` instead emptied the draft in the moment between restoring a
-   * list and its rows resolving again.
+   * A restored entry has neither type nor data until its fetch lands, so
+   * re-saving the list it was restored into must keep it. Dropping it there
+   * would empty the draft in the moment between restoring a list and its rows
+   * resolving again.
    */
   it("keeps a restored entry that has not re-resolved yet", () => {
-    saveScanDraft(KEY, { "qr-1": { codeType: "qr", type: "asset" } });
+    saveScanDraft(KEY, { "qr-1": scanned() });
+    const restored = readScanDraft(KEY)!;
+
+    saveScanDraft(KEY, restored);
 
     expect(readScanDraft(KEY)).toEqual({
-      "qr-1": { codeType: "qr", type: "asset" },
+      "qr-1": { codeType: "qr", pendingLookup: true },
     });
   });
 
-  it("drops codes that never resolved", () => {
+  /**
+   * A reload can land while a code scanned a moment ago is still being looked
+   * up. Nothing is known to be wrong with it, so it must not be lost.
+   */
+  it("keeps a code whose first lookup has not answered yet", () => {
     saveScanDraft(KEY, {
       "qr-1": scanned(),
       "qr-2": undefined,
-      "qr-3": { codeType: "qr" },
+      "qr-3": { codeType: "barcode" },
     });
 
-    expect(Object.keys(readScanDraft(KEY) ?? {})).toEqual(["qr-1"]);
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "qr-3": { codeType: "barcode", pendingLookup: true },
+    });
   });
 
   /** A code that failed once fails again; restoring it only repeats the error. */
@@ -122,6 +145,73 @@ describe("saveScanDraft / readScanDraft", () => {
    * Quick check-in and check-out mint keys that name a booking row, not a code.
    * They mean nothing once the booking has moved on.
    */
+  /**
+   * A lookup that got no answer (no connection, a gateway page) is not a
+   * verdict on the code. Dropping it would empty the draft the moment a
+   * restored list is looked up against a server that is still struggling,
+   * which is exactly when the draft is needed.
+   */
+  it("keeps a code whose lookup got no answer, to try again later", () => {
+    saveScanDraft(KEY, {
+      "qr-1": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "qr",
+      },
+      // Scanned for the first time while offline: no type is known yet.
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+
+    expect(readScanDraft(KEY)).toEqual({
+      "qr-1": { codeType: "qr", pendingLookup: true },
+      "barcode-2": { codeType: "barcode", pendingLookup: true },
+    });
+  });
+
+  /**
+   * A restored list is mirrored again as soon as any row on it changes. An
+   * entry still waiting for its lookup has no type, and must not be dropped
+   * by that write: another reload would lose the scan.
+   */
+  it("keeps a still-unanswered code through a restore and the next save", () => {
+    saveScanDraft(KEY, {
+      "qr-1": scanned(),
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+
+    // The restore, then a mirror write while the barcode is still pending.
+    const restored = readScanDraft(KEY)!;
+    saveScanDraft(KEY, { ...restored, "qr-1": scanned() });
+
+    expect(Object.keys(readScanDraft(KEY) ?? {}).sort()).toEqual([
+      "barcode-2",
+      "qr-1",
+    ]);
+  });
+
+  it("lets go of a retried code once the server refuses it", () => {
+    saveScanDraft(KEY, {
+      "barcode-2": {
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      },
+    });
+    readScanDraft(KEY);
+
+    saveScanDraft(KEY, { "barcode-2": { error: "Asset not found" } });
+
+    expect(readScanDraft(KEY)).toBeNull();
+  });
+
   it("drops the synthetic booking-row keys", () => {
     saveScanDraft(KEY, {
       "qr-1": scanned(),
@@ -218,5 +308,100 @@ describe("clearScanDraft", () => {
     clearScanDraft(KEY);
 
     expect(readScanDraft(KEY)).toBeNull();
+  });
+
+  it("removes the context saved with it, leaving nothing behind", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+    clearScanDraft(KEY);
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+    expect(
+      Object.keys(localStorage).filter((key) => key.startsWith(KEY))
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The context (on the bulk scanner, the action a list was parked under) is
+ * stored inside the draft, so it lives, expires and goes with its list.
+ */
+describe("draft context", () => {
+  it("round-trips with the draft", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+
+    expect(readScanDraftContext(KEY)).toBe("Assign custody");
+  });
+
+  it("is gone once the list is emptied", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+    saveScanDraft(KEY, {}, { context: "Assign custody" });
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+  });
+
+  it("expires with its draft", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T08:00:00Z"));
+    saveScanDraft(KEY, { "qr-1": scanned() }, { context: "Assign custody" });
+
+    vi.setSystemTime(new Date("2026-01-02T08:00:00Z"));
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("is null when none was saved", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() });
+
+    expect(readScanDraftContext(KEY)).toBeNull();
+  });
+});
+
+/**
+ * The units and source locations set on the rows are kept with the codes, so
+ * a restored list is not one that looks complete while every row has fallen
+ * back to its default.
+ */
+describe("draft choices", () => {
+  const choices = {
+    quantities: { "pool-1": 3 },
+    sources: { "pool-1": "loc-2" },
+  };
+
+  it("round-trips the quantities and sources set on the rows", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+
+    expect(readScanDraftChoices(KEY)).toEqual(choices);
+  });
+
+  it("goes with the draft when the list is emptied", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+    saveScanDraft(KEY, {}, { choices });
+
+    expect(readScanDraftChoices(KEY)).toEqual({ quantities: {}, sources: {} });
+  });
+
+  it("goes with the draft when it is cleared", () => {
+    saveScanDraft(KEY, { "qr-1": scanned() }, { choices });
+    clearScanDraft(KEY);
+
+    expect(readScanDraftChoices(KEY)).toEqual({ quantities: {}, sources: {} });
+  });
+
+  it("leaves out values of the wrong shape, so the row falls back to its default", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        savedAt: Date.now(),
+        entries: { "qr-1": { codeType: "qr" } },
+        quantities: { a: 2, b: 0, c: 1.5, d: "4" },
+        sources: { a: "loc-1", b: "", c: 7 },
+      })
+    );
+
+    expect(readScanDraftChoices(KEY)).toEqual({
+      quantities: { a: 2 },
+      sources: { a: "loc-1" },
+    });
   });
 });

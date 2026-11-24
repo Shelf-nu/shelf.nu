@@ -1,4 +1,5 @@
 import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
@@ -46,10 +47,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       role,
     });
 
-    const { assetIds, newLocationId, currentSearchParams } = parseData(
-      formData,
-      BulkLocationUpdateSchema.and(CurrentSearchParamsSchema)
-    );
+    const { assetIds, newLocationId, currentSearchParams, quantityTracked } =
+      parseData(
+        formData,
+        BulkLocationUpdateSchema.and(CurrentSearchParamsSchema).and(
+          z.object({
+            // Sent by a caller that submits an explicit list and reports one
+            // result for it (the scanner drawer): a quantity-tracked asset,
+            // which this path cannot place, then refuses the list. Left out
+            // by the asset index dialog, which warns about those assets
+            // before the user confirms and relies on them being skipped.
+            quantityTracked: z.enum(["skip", "refuse"]).optional(),
+          })
+        )
+      );
 
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -59,7 +70,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    await bulkUpdateAssetLocation({
+    const { skippedQuantityTracked } = await bulkUpdateAssetLocation({
       userId,
       assetIds,
       organizationId,
@@ -69,11 +80,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
       bookableScope: resolveBookableListScope({ access, userId }),
       timeZone,
+      quantityTracked,
     });
+
+    // The dialog can only count the quantity-tracked rows it has loaded, and
+    // "select all" reaches rows on other pages, so the real number of skipped
+    // assets is reported here.
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Set their placements, with a quantity per location, on each asset's page.`
+        : "";
 
     sendNotification({
       title: "Assets updated",
-      message: "Your assets' locations have been successfully updated",
+      message: `Your assets' locations have been successfully updated.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });

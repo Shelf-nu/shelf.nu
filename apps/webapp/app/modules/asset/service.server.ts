@@ -192,6 +192,7 @@ import {
   parseFileFormData,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { formatModelShortfallMessage } from "./archive-shortfall";
@@ -268,9 +269,11 @@ import {
   recordStockChanges,
 } from "../consumption-log/stock-ledger.server";
 import { createKitsIfNotExists } from "../kit/service.server";
+import type { AssetLocationMove } from "../location-note/service.server";
 import {
   createAssetLocationMoveNotes,
   createSystemLocationNote,
+  firstPlacementMove,
   placementChangeMoves,
 } from "../location-note/service.server";
 import {
@@ -972,6 +975,41 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   }
 }
 
+/** A just-created asset, as `createAsset` returns it. */
+type CreatedAssetWithPlacement = {
+  id: string;
+  title: string;
+  type: AssetType;
+  unitOfMeasure: string | null;
+  assetLocations?: {
+    quantity: number;
+    location: { id: string; name: string } | null;
+  }[];
+  user?: (UserNameFields & { id: string }) | null;
+};
+
+/**
+ * The location Activity lines for assets just created at a location: one move
+ * each, from no location to where the asset was placed, named after the user
+ * who created them. Passing every asset of a batch in one call lets
+ * `createAssetLocationMoveNotes` group them into one line per location.
+ *
+ * @param assets - Assets as `createAsset` returns them
+ * @returns The helper's arguments, or `null` when no asset was placed
+ */
+function firstPlacementNotes(
+  assets: CreatedAssetWithPlacement[]
+): Parameters<typeof createAssetLocationMoveNotes>[0] | null {
+  const moves = assets.flatMap((asset): AssetLocationMove[] => {
+    const placement = asset.assetLocations?.[0];
+    if (!placement?.location) return [];
+    return [firstPlacementMove(asset, placement.location, placement.quantity)];
+  });
+  // Every asset of a batch is created by the same user.
+  const actor = assets.find((asset) => asset.user)?.user;
+  return moves.length > 0 && actor ? { moves, actor } : null;
+}
+
 /**
  * Builds the `assetKits` nested-create fragment that attaches a newly-created
  * asset to a kit via the `AssetKit` pivot.
@@ -1035,6 +1073,7 @@ export async function createAsset({
   consumptionType,
   unitOfMeasure,
   assetModelId,
+  writeLocationNote = true,
 }: Pick<
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
@@ -1057,6 +1096,12 @@ export async function createAsset({
   consumptionType?: Asset["consumptionType"];
   unitOfMeasure?: Asset["unitOfMeasure"];
   assetModelId?: string;
+  /**
+   * Whether to add the new asset to its location's Activity tab. Callers that
+   * create many assets pass `false` and write one grouped line for all of
+   * them with {@link firstPlacementNotes}.
+   */
+  writeLocationNote?: boolean;
 }) {
   // Server-side validation for quantity-tracked assets
   if (isQuantityTracked(type)) {
@@ -1474,6 +1519,31 @@ export async function createAsset({
           tx
         );
 
+        // The first placement, in the same shape as a move from nowhere, so
+        // the Activity Summary shows where the asset arrived.
+        if (locationId) {
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_LOCATION_CHANGED",
+              entityType: "ASSET",
+              entityId: created.id,
+              assetId: created.id,
+              locationId,
+              field: "locationId",
+              fromValue: null,
+              toValue: locationId,
+              // Qty-tracked: the units placed. No-op for INDIVIDUAL.
+              meta: assetQtyMeta(
+                { type: type ?? AssetType.INDIVIDUAL },
+                quantity
+              ),
+            },
+            tx
+          );
+        }
+
         // Re-read so the returned shape has the pivot we just created
         // (the initial create's include came back empty for it).
         return locationId
@@ -1488,6 +1558,13 @@ export async function createAsset({
             })
           : created;
       }, LONG_TRANSACTION_OPTIONS);
+
+      // The first placement on the location's Activity tab, written after the
+      // commit.
+      const locationNotes = writeLocationNote
+        ? firstPlacementNotes([asset])
+        : null;
+      if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
 
       // Successfully created asset, exit the retry loop
       return asset;
@@ -1793,11 +1870,20 @@ export async function bulkCreateAssetsFromModel({
   // Nesting under an outer tx would break that retry; instead we accept
   // partial-success semantics and surface `failedAt` on mid-loop failure.
 
+  const created: CreatedAssetWithPlacement[] = [];
   const createdAssetIds: Asset["id"][] = [];
+  /**
+   * One grouped line on the location's Activity tab for every asset saved,
+   * including those saved before a failure part-way through.
+   */
+  const writeLocationNotes = async () => {
+    const locationNotes = firstPlacementNotes(created);
+    if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
+  };
   for (let i = 0; i < titles.length; i++) {
     const title = titles[i];
     try {
-      const created = await createAsset({
+      const asset = await createAsset({
         title,
         description: description ?? null,
         userId,
@@ -1813,8 +1899,10 @@ export async function bulkCreateAssetsFromModel({
         mainImageExpiration,
         availableToBook: availableToBook ?? true,
         type: AssetType.INDIVIDUAL,
+        writeLocationNote: false,
       });
-      createdAssetIds.push(created.id);
+      created.push(asset);
+      createdAssetIds.push(asset.id);
     } catch (cause) {
       const error = isLikeShelfError(cause)
         ? (cause as ShelfError)
@@ -1830,10 +1918,12 @@ export async function bulkCreateAssetsFromModel({
               failedAtIndex: i,
             },
           });
+      await writeLocationNotes();
       return { createdAssetIds, failedAt: i, error };
     }
   }
 
+  await writeLocationNotes();
   return { createdAssetIds };
 }
 
@@ -5553,6 +5643,7 @@ export async function duplicateAsset({
               amountOfDuplicates > 1 ? ` ${i + 1}` : ""
             })`,
             customFieldsValues: copiedCustomFieldValues,
+            writeLocationNote: false,
           })
         );
       }
@@ -5565,6 +5656,10 @@ export async function duplicateAsset({
       });
       throw cause;
     }
+
+    // One grouped line on the location's Activity tab, once every copy exists.
+    const locationNotes = firstPlacementNotes(duplicatedAssets);
+    if (locationNotes) await createAssetLocationMoveNotes(locationNotes);
 
     // Images are uploaded once every copy exists, so a failed create never
     // leaves an uploaded file behind. An image is best-effort: a copy without
@@ -7984,11 +8079,22 @@ export async function bulkUpdateAssetLocation({
   lastAuditDateAccess,
   bookableScope,
   timeZone = "UTC",
+  quantityTracked = "skip",
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
+  /**
+   * What to do with QUANTITY_TRACKED assets in the selection, which this path
+   * cannot place (a placement needs a unit count per location):
+   * - `"skip"` (default): move the rest and leave them where they are. For a
+   *   caller that has told the user up front, as the asset index dialog does.
+   * - `"refuse"`: move no assets and name the ones in the way. For a caller that
+   *   submits an explicit list and reports one result for it, such as a
+   *   scanner, where a skipped row would read as moved.
+   */
+  quantityTracked?: "skip" | "refuse";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   /**
@@ -8068,20 +8174,53 @@ export async function bulkUpdateAssetLocation({
     ]);
 
     /**
-     * Filter out QUANTITY_TRACKED assets FIRST — they always skip the
-     * bulk path (no per-asset qty input here), so they shouldn't be
-     * counted against the kit-guard below. A qty-tracked asset that
-     * happens to be in a kit would otherwise trip the kit-guard error
-     * even though it would have been skipped anyway. Mirror of the
-     * bulk-custody pattern (`bulkCheckOutAssets` line ~4099-4113):
-     * silently skip qty-tracked rows, throw early when the whole
-     * selection is qty-tracked. The dialog shows a `WarningBox`
-     * summarising the skip so users know what happened.
+     * Filter out QUANTITY_TRACKED assets FIRST: this path never places them
+     * (there is no unit count per asset here), so they must not be counted
+     * against the kit-guard below. A qty-tracked asset that happens to be in
+     * a kit would otherwise trip the kit-guard error although it is not being
+     * moved. Same shape as the bulk-custody path (`bulkCheckOutAssets`).
+     *
+     * A selection that is ALL qty-tracked always throws. A mixed one follows
+     * `quantityTracked`: skipped for a caller that warned the user up front
+     * (the asset index dialog shows a `WarningBox`), refused for one that
+     * reports a single result for an explicit list.
      */
     const nonQtyTracked = assets.filter(
       (a) => a.type !== AssetType.QUANTITY_TRACKED
     );
     const skippedQuantityTracked = assets.length - nonQtyTracked.length;
+    if (quantityTracked === "refuse" && skippedQuantityTracked > 0) {
+      // The titles are named because a caller may show this message as its
+      // only feedback, with no way to mark the rows: the operator has to be
+      // able to find them. Only the first few, so a long list stays readable.
+      // "No assets were moved" and not "nothing": a caller can move kits
+      // through a separate request that this refusal says nothing about.
+      const NAMED_TITLES = 5;
+      const skippedTitles = assets
+        .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
+        .map((a) => a.title);
+      const named = skippedTitles.slice(0, NAMED_TITLES).join(", ");
+      const unnamed = skippedTitles.length - NAMED_TITLES;
+      const one = skippedQuantityTracked === 1;
+      throw new ShelfError({
+        cause: null,
+        message: `${skippedQuantityTracked} quantity-tracked ${
+          one ? "asset" : "assets"
+        } can't be moved this way, so no assets were moved: ${named}${
+          unnamed > 0 ? ` and ${unnamed} more` : ""
+        }. Remove ${one ? "it" : "them"} from the list, then set ${
+          one ? "its" : "their"
+        } placements, with a quantity per location, on the asset page.`,
+        additionalData: {
+          userId,
+          organizationId,
+          skippedQuantityTracked,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
     if (nonQtyTracked.length === 0 && skippedQuantityTracked > 0) {
       throw new ShelfError({
         cause: null,
@@ -8250,7 +8389,9 @@ export async function bulkUpdateAssetLocation({
       actor: { ...user, id: userId },
     });
 
-    return true;
+    // The count of quantity-tracked assets left where they were, so a caller
+    // that let them be skipped can tell the user how many.
+    return { success: true, skippedQuantityTracked };
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 

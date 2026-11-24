@@ -170,6 +170,7 @@ const isShowingScreen = () =>
 /** What the tab's visibility and automation flag read as, per test. */
 let visibility: DocumentVisibilityState = "visible";
 let automated = false;
+let userAgent = "";
 
 /** Shows or hides the tab, firing the event the browser would. */
 function setTabVisibility(state: DocumentVisibilityState) {
@@ -187,6 +188,12 @@ Object.defineProperty(navigator, "webdriver", {
   configurable: true,
   get: () => automated,
 });
+// why: lets a test load the page as a crawler that does not set webdriver.
+const browserUserAgent = navigator.userAgent;
+Object.defineProperty(navigator, "userAgent", {
+  configurable: true,
+  get: () => userAgent,
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -199,6 +206,7 @@ beforeEach(() => {
   vi.mocked(Sentry.logger.info).mockClear();
   visibility = "visible";
   automated = false;
+  userAgent = browserUserAgent;
 });
 
 afterEach(() => {
@@ -725,7 +733,7 @@ describe("markHydrated", () => {
     );
   });
 
-  it("raises a separate info issue for a timeout that fired before its clock ran out", () => {
+  it("logs a timeout that fired before its clock ran out, without raising an issue", () => {
     // A link scanner opening emailed links runs timers early: the 20-second
     // visible-time timeout fires with only a few seconds on the page clock.
     // Both clocks read 6 seconds when it fires, so the device did not sleep.
@@ -736,14 +744,14 @@ describe("markHydrated", () => {
 
     markHydrated();
 
-    expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
-    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    expect(Sentry.logger.info).toHaveBeenCalledWith(
       "Hydration timeout fired before its clock ran out",
       expect.objectContaining({
-        level: "info",
-        fingerprint: ["hydration-failure", "timeout-early"],
-        tags: expect.objectContaining({ hydration_failure: "timeout" }),
-        extra: expect.objectContaining({ failedAfterMs: 6_000 }),
+        label: "Hydration",
+        path: "/assets",
+        failedAfterMs: 6_000,
       })
     );
   });
@@ -767,6 +775,18 @@ describe("markHydrated", () => {
     // Crawlers and link previewers fast-forward timers; their timeouts say
     // nothing about users.
     automated = true;
+    runWatchdog();
+    vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
+
+    markHydrated();
+
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing for a search crawler that does not report automation", () => {
+    userAgent =
+      "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
     runWatchdog();
     vi.advanceTimersByTime(HYDRATION_TIMEOUT_MS);
 

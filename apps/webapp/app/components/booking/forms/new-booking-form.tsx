@@ -8,7 +8,7 @@ import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
-import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
+import { useReservationWordedAsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
@@ -76,7 +76,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
 
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
-  const reservationIsRequest = useReservationIsRequest();
+  const reservationIsRequest = useReservationWordedAsRequest();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(

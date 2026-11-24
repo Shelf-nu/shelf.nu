@@ -92,6 +92,10 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       newLocationId: locationId,
       currentSearchParams: null,
+      // The phone submits an explicit scan list and shows one result for it,
+      // so a quantity-tracked row the service cannot place refuses the list
+      // rather than being skipped under a success toast.
+      quantityTracked: "refuse",
       settings,
       lastAuditDateAccess: resolveLastAuditDateAccess({
         seeAllAudits: access.audits.seeAll,

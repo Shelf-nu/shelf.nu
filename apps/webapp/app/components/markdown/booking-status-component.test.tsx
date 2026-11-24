@@ -19,9 +19,10 @@ vi.mock("~/hooks/use-user-data", () => ({
 }));
 
 // why: the badge reads workspace booking settings from a route loader, which
-// a unit test does not mount
+// a unit test does not mount. Answers "the viewer's reservations are
+// requests", the case in which a live badge adds "subject to review".
 vi.mock("~/hooks/use-reservation-is-request", () => ({
-  useReservationIsRequest: () => false,
+  useReservationIsRequest: () => true,
 }));
 
 describe("BookingStatusComponent", () => {
@@ -40,6 +41,24 @@ describe("BookingStatusComponent", () => {
     render(<BookingStatusComponent status={1 as unknown as string} />);
 
     expect(screen.getByText("1")).toBeInTheDocument();
+  });
+
+  it("renders a pending request as the Pending approval chip alone", () => {
+    const { container } = render(
+      <BookingStatusComponent status="PENDING_APPROVAL" />
+    );
+
+    expect(container.textContent).toBe("Pending approval");
+  });
+
+  it("shows the status a note recorded, without the viewer's subject to review suffix", () => {
+    // The viewer (user-1) is the custodian and their reservations are
+    // requests: a live badge would read "Reserved - subject to review".
+    const { container } = render(
+      <BookingStatusComponent status="RESERVED" custodianUserId="user-1" />
+    );
+
+    expect(container.textContent).toBe("RESERVED");
   });
 
   it("still renders the badge for a real booking status", () => {

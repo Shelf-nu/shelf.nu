@@ -128,3 +128,51 @@ export async function lockEveryAssetForQuantityUpdate(
     });
   }
 }
+
+/**
+ * Row-locks every given asset in one statement and returns the full rows,
+ * keyed by id.
+ *
+ * Same single sorted, org-scoped `FOR UPDATE` statement as
+ * {@link lockAssetsForQuantityUpdate}, so the same global lock order, and the
+ * same 404 as {@link lockEveryAssetForQuantityUpdate} when an id matches no row
+ * in the caller's organization. Returns whole rows for callers that need more
+ * than the quantity (title, unit of measure, consumption type) from the asset
+ * they locked, in place of locking assets one by one. Empty input issues no
+ * query.
+ *
+ * Must be called within a `db.$transaction()` interactive transaction.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetIds - Assets to lock; duplicates are ignored
+ * @param organizationId - The caller's organization
+ * @returns The locked rows by asset id
+ * @throws {ShelfError} If any asset is not found in the caller's org (404)
+ */
+export async function lockAssetRowsForQuantityUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any, // Prisma interactive tx client (no clean type for extended clients)
+  assetIds: string[],
+  organizationId: string
+): Promise<Map<string, Asset>> {
+  const ids = Array.from(new Set(assetIds)).sort();
+  if (ids.length === 0) return new Map();
+
+  const rows: Asset[] = await tx.$queryRaw`
+    SELECT * FROM "Asset"
+    WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
+    ORDER BY id COLLATE "C"
+    FOR UPDATE
+  `;
+  const byId = new Map((rows ?? []).map((row) => [row.id, row]));
+
+  if (byId.size < ids.length) {
+    throw new ShelfError({
+      cause: null,
+      message: "Asset not found",
+      label: "Consumption Log",
+      status: 404,
+    });
+  }
+  return byId;
+}

@@ -7,7 +7,7 @@
  */
 import type React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import FeedbackModal from "./feedback-modal";
 
@@ -130,5 +130,25 @@ describe("FeedbackModal", () => {
     expect(
       screen.getByText(/included automatically to help us debug/i)
     ).toBeTruthy();
+  });
+
+  describe("Chat with us", () => {
+    const originalEnv = window.env;
+
+    afterEach(() => {
+      window.env = originalEnv;
+    });
+
+    it("is hidden when the install has no Crisp website id", () => {
+      window.env = { ...window.env, CRISP_WEBSITE_ID: "" };
+      render(<FeedbackModal open onClose={vi.fn()} />);
+      expect(screen.queryByText("Chat with us")).toBeNull();
+    });
+
+    it("is shown when Crisp is configured", () => {
+      window.env = { ...window.env, CRISP_WEBSITE_ID: "test-website-id" };
+      render(<FeedbackModal open onClose={vi.fn()} />);
+      expect(screen.getByText("Chat with us")).toBeTruthy();
+    });
   });
 });

@@ -27,7 +27,7 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
 import { Switch } from "../forms/switch";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 
 /** One role's switch on an explicit-requirement card. */
 export type ExplicitRequirementSwitch = {
@@ -52,11 +52,14 @@ export type ExplicitRequirementSwitch = {
  * @returns The settings card
  */
 export function ExplicitRequirementSettingsCard({
+  id,
   header,
   exemption,
   intent,
   switches,
 }: {
+  /** Anchor id, so `/settings/bookings#<id>` scrolls to this card */
+  id: string;
   header: { title: string; subHeading?: string };
   /** Who the switches never apply to, shown under the heading at all times */
   exemption: string;
@@ -70,9 +73,9 @@ export function ExplicitRequirementSettingsCard({
   const formRevision = useRevisionOnRefusedSave(fetcher);
 
   return (
-    <Card className="mt-0">
+    <Card id={id} className="mt-0">
       <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
+        <CardTitle>{header.title}</CardTitle>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
         <p className="mt-2 text-sm font-medium text-gray-700">{exemption}</p>
       </div>

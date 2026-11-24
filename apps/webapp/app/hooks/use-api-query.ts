@@ -32,6 +32,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 const useIsomorphicLayoutEffect =
   typeof document !== "undefined" ? useLayoutEffect : useEffect;
 
+/** What `onSuccess` is told about the response besides its body. */
+export type ApiQueryResponseMeta = {
+  /** The response's HTTP status. */
+  status: number;
+};
+
 type UseApiQueryParams<TData> = {
   /** Any API endpoint */
   api: string;
@@ -42,8 +48,13 @@ type UseApiQueryParams<TData> = {
   /** Query will not execute until this is true */
   enabled?: boolean;
 
-  /** Callback function called when query succeeds */
-  onSuccess?: (data: TData) => void;
+  /**
+   * Callback function called when query succeeds. `meta.status` is the HTTP
+   * status: the app answers its own refusals with a JSON body too, so a
+   * caller that must tell a refusal (4xx) from a server failure (5xx) reads it
+   * here.
+   */
+  onSuccess?: (data: TData, meta: ApiQueryResponseMeta) => void;
 
   /** Callback function called when query fails */
   onError?: (error: string) => void;
@@ -57,7 +68,7 @@ type UseApiQueryParams<TData> = {
  * @param args.enabled - Nothing is requested until this is true. A query that
  *   turns disabled mid-request cancels it and reports itself as not loading.
  * @param args.onSuccess - Called with the parsed payload of the request that
- *   was still current when it answered.
+ *   was still current when it answered, and the response's status.
  * @param args.onError - Called with a message when the request fails. A
  *   cancelled request is not a failure and calls neither callback.
  * @returns `{ isLoading, error, data, refetch }`.
@@ -120,14 +131,17 @@ export default function useApiQuery<TData>({
 
       setIsLoading(true);
       fetch(apiUrl, { signal: controller.signal })
-        .then((response) => response.json())
-        .then((data: TData) => {
+        .then(async (response) => ({
+          data: (await response.json()) as TData,
+          meta: { status: response.status },
+        }))
+        .then(({ data, meta }) => {
           // A superseded request must not land: its answer describes a url the
           // caller has already moved on from, and whichever response happens
           // to be slower would otherwise win.
           if (controller.signal.aborted) return;
           setData(data);
-          onSuccessRef.current?.(data);
+          onSuccessRef.current?.(data, meta);
         })
         .catch((error: Error) => {
           if (controller.signal.aborted) return;

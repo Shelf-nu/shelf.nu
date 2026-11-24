@@ -13,7 +13,9 @@ import { accessFor } from "@helpers/role-access";
 import {
   bookingCustodianIsSelf,
   canUserRemoveBookingAssets,
+  isBookingPendingApproval,
   mayRemoveBookingItems,
+  roleReservesAsRequest,
 } from "./bookings";
 
 /** The statuses in which a booking is a closed record. */
@@ -120,5 +122,104 @@ describe("bookingCustodianIsSelf", () => {
         bookingCustodianIsSelf(accessFor([r]))
       )
     ).toEqual([false, false, false, true, true]);
+  });
+});
+
+describe("roleReservesAsRequest", () => {
+  const BOTH_ON = {
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: true,
+  };
+
+  it("reads each role's own switch", () => {
+    const baseOnly = {
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    };
+    const selfServiceOnly = {
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: true,
+    };
+    expect(
+      roleReservesAsRequest({ approvalSetting: "base", settings: baseOnly })
+    ).toBe(true);
+    expect(
+      roleReservesAsRequest({
+        approvalSetting: "selfService",
+        settings: baseOnly,
+      })
+    ).toBe(false);
+    expect(
+      roleReservesAsRequest({
+        approvalSetting: "selfService",
+        settings: selfServiceOnly,
+      })
+    ).toBe(true);
+    expect(
+      roleReservesAsRequest({
+        approvalSetting: "base",
+        settings: selfServiceOnly,
+      })
+    ).toBe(false);
+  });
+
+  it("never makes a request of a role without a switch", () => {
+    expect(
+      roleReservesAsRequest({ approvalSetting: "none", settings: BOTH_ON })
+    ).toBe(false);
+    expect(
+      roleReservesAsRequest({ approvalSetting: undefined, settings: BOTH_ON })
+    ).toBe(false);
+  });
+
+  it("reads absent settings as all off", () => {
+    expect(
+      roleReservesAsRequest({ approvalSetting: "base", settings: null })
+    ).toBe(false);
+  });
+
+  it("matches the role policy table", () => {
+    const settingFor = (role: OrganizationRoles) =>
+      accessFor([role]).policy.bookings.approvalSetting;
+    expect(settingFor(OrganizationRoles.BASE)).toBe("base");
+    expect(settingFor(OrganizationRoles.SELF_SERVICE)).toBe("selfService");
+    expect(settingFor(OrganizationRoles.ADMIN)).toBe("none");
+    expect(settingFor(OrganizationRoles.OWNER)).toBe("none");
+  });
+});
+
+describe("isBookingPendingApproval", () => {
+  const reserved = {
+    status: BookingStatus.RESERVED,
+    requireBookingApproval: true,
+  };
+
+  it("is pending only for an undecided reservation while approval is on", () => {
+    expect(isBookingPendingApproval({ ...reserved, approvedAt: null })).toBe(
+      true
+    );
+    expect(
+      isBookingPendingApproval({ ...reserved, approvedAt: new Date() })
+    ).toBe(false);
+    expect(
+      isBookingPendingApproval({
+        ...reserved,
+        approvedAt: null,
+        requireBookingApproval: false,
+      })
+    ).toBe(false);
+    expect(
+      isBookingPendingApproval({
+        ...reserved,
+        status: BookingStatus.ONGOING,
+        approvedAt: null,
+      })
+    ).toBe(false);
+  });
+
+  it("reads a field the caller did not load as settled", () => {
+    expect(
+      isBookingPendingApproval({ ...reserved, approvedAt: undefined })
+    ).toBe(false);
   });
 });
