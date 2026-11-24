@@ -790,9 +790,11 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     expect(questions).toEqual([]);
   });
 
-  it('still asks an older phone about a slice planned at one source, defaulting to "as planned"', async () => {
+  it("asks an older phone about a slice planned at one source, defaulting to that source, and an untouched answer still dispatches by allocation", async () => {
+    // Studio is not the shelf default (Camera Room has more left), so the
+    // default can only come from the plan.
     stageConverted([
-      { kind: "LOCATION", locationId: "loc-camera", quantity: 15 },
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 15 },
     ]);
 
     const questions = await getCheckoutSourceQuestions({
@@ -801,9 +803,82 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
       clientSupportsSources: false,
     });
 
-    expect(questions.map((q) => q.defaultLocationId)).toEqual([
-      ALLOCATION_SOURCE_FORM_VALUE,
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toMatchObject({
+      defaultLocationId: "loc-studio",
+      fromAllocation: true,
+    });
+
+    // An older phone sends only the rows the operator changed, so an
+    // untouched default arrives as no answer at all.
+    const { tx } = scenario();
+    // why: the facade's dispatch is covered by its own suite; this test only
+    // reads the picks it is handed
+    vi.mocked(dispatchUnits).mockResolvedValue({
+      dispatched: [],
+      legacySliceIds: [],
+    });
+    await dispatchCheckoutSources(tx as never, {
+      organizationId: ORG,
+      bookingId: "booking-1",
+      departures: [{ sliceId: "ba-1", assetId: "pool-1", units: 15 }],
+      poolAssetIds: new Set(["pool-1"]),
+      submission: sourceSubmissionFromRecord({}),
+      window: { from: new Date("2026-12-01"), to: new Date("2026-12-03") },
+      clientSupportsSources: false,
+    });
+    expect(vi.mocked(dispatchUnits).mock.calls[0][1].picks).toEqual([
+      { sliceId: "ba-1", units: 15 },
     ]);
+  });
+
+  it("defaults an older phone to Unplaced for a slice planned at Unplaced only", async () => {
+    stageConverted([{ kind: "UNPLACED", locationId: null, quantity: 15 }]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      clientSupportsSources: false,
+    });
+
+    expect(questions.map((q) => q.defaultLocationId)).toEqual([null]);
+  });
+
+  it("defaults an older phone to the shelf for a fully returned converted slice", async () => {
+    stageConverted([
+      {
+        kind: "LOCATION",
+        locationId: "loc-studio",
+        quantity: 15,
+        releasedQuantity: 15,
+      },
+    ]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      clientSupportsSources: false,
+    });
+
+    // No pending source to show, so the shelf default (most units left).
+    expect(questions.map((q) => q.defaultLocationId)).toEqual(["loc-camera"]);
+  });
+
+  it("defaults an older phone to the shelf for a LEGACY slice when adoption is on", async () => {
+    stageConverted([], "LEGACY");
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      clientSupportsSources: false,
+      adoptionEnabled: true,
+    });
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toMatchObject({
+      defaultLocationId: "loc-camera",
+      fromAllocation: false,
+    });
   });
 
   it('defaults a slice planned at one source to "as planned" too', async () => {
@@ -841,6 +916,8 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     const form = new FormData();
     form.set(sourceLocationFieldName("ba-1"), question.defaultLocationId ?? "");
     const { tx } = scenario();
+    // why: the facade's dispatch is covered by its own suite; this test only
+    // reads the picks it is handed
     vi.mocked(dispatchUnits).mockResolvedValue({
       dispatched: [],
       legacySliceIds: [],
@@ -880,6 +957,8 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     const form = new FormData();
     form.set(sourceLocationFieldName("ba-1"), question.defaultLocationId ?? "");
     const { tx } = scenario();
+    // why: the facade's dispatch is covered by its own suite; this test only
+    // reads the picks it is handed
     vi.mocked(dispatchUnits).mockResolvedValue({
       dispatched: [],
       legacySliceIds: [],

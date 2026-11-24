@@ -466,6 +466,17 @@ const futureFrom = new Date();
 futureFrom.setDate(futureFrom.getDate() + 30);
 const futureTo = new Date(futureFrom.getTime() + HOURS * 60 * 60 * 1000);
 
+/**
+ * The row the booking lock reads: its status and its live window, which
+ * matches the booking fixtures below unless a test says otherwise.
+ */
+function lockedBookingRow(
+  status: BookingStatus,
+  window: { from: Date; to: Date } = { from: futureFrom, to: futureTo }
+) {
+  return { status, ...window };
+}
+
 const mockHints = {
   timeZone: "America/New_York",
   locale: "en-US",
@@ -519,6 +530,11 @@ function dispatchAllLegacy() {
 
 beforeEach(() => {
   dispatchAllLegacy();
+  // why: the check-out's booking lock is a raw `SELECT … FOR UPDATE` that also
+  // reads the window; ONGOING with the fixtures' window serves every path
+  (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+    lockedBookingRow(BookingStatus.ONGOING),
+  ]);
 });
 
 describe("partialCheckoutBooking", () => {
@@ -635,7 +651,7 @@ describe("partialCheckoutBooking", () => {
     expect.assertions(4);
     // The row lock still reads the booking RESERVED.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.RESERVED },
+      lockedBookingRow(BookingStatus.RESERVED),
     ]);
 
     // First lookup loads the still-RESERVED booking; the post-update re-fetch
@@ -706,7 +722,7 @@ describe("partialCheckoutBooking", () => {
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue(reservedBooking);
       (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: lockedStatus },
+        lockedBookingRow(lockedStatus),
       ]);
 
       await expect(
@@ -722,7 +738,7 @@ describe("partialCheckoutBooking", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(reservedBooking);
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.DRAFT },
+      lockedBookingRow(BookingStatus.DRAFT),
     ]);
 
     await expect(
@@ -737,7 +753,7 @@ describe("partialCheckoutBooking", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(reservedBooking);
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.ONGOING },
+      lockedBookingRow(BookingStatus.ONGOING),
     ]);
 
     await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] });
@@ -753,7 +769,7 @@ describe("partialCheckoutBooking", () => {
     expect.assertions(1);
     // The row lock still reads the booking RESERVED.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.RESERVED },
+      lockedBookingRow(BookingStatus.RESERVED),
     ]);
 
     // reservedBooking.from is in the future, so this is an early checkout.
@@ -810,7 +826,7 @@ describe("partialCheckoutBooking", () => {
       expect.assertions(1);
       // The row lock still reads the booking RESERVED.
       (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: BookingStatus.RESERVED },
+        lockedBookingRow(BookingStatus.RESERVED),
       ]);
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -1064,7 +1080,7 @@ describe("partialCheckoutBooking", () => {
     expect.assertions(1);
     // The row lock still reads the booking RESERVED.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.RESERVED },
+      lockedBookingRow(BookingStatus.RESERVED),
     ]);
 
     // The post-update re-fetch carries the status the batch wrote.
@@ -4094,8 +4110,10 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue(qtyOnlyBooking);
       // The row lock reads the booking RESERVED: this is its first scan.
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the row it reads
       (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: BookingStatus.RESERVED },
+        lockedBookingRow(BookingStatus.RESERVED),
       ]);
       // why: the booking's pool slices are read under the booking lock to
       // lock their assets before the admission; every other slice read keeps
@@ -4143,6 +4161,55 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         expect.objectContaining({
           data: expect.objectContaining({ from: admitted.from }),
         })
+      );
+    });
+
+    it("measures the window read under the booking lock, not the earlier read", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // A concurrent extension committed between the pre-transaction read
+      // (which still ends at futureTo) and the row lock.
+      const extendedTo = new Date(futureTo.getTime() + 24 * 60 * 60 * 1000);
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the row it reads, with the extended end
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED, {
+          from: futureFrom,
+          to: extendedTo,
+        }),
+      ]);
+      // why: the booking's pool slices are read under the booking lock to
+      // lock their assets before the admission; every other slice read keeps
+      // the shared fake's answer.
+      const findMany = vitest.mocked(db.bookingAsset.findMany);
+      const shared = findMany.getMockImplementation();
+      findMany.mockImplementation(((args?: {
+        where?: { id?: unknown; asset?: { type?: unknown } };
+      }) =>
+        args?.where?.asset?.type && !args.where.id
+          ? Promise.resolve([{ id: "ba-qty-1", assetId: "asset-qty-1" }])
+          : shared?.(args as never) ??
+            Promise.resolve([{ quantity: 1 }])) as never);
+      onTestFinished(() => {
+        if (shared) findMany.mockImplementation(shared);
+      });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      expect(admitWindowChange).toHaveBeenCalledTimes(1);
+      expect(vitest.mocked(admitWindowChange).mock.calls[0][1]).toMatchObject({
+        to: extendedTo,
+        previous: { from: futureFrom, to: extendedTo },
+      });
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1].window.to).toEqual(
+        extendedTo
       );
     });
 

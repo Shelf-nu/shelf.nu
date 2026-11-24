@@ -313,6 +313,7 @@ import {
   assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
   lockBookingForStatusCheck,
+  lockBookingWithWindow,
   getBookingOwnershipScope,
   isBookingExpired,
 } from "./utils.server";
@@ -11199,11 +11200,11 @@ export async function partialCheckoutBooking({
         // concurrent archive, cancellation or revert to draft could otherwise
         // commit in between and this write would land assets out on a closed
         // booking (or overwrite an ARCHIVED one back to ONGOING/OVERDUE).
-        const lockedStatus = await lockBookingForStatusCheck(
-          tx,
-          id,
-          organizationId
-        );
+        // The window is read in the same locked statement: the admission and
+        // the dispatch below measure it, and a concurrent extension cannot
+        // move it while this transaction holds the row.
+        const locked = await lockBookingWithWindow(tx, id, organizationId);
+        const lockedStatus = locked.status;
         assertBookingIsOpen({
           status: lockedStatus,
           operation: "check out",
@@ -11291,12 +11292,12 @@ export async function partialCheckoutBooking({
          * over it. Every quantity-tracked asset on the booking is locked
          * first, in one sorted statement with this batch's pools, so the
          * facade and the per-asset locks below only re-take rows already held.
+         * The stored window is the one read under the booking lock.
          */
-        const storedWindow = { from: bookingFound.from, to: bookingFound.to };
+        const storedWindow = { from: locked.from, to: locked.to };
         const adjustedFrom =
           lockedStatus === BookingStatus.RESERVED &&
-          bookingFound.from &&
-          isBookingEarlyCheckout(bookingFound.from) &&
+          isBookingEarlyCheckout(storedWindow.from) &&
           intentChoice === CheckoutIntentEnum["with-adjusted-date"]
             ? DateTime.fromFormat(
                 DateTime.fromJSDate(new Date(), {
@@ -11368,10 +11369,7 @@ export async function partialCheckoutBooking({
           qtyDispositionAssetIds,
           {
             organizationId,
-            window:
-              bookingFound.from && bookingFound.to
-                ? { from: bookingFound.from, to: bookingFound.to }
-                : null,
+            window: storedWindow,
             excludeBookingId: id,
             db: tx,
           }

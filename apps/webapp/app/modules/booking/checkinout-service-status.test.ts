@@ -39,7 +39,9 @@ const h = vi.hoisted(() => {
   /** Thrown by every database access other than the booking and user reads. */
   class PastStatusCheck extends Error {}
 
-  const state = { booking: null as { status: string } | null };
+  const state = {
+    booking: null as { status: string; from?: Date; to?: Date } | null,
+  };
   const READS = new Set([
     "findUniqueOrThrow",
     "findFirstOrThrow",
@@ -82,9 +84,17 @@ const h = vi.hoisted(() => {
     {
       get(_target, prop) {
         if (typeof prop !== "string" || prop === "then") return undefined;
-        // The locked in-transaction status read (`lockBookingForStatusCheck`).
+        // The locked in-transaction read (`lockBookingForStatusCheck`, and
+        // `lockBookingWithWindow`, which also reads the window).
         if (prop === "$queryRaw") {
-          return () => Promise.resolve([{ status: state.booking?.status }]);
+          return () =>
+            Promise.resolve([
+              {
+                status: state.booking?.status,
+                from: state.booking?.from,
+                to: state.booking?.to,
+              },
+            ]);
         }
         if (prop === "$transaction") {
           return (work: unknown) =>

@@ -7757,6 +7757,47 @@ describe("fulfilModelRequestsAndCheckout", () => {
     expect(hasStatusUpdate()).toBe(false);
   });
 
+  it("locks a pool the booking holds only through a kit, read under the booking lock, together with the scan and before it", async () => {
+    expect.assertions(4);
+
+    // The pre-transaction read sees no pool slice at all: the kit's pool is
+    // known only from the read made under the booking lock.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValueOnce(buildPreTxBooking());
+    // why: the first slice read inside the transaction is the pool read under
+    // the booking lock; it finds a pool held only through a kit slice
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "ba-kit-cables", assetId: "asset-cables" }]);
+    // why: the scan's first read is its org guard; answering "not found" stops
+    // the flow right there, so the assertions see only what ran before the scan
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      []
+    );
+
+    await expect(
+      fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+      })
+    ).rejects.toThrow(/do not exist in your workspace/);
+
+    // One sorted lock over the scanned asset and the kit-only pool.
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledTimes(1);
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      db,
+      ["dell-1", "asset-cables"],
+      "org-1"
+    );
+    // Taken before the scan's first read.
+    expect(
+      vitest.mocked(lockAssetsForArchiveGuard).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mock
+        .invocationCallOrder[0]
+    );
+  });
+
   /**
    * The case holds only a quantity-tracked member, which the asset conflict
    * rule exempts, so any refusal can only come from the kit rule.
