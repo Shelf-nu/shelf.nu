@@ -1,4 +1,5 @@
 import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
@@ -46,10 +47,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       role,
     });
 
-    const { assetIds, newLocationId, currentSearchParams } = parseData(
-      formData,
-      BulkLocationUpdateSchema.and(CurrentSearchParamsSchema)
-    );
+    const { assetIds, newLocationId, currentSearchParams, quantityTracked } =
+      parseData(
+        formData,
+        BulkLocationUpdateSchema.and(CurrentSearchParamsSchema).and(
+          z.object({
+            // Sent by a caller that submits an explicit list and reports one
+            // result for it (the scanner drawer): a quantity-tracked asset,
+            // which this path cannot place, then refuses the list. Left out
+            // by the asset index dialog, which warns about those assets
+            // before the user confirms and relies on them being skipped.
+            quantityTracked: z.enum(["skip", "refuse"]).optional(),
+          })
+        )
+      );
 
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -69,6 +80,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
       bookableScope: resolveBookableListScope({ access, userId }),
       timeZone,
+      quantityTracked,
     });
 
     sendNotification({

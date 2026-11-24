@@ -9114,11 +9114,12 @@ describe("bulkUpdateAssetLocation, quantity-tracked assets in the selection", ()
     });
 
   it("refuses the whole list when asked to, and moves nothing", async () => {
+    // The message names the asset: a caller may show it as its only
+    // feedback, with no way to mark the row.
     await expect(move("refuse")).rejects.toMatchObject({
       status: 400,
-      message: expect.stringContaining(
-        "1 quantity-tracked asset can't be moved"
-      ),
+      message:
+        "1 quantity-tracked asset can't be moved this way, so no assets were moved: Gaffer tape. Remove it from the list, then set its placements, with a quantity per location, on the asset page.",
     });
     expect(db.$transaction).not.toHaveBeenCalled();
   });

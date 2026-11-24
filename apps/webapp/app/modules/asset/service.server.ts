@@ -8015,7 +8015,7 @@ export async function bulkUpdateAssetLocation({
    * cannot place (a placement needs a unit count per location):
    * - `"skip"` (default): move the rest and leave them where they are. For a
    *   caller that has told the user up front, as the asset index dialog does.
-   * - `"refuse"`: move nothing and name how many there are. For a caller that
+   * - `"refuse"`: move no assets and name the ones in the way. For a caller that
    *   submits an explicit list and reports one result for it, such as a
    *   scanner, where a skipped row would read as moved.
    */
@@ -8115,14 +8115,26 @@ export async function bulkUpdateAssetLocation({
     );
     const skippedQuantityTracked = assets.length - nonQtyTracked.length;
     if (quantityTracked === "refuse" && skippedQuantityTracked > 0) {
+      // The titles are named because a caller may show this message as its
+      // only feedback, with no way to mark the rows: the operator has to be
+      // able to find them. Only the first few, so a long list stays readable.
+      // "No assets were moved" and not "nothing": a caller can move kits
+      // through a separate request that this refusal says nothing about.
+      const NAMED_TITLES = 5;
+      const skippedTitles = assets
+        .filter((a) => a.type === AssetType.QUANTITY_TRACKED)
+        .map((a) => a.title);
+      const named = skippedTitles.slice(0, NAMED_TITLES).join(", ");
+      const unnamed = skippedTitles.length - NAMED_TITLES;
+      const one = skippedQuantityTracked === 1;
       throw new ShelfError({
         cause: null,
         message: `${skippedQuantityTracked} quantity-tracked ${
-          skippedQuantityTracked === 1 ? "asset" : "assets"
-        } can't be moved this way, so nothing was moved. Remove ${
-          skippedQuantityTracked === 1 ? "it" : "them"
-        } from the list, then set ${
-          skippedQuantityTracked === 1 ? "its" : "their"
+          one ? "asset" : "assets"
+        } can't be moved this way, so no assets were moved: ${named}${
+          unnamed > 0 ? ` and ${unnamed} more` : ""
+        }. Remove ${one ? "it" : "them"} from the list, then set ${
+          one ? "its" : "their"
         } placements, with a quantity per location, on the asset page.`,
         additionalData: {
           userId,
