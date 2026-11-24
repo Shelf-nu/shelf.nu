@@ -15,9 +15,11 @@ import {
   destroyedUnitsBySlice,
   emptySettlement,
   matchSharesToLogs,
+  remainingInSettlement,
   settledPlacementSlice,
   settlementWindow,
   settleUnits,
+  slicesUnderLock,
   unitsOutInSettlement,
 } from "./settlement";
 import type { Settlement, UnsharedLog } from "./settlement";
@@ -367,6 +369,77 @@ describe("matchSharesToLogs", () => {
       plannedLeft: [{ assetId: POOL, category: "RETURN", units: 2 }],
       logsLeft: [{ logId: "c-1", units: 1 }],
     });
+  });
+});
+
+describe("remainingInSettlement", () => {
+  it("is zero once every planned unit is settled, whatever was re-dispatched", () => {
+    // 10 planned at A: all went out and came back, then 5 went out again.
+    const rowA = row(
+      "r-a",
+      "LOCATION",
+      { quantity: 10, out: 5, released: 5 },
+      "loc-a"
+    );
+    const settlement = settlementOf([slice("s1", [rowA])]);
+
+    expect(remainingInSettlement(settlement, POOL)).toBe(5);
+    settleUnits(settlement, { sliceId: "s1", assetId: POOL, returned: 5 });
+    expect(remainingInSettlement(settlement, POOL)).toBe(0);
+  });
+
+  it("counts pending units that never left as not settled, over every slice", () => {
+    const settlement = settlementOf([
+      slice("s1", [row("r-1", "UNPLACED", { quantity: 4, out: 0 })]),
+      slice("s2", [row("r-2", "KIT", { quantity: 3, out: 3 })], {
+        assetKitId: "ak-1",
+        mode: "KIT",
+      }),
+    ]);
+
+    expect(remainingInSettlement(settlement, POOL)).toBe(7);
+  });
+
+  it("is null for a LEGACY group", () => {
+    const settlement = emptySettlement({
+      organizationId: "org-1",
+      bookingId: "booking-1",
+    });
+
+    expect(remainingInSettlement(settlement, POOL)).toBeNull();
+  });
+});
+
+describe("slicesUnderLock", () => {
+  /** A caller's slice, read before the locks. */
+  type Read = { id: string; assetId: string; title: string; fresh: boolean };
+
+  it("walks a converted group's slices as the settlement holds them", () => {
+    const settlement = settlementOf([
+      slice("s2", [row("r-2", "KIT", { quantity: 3, out: 3 })], {
+        assetKitId: "ak-1",
+      }),
+      slice("s3", [row("r-3", "UNPLACED", { quantity: 2, out: 2 })]),
+    ]);
+    const read: Read[] = [
+      { id: "s1", assetId: POOL, title: "Pens", fresh: false },
+      { id: "s2", assetId: POOL, title: "Pens", fresh: false },
+      { id: "legacy", assetId: "other", title: "Cups", fresh: false },
+    ];
+
+    const walked = slicesUnderLock(
+      settlement,
+      read,
+      (working, found, sibling) =>
+        found ?? { ...sibling, id: working.id, fresh: true }
+    );
+
+    // s1 was removed before the locks, s3 added: standalone first, then kit.
+    expect(walked).toEqual([
+      { id: "s3", assetId: POOL, title: "Pens", fresh: true },
+      { id: "s2", assetId: POOL, title: "Pens", fresh: false },
+      { id: "legacy", assetId: "other", title: "Cups", fresh: false },
+    ]);
   });
 });
 

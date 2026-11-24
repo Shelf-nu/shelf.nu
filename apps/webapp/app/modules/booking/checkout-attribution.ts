@@ -33,6 +33,25 @@ export const BOOKING_DISPOSITION_CATEGORIES = [
   "DAMAGE",
 ] as const;
 
+/** One of {@link BOOKING_DISPOSITION_CATEGORIES}. */
+export type BookingDispositionCategory =
+  (typeof BOOKING_DISPOSITION_CATEGORIES)[number];
+
+/**
+ * Whether a `ConsumptionLog.category` is one of the booking dispositions in
+ * {@link BOOKING_DISPOSITION_CATEGORIES}.
+ *
+ * @param category - Any consumption log category
+ * @returns True for RETURN, CONSUME, LOSS and DAMAGE
+ */
+export function isBookingDispositionCategory(
+  category: string
+): category is BookingDispositionCategory {
+  return (BOOKING_DISPOSITION_CATEGORIES as readonly string[]).includes(
+    category
+  );
+}
+
 /**
  * One raw persisted checkout session, as stored on `PartialBookingCheckout`.
  *

@@ -49,6 +49,7 @@ const h = vi.hoisted(() => ({
   capacity: new Map<string, Map<string, number>>(),
   holds: new Map<string, unknown[]>(),
   physical: new Map<string, Map<string, number>>(),
+  sql: [] as string[],
 }));
 
 // why: the summary reads through the root client; this stand-in answers the
@@ -113,20 +114,51 @@ function free(unplaced: number, locA: number) {
   ];
 }
 
+/** The text of a raw statement, tagged template or `Prisma.sql`. */
+function sqlText(query: unknown): string {
+  if (Array.isArray(query)) return query.join("?");
+  return (query as { sql: string }).sql;
+}
+
+/**
+ * True when the seeded group counts as converted for the probe: a slice that
+ * is not LEGACY, or the group marked converted (it has shares).
+ */
+function seededGroupConverted(): boolean {
+  return [...h.states.values()].some((state) => {
+    const group = state as GroupState;
+    return group.converted || group.slices.some((s) => s.mode !== "LEGACY");
+  });
+}
+
 /**
  * A fake transaction: the facade's slice and booking reads, location names,
- * and the asset lock statement (recorded in call order).
+ * and its raw statements, each recorded in call order: the converted-group
+ * probe ("probe", answered from the seeded group), the new-logs read of a
+ * settlement commit ("newLogs", answered with `logs`), and the asset lock
+ * ("lock").
  */
 function fakeTx(args: {
   slices: Array<{ id: string; assetId?: string }>;
   status?: string;
+  logs?: unknown[];
 }) {
   const slices = args.slices.map((s) => ({
     id: s.id,
     assetId: s.assetId ?? POOL,
   }));
   return {
-    $queryRaw: vi.fn(() => {
+    $queryRaw: vi.fn((query: unknown) => {
+      const text = sqlText(query);
+      if (text.includes('AS "converted"')) {
+        h.order.push("probe");
+        return [{ converted: seededGroupConverted() }];
+      }
+      if (text.includes('FROM "ConsumptionLog"')) {
+        h.order.push("newLogs");
+        h.sql.push(text);
+        return args.logs ?? [];
+      }
       h.order.push("lock");
       return [{ id: POOL, type: "QUANTITY_TRACKED", quantity: 20 }];
     }),
@@ -139,6 +171,7 @@ function fakeTx(args: {
       findFirst: vi.fn(() => ({
         status: args.status ?? "RESERVED",
         from: WINDOW.from,
+        to: WINDOW.to,
         createdAt: new Date("2026-11-01T09:00:00Z"),
       })),
     },
@@ -221,6 +254,7 @@ async function refusal(call: Promise<void>): Promise<ShelfError> {
 
 beforeEach(() => {
   h.order = [];
+  h.sql = [];
   h.writes = [];
   h.windows = [];
   h.freeFor = () => free(20, 0);
@@ -342,9 +376,9 @@ describe("allocateNewSlices", () => {
       adoptionEnabled: false,
     });
 
-    const plan = writtenPlan();
-    expect(plan.setModes).toEqual([]);
-    expect(plan.upsertRows).toEqual([]);
+    // No converted group on the booking: the probe, and nothing else.
+    expect(h.order).toEqual(["probe"]);
+    expect(h.writes).toHaveLength(0);
   });
 
   it("writes nothing for a held-back group and leaves the slice added with it LEGACY", async () => {
@@ -1692,6 +1726,27 @@ describe("dispatchUnits", () => {
     });
 
     expect(result).toEqual({ dispatched: [], legacySliceIds: ["s1"] });
+    expect(h.order).toEqual(["probe"]);
+  });
+
+  it("dispatches a converted group's slice even with adoption off", async () => {
+    stageShelf({ "UNPLACED:": 5 });
+    seedConverted([{ kind: "UNPLACED", quantity: 5 }]);
+
+    const result = await dispatchUnits(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      picks: [{ sliceId: "s1", units: 5 }],
+      window: WINDOW,
+      now: NOW,
+      adoptionEnabled: false,
+    });
+
+    expect(h.order.slice(0, 3)).toEqual(["probe", "lock", "loadGroupStates"]);
+    expect(result.legacySliceIds).toEqual([]);
+    expect(result.dispatched).toEqual([
+      expect.objectContaining({ sliceId: "s1" }),
+    ]);
   });
 });
 
@@ -1722,33 +1777,48 @@ describe("openSettlement and commitSettlement", () => {
   }
 
   /**
-   * The fake transaction plus the two reads the commit makes: the booking's
-   * disposition logs (as written by the check-in) and their share sums.
+   * The fake transaction, answering the commit's one read with `logs`: the
+   * booking's disposition logs that no share covers (as written by the
+   * check-in, plus any a conversion seeds in memory).
    */
-  function settleTx(
-    sliceIds: string[],
-    logs: LogRow[],
-    shareSums: Array<{
-      consumptionLogId: string;
-      _sum: { quantity: number };
-    }> = []
-  ) {
-    return {
-      ...fakeTx({ slices: sliceIds.map((id) => ({ id })), status: "ONGOING" }),
-      consumptionLog: { findMany: vi.fn(() => logs) },
-      bookingDispositionShare: { groupBy: vi.fn(() => shareSums) },
-    } as unknown as BookingSourcesTx;
+  function settleTx(sliceIds: string[], logs: LogRow[]) {
+    return fakeTx({
+      slices: sliceIds.map((id) => ({ id })),
+      status: "ONGOING",
+      logs,
+    });
   }
 
   /** Opens the settlement of BOOKING's pool. */
-  function open(tx: BookingSourcesTx, adoptionEnabled = true) {
+  function open(
+    tx: BookingSourcesTx,
+    adoptionEnabled = true,
+    assetsLocked = false
+  ) {
     return openSettlement(tx, {
       organizationId: ORG,
       bookingId: BOOKING,
       assetIds: [POOL],
-      booking: WINDOW,
+      assetsLocked,
       now: NOW,
       adoptionEnabled,
+    });
+  }
+
+  /** One converted AUTO slice s1 with 5 units out from Unplaced. */
+  function seedConverted() {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          checkedOutQuantity: 5,
+          rows: [
+            row("s1", { quantity: 5, outQuantity: 5, dispatchedTotal: 5 }),
+          ],
+        }),
+      ],
     });
   }
 
@@ -2013,13 +2083,82 @@ describe("openSettlement and commitSettlement", () => {
     await commitSettlement(tx, settlement);
 
     expect(settled.legacy).toBe(true);
-    expect(writtenPlan()).toEqual({
-      upsertRows: [],
-      deleteRowIds: [],
-      insertShares: [],
-      repointShares: [],
-      setModes: [],
+    expect(settlement.groups.size).toBe(0);
+    // No converted group on the booking: the probe, and nothing else.
+    expect(h.order).toEqual(["probe"]);
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("still opens a converted group when adoption is off", async () => {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          checkedOutQuantity: 5,
+          rows: [
+            row("s1", { quantity: 5, outQuantity: 5, dispatchedTotal: 5 }),
+          ],
+        }),
+      ],
     });
+    const tx = settleTx(
+      ["s1"],
+      [log({ id: "log-1", bookingAssetId: "s1", quantity: 2 })]
+    );
+
+    const settlement = await open(tx, false, true);
+    const settled = settleUnits(settlement, {
+      sliceId: "s1",
+      assetId: POOL,
+      returned: 2,
+    });
+    await commitSettlement(tx, settlement);
+
+    expect(settled.legacy).toBe(false);
+    // The caller holds the asset lock: the probe, then the group states.
+    expect(h.order).toEqual([
+      "probe",
+      "loadGroupStates",
+      "computeFreeBySourceForPools",
+      "newLogs",
+      "writeSourcePlan",
+    ]);
+    expect(writtenPlan().insertShares).toEqual([
+      expect.objectContaining({ consumptionLogId: "log-1", quantity: 2 }),
+    ]);
+  });
+
+  it("finds the new logs by the absence of any share, in one statement", async () => {
+    seedConverted();
+    const tx = settleTx(
+      ["s1"],
+      [log({ id: "log-1", bookingAssetId: "s1", quantity: 1 })]
+    );
+
+    const settlement = await open(tx);
+    settleUnits(settlement, { sliceId: "s1", assetId: POOL, returned: 1 });
+    await commitSettlement(tx, settlement);
+
+    expect(h.sql).toHaveLength(1);
+    expect(h.sql[0]).toContain("NOT EXISTS");
+    expect(h.sql[0]).toContain('sh."consumptionLogId" = cl.id');
+    expect(h.sql[0]).toContain('b."organizationId"');
+  });
+
+  it("refuses the commit when a converted group gained a log it never settled", async () => {
+    seedConverted();
+    const tx = settleTx(["s1"], [log({ id: "stray", quantity: 1 })]);
+
+    const settlement = await open(tx);
+    const error = await commitSettlement(tx, settlement).catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect((error as ShelfError).status).toBe(500);
+    expect(h.writes).toHaveLength(0);
   });
 
   it("refuses the commit when a new log was never settled, writing nothing", async () => {

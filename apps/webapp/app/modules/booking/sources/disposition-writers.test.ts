@@ -9,12 +9,15 @@
  * conversion reads behind, so a caller that writes before locking can slip a
  * log past it.
  *
- * This test finds every function in `app/modules` and `app/routes` that calls
- * either writer and compares the list with {@link CALLERS}, where each entry
+ * This test finds every top-level function (a declaration, or a `const`
+ * bound to an arrow or function expression) in `app/modules` and
+ * `app/routes` that calls either writer and compares the list with
+ * {@link CALLERS}, where each entry
  * says whether it writes booking dispositions and how it takes the asset
  * lock. A new caller fails the test until it is classified here; a booking
  * disposition writer must also contain the lock and settlement calls listed
- * for it.
+ * for it. No other file writes `ConsumptionLog` rows through the client
+ * directly, so the writers are the only way in.
  *
  * @see {@link file://./settlement.ts}
  * @see {@link file://../service.server.ts} `checkinBooking`, `partialCheckinBooking`
@@ -131,8 +134,36 @@ function stripComments(source: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-/** A top-level function declaration line; group 1 is its name. */
-const FUNCTION_LINE = /^(?:export\s+)?(?:async\s+)?function\s+(\w+)/;
+/**
+ * A top-level function: a `function` declaration (group 1 is its name) or a
+ * `const` bound to an arrow or function expression (group 2 is its name).
+ */
+const FUNCTION_LINE =
+  /^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?const\s+(\w+)\s*(?::[^=]*)?=\s*(?:async\s*)?(?:\(|function\b|\w+\s*=>)/;
+
+/** A direct write of a `ConsumptionLog` row through the Prisma client. */
+const DIRECT_LOG_WRITE = /\.consumptionLog\s*\.\s*create(?:Many)?\(/;
+
+/**
+ * The only files that write `ConsumptionLog` rows through the client: the two
+ * writers themselves. Every other path goes through them, so the inventory
+ * above sees it.
+ */
+const DIRECT_LOG_WRITERS = [
+  "modules/consumption-log/service.server.ts",
+  "modules/consumption-log/stock-ledger.server.ts",
+];
+
+/** Every scanned source file, as `[path relative to app/, source]`. */
+function scannedSources(): Array<[string, string]> {
+  return [
+    ...sourceFiles(join(APP, "modules")),
+    ...sourceFiles(join(APP, "routes")),
+  ].map((file) => [
+    relative(APP, file).split("\\").join("/"),
+    stripComments(readFileSync(file, "utf8")),
+  ]);
+}
 
 /** A call of one of the writers (not their declarations). */
 const WRITER_CALL = /\b(createConsumptionLog|recordStockChanges)\(/;
@@ -143,18 +174,13 @@ const WRITER_CALL = /\b(createConsumptionLog|recordStockChanges)\(/;
  */
 function findCallers(): Map<string, string> {
   const callers = new Map<string, string>();
-  for (const file of [
-    ...sourceFiles(join(APP, "modules")),
-    ...sourceFiles(join(APP, "routes")),
-  ]) {
-    const source = stripComments(readFileSync(file, "utf8"));
+  for (const [path, source] of scannedSources()) {
     if (!WRITER_CALL.test(source)) continue;
-    const path = relative(APP, file).split("\\").join("/");
     const lines = source.split("\n");
     const starts: Array<{ name: string; line: number }> = [];
     lines.forEach((line, index) => {
       const match = FUNCTION_LINE.exec(line);
-      if (match) starts.push({ name: match[1], line: index });
+      if (match) starts.push({ name: match[1] ?? match[2], line: index });
     });
     starts.forEach((start, index) => {
       const end = starts[index + 1]?.line ?? lines.length;
@@ -177,6 +203,14 @@ describe("disposition log writers", () => {
 
   it("lists every caller of createConsumptionLog and recordStockChanges", () => {
     expect([...callers.keys()].sort()).toEqual(Object.keys(CALLERS).sort());
+  });
+
+  it("writes ConsumptionLog rows through the client only in the two writers", () => {
+    const direct = scannedSources()
+      .filter(([, source]) => DIRECT_LOG_WRITE.test(source))
+      .map(([path]) => path)
+      .sort();
+    expect(direct).toEqual([...DIRECT_LOG_WRITERS].sort());
   });
 
   it.each(Object.entries(CALLERS))(

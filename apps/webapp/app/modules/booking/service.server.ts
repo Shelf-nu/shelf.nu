@@ -200,10 +200,12 @@ import { resolveSentUnits } from "./checkin-receipt";
 import {
   attributeDispositionsByBookingAsset,
   attributeSessionCheckoutToSlices,
+  BOOKING_DISPOSITION_CATEGORIES,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
   computeDispatchedUnitsTotalByAsset,
   computeSlicesRemainingToCheckOut,
+  isBookingDispositionCategory,
 } from "./checkout-attribution";
 import {
   bookingMethodClause,
@@ -297,8 +299,10 @@ import {
 import type { DispatchedSlice } from "./sources/booking-sources.server";
 import {
   destroyedUnitsBySlice,
+  remainingInSettlement,
   settledPlacementSlice,
   settleUnits,
+  slicesUnderLock,
   unitsOutInSettlement,
 } from "./sources/settlement";
 import type {
@@ -5604,27 +5608,7 @@ export async function fulfilModelRequestsAndCheckout({
  * "Pending" units are *absence* of logs — tracked implicitly via
  * `remaining = BookingAsset.quantity − Σ(these categories)`.
  */
-const CHECKIN_DISPOSITION_CATEGORIES = [
-  "RETURN",
-  "CONSUME",
-  "LOSS",
-  "DAMAGE",
-] as const;
-
-/**
- * Whether a `ConsumptionLog.category` is one of the check-in dispositions in
- * {@link CHECKIN_DISPOSITION_CATEGORIES}.
- *
- * @param category - Any consumption log category
- * @returns True for RETURN, CONSUME, LOSS and DAMAGE
- */
-function isCheckinDispositionCategory(
-  category: string
-): category is (typeof CHECKIN_DISPOSITION_CATEGORIES)[number] {
-  return (CHECKIN_DISPOSITION_CATEGORIES as readonly string[]).includes(
-    category
-  );
-}
+const CHECKIN_DISPOSITION_CATEGORIES = BOOKING_DISPOSITION_CATEGORIES;
 
 /**
  * The {@link DispositionCategoryBreakdown} field each disposition category
@@ -7329,14 +7313,44 @@ export async function checkinBooking({
          * Source rows of converted groups: each disposition is settled on the
          * rows its units were out from, and every log written below gets its
          * shares at `commitSettlement`. A LEGACY group (adoption off, or held
-         * back) is reported `legacy` and keeps the path below unchanged.
+         * back) is reported `legacy` and keeps the path below unchanged. The
+         * asset lock above covers every asset the settlement opens.
          */
         const settlement = await openSettlement(tx, {
           organizationId,
           bookingId: id,
           assetIds: qtyTrackedAssetIds,
-          booking: bookingFound,
+          assetsLocked: true,
         });
+
+        /**
+         * The slices the loop below walks. A converted group's slices come
+         * from the settlement, read under the locks; a slice the pre-lock
+         * read did not see takes its asset-level fields from a sibling and
+         * has no recorded source (converted groups settle on their rows).
+         */
+        const checkinSlices = slicesUnderLock(
+          settlement,
+          qtyTrackedSlices,
+          (working, read, sibling) => ({
+            ...(read ?? {
+              ...sibling,
+              sourceKitId: null,
+              sourceLocationId: null,
+              checkedOutAt: null,
+            }),
+            id: working.id,
+            assetKitId: working.assetKitId,
+            quantity: working.quantity,
+            checkedOutQuantity: working.checkedOutQuantity,
+          })
+        ).sort((a, b) =>
+          a.assetId !== b.assetId
+            ? a.assetId < b.assetId
+              ? -1
+              : 1
+            : compareSlicesForGreedyFill(a, b)
+        );
 
         /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
@@ -7427,7 +7441,7 @@ export async function checkinBooking({
           // The query already filters to these categories; this narrows the
           // type for the spread.
           const loggedDispositions = loggedRows.flatMap((row) =>
-            isCheckinDispositionCategory(row.category)
+            isBookingDispositionCategory(row.category)
               ? [{ ...row, category: row.category }]
               : []
           );
@@ -7486,12 +7500,12 @@ export async function checkinBooking({
          * rather than letting the operator's numbers drop silently.
          */
         const assetIdsWithUnitsStillOut = new Set(
-          qtyTrackedSlices
+          checkinSlices
             .filter((slice) => unitsStillOutOn(slice) > 0)
             .map((slice) => slice.assetId)
         );
 
-        for (const slice of qtyTrackedSlices) {
+        for (const slice of checkinSlices) {
           const assetCap = assetRemainingSoFar.get(slice.assetId) ?? 0;
           const convertedOut = unitsOutInSettlement(settlement, {
             assetId: slice.assetId,
@@ -9146,13 +9160,14 @@ export async function partialCheckinBooking({
        * Source rows of converted groups: each disposition is settled on the
        * rows its units were out from before its logs are written, and every
        * log gets its shares at `commitSettlement` below. LEGACY groups keep
-       * the path below unchanged.
+       * the path below unchanged. The asset lock above covers every asset the
+       * settlement opens.
        */
       const settlement = await openSettlement(tx, {
         organizationId,
         bookingId: id,
         assetIds: qtyDispositionAssetIds,
-        booking: bookingFound,
+        assetsLocked: true,
       });
 
       for (const disp of dispositions) {
@@ -9494,7 +9509,12 @@ export async function partialCheckinBooking({
           });
         }
 
-        const pendingAfter = remaining - claimed;
+        // A converted group is fully reconciled when its rows hold nothing
+        // unsettled; the log arithmetic (`remaining`) is the LEGACY reading
+        // and disagrees once units were re-dispatched.
+        const pendingAfter =
+          remainingInSettlement(settlement, disp.assetId) ??
+          remaining - claimed;
         if (pendingAfter === 0) {
           fullyReconciledQtyAssetIds.push(disp.assetId);
         }
@@ -9707,29 +9727,33 @@ export async function partialCheckinBooking({
 
           /**
            * A converted group reads its source rows, never the log spread: a
-           * slice is finished when nothing is out from its rows, and the
-           * units destroyed out of a kit slice are its settled shares.
+           * slice is finished when units left on it and nothing is out from
+           * its rows any more, and the units destroyed out of a kit slice are
+           * its settled shares. Its slices are the settlement's, read under
+           * the locks; a slice already marked checked in stays as it is.
            */
-          if (unitsOutInSettlement(settlement, { assetId }) !== null) {
+          const convertedGroup = settlement.groups.get(assetId);
+          if (convertedGroup) {
             const destroyedBySlice = destroyedUnitsBySlice(settlement, assetId);
-            for (const slice of slices) {
-              const destroyed = destroyedBySlice.get(slice.id) ?? 0;
-              if (slice.assetKitId && destroyed > 0) {
+            for (const working of convertedGroup.slices) {
+              const destroyed = destroyedBySlice.get(working.id) ?? 0;
+              if (working.assetKitId && destroyed > 0) {
                 destroyedUnitsByAssetKitId.set(
-                  slice.assetKitId,
-                  (destroyedUnitsByAssetKitId.get(slice.assetKitId) ?? 0) +
+                  working.assetKitId,
+                  (destroyedUnitsByAssetKitId.get(working.assetKitId) ?? 0) +
                     destroyed
                 );
               }
+              const read = slices.find((s) => s.id === working.id);
               if (
-                isOutstandingSlice(slice) &&
-                resolveSentUnits(slice) > 0 &&
+                !read?.checkedInAt &&
+                working.checkedOutQuantity > 0 &&
                 unitsOutInSettlement(settlement, {
                   assetId,
-                  sliceId: slice.id,
+                  sliceId: working.id,
                 }) === 0
               ) {
-                settledSliceIds.add(slice.id);
+                settledSliceIds.add(working.id);
               }
             }
             continue;

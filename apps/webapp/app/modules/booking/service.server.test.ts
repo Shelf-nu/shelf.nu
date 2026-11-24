@@ -17630,6 +17630,8 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         organizationId: "org-1",
         bookingId: mockBookingId,
         assetIds: [mockQtyAssetId],
+        // The check-in already holds the sorted asset lock.
+        assetsLocked: true,
       })
     );
     // Lock, open, log, commit, then the booking write.
@@ -23351,6 +23353,63 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
     );
     expect(bookingSources.commitSettlement).not.toHaveBeenCalled();
   });
+
+  it("judges a converted group reconciled from its rows after a re-dispatch", async () => {
+    expect.assertions(3);
+
+    arrange([poolSlice("ba-loose", null, 10), fillerSlice]);
+    // why: all 10 booked units went out and came back once, so the logs
+    // already account for the booked 10 and the log-based remaining is 0.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 10 } });
+    // why: a returnable pool, large enough for the custody guard.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pool",
+      title: "Batteries",
+      quantity: 20,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.TWO_WAY,
+    });
+    // why: the group is converted; 5 of the released units were dispatched
+    // again, so 5 are out from Demo Warehouse and 5 are released.
+    vitest.mocked(bookingSources.openSettlement).mockResolvedValueOnce(
+      convertedSettlement("asset-pool", [
+        settlementSlice("ba-loose", null, [
+          {
+            kind: "LOCATION",
+            locationId: "loc-a",
+            quantity: 10,
+            out: 5,
+            released: 5,
+          },
+        ]),
+      ])
+    );
+
+    await partialCheckinBooking(
+      params([{ assetId: "asset-pool", returned: 5 }])
+    );
+
+    // The rows hold nothing unsettled: the asset is fully reconciled, even
+    // though the logs already counted the booked units once.
+    expect(db.partialBookingCheckin.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ assetIds: ["asset-pool"] }),
+      })
+    );
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", quantity: 5 })
+    );
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["ba-loose"] } }),
+      })
+    );
+  });
 });
 
 /**
@@ -25820,6 +25879,8 @@ type SettlementRowInput = {
   locationId: string | null;
   quantity: number;
   out: number;
+  /** Units that came back or were used up; 0 when omitted. */
+  released?: number;
 };
 
 /** A converted slice of a settlement, its rows with `out` units out. */
@@ -25834,15 +25895,18 @@ function settlementSlice(
     locationId: r.locationId,
     quantity: r.quantity,
     outQuantity: r.out,
-    releasedQuantity: 0,
-    dispatchedTotal: r.out,
+    releasedQuantity: r.released ?? 0,
+    dispatchedTotal: r.out + (r.released ?? 0),
     sharedQuantity: 0,
   }));
   return {
     id,
     assetKitId,
     quantity: rows.reduce((sum, r) => sum + r.quantity, 0),
-    checkedOutQuantity: rows.reduce((sum, r) => sum + r.out, 0),
+    checkedOutQuantity: rows.reduce(
+      (sum, r) => sum + r.out + (r.released ?? 0),
+      0
+    ),
     originalMode: assetKitId ? "KIT" : "AUTO",
     mode: assetKitId ? "KIT" : "AUTO",
     rows: working,

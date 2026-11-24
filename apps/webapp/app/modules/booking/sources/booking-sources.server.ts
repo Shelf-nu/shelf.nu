@@ -17,6 +17,9 @@
  * 5. writes everything in one `writeSourcePlan` call. Every refusal is thrown
  *    before that write.
  *
+ * With adoption off, a booking with no converted group stops after one
+ * probe: every slice stays LEGACY and nothing is read, locked or written.
+ *
  * Refusals are `ShelfError` 400 with `shouldBeCaptured: false`, naming each
  * source with its free units. Drafts hold nothing, so a draft's allocation
  * never refuses: units that fit nowhere wait on UNASSIGNED until the booking
@@ -41,7 +44,7 @@
  * @see {@link file://./capacity.server.ts} free units, capacity and holds
  */
 
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import {
   allocateSources,
   computeShortSlices,
@@ -62,7 +65,10 @@ import { db } from "~/database/db.server";
 import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
-import { BOOKING_DISPOSITION_CATEGORIES } from "../checkout-attribution";
+import {
+  BOOKING_DISPOSITION_CATEGORIES,
+  isBookingDispositionCategory,
+} from "../checkout-attribution";
 import {
   computeFreeBySourceForPools,
   loadCompetingHoldsByPool,
@@ -96,7 +102,6 @@ import { resizeKitRow } from "./kit-quantity";
 import { groupMapKey, writeSourcePlan } from "./repository.server";
 import {
   emptySettlement,
-  isSettleCategory,
   matchSharesToLogs,
   settlementWindow,
 } from "./settlement";
@@ -132,24 +137,94 @@ type CallContext = {
   groupBySlice: Map<string, WorkingGroup>;
   /** True when the booking is a DRAFT (holds nothing). */
   isDraft: boolean;
-  /** The booking's stored start and creation time: its short-sweep priority. */
+  /**
+   * The booking's stored start and creation time: its short-sweep priority.
+   * Unread (epoch) in an empty context, which has no group to sweep.
+   */
   booking: { from: Date; createdAt: Date };
 };
+
+/**
+ * The window a call measures over: fixed by the caller, or derived from the
+ * booking's stored start and end as read under the booking lock.
+ */
+type CallWindow = Window | ((booking: { from: Date; to: Date }) => Window);
+
+/**
+ * A context with no group: every touched slice stays LEGACY, nothing is
+ * planned and {@link finishCall} writes nothing.
+ */
+function emptyCallContext(organizationId: string): CallContext {
+  return {
+    session: { organizationId, groups: new Map(), pending: [] },
+    groupBySlice: new Map(),
+    isDraft: false,
+    booking: { from: new Date(0), createdAt: new Date(0) },
+  };
+}
+
+/**
+ * True when any group of the booking is converted: a slice that is not
+ * LEGACY, or a share row (shares outlive their slices, so a group whose
+ * slices were all removed stays converted). One statement, two indexed
+ * EXISTS probes (`BookingAsset.bookingId`, `BookingDispositionShare
+ * (bookingId, assetId)`). Booking-wide on purpose: a superset of the touched
+ * groups only sends a call down the full path, never the other way.
+ *
+ * @param tx - The caller's transaction
+ * @param organizationId - The trusted workspace id
+ * @param bookingId - The booking
+ */
+async function bookingHasConvertedGroup(
+  tx: BookingSourcesTx,
+  organizationId: string,
+  bookingId: string
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ converted: boolean }>>(Prisma.sql`
+    SELECT (
+      EXISTS (
+        SELECT 1 FROM "BookingAsset" ba
+        JOIN "Booking" b ON b.id = ba."bookingId"
+        WHERE ba."bookingId" = ${bookingId}
+          AND b."organizationId" = ${organizationId}
+          AND ba."sourceAllocation" <> 'LEGACY'
+      )
+      OR EXISTS (
+        SELECT 1 FROM "BookingDispositionShare" sh
+        WHERE sh."bookingId" = ${bookingId}
+          AND sh."organizationId" = ${organizationId}
+      )
+    ) AS "converted"`);
+  return rows[0]?.converted === true;
+}
 
 /**
  * Steps 1 and 2 of every write: read the touched slices and the booking's
  * status, lock the assets, open the session.
  *
+ * With adoption off, a booking with no converted group has nothing to plan:
+ * one probe ({@link bookingHasConvertedGroup}) and an empty context, without
+ * the slice, booking, lock, state or free-unit reads. Every slice is then
+ * LEGACY to the caller, and a slice id that is not on the booking is not
+ * reported (nothing is written for it either).
+ *
  * Only quantity-tracked assets are read and locked when `sliceIds` is
  * omitted: an INDIVIDUAL asset has no source rows, and a caller that locked
  * the booking's pool assets in one sorted statement beforehand finds this
- * lock already held (no second lock set, so no lock-order inversion).
+ * lock already held (no second lock set, so no lock-order inversion). A
+ * caller that holds that lock passes `assetsLocked` and the statement is not
+ * sent again.
  *
  * @param tx - The caller's transaction; the caller holds the booking lock
  * @param args.sliceIds - Slices to touch; every quantity-tracked slice of the
  *   booking when omitted
  * @param args.assetIds - With `sliceIds` omitted, only the quantity-tracked
  *   slices of these assets
+ * @param args.window - The session window, or how to derive it from the
+ *   booking's stored dates
+ * @param args.assetsLocked - True when the caller already holds the sorted
+ *   asset lock of every touched quantity-tracked asset; only with `sliceIds`
+ *   omitted (the slice read then keeps to quantity-tracked assets)
  * @throws {ShelfError} 404 when a slice is not on this booking in this workspace
  */
 async function openCall(
@@ -159,12 +234,20 @@ async function openCall(
     bookingId: string;
     sliceIds?: string[];
     assetIds?: string[];
-    window: Window;
+    window: CallWindow;
     adoptionEnabled: boolean;
     newSliceIds?: ReadonlySet<string>;
+    assetsLocked?: boolean;
   }
 ): Promise<CallContext> {
-  const { organizationId, bookingId, sliceIds, window } = args;
+  const { organizationId, bookingId, sliceIds } = args;
+  if (
+    !args.adoptionEnabled &&
+    !(await bookingHasConvertedGroup(tx, organizationId, bookingId))
+  ) {
+    return emptyCallContext(organizationId);
+  }
+
   // Reading the slice list before the asset lock is safe: the caller holds
   // the booking lock, so no slice is added or removed meanwhile, and every
   // read that decides anything (slices, rows, logs, shares) runs again under
@@ -185,7 +268,7 @@ async function openCall(
     }),
     tx.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { status: true, from: true, createdAt: true },
+      select: { status: true, from: true, to: true, createdAt: true },
     }),
   ]);
   const wanted = sliceIds ? new Set(sliceIds) : null;
@@ -200,14 +283,18 @@ async function openCall(
     });
   }
 
-  const pools = await lockGroupAssets(
-    tx,
-    organizationId,
-    slices.map((s) => s.assetId)
-  );
-  const assetIds = [...new Set(slices.map((s) => s.assetId))].filter((id) =>
-    pools.has(id)
-  );
+  const sliceAssetIds = [...new Set(slices.map((s) => s.assetId))];
+  // The slice read keeps to quantity-tracked assets when `sliceIds` is
+  // omitted, so a caller's held lock covers exactly these.
+  const pools =
+    args.assetsLocked && !sliceIds
+      ? new Set(sliceAssetIds)
+      : await lockGroupAssets(tx, organizationId, sliceAssetIds);
+  const assetIds = sliceAssetIds.filter((id) => pools.has(id));
+  const window =
+    typeof args.window === "function"
+      ? args.window({ from: booking.from, to: booking.to })
+      : args.window;
   const session = await openGroupSession(tx, {
     organizationId,
     groups: assetIds.map((assetId) => ({ bookingId, assetId })),
@@ -322,8 +409,12 @@ function reallocateConflictingAutoSlices(
   }
 }
 
-/** Step 5: one write for the whole call. */
+/**
+ * Step 5: one write for the whole call. An empty context (no group opened)
+ * has nothing to write and sends nothing.
+ */
 async function finishCall(tx: BookingSourcesTx, ctx: CallContext) {
+  if (ctx.session.groups.size === 0) return;
   await writeSourcePlan(tx, {
     organizationId: ctx.session.organizationId,
     plan: buildSessionPlan(ctx.session),
@@ -1622,9 +1713,9 @@ export async function dispatchUnits(
 }
 
 /**
- * Opens the check-in settlement of a booking: the asset lock, the group
- * session, the conversion of LEGACY groups (adoption on), and the allocation
- * of seeded pending units. Writes nothing; {@link commitSettlement} writes.
+ * Opens the check-in settlement of a booking: the group session, the
+ * conversion of LEGACY groups (adoption on), and the allocation of seeded
+ * pending units. Writes nothing; {@link commitSettlement} writes.
  *
  * Call it right after the booking lock and the check-in's one sorted asset
  * lock, before any read that decides what comes back and before any log is
@@ -1632,21 +1723,24 @@ export async function dispatchUnits(
  * log written after it gets RECORDED shares at the commit.
  *
  * A check-in never refuses for capacity: seeded pending units are allocated
- * by the rule, and what fits nowhere waits on UNASSIGNED. A group held back
- * at the conversion gate, or LEGACY with adoption off, stays LEGACY and its
- * dispositions follow the existing path.
+ * by the rule over `settlementWindow` of the booking's stored dates (read
+ * under the booking lock), and what fits nowhere waits on UNASSIGNED. A group
+ * held back at the conversion gate, or LEGACY with adoption off, stays LEGACY
+ * and its dispositions follow the existing path.
  *
- * Queries: none for no assets; else the slice and booking reads (two), the
- * asset lock (one, held already), the group states (four) and free units
- * (five, only for converted groups).
+ * Queries: none for no assets. With adoption off and no converted group on
+ * the booking, one probe and nothing else (an empty settlement). Otherwise
+ * the probe (adoption off only), the slice and booking reads (two), the
+ * asset lock (one, skipped with `assetsLocked`), the group states (four) and
+ * free units (five, only for converted groups).
  *
  * @param tx - The check-in transaction; the caller holds the booking lock
  *   and the sorted lock of these assets
  * @param args.organizationId - The trusted workspace id
  * @param args.bookingId - The booking
  * @param args.assetIds - The quantity-tracked assets the check-in touches
- * @param args.booking - The booking's stored start and end; seeded pending
- *   units are allocated over `settlementWindow` of them
+ * @param args.assetsLocked - True when the caller holds the sorted lock of
+ *   every one of `assetIds` (the statement is not sent again)
  * @param args.now - The current time (defaults to now)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
  * @returns The settlement to pass to `settleUnits` and {@link commitSettlement}
@@ -1658,7 +1752,7 @@ export async function openSettlement(
     organizationId: string;
     bookingId: string;
     assetIds: string[];
-    booking: { from: Date; to: Date };
+    assetsLocked?: boolean;
     now?: Date;
     adoptionEnabled?: boolean;
   }
@@ -1668,13 +1762,18 @@ export async function openSettlement(
   if (assetIds.length === 0) {
     return emptySettlement({ organizationId, bookingId });
   }
+  const now = args.now ?? new Date();
   const ctx = await openCall(tx, {
     organizationId,
     bookingId,
     assetIds,
-    window: settlementWindow(args.booking, args.now ?? new Date()),
+    assetsLocked: args.assetsLocked,
+    window: (booking) => settlementWindow(booking, now),
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
   });
+  if (ctx.session.groups.size === 0) {
+    return emptySettlement({ organizationId, bookingId });
+  }
   await allocateSessionPending(tx, ctx.session, "involuntary");
 
   const groups = new Map<string, WorkingGroup>();
@@ -1690,6 +1789,49 @@ export async function openSettlement(
   };
 }
 
+/** A disposition log of the booking that no share covers yet. */
+type NewLogRow = {
+  id: string;
+  assetId: string;
+  bookingAssetId: string | null;
+  category: string;
+  quantity: number;
+  createdAt: Date;
+};
+
+/**
+ * The booking's disposition logs of these assets that have no share at all:
+ * one statement, a `NOT EXISTS` on the share's `consumptionLogId` index. A
+ * converted group's earlier logs are each fully shared (the commit check),
+ * so in a converted group these are the logs this check-in wrote plus, in a
+ * group converting now, the logs its conversion seeds in memory.
+ *
+ * @param tx - The check-in transaction
+ * @param args.organizationId - The trusted workspace id
+ * @param args.bookingId - The booking
+ * @param args.assetIds - The converted groups' assets
+ */
+async function loadUnsharedDispositionLogs(
+  tx: BookingSourcesTx,
+  args: { organizationId: string; bookingId: string; assetIds: string[] }
+): Promise<NewLogRow[]> {
+  return tx.$queryRaw<NewLogRow[]>(Prisma.sql`
+    SELECT cl.id, cl."assetId", cl."bookingAssetId", cl.category::text AS category,
+           cl.quantity, cl."createdAt"
+    FROM "ConsumptionLog" cl
+    JOIN "Booking" b ON b.id = cl."bookingId"
+    WHERE cl."bookingId" = ${args.bookingId}
+      AND b."organizationId" = ${args.organizationId}
+      AND cl."assetId" IN (${Prisma.join(args.assetIds)})
+      AND cl.category::text IN (${Prisma.join([
+        ...BOOKING_DISPOSITION_CATEGORIES,
+      ])})
+      AND NOT EXISTS (
+        SELECT 1 FROM "BookingDispositionShare" sh
+        WHERE sh."consumptionLogId" = cl.id
+      )`);
+}
+
 /**
  * Writes a check-in settlement, after every disposition log of the check-in
  * is written, in the same transaction: the conversion of groups converted by
@@ -1697,14 +1839,15 @@ export async function openSettlement(
  * of every new log.
  *
  * The new logs are found, not passed in: the booking's disposition logs of
- * the settled assets that no share covers and that conversion did not just
- * seed. Every earlier log of a converted group is fully shared (the commit
- * check), so these are exactly the logs this check-in wrote, including the
- * ledger's CONSUME, LOSS and DAMAGE rows, which split one event over the
- * places the stock left from.
+ * the settlement's converted groups that have no share and that conversion
+ * did not just seed ({@link loadUnsharedDispositionLogs}). These are exactly
+ * the logs this check-in wrote, including the ledger's CONSUME, LOSS and
+ * DAMAGE rows, which split one event over the places the stock left from.
+ * Every converted group is read, settled or not, so a log written for a
+ * group without settling it is caught.
  *
- * Queries: none for an empty settlement; the logs and their share sums (two,
- * only when units were settled); the write.
+ * Queries: none for an empty settlement; the new logs (one, only when a
+ * group is converted); the write.
  *
  * @param tx - The check-in transaction
  * @param settlement - The settlement from {@link openSettlement}
@@ -1720,50 +1863,20 @@ export async function commitSettlement(
   if (!session) return;
   const plan = buildSessionPlan(session);
 
-  if (settlement.planned.length > 0) {
-    const assetIds = [...new Set(settlement.planned.map((p) => p.assetId))];
+  const assetIds = [...settlement.groups.keys()];
+  if (assetIds.length > 0) {
     const seeded = new Set(plan.insertShares.map((s) => s.consumptionLogId));
-    const [logs, shareSums] = await Promise.all([
-      tx.consumptionLog.findMany({
-        where: {
-          bookingId,
-          assetId: { in: assetIds },
-          booking: { organizationId },
-          category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
-        },
-        select: {
-          id: true,
-          assetId: true,
-          bookingAssetId: true,
-          category: true,
-          quantity: true,
-          createdAt: true,
-        },
-      }),
-      tx.bookingDispositionShare.groupBy({
-        by: ["consumptionLogId"],
-        where: { organizationId, bookingId, assetId: { in: assetIds } },
-        _sum: { quantity: true },
-      }),
-    ]);
-    const sharedByLog = new Map(
-      shareSums.map((s) => [s.consumptionLogId, s._sum.quantity ?? 0])
-    );
+    const logs = await loadUnsharedDispositionLogs(tx, {
+      organizationId,
+      bookingId,
+      assetIds,
+    });
     const unshared: UnsharedLog[] = logs.flatMap((log) => {
-      if (seeded.has(log.id) || !isSettleCategory(log.category)) return [];
-      const left = log.quantity - (sharedByLog.get(log.id) ?? 0);
-      return left > 0
-        ? [
-            {
-              id: log.id,
-              assetId: log.assetId,
-              bookingAssetId: log.bookingAssetId,
-              category: log.category,
-              quantity: left,
-              createdAt: log.createdAt,
-            },
-          ]
-        : [];
+      const { category } = log;
+      if (seeded.has(log.id) || !isBookingDispositionCategory(category)) {
+        return [];
+      }
+      return [{ ...log, category }];
     });
     const match = matchSharesToLogs(settlement.planned, unshared);
     if (!match.ok) {

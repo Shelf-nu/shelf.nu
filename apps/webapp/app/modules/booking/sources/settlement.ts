@@ -34,6 +34,9 @@ import type { SourceRowState } from "@shelf/quantity-control";
 
 import { ShelfError } from "~/utils/error";
 
+import { BOOKING_DISPOSITION_CATEGORIES } from "../checkout-attribution";
+import type { BookingDispositionCategory } from "../checkout-attribution";
+
 import type {
   GroupSession,
   WorkingGroup,
@@ -44,19 +47,8 @@ import type { PlannedShare, Window } from "./types";
 import { resolveUntaggedDisposition } from "./untagged-resolution";
 import type { ResolvedShare } from "./untagged-resolution";
 
-/** Disposition categories, in the order a disposition's units are poured. */
-export const SETTLE_CATEGORIES = [
-  "RETURN",
-  "CONSUME",
-  "LOSS",
-  "DAMAGE",
-] as const;
-
-/** One disposition category of a booking check-in. */
-export type SettleCategory = (typeof SETTLE_CATEGORIES)[number];
-
 /** Categories whose units leave the stock (the placement reconcile). */
-const DESTROY_CATEGORIES: ReadonlySet<SettleCategory> = new Set([
+const DESTROY_CATEGORIES: ReadonlySet<BookingDispositionCategory> = new Set([
   "CONSUME",
   "LOSS",
   "DAMAGE",
@@ -77,7 +69,7 @@ export type SettlementDisposition = {
 /** Units of one category of a disposition planned on one slice row. */
 export type PlannedSettleShare = {
   assetId: string;
-  category: SettleCategory;
+  category: BookingDispositionCategory;
   /** The slice (`BookingAsset.id`). */
   sliceId: string;
   /** `sourceKey` of the row on that slice. */
@@ -216,6 +208,76 @@ export function unitsOutInSettlement(
     );
 }
 
+/**
+ * Units of a converted group not settled yet: the sum of `quantity -
+ * releasedQuantity` over every row of every slice (AUTO, MANUAL and KIT), as
+ * the settlement holds them now. Zero means every planned unit of the group
+ * came back or was used up, whatever was re-dispatched in between: that is
+ * when the asset is fully reconciled on the booking. Pending units that never
+ * left count as not settled.
+ *
+ * @param settlement - The open settlement
+ * @param assetId - The asset
+ * @returns Units not settled, or null when the group is LEGACY
+ */
+export function remainingInSettlement(
+  settlement: Settlement,
+  assetId: string
+): number | null {
+  const group = settlement.groups.get(assetId);
+  if (!group) return null;
+  return group.slices.reduce(
+    (sum, s) =>
+      sum +
+      s.rows.reduce(
+        (rowSum, r) => rowSum + (r.quantity - r.releasedQuantity),
+        0
+      ),
+    0
+  );
+}
+
+/**
+ * The slices a check-in walks, with every converted group's slices taken from
+ * the settlement: those were read under the booking and asset locks, so a
+ * slice added or removed between the caller's own read and its locks is seen
+ * as it is now. LEGACY groups keep the caller's slices.
+ *
+ * The result keeps the caller's order for LEGACY slices; a converted group's
+ * slices take the place of the caller's first slice of that asset, in
+ * allocation order (standalone first, then by id). Callers that need another
+ * order sort the result.
+ *
+ * @param settlement - The open settlement
+ * @param slices - The caller's slices, read before the locks
+ * @param adopt - Builds the caller's slice for a settlement slice: `read` is
+ *   the caller's slice with the same id when it has one, `sibling` a slice of
+ *   the same asset (for asset-level fields such as the title)
+ * @returns The slices to walk
+ */
+export function slicesUnderLock<T extends { id: string; assetId: string }>(
+  settlement: Settlement,
+  slices: T[],
+  adopt: (slice: WorkingSlice, read: T | undefined, sibling: T) => T
+): T[] {
+  const result: T[] = [];
+  const placed = new Set<string>();
+  for (const slice of slices) {
+    const group = settlement.groups.get(slice.assetId);
+    if (!group) {
+      result.push(slice);
+      continue;
+    }
+    if (placed.has(slice.assetId)) continue;
+    placed.add(slice.assetId);
+    for (const working of [...group.slices].sort(compareAllocationOrder)) {
+      const read = slices.find((s) => s.id === working.id);
+      result.push(adopt(working, read, slice));
+    }
+  }
+  return result;
+}
+
 /** A 400 for units asked back that are not out. */
 function notOut(asked: number, out: number, assetId: string): ShelfError {
   return new ShelfError({
@@ -328,7 +390,7 @@ export function settleUnits(
   });
 
   // Pour the categories into the resolved pieces, in order.
-  const left: Record<SettleCategory, number> = {
+  const left: Record<BookingDispositionCategory, number> = {
     RETURN: disposition.returned ?? 0,
     CONSUME: disposition.consumed ?? 0,
     LOSS: disposition.lost ?? 0,
@@ -340,7 +402,8 @@ export function settleUnits(
     const row = slice?.rows.find((r) => rowRef(r) === share.sourceRowId);
     if (!slice || !row) continue; // the resolver only names candidate rows
     let pieceLeft = share.units;
-    for (const category of SETTLE_CATEGORIES) {
+    // The categories pour in the order of BOOKING_DISPOSITION_CATEGORIES.
+    for (const category of BOOKING_DISPOSITION_CATEGORIES) {
       if (pieceLeft === 0) break;
       const take = Math.min(pieceLeft, left[category]);
       if (take === 0) continue;
@@ -436,7 +499,7 @@ export type UnsharedLog = {
   assetId: string;
   /** The slice the log is tagged with, or null. */
   bookingAssetId: string | null;
-  category: SettleCategory;
+  category: BookingDispositionCategory;
   /** Units of the log not covered by any share. */
   quantity: number;
   createdAt: Date;
@@ -546,9 +609,4 @@ export function matchSharesToLogs(
     return { ok: false, plannedLeft: [...plannedLeft.values()], logsLeft };
   }
   return { ok: true, shares };
-}
-
-/** True for a disposition category a check-in writes. */
-export function isSettleCategory(category: string): category is SettleCategory {
-  return (SETTLE_CATEGORIES as readonly string[]).includes(category);
 }
