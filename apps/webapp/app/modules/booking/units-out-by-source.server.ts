@@ -20,6 +20,7 @@ import { BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 
+import { resolveSentUnits } from "./checkin-receipt";
 import {
   attributeDispositionsByBookingAsset,
   BOOKING_DISPOSITION_CATEGORIES,
@@ -34,6 +35,8 @@ export type CountedSlice = {
   assetKitId: string | null;
   /** Units sent out on it so far, cumulative across trips. */
   checkedOutQuantity?: number;
+  /** When the slice was last dispatched; `null` when it never was. */
+  checkedOutAt?: Date | null;
 };
 
 /**
@@ -87,16 +90,20 @@ export function unitsStillOutBySlice({
     const groupKey = key(slice.bookingId, slice.assetId);
     let attributed = attributedByGroup.get(groupKey);
     if (!attributed) {
-      // A slice can go out and come back more than once, so what it can
-      // absorb is its cumulative departures, not one booked quantity.
-      // Otherwise untagged returns from later trips spill nowhere and read
-      // as units still out.
+      // A slice absorbs at most the units it sent (`resolveSentUnits`), the
+      // capacity the check-in writer and the booking page use. Cumulative, so
+      // untagged returns from a later trip still find room; and nothing for a
+      // slice that never left, so a return cannot land on it.
       attributed = attributeDispositionsByBookingAsset({
         bookingAssetRows: (slicesByGroup.get(groupKey) ?? [slice]).map(
           (row) => ({
             id: row.id,
             assetKitId: row.assetKitId,
-            quantity: Math.max(row.quantity, row.checkedOutQuantity ?? 0),
+            quantity: resolveSentUnits({
+              quantity: row.quantity,
+              checkedOutAt: row.checkedOutAt ?? null,
+              checkedOutQuantity: row.checkedOutQuantity ?? null,
+            }),
           })
         ),
         consumptionLogs: logsByGroup.get(groupKey) ?? [],
@@ -153,6 +160,7 @@ export async function loadBookedOutBySource(
     assetId: true,
     quantity: true,
     assetKitId: true,
+    checkedOutAt: true,
   } as const;
   const sourced = await client.bookingAsset.findMany({
     where: {

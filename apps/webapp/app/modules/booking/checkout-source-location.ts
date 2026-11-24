@@ -521,8 +521,8 @@ export type UntaggedCheckinSlice = Pick<
   quantity: number;
   /** Units sent out on it so far, cumulative across trips. */
   checkedOutQuantity: number;
-  /** When the slice was last dispatched; absent or `null` when it never was. */
-  checkedOutAt?: Date | null;
+  /** When the slice was last dispatched; `null` when it never was. */
+  checkedOutAt: Date | null;
 };
 
 /** One slice's share of a check-in disposition that named no slice. */
@@ -576,7 +576,7 @@ export function spreadUntaggedCheckin({
   const sent = (slice: UntaggedCheckinSlice) =>
     resolveSentUnits({
       quantity: slice.quantity,
-      checkedOutAt: slice.checkedOutAt ?? null,
+      checkedOutAt: slice.checkedOutAt,
       checkedOutQuantity: slice.checkedOutQuantity,
     });
   const already = attributeDispositionsByBookingAsset({
@@ -637,30 +637,27 @@ export function spreadUntaggedCheckin({
 }
 
 /**
- * Which manual placements lose the units of a check-in disposition that names
- * no slice, for an asset with several slices on the booking.
+ * Which manual placements lose the used-up, lost and damaged units of shares
+ * already worked out by {@link spreadUntaggedCheckin}.
  *
- * Built on {@link spreadUntaggedCheckin}, so the used-up, lost and damaged
- * units come off the same slices their logs are tagged with. Each slice's
- * share comes off its own manual source (see {@link isManualSourceSlice});
- * units on a kit slice, or beyond every slice's room, are left to the unplaced
- * units.
+ * Each slice's share comes off its own manual source (see
+ * {@link isManualSourceSlice}); units on a kit slice, or beyond every slice's
+ * room, are left to the unplaced units.
  *
  * @param args.slices - The asset's slices on this booking
- * @param args.priorLogs - The asset's earlier check-in logs on this booking
+ * @param args.shares - The disposition's shares, one per slice
  * @returns The `sources` for `reconcileManualPlacementsForStockDecrease`
  */
-export function untaggedCheckinPlacementSources(args: {
+export function placementSourcesForShares({
+  slices,
+  shares,
+}: {
   slices: readonly UntaggedCheckinSlice[];
-  priorLogs: ReadonlyArray<{ bookingAssetId: string | null; quantity: number }>;
-  returned?: number;
-  consumed?: number;
-  lost?: number;
-  damaged?: number;
+  shares: readonly UntaggedCheckinShare[];
 }): Array<{ locationId: string; quantity: number }> {
-  const sliceById = new Map(args.slices.map((slice) => [slice.id, slice]));
+  const sliceById = new Map(slices.map((slice) => [slice.id, slice]));
   const byLocation = new Map<string, number>();
-  for (const share of spreadUntaggedCheckin(args)) {
+  for (const share of shares) {
     const slice = share.bookingAssetId
       ? sliceById.get(share.bookingAssetId)
       : undefined;
@@ -675,4 +672,30 @@ export function untaggedCheckinPlacementSources(args: {
     locationId,
     quantity,
   }));
+}
+
+/**
+ * Which manual placements lose the units of a check-in disposition that names
+ * no slice, for an asset with several slices on the booking.
+ *
+ * Runs {@link spreadUntaggedCheckin} and hands its shares to
+ * {@link placementSourcesForShares}, so the units come off the same slices
+ * their logs are tagged with.
+ *
+ * @param args.slices - The asset's slices on this booking
+ * @param args.priorLogs - The asset's earlier check-in logs on this booking
+ * @returns The `sources` for `reconcileManualPlacementsForStockDecrease`
+ */
+export function untaggedCheckinPlacementSources(args: {
+  slices: readonly UntaggedCheckinSlice[];
+  priorLogs: ReadonlyArray<{ bookingAssetId: string | null; quantity: number }>;
+  returned?: number;
+  consumed?: number;
+  lost?: number;
+  damaged?: number;
+}): Array<{ locationId: string; quantity: number }> {
+  return placementSourcesForShares({
+    slices: args.slices,
+    shares: spreadUntaggedCheckin(args),
+  });
 }

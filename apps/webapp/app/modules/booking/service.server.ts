@@ -232,7 +232,7 @@ import {
   parseSourceLocationsFromFormData,
   sliceForDisposition,
   spreadUntaggedCheckin,
-  untaggedCheckinPlacementSources,
+  placementSourcesForShares,
   type UntaggedCheckinShare,
 } from "./checkout-source-location";
 import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
@@ -8542,6 +8542,16 @@ export async function partialCheckinBooking({
         bareCheckinAssetIds.add(assetId);
       }
     }
+    /**
+     * Entries that name their slice go first. An entry that names none is
+     * spread over whatever room the asset's slices have left, read from the
+     * logs written so far, so it must run after the named entries of the same
+     * asset have written theirs. The sort is stable: entries keep their
+     * submitted order otherwise.
+     */
+    dispositions.sort(
+      (a, b) => Number(!a.bookingAssetId) - Number(!b.bookingAssetId)
+    );
 
     if (dispositions.length === 0) {
       throw new ShelfError({
@@ -9047,6 +9057,33 @@ export async function partialCheckinBooking({
       );
 
       /**
+       * The booking's slices as they stand under the locks. The booking was
+       * loaded before the transaction, and a check-out of the same booking
+       * that commits in between changes what a slice sent and where it left
+       * from. Everything below that sizes or places a slice reads these rows.
+       */
+      const dispatchBySliceId = new Map(
+        (qtyAssetIdsInSession.length > 0
+          ? await tx.bookingAsset.findMany({
+              where: { bookingId: id, assetId: { in: qtyAssetIdsInSession } },
+              select: {
+                id: true,
+                quantity: true,
+                checkedOutAt: true,
+                checkedOutQuantity: true,
+                sourceLocationId: true,
+                sourceKitId: true,
+              },
+            })
+          : []
+        ).map((row) => [row.id, row])
+      );
+      const lockedSlices = bookingFound.bookingAssets.map((slice) => ({
+        ...slice,
+        ...dispatchBySliceId.get(slice.id),
+      }));
+
+      /**
        * Units still to check in, read once under the locks. The asset's
        * figure is counted down as each disposition claims units (see
        * `computeBookingCheckinRemaining` for why that matches a fresh read).
@@ -9183,7 +9220,7 @@ export async function partialCheckinBooking({
            * would log a return for units that never went out. Mirrors the
            * auto-default in `checkinBooking`.
            */
-          const slices = bookingFound.bookingAssets.filter(
+          const slices = lockedSlices.filter(
             (slice) => slice.assetId === disp.assetId
           );
           const sentOut = slices.reduce(
@@ -9258,14 +9295,16 @@ export async function partialCheckinBooking({
          * check-in that sends only asset ids) resolves when the asset has a
          * single slice on this booking.
          */
-        const sourceSlice = sliceForDisposition(bookingFound.bookingAssets, {
+        const sourceSlice = sliceForDisposition(lockedSlices, {
           assetId: disp.assetId,
           bookingAssetId: disp.bookingAssetId,
         });
         /**
          * The disposition as the logs record it: one share per slice, each
-         * tagged with its `bookingAssetId`. Every log names its slice, so no
-         * reader has to guess later which slice the units came back to.
+         * tagged with its `bookingAssetId` where a slice can be found for it,
+         * so no reader has to guess later which slice the units came back to.
+         * Units beyond every slice's room have no slice to name and stay
+         * untagged.
          *
          * A disposition that names its slice, or whose asset has one slice
          * here, is a single share. One that names none on an asset with
@@ -9298,7 +9337,7 @@ export async function partialCheckinBooking({
           damaged: disp.damaged,
         });
         if (!sourceSlice && !disp.bookingAssetId) {
-          const assetSlices = bookingFound.bookingAssets.filter(
+          const assetSlices = lockedSlices.filter(
             (ba) => ba.assetId === disp.assetId
           );
           const priorLogs = await tx.consumptionLog.findMany({
@@ -9309,21 +9348,23 @@ export async function partialCheckinBooking({
             },
             select: { bookingAssetId: true, quantity: true },
           });
-          const spreadArgs = {
+          shares = spreadUntaggedCheckin({
             slices: assetSlices,
             priorLogs,
             returned: disp.returned,
             consumed: disp.consumed,
             lost: disp.lost,
             damaged: disp.damaged,
-          };
-          shares = spreadUntaggedCheckin(spreadArgs).map((share) => ({
+          }).map((share) => ({
             ...share,
             slice:
               assetSlices.find((slice) => slice.id === share.bookingAssetId) ??
               null,
           }));
-          placementSources = untaggedCheckinPlacementSources(spreadArgs);
+          placementSources = placementSourcesForShares({
+            slices: assetSlices,
+            shares,
+          });
         }
 
         // One RETURN log per share. CONSUME / LOSS / DAMAGE are written with
@@ -9432,11 +9473,19 @@ export async function partialCheckinBooking({
         }
 
         const pendingAfter = remaining - claimed;
-        // Count the claim off what is left for the asset: this disposition
-        // just wrote logs for exactly these units. A slice's remaining needs
-        // no count-down, because a session names each slice at most once
-        // (repeated asset and slice pairs collapse above).
+        // Count the claim off what is left, for the asset and for each slice
+        // a share was written to: this disposition just wrote logs for
+        // exactly these units, and a later entry of the same asset is capped
+        // by what they leave.
         checkinRemaining.byAsset.set(disp.assetId, pendingAfter);
+        for (const share of shares) {
+          if (!share.bookingAssetId) continue;
+          checkinRemaining.bySlice.set(
+            share.bookingAssetId,
+            (checkinRemaining.bySlice.get(share.bookingAssetId) ?? 0) -
+              (share.returned + share.consumed + share.lost + share.damaged)
+          );
+        }
         if (pendingAfter === 0) {
           fullyReconciledQtyAssetIds.push(disp.assetId);
         }
@@ -9576,7 +9625,7 @@ export async function partialCheckinBooking({
         string,
         (typeof bookingFound.bookingAssets)[number][]
       >();
-      for (const slice of bookingFound.bookingAssets) {
+      for (const slice of lockedSlices) {
         const bucket = bookingSlicesByAssetId.get(slice.assetId);
         if (bucket) {
           bucket.push(slice);

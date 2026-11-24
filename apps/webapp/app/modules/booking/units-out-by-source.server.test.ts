@@ -17,6 +17,7 @@ const slice = {
   assetId: "pool-1",
   quantity: 10,
   assetKitId: null,
+  checkedOutQuantity: 10,
 };
 
 describe("unitsStillOutBySlice", () => {
@@ -64,6 +65,7 @@ describe("unitsStillOutBySlice", () => {
       id: "ba-kit",
       assetKitId: "ak-1",
       quantity: 5,
+      checkedOutQuantity: 5,
     };
     const out = unitsStillOutBySlice({
       sourced: [{ ...slice, checkedOutQuantity: 10 }],
@@ -103,6 +105,56 @@ describe("unitsStillOutBySlice", () => {
       ],
     });
     expect(out.get("ba-1")).toBe(0);
+  });
+
+  it("gives an untagged return nothing on a sibling that never went out", () => {
+    // The loose slice is booked but still on the shelf; the kit slice sent 5.
+    const kitSlice = {
+      ...slice,
+      id: "ba-kit",
+      assetKitId: "ak-1",
+      quantity: 5,
+      checkedOutQuantity: 5,
+    };
+    const out = unitsStillOutBySlice({
+      sourced: [kitSlice],
+      siblings: [{ ...slice, checkedOutQuantity: 0 }, kitSlice],
+      logs: [
+        {
+          bookingId: "b-1",
+          assetId: "pool-1",
+          bookingAssetId: null,
+          quantity: 3,
+        },
+      ],
+    });
+    expect(out.get("ba-kit")).toBe(2);
+  });
+
+  it("caps a partly dispatched slice at the units it sent", () => {
+    // 4 of 10 booked loose units left and came back; 3 more belong to the kit.
+    const partly = { ...slice, checkedOutQuantity: 4 };
+    const kitSlice = {
+      ...slice,
+      id: "ba-kit",
+      assetKitId: "ak-1",
+      quantity: 5,
+      checkedOutQuantity: 5,
+    };
+    const out = unitsStillOutBySlice({
+      sourced: [partly, kitSlice],
+      siblings: [partly, kitSlice],
+      logs: [
+        {
+          bookingId: "b-1",
+          assetId: "pool-1",
+          bookingAssetId: null,
+          quantity: 7,
+        },
+      ],
+    });
+    expect(out.get("ba-1")).toBe(0);
+    expect(out.get("ba-kit")).toBe(2);
   });
 
   it("ignores logs from another booking", () => {
