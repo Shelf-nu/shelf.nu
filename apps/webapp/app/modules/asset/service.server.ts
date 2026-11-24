@@ -8314,7 +8314,9 @@ export async function bulkUpdateAssetLocation({
       actor: { ...user, id: userId },
     });
 
-    return true;
+    // The count of quantity-tracked assets left where they were, so a caller
+    // that let them be skipped can tell the user how many.
+    return { success: true, skippedQuantityTracked };
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
 

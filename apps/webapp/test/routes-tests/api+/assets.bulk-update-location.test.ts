@@ -78,7 +78,10 @@ describe("POST /api/assets/bulk-update-location", () => {
       access: accessFor(["ADMIN"]),
       currentOrganization: { auditsEnabled: true },
     } as never);
-    vi.mocked(bulkUpdateAssetLocation).mockResolvedValue(true as never);
+    vi.mocked(bulkUpdateAssetLocation).mockResolvedValue({
+      success: true,
+      skippedQuantityTracked: 0,
+    });
   });
 
   it("asks the service to refuse quantity-tracked assets when the scanner says so", async () => {
@@ -124,6 +127,37 @@ describe("POST /api/assets/bulk-update-location", () => {
     // one must be absent.
     expect(sendNotification).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Assets updated" })
+    );
+  });
+
+  it("says how many quantity-tracked assets the save skipped", async () => {
+    // The dialog can only count the rows it has loaded, and "select all"
+    // reaches rows on other pages, so this notification carries the real
+    // number.
+    vi.mocked(bulkUpdateAssetLocation).mockResolvedValue({
+      success: true,
+      skippedQuantityTracked: 3,
+    });
+
+    await submit();
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Assets updated",
+        message: expect.stringContaining(
+          "3 quantity-tracked asset(s) were skipped"
+        ),
+      })
+    );
+  });
+
+  it("adds nothing to the notification when no asset was skipped", async () => {
+    await submit();
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Your assets' locations have been successfully updated.",
+      })
     );
   });
 

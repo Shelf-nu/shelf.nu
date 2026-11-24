@@ -70,7 +70,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    await bulkUpdateAssetLocation({
+    const { skippedQuantityTracked } = await bulkUpdateAssetLocation({
       userId,
       assetIds,
       organizationId,
@@ -83,9 +83,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       quantityTracked,
     });
 
+    // The dialog can only count the quantity-tracked rows it has loaded, and
+    // "select all" reaches rows on other pages, so the real number of skipped
+    // assets is reported here.
+    const skippedNote =
+      skippedQuantityTracked > 0
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Set their placements, with a quantity per location, on each asset's page.`
+        : "";
+
     sendNotification({
       title: "Assets updated",
-      message: "Your assets' locations have been successfully updated",
+      message: `Your assets' locations have been successfully updated.${skippedNote}`,
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
