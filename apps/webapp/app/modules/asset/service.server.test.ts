@@ -9124,8 +9124,13 @@ describe("bulkUpdateAssetLocation, quantity-tracked assets in the selection", ()
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
-  it("skips them and moves the rest by default", async () => {
-    await expect(move()).resolves.toBeDefined();
+  it("skips them, moves the rest and reports how many it skipped by default", async () => {
+    // The count is what lets a caller tell the user: the asset index dialog
+    // cannot see quantity-tracked assets on pages it has not loaded.
+    await expect(move()).resolves.toEqual({
+      success: true,
+      skippedQuantityTracked: 1,
+    });
     expect(db.$transaction).toHaveBeenCalled();
   });
 });
