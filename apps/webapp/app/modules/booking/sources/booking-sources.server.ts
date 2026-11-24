@@ -30,6 +30,10 @@
  * (by allocation, or from the operator's chosen source) and checks units
  * leaving now against what is physically on hand.
  *
+ * {@link openSettlement} and {@link commitSettlement} are the check-in path:
+ * units that come back or are used up are settled on the rows they were out
+ * from (see `settlement.ts`), and every disposition log gets its shares.
+ *
  * {@link getSliceSourceSummaries} is the read-only display path: no lock, no
  * conversion.
  *
@@ -58,6 +62,7 @@ import { db } from "~/database/db.server";
 import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
+import { BOOKING_DISPOSITION_CATEGORIES } from "../checkout-attribution";
 import {
   computeFreeBySourceForPools,
   loadCompetingHoldsByPool,
@@ -89,6 +94,13 @@ import type {
 } from "./conversion.server";
 import { resizeKitRow } from "./kit-quantity";
 import { groupMapKey, writeSourcePlan } from "./repository.server";
+import {
+  emptySettlement,
+  isSettleCategory,
+  matchSharesToLogs,
+  settlementWindow,
+} from "./settlement";
+import type { Settlement, UnsharedLog } from "./settlement";
 import type { SourceAllocationMode, Window } from "./types";
 
 /** Source kinds that hold location or Unplaced capacity. */
@@ -136,6 +148,8 @@ type CallContext = {
  * @param tx - The caller's transaction; the caller holds the booking lock
  * @param args.sliceIds - Slices to touch; every quantity-tracked slice of the
  *   booking when omitted
+ * @param args.assetIds - With `sliceIds` omitted, only the quantity-tracked
+ *   slices of these assets
  * @throws {ShelfError} 404 when a slice is not on this booking in this workspace
  */
 async function openCall(
@@ -144,6 +158,7 @@ async function openCall(
     organizationId: string;
     bookingId: string;
     sliceIds?: string[];
+    assetIds?: string[];
     window: Window;
     adoptionEnabled: boolean;
     newSliceIds?: ReadonlySet<string>;
@@ -161,7 +176,10 @@ async function openCall(
         booking: { organizationId },
         ...(sliceIds
           ? { id: { in: sliceIds } }
-          : { asset: { type: AssetType.QUANTITY_TRACKED } }),
+          : {
+              asset: { type: AssetType.QUANTITY_TRACKED },
+              ...(args.assetIds ? { assetId: { in: args.assetIds } } : {}),
+            }),
       },
       select: { id: true, assetId: true },
     }),
@@ -1545,6 +1563,173 @@ export async function dispatchUnits(
     dispatched.push({ sliceId: slice.id, assetId: group.key.assetId, sources });
   }
   return { dispatched, legacySliceIds };
+}
+
+/**
+ * Opens the check-in settlement of a booking: the asset lock, the group
+ * session, the conversion of LEGACY groups (adoption on), and the allocation
+ * of seeded pending units. Writes nothing; {@link commitSettlement} writes.
+ *
+ * Call it right after the booking lock and the check-in's one sorted asset
+ * lock, before any read that decides what comes back and before any log is
+ * written: conversion seeds shares from the logs it reads here, and every
+ * log written after it gets RECORDED shares at the commit.
+ *
+ * A check-in never refuses for capacity: seeded pending units are allocated
+ * by the rule, and what fits nowhere waits on UNASSIGNED. A group held back
+ * at the conversion gate, or LEGACY with adoption off, stays LEGACY and its
+ * dispositions follow the existing path.
+ *
+ * Queries: none for no assets; else the slice and booking reads (two), the
+ * asset lock (one, held already), the group states (four) and free units
+ * (five, only for converted groups).
+ *
+ * @param tx - The check-in transaction; the caller holds the booking lock
+ *   and the sorted lock of these assets
+ * @param args.organizationId - The trusted workspace id
+ * @param args.bookingId - The booking
+ * @param args.assetIds - The quantity-tracked assets the check-in touches
+ * @param args.booking - The booking's stored start and end; seeded pending
+ *   units are allocated over `settlementWindow` of them
+ * @param args.now - The current time (defaults to now)
+ * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @returns The settlement to pass to `settleUnits` and {@link commitSettlement}
+ * @throws {ShelfError} 404 when the booking is not in this workspace
+ */
+export async function openSettlement(
+  tx: BookingSourcesTx,
+  args: {
+    organizationId: string;
+    bookingId: string;
+    assetIds: string[];
+    booking: { from: Date; to: Date };
+    now?: Date;
+    adoptionEnabled?: boolean;
+  }
+): Promise<Settlement> {
+  const { organizationId, bookingId } = args;
+  const assetIds = [...new Set(args.assetIds)];
+  if (assetIds.length === 0) {
+    return emptySettlement({ organizationId, bookingId });
+  }
+  const ctx = await openCall(tx, {
+    organizationId,
+    bookingId,
+    assetIds,
+    window: settlementWindow(args.booking, args.now ?? new Date()),
+    adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
+  });
+  await allocateSessionPending(tx, ctx.session, "involuntary");
+
+  const groups = new Map<string, WorkingGroup>();
+  for (const group of ctx.session.groups.values()) {
+    if (group.status === "converted") groups.set(group.key.assetId, group);
+  }
+  return {
+    organizationId,
+    bookingId,
+    groups,
+    planned: [],
+    session: ctx.session,
+  };
+}
+
+/**
+ * Writes a check-in settlement, after every disposition log of the check-in
+ * is written, in the same transaction: the conversion of groups converted by
+ * {@link openSettlement}, the settled rows, and one RECORDED share per piece
+ * of every new log.
+ *
+ * The new logs are found, not passed in: the booking's disposition logs of
+ * the settled assets that no share covers and that conversion did not just
+ * seed. Every earlier log of a converted group is fully shared (the commit
+ * check), so these are exactly the logs this check-in wrote, including the
+ * ledger's CONSUME, LOSS and DAMAGE rows, which split one event over the
+ * places the stock left from.
+ *
+ * Queries: none for an empty settlement; the logs and their share sums (two,
+ * only when units were settled); the write.
+ *
+ * @param tx - The check-in transaction
+ * @param settlement - The settlement from {@link openSettlement}
+ * @throws {ShelfError} 500 when the new logs and the settled units disagree
+ *   (a writer logged without settling, or settled without logging); nothing
+ *   is written
+ */
+export async function commitSettlement(
+  tx: BookingSourcesTx,
+  settlement: Settlement
+): Promise<void> {
+  const { session, organizationId, bookingId } = settlement;
+  if (!session) return;
+  const plan = buildSessionPlan(session);
+
+  if (settlement.planned.length > 0) {
+    const assetIds = [...new Set(settlement.planned.map((p) => p.assetId))];
+    const seeded = new Set(plan.insertShares.map((s) => s.consumptionLogId));
+    const [logs, shareSums] = await Promise.all([
+      tx.consumptionLog.findMany({
+        where: {
+          bookingId,
+          assetId: { in: assetIds },
+          booking: { organizationId },
+          category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
+        },
+        select: {
+          id: true,
+          assetId: true,
+          bookingAssetId: true,
+          category: true,
+          quantity: true,
+          createdAt: true,
+        },
+      }),
+      tx.bookingDispositionShare.groupBy({
+        by: ["consumptionLogId"],
+        where: { organizationId, bookingId, assetId: { in: assetIds } },
+        _sum: { quantity: true },
+      }),
+    ]);
+    const sharedByLog = new Map(
+      shareSums.map((s) => [s.consumptionLogId, s._sum.quantity ?? 0])
+    );
+    const unshared: UnsharedLog[] = logs.flatMap((log) => {
+      if (seeded.has(log.id) || !isSettleCategory(log.category)) return [];
+      const left = log.quantity - (sharedByLog.get(log.id) ?? 0);
+      return left > 0
+        ? [
+            {
+              id: log.id,
+              assetId: log.assetId,
+              bookingAssetId: log.bookingAssetId,
+              category: log.category,
+              quantity: left,
+              createdAt: log.createdAt,
+            },
+          ]
+        : [];
+    });
+    const match = matchSharesToLogs(settlement.planned, unshared);
+    if (!match.ok) {
+      throw new ShelfError({
+        cause: null,
+        title: "Booking sources",
+        message:
+          "The check-in's records and its returned units do not match. Nothing was saved.",
+        additionalData: {
+          bookingId,
+          organizationId,
+          plannedLeft: JSON.stringify(match.plannedLeft),
+          logsLeft: JSON.stringify(match.logsLeft),
+        },
+        label: "Booking",
+        status: 500,
+      });
+    }
+    plan.insertShares.push(...match.shares);
+  }
+
+  await writeSourcePlan(tx, { organizationId, plan });
 }
 
 /** What the booking page shows for one slice. */

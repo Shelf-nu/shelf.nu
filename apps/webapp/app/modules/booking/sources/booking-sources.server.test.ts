@@ -20,8 +20,10 @@ import { ShelfError } from "~/utils/error";
 import {
   admitWindowChange,
   allocateNewSlices,
+  commitSettlement,
   dispatchUnits,
   getSliceSourceSummaries,
+  openSettlement,
   resizeSlices,
   setAutoSources,
   setManualSources,
@@ -33,6 +35,7 @@ import type {
   SourcePlanWrite,
   SourceRowRecord,
 } from "./repository.server";
+import { settleUnits } from "./settlement";
 
 type FreeArgs = { window: { from: Date; to: Date } };
 
@@ -1501,5 +1504,381 @@ describe("dispatchUnits", () => {
     });
 
     expect(result).toEqual({ dispatched: [], legacySliceIds: ["s1"] });
+  });
+});
+
+describe("openSettlement and commitSettlement", () => {
+  /** Before the window, so the settlement window is the booking's own. */
+  const NOW = new Date("2026-11-30T09:00:00Z");
+
+  /** A disposition log as the commit reads it back. */
+  type LogRow = {
+    id: string;
+    assetId: string;
+    bookingAssetId: string | null;
+    category: string;
+    quantity: number;
+    createdAt: Date;
+  };
+
+  /** A new log of the booking's pool. */
+  function log(overrides: Partial<LogRow> & { id: string }): LogRow {
+    return {
+      assetId: POOL,
+      bookingAssetId: null,
+      category: "RETURN",
+      quantity: 1,
+      createdAt: new Date("2026-12-01T12:00:00Z"),
+      ...overrides,
+    };
+  }
+
+  /**
+   * The fake transaction plus the two reads the commit makes: the booking's
+   * disposition logs (as written by the check-in) and their share sums.
+   */
+  function settleTx(
+    sliceIds: string[],
+    logs: LogRow[],
+    shareSums: Array<{
+      consumptionLogId: string;
+      _sum: { quantity: number };
+    }> = []
+  ) {
+    return {
+      ...fakeTx({ slices: sliceIds.map((id) => ({ id })), status: "ONGOING" }),
+      consumptionLog: { findMany: vi.fn(() => logs) },
+      bookingDispositionShare: { groupBy: vi.fn(() => shareSums) },
+    } as unknown as BookingSourcesTx;
+  }
+
+  /** Opens the settlement of BOOKING's pool. */
+  function open(tx: BookingSourcesTx, adoptionEnabled = true) {
+    return openSettlement(tx, {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      assetIds: [POOL],
+      booking: WINDOW,
+      now: NOW,
+      adoptionEnabled,
+    });
+  }
+
+  it("Reserve 10 at A, dispatch 5, return 1: 9 protected at A, the log shared on A", async () => {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          quantity: 10,
+          checkedOutQuantity: 5,
+          rows: [
+            row("s1", {
+              kind: "LOCATION",
+              locationId: "loc-a",
+              quantity: 10,
+              outQuantity: 5,
+              dispatchedTotal: 5,
+            }),
+          ],
+        }),
+      ],
+    });
+    const tx = settleTx(
+      ["s1"],
+      [log({ id: "log-1", bookingAssetId: "s1", quantity: 1 })]
+    );
+
+    const settlement = await open(tx);
+    settleUnits(settlement, { sliceId: "s1", assetId: POOL, returned: 1 });
+    await commitSettlement(tx, settlement);
+
+    expect(h.order.slice(0, 2)).toEqual(["lock", "loadGroupStates"]);
+    const plan = writtenPlan();
+    expect(plan.upsertRows).toEqual([
+      expect.objectContaining({
+        bookingAssetId: "s1",
+        kind: "LOCATION",
+        locationId: "loc-a",
+        quantity: 10,
+        outQuantity: 4,
+        releasedQuantity: 1,
+        dispatchedTotal: 5,
+      }),
+    ]);
+    // Remaining reservation at A: quantity - released.
+    expect(
+      plan.upsertRows[0].quantity - plan.upsertRows[0].releasedQuantity
+    ).toBe(9);
+    expect(plan.insertShares).toEqual([
+      {
+        consumptionLogId: "log-1",
+        bookingAssetId: "s1",
+        sourceKey: "LOCATION:loc-a",
+        quantity: 1,
+        origin: "RECORDED",
+      },
+    ]);
+  });
+
+  it("one untagged 8-unit return over two slices: one log, two shares", async () => {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          checkedOutQuantity: 5,
+          rows: [
+            row("s1", { quantity: 5, outQuantity: 5, dispatchedTotal: 5 }),
+          ],
+        }),
+        slice({
+          id: "s2",
+          mode: "KIT",
+          assetKitId: "ak-1",
+          checkedOutQuantity: 5,
+          rows: [
+            row("s2", {
+              kind: "KIT",
+              quantity: 5,
+              outQuantity: 5,
+              dispatchedTotal: 5,
+            }),
+          ],
+        }),
+      ],
+    });
+    const tx = settleTx(["s1", "s2"], [log({ id: "log-8", quantity: 8 })]);
+
+    const settlement = await open(tx);
+    const settled = settleUnits(settlement, { assetId: POOL, returned: 8 });
+    await commitSettlement(tx, settlement);
+
+    expect(settled.bookingAssetId).toBeNull();
+    expect(writtenPlan().insertShares).toEqual([
+      {
+        consumptionLogId: "log-8",
+        bookingAssetId: "s1",
+        sourceKey: "UNPLACED:",
+        quantity: 5,
+        origin: "RECORDED",
+      },
+      {
+        consumptionLogId: "log-8",
+        bookingAssetId: "s2",
+        sourceKey: "KIT:",
+        quantity: 3,
+        origin: "RECORDED",
+      },
+    ]);
+    expect(
+      writtenPlan().upsertRows.find((r) => r.bookingAssetId === "s2")
+    ).toMatchObject({ outQuantity: 2, releasedQuantity: 3 });
+  });
+
+  it("settles units out from UNKNOWN by moving them to UNASSIGNED as released", async () => {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          quantity: 4,
+          checkedOutQuantity: 4,
+          rows: [
+            row("s1", {
+              kind: "UNKNOWN",
+              quantity: 4,
+              outQuantity: 4,
+              dispatchedTotal: 4,
+            }),
+          ],
+        }),
+      ],
+    });
+    const tx = settleTx(
+      ["s1"],
+      [log({ id: "log-1", bookingAssetId: "s1", quantity: 4 })]
+    );
+
+    const settlement = await open(tx);
+    settleUnits(settlement, { sliceId: "s1", assetId: POOL, returned: 4 });
+    await commitSettlement(tx, settlement);
+
+    const plan = writtenPlan();
+    expect(plan.upsertRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "UNKNOWN",
+          quantity: 0,
+          outQuantity: 0,
+          releasedQuantity: 0,
+          dispatchedTotal: 4,
+        }),
+        expect.objectContaining({
+          kind: "UNASSIGNED",
+          quantity: 4,
+          outQuantity: 0,
+          releasedQuantity: 4,
+          dispatchedTotal: 0,
+        }),
+      ])
+    );
+    expect(plan.insertShares).toEqual([
+      expect.objectContaining({ sourceKey: "UNKNOWN:", quantity: 4 }),
+    ]);
+  });
+
+  it("Legacy ONGOING slice checked in first after activation: converted, settled, never refused", async () => {
+    // Nothing is free anywhere: the seeded pending units wait on UNASSIGNED
+    // instead of refusing the check-in.
+    h.freeFor = () => free(0, 0);
+    const earlier = log({
+      id: "old-1",
+      bookingAssetId: "s1",
+      quantity: 2,
+      createdAt: new Date("2026-12-01T10:00:00Z"),
+    });
+    seedGroup({
+      slices: [
+        slice({
+          id: "s1",
+          quantity: 10,
+          checkedOutQuantity: 6,
+          sourceLocationId: "loc-a",
+        }),
+      ],
+      logs: [
+        {
+          id: earlier.id,
+          bookingAssetId: "s1",
+          quantity: 2,
+          createdAt: earlier.createdAt,
+        },
+      ],
+    });
+    const tx = settleTx(
+      ["s1"],
+      [earlier, log({ id: "new-1", bookingAssetId: "s1", quantity: 4 })]
+    );
+
+    const settlement = await open(tx);
+    const settled = settleUnits(settlement, {
+      sliceId: "s1",
+      assetId: POOL,
+      returned: 4,
+    });
+    await commitSettlement(tx, settlement);
+
+    expect(settled.legacy).toBe(false);
+    const plan = writtenPlan();
+    expect(plan.setModes).toEqual([{ bookingAssetId: "s1", mode: "AUTO" }]);
+    expect(plan.upsertRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 6,
+          outQuantity: 0,
+          releasedQuantity: 6,
+          dispatchedTotal: 6,
+        }),
+        expect.objectContaining({
+          kind: "UNASSIGNED",
+          quantity: 4,
+          releasedQuantity: 0,
+        }),
+      ])
+    );
+    // The earlier log is seeded by the conversion; only the new one is
+    // recorded by the check-in.
+    expect(plan.insertShares).toEqual([
+      expect.objectContaining({
+        consumptionLogId: "old-1",
+        origin: "SEEDED",
+        quantity: 2,
+      }),
+      {
+        consumptionLogId: "new-1",
+        bookingAssetId: "s1",
+        sourceKey: "LOCATION:loc-a",
+        quantity: 4,
+        origin: "RECORDED",
+      },
+    ]);
+  });
+
+  it("leaves a LEGACY group to the caller when adoption is off", async () => {
+    seedGroup({
+      slices: [slice({ id: "s1", quantity: 5, checkedOutQuantity: 5 })],
+    });
+    const tx = settleTx(["s1"], []);
+
+    const settlement = await open(tx, false);
+    const settled = settleUnits(settlement, {
+      sliceId: "s1",
+      assetId: POOL,
+      returned: 5,
+    });
+    await commitSettlement(tx, settlement);
+
+    expect(settled.legacy).toBe(true);
+    expect(writtenPlan()).toEqual({
+      upsertRows: [],
+      deleteRowIds: [],
+      insertShares: [],
+      repointShares: [],
+      setModes: [],
+    });
+  });
+
+  it("refuses the commit when a new log was never settled, writing nothing", async () => {
+    seedGroup({
+      converted: true,
+      slices: [
+        slice({
+          id: "s1",
+          mode: "AUTO",
+          checkedOutQuantity: 5,
+          rows: [
+            row("s1", { quantity: 5, outQuantity: 5, dispatchedTotal: 5 }),
+          ],
+        }),
+      ],
+    });
+    const tx = settleTx(
+      ["s1"],
+      [
+        log({ id: "log-1", bookingAssetId: "s1", quantity: 1 }),
+        log({ id: "stray", category: "CONSUME", quantity: 2 }),
+      ]
+    );
+
+    const settlement = await open(tx);
+    settleUnits(settlement, { sliceId: "s1", assetId: POOL, returned: 1 });
+    const error = await commitSettlement(tx, settlement).catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect((error as ShelfError).status).toBe(500);
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("opens nothing for a check-in without quantity-tracked assets", async () => {
+    const tx = settleTx([], []);
+
+    const settlement = await openSettlement(tx, {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      assetIds: [],
+      booking: WINDOW,
+    });
+    await commitSettlement(tx, settlement);
+
+    expect(h.order).toEqual([]);
+    expect(h.writes).toHaveLength(0);
   });
 });

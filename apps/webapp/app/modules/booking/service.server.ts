@@ -290,9 +290,17 @@ import {
 import {
   admitWindowChange,
   allocateNewSlices,
+  commitSettlement,
+  openSettlement,
   resizeSlices,
 } from "./sources/booking-sources.server";
 import type { DispatchedSlice } from "./sources/booking-sources.server";
+import {
+  destroyedUnitsBySlice,
+  settledPlacementSlice,
+  settleUnits,
+  unitsOutInSettlement,
+} from "./sources/settlement";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -7319,6 +7327,31 @@ export async function checkinBooking({
         });
 
         /**
+         * Lock order: the booking above, then every quantity-tracked asset of
+         * the check-in in one sorted statement, before any read that decides
+         * what comes back. The per-slice locks below re-acquire rows this
+         * transaction already holds.
+         */
+        await lockEveryAssetForQuantityUpdate(
+          tx,
+          qtyTrackedAssetIds,
+          organizationId
+        );
+
+        /**
+         * Source rows of converted groups: each disposition is settled on the
+         * rows its units were out from, and every log written below gets its
+         * shares at `commitSettlement`. A LEGACY group (adoption off, or held
+         * back) is reported `legacy` and keeps the path below unchanged.
+         */
+        const settlement = await openSettlement(tx, {
+          organizationId,
+          bookingId: id,
+          assetIds: qtyTrackedAssetIds,
+          booking: bookingFound,
+        });
+
+        /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
          * pool-drain guard can read the current `Asset.quantity` before
          * downstream status flips, locking each asset row before it writes.
@@ -7447,6 +7480,12 @@ export async function checkinBooking({
          * return for units that never went out.
          */
         const unitsStillOutOn = (slice: (typeof qtyTrackedSlices)[number]) =>
+          // A converted group counts what is out from its source rows; the
+          // log spread above is the LEGACY reading.
+          unitsOutInSettlement(settlement, {
+            assetId: slice.assetId,
+            sliceId: slice.id,
+          }) ??
           Math.max(
             0,
             resolveSentUnits(slice) - (accountedBySliceId.get(slice.id) ?? 0)
@@ -7466,21 +7505,32 @@ export async function checkinBooking({
         );
 
         for (const slice of qtyTrackedSlices) {
-          const sliceRemaining = await computeBookingAssetSliceRemaining(
-            tx,
-            id,
-            slice.id
-          );
-          if (sliceRemaining <= 0) continue; // Already reconciled.
-
-          // Cap by BOTH the slice's own remaining AND the asset-level
-          // remaining still unclaimed in this pass. The asset-level cap is
-          // the safety net for legacy NULL-tagged logs (excluded by the
-          // per-slice helper) — without it, an asset with both tagged and
-          // NULL logs could over-decrement the shared pool.
           const assetCap = assetRemainingSoFar.get(slice.assetId) ?? 0;
-          const cap = Math.min(sliceRemaining, assetCap);
-          if (cap <= 0) continue;
+          const convertedOut = unitsOutInSettlement(settlement, {
+            assetId: slice.assetId,
+            sliceId: slice.id,
+          });
+          let cap: number;
+          if (convertedOut === null) {
+            const sliceRemaining = await computeBookingAssetSliceRemaining(
+              tx,
+              id,
+              slice.id
+            );
+            if (sliceRemaining <= 0) continue; // Already reconciled.
+
+            // Cap by BOTH the slice's own remaining AND the asset-level
+            // remaining still unclaimed in this pass. The asset-level cap is
+            // the safety net for NULL-tagged logs (excluded by the per-slice
+            // helper): without it, an asset with both tagged and NULL logs
+            // could over-decrement the shared pool.
+            cap = Math.min(sliceRemaining, assetCap);
+            if (cap <= 0) continue;
+          } else {
+            // A converted slice can give back exactly what is out from its
+            // rows, which re-dispatches may push above its booked quantity.
+            cap = convertedOut;
+          }
 
           const unitsStillOut = unitsStillOutOn(slice);
           // The most any disposition may account for on this slice: what the
@@ -7557,6 +7607,26 @@ export async function checkinBooking({
             organizationId
           );
 
+          // Always tag the slice id. An explicit disposition may already
+          // carry its own `bookingAssetId` (drawer flow that picked a
+          // specific slice): honour that; otherwise tag with this slice's
+          // id so the auto-default path never writes NULL.
+          const dispBookingAssetId = disposition.bookingAssetId ?? slice.id;
+
+          // Settled on the source rows before any log is written; LEGACY
+          // groups come back `legacy` and keep the slice's recorded source.
+          const settled = settleUnits(settlement, {
+            sliceId: dispBookingAssetId,
+            assetId: slice.assetId,
+            returned: disposition.returned,
+            consumed: disposition.consumed,
+            lost: disposition.lost,
+            damaged: disposition.damaged,
+          });
+          const placementSlice = settled.legacy
+            ? slice
+            : settledPlacementSlice(settled);
+
           const poolDecrement =
             (disposition.consumed ?? 0) +
             (disposition.lost ?? 0) +
@@ -7591,11 +7661,6 @@ export async function checkinBooking({
             }
           }
 
-          // Always tag the slice id. An explicit disposition may already
-          // carry its own `bookingAssetId` (drawer flow that picked a
-          // specific slice) — honour that; otherwise tag with this slice's
-          // id so the auto-default path no longer writes NULL.
-          const dispBookingAssetId = disposition.bookingAssetId ?? slice.id;
           if ((disposition.returned ?? 0) > 0) {
             await createConsumptionLog({
               assetId: slice.assetId,
@@ -7604,9 +7669,11 @@ export async function checkinBooking({
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
+              // The location the units left from: returned units go back
+              // there, used-up ones come off it.
+              locationId: settled.legacy
+                ? slice.sourceLocationId
+                : settled.returnLocationId,
               tx,
             });
           }
@@ -7648,12 +7715,14 @@ export async function checkinBooking({
               // The units left from the location recorded at check-out, so
               // that placement loses them. None recorded (or a kit slice):
               // the unplaced units absorb the drop, as before.
-              sources: checkinPlacementSources({
-                slice,
-                consumed: disposition.consumed,
-                lost: disposition.lost,
-                damaged: disposition.damaged,
-              }),
+              sources: settled.legacy
+                ? checkinPlacementSources({
+                    slice,
+                    consumed: disposition.consumed,
+                    lost: disposition.lost,
+                    damaged: disposition.damaged,
+                  })
+                : settled.destroyedFromLocations,
             });
 
             reportAmbiguousPlacementReconcile({
@@ -7669,7 +7738,7 @@ export async function checkinBooking({
              */
             stockChangesByAssetId.get(slice.assetId)?.events?.push(
               ...checkinStockEvents({
-                slice,
+                slice: placementSlice,
                 disposition,
                 bookingId: id,
                 bookingAssetId: dispBookingAssetId,
@@ -7719,6 +7788,11 @@ export async function checkinBooking({
         if (quantityChangeEvents.length > 0) {
           await recordEvents(quantityChangeEvents, tx);
         }
+
+        // Every disposition log is written: shares, settled rows and any
+        // conversion go in one write, before the kit cascade below can merge
+        // a kit slice into its standalone sibling.
+        await commitSettlement(tx, settlement);
 
         qtySummariesRef.value.push(...summaryByAssetId.values());
 
@@ -9050,15 +9124,8 @@ export async function partialCheckinBooking({
         }>
       >();
 
-      /**
-       * Lock every QUANTITY_TRACKED asset this session touches up front, in
-       * sorted id order, the order every other booking flow locks in. The
-       * loop below walks `dispositions` in payload order, so locking as it goes
-       * would let two sessions that share assets take the locks in reverse and
-       * deadlock. Its own lock call then re-acquires a row this transaction
-       * already holds, which only re-reads it.
-       */
-      for (const assetId of [
+      /** Every QUANTITY_TRACKED asset this session touches, in id order. */
+      const qtyDispositionAssetIds = [
         ...new Set(
           dispositions
             .filter(
@@ -9066,9 +9133,40 @@ export async function partialCheckinBooking({
             )
             .map((d) => d.assetId)
         ),
-      ].sort()) {
+      ].sort();
+
+      /**
+       * Lock order: the booking first, then every asset of the session up
+       * front in one sorted statement, the order every other booking flow
+       * locks in. The booking lock serializes this session with every other
+       * writer of the booking's slices and source rows. The loop below walks
+       * `dispositions` in payload order, so locking as it goes would let two
+       * sessions that share assets take the locks in reverse and deadlock;
+       * its own lock calls, and the per-asset ones here, re-acquire rows this
+       * transaction already holds, which only re-reads them.
+       */
+      await lockBookingForStatusCheck(tx, id, organizationId);
+      await lockEveryAssetForQuantityUpdate(
+        tx,
+        qtyDispositionAssetIds,
+        organizationId
+      );
+      for (const assetId of qtyDispositionAssetIds) {
         await lockAssetForQuantityUpdate(tx, assetId, organizationId);
       }
+
+      /**
+       * Source rows of converted groups: each disposition is settled on the
+       * rows its units were out from before its logs are written, and every
+       * log gets its shares at `commitSettlement` below. LEGACY groups keep
+       * the path below unchanged.
+       */
+      const settlement = await openSettlement(tx, {
+        organizationId,
+        bookingId: id,
+        assetIds: qtyDispositionAssetIds,
+        booking: bookingFound,
+      });
 
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
@@ -9120,8 +9218,17 @@ export async function partialCheckinBooking({
          * another. Legacy callers omit `bookingAssetId` → asset-level cap
          * only, unchanged.
          */
-        let cap = remaining;
-        if (disp.bookingAssetId) {
+        /**
+         * A converted group gives back what is out from its source rows: on
+         * the named slice, or on every slice of the asset for an untagged
+         * request. The log arithmetic above is the LEGACY reading.
+         */
+        const convertedOut = unitsOutInSettlement(settlement, {
+          assetId: disp.assetId,
+          sliceId: disp.bookingAssetId,
+        });
+        let cap = convertedOut ?? remaining;
+        if (convertedOut === null && disp.bookingAssetId) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
             id,
@@ -9169,7 +9276,7 @@ export async function partialCheckinBooking({
           );
           const logged =
             slices.reduce((sum, slice) => sum + slice.quantity, 0) - remaining;
-          const unitsStillOut = Math.max(0, sentOut - logged);
+          const unitsStillOut = convertedOut ?? Math.max(0, sentOut - logged);
           if (unitsStillOut === 0) {
             throw new ShelfError({
               cause: null,
@@ -9193,10 +9300,25 @@ export async function partialCheckinBooking({
             cause: null,
             status: 400,
             label,
-            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${cap} remaining on this booking.`,
+            message:
+              convertedOut === null
+                ? `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${cap} remaining on this booking.`
+                : `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${cap} are out on this booking.`,
             shouldBeCaptured: false,
           });
         }
+
+        // Settled on the source rows before any log is written. An untagged
+        // request is spread over the rows with units out (most out first);
+        // its logs name the slice only when one slice took every unit.
+        const settled = settleUnits(settlement, {
+          sliceId: disp.bookingAssetId ?? null,
+          assetId: disp.assetId,
+          returned: disp.returned,
+          consumed: disp.consumed,
+          lost: disp.lost,
+          damaged: disp.damaged,
+        });
 
         const poolDecrement =
           (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
@@ -9237,7 +9359,9 @@ export async function partialCheckinBooking({
         // `bookingAssetId` carries per-row attribution when the caller knows
         // the slice (drawer post-Polish-6); legacy callers leave it null and
         // the loader's greedy-fill handles them on read.
-        const dispBookingAssetId = disp.bookingAssetId ?? null;
+        const dispBookingAssetId = settled.legacy
+          ? disp.bookingAssetId ?? null
+          : settled.bookingAssetId;
         /**
          * The slice these units belong to, for the location they left from.
          * A disposition that names no slice (an older phone app) resolves
@@ -9253,13 +9377,20 @@ export async function partialCheckinBooking({
          * slices the way the readers will attribute the logs written below,
          * so read the asset's earlier logs first, under the asset lock.
          */
-        let placementSources = checkinPlacementSources({
-          slice: sourceSlice,
-          consumed: disp.consumed,
-          lost: disp.lost,
-          damaged: disp.damaged,
-        });
-        if (!sourceSlice && !disp.bookingAssetId && poolDecrement > 0) {
+        let placementSources = settled.legacy
+          ? checkinPlacementSources({
+              slice: sourceSlice,
+              consumed: disp.consumed,
+              lost: disp.lost,
+              damaged: disp.damaged,
+            })
+          : settled.destroyedFromLocations;
+        if (
+          settled.legacy &&
+          !sourceSlice &&
+          !disp.bookingAssetId &&
+          poolDecrement > 0
+        ) {
           const priorLogs = await tx.consumptionLog.findMany({
             where: {
               bookingId: id,
@@ -9287,12 +9418,14 @@ export async function partialCheckinBooking({
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
+            locationId: settled.legacy
+              ? sourceSlice?.sourceLocationId ?? null
+              : settled.returnLocationId,
             tx,
           });
         }
 
-        if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
+        if (settled.legacy && qtyAssetIdsWithKitSlice.has(disp.assetId)) {
           const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
           for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
             const quantity = disp[CATEGORY_FIELD[category]] ?? 0;
@@ -9362,7 +9495,9 @@ export async function partialCheckinBooking({
                 assetId: disp.assetId,
                 before: stockBefore,
                 events: checkinStockEvents({
-                  slice: sourceSlice,
+                  slice: settled.legacy
+                    ? sourceSlice
+                    : settledPlacementSlice(settled),
                   disposition: disp,
                   bookingId: id,
                   bookingAssetId: dispBookingAssetId,
@@ -9395,6 +9530,10 @@ export async function partialCheckinBooking({
       if (quantityChangeEvents.length > 0) {
         await recordEvents(quantityChangeEvents, tx);
       }
+
+      // Every disposition log of the session is written: shares, settled
+      // rows and any conversion go in one write.
+      await commitSettlement(tx, settlement);
 
       // ---- Individual asset status updates (unchanged) ----
       const individualAssetIds = effectiveAssetIds.filter(
@@ -9578,6 +9717,36 @@ export async function partialCheckinBooking({
         for (const assetId of qtyAssetIdsTouched) {
           const slices = bookingSlicesByAssetId.get(assetId) ?? [];
           if (slices.length === 0) continue;
+
+          /**
+           * A converted group reads its source rows, never the log spread: a
+           * slice is finished when nothing is out from its rows, and the
+           * units destroyed out of a kit slice are its settled shares.
+           */
+          if (unitsOutInSettlement(settlement, { assetId }) !== null) {
+            const destroyedBySlice = destroyedUnitsBySlice(settlement, assetId);
+            for (const slice of slices) {
+              const destroyed = destroyedBySlice.get(slice.id) ?? 0;
+              if (slice.assetKitId && destroyed > 0) {
+                destroyedUnitsByAssetKitId.set(
+                  slice.assetKitId,
+                  (destroyedUnitsByAssetKitId.get(slice.assetKitId) ?? 0) +
+                    destroyed
+                );
+              }
+              if (
+                isOutstandingSlice(slice) &&
+                resolveSentUnits(slice) > 0 &&
+                unitsOutInSettlement(settlement, {
+                  assetId,
+                  sliceId: slice.id,
+                }) === 0
+              ) {
+                settledSliceIds.add(slice.id);
+              }
+            }
+            continue;
+          }
 
           /**
            * What each slice owes: the units it actually sent out.

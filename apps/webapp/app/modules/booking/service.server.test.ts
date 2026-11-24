@@ -22,6 +22,7 @@ import {
   BOOKING_EMPTY_RESERVED_MESSAGE,
   BOOKING_RESERVE_BLOCKED_LABELS,
 } from "@shelf/labels";
+import type { SourceKind } from "@shelf/quantity-control";
 import { onTestFinished } from "vitest";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { accessFor } from "@helpers/role-access";
@@ -37,6 +38,12 @@ import {
   assertKitsCustodyAssignable,
 } from "~/modules/booking/kit-holds.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
+import * as bookingSources from "~/modules/booking/sources/booking-sources.server";
+import type {
+  WorkingGroup,
+  WorkingSlice,
+} from "~/modules/booking/sources/conversion.server";
+import type { Settlement } from "~/modules/booking/sources/settlement";
 import {
   assertModelUnitsNotReservedElsewhere,
   assertOutstandingModelRequestsFit,
@@ -519,6 +526,18 @@ vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
           legacySliceIds: args.picks.map((pick) => pick.sliceId),
         })
     ),
+  // Every group stays LEGACY, so check-ins write their logs exactly as they
+  // did before and the commit writes nothing.
+  openSettlement: vitest.fn().mockImplementation(() =>
+    Promise.resolve({
+      organizationId: "",
+      bookingId: "",
+      groups: new Map(),
+      planned: [],
+      session: null,
+    })
+  ),
+  commitSettlement: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
@@ -17366,6 +17385,84 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     // None of the logs are NULL-tagged (the bug).
     expect(returnLogs.every((l) => l.bookingAssetId != null)).toBe(true);
   });
+
+  it("returns what a converted slice's rows have out, to the location they left from", async () => {
+    expect.assertions(3);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    // why: the group is converted; 6 of the 10 booked units are out from
+    // Demo Warehouse, so the auto-default returns 6, not the booked 10.
+    const settlement = convertedSettlement(mockQtyAssetId, [
+      settlementSlice("ba-pens-standalone", null, [
+        { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
+      ]),
+    ]);
+    vitest
+      .mocked(bookingSources.openSettlement)
+      .mockResolvedValueOnce(settlement);
+
+    await checkinBooking(baseParams);
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        quantity: 6,
+        bookingAssetId: "ba-pens-standalone",
+        locationId: "loc-a",
+      })
+    );
+    expect(bookingSources.openSettlement).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        organizationId: "org-1",
+        bookingId: mockBookingId,
+        assetIds: [mockQtyAssetId],
+      })
+    );
+    // Lock, open, log, commit, then the booking write.
+    const order = (fn: unknown) =>
+      (fn as ReturnType<typeof vitest.fn>).mock.invocationCallOrder[0] ?? -1;
+    const calls = [
+      order(quantityLock.lockEveryAssetForQuantityUpdate),
+      order(bookingSources.openSettlement),
+      order(consumptionLogService.createConsumptionLog),
+      order(bookingSources.commitSettlement),
+      order(db.booking.update),
+    ];
+    expect(calls.every((c) => c > 0) && calls).toEqual(
+      [...calls].sort((a, b) => a - b)
+    );
+  });
+
+  it("charges units a converted slice used up to the location they left from", async () => {
+    expect.assertions(2);
+
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    vitest
+      .mocked(bookingSources.openSettlement)
+      .mockResolvedValueOnce(
+        convertedSettlement(mockQtyAssetId, [
+          settlementSlice("ba-pens-standalone", null, [
+            { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
+          ]),
+        ])
+      );
+
+    await checkinBooking(baseParams);
+
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({
+        category: "CONSUME",
+        change: -6,
+        locationId: "loc-a",
+        bookingAssetId: "ba-pens-standalone",
+      })
+    );
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 6 } },
+    });
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -22951,6 +23048,96 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       })
     );
   });
+
+  it("settles an untagged CONSUME of a converted group on the rows with units out", async () => {
+    expect.assertions(5);
+
+    arrange([
+      poolSlice("ba-loose", null, 2),
+      poolSlice("ba-kit", "kit-a", 5),
+      fillerSlice,
+    ]);
+    // why: a pool large enough that the custody guard lets 6 units go.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pool",
+      title: "Batteries",
+      quantity: 20,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.ONE_WAY,
+    });
+    // why: the group is converted; its rows say 2 units are out on the loose
+    // slice and 5 on the kit slice.
+    const settlement = convertedSettlement("asset-pool", [
+      settlementSlice("ba-loose", null, [
+        { kind: "UNPLACED", locationId: null, quantity: 2, out: 2 },
+      ]),
+      settlementSlice("ba-kit", "ak-kit-a", [
+        { kind: "KIT", locationId: null, quantity: 5, out: 5 },
+      ]),
+    ]);
+    vitest
+      .mocked(bookingSources.openSettlement)
+      .mockResolvedValueOnce(settlement);
+
+    await partialCheckinBooking(
+      params([{ assetId: "asset-pool", consumed: 6 }])
+    );
+
+    // Most out first: the kit slice's 5, then 1 from the loose slice. The
+    // log spread (loose slice first) is the LEGACY reading and is not used.
+    expect(removeDestroyedUnitsFromKits).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        destroyedUnitsByAssetKitId: new Map([["ak-kit-a", 5]]),
+      })
+    );
+    expect(recordedStockEvents()).toContainEqual(
+      expect.objectContaining({
+        category: "CONSUME",
+        change: -6,
+        bookingAssetId: null,
+      })
+    );
+    expect(settlement.planned.map((p) => [p.sliceId, p.units])).toEqual([
+      ["ba-kit", 5],
+      ["ba-loose", 1],
+    ]);
+    expect(bookingSources.commitSettlement).toHaveBeenCalledWith(
+      db,
+      settlement
+    );
+    // Only the kit slice has nothing left out.
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["ba-kit"] } }),
+      })
+    );
+  });
+
+  it("refuses more units than a converted group has out", async () => {
+    expect.assertions(2);
+
+    arrange([poolSlice("ba-loose", null, 5), fillerSlice]);
+    vitest
+      .mocked(bookingSources.openSettlement)
+      .mockResolvedValueOnce(
+        convertedSettlement("asset-pool", [
+          settlementSlice("ba-loose", null, [
+            { kind: "UNPLACED", locationId: null, quantity: 5, out: 2 },
+          ]),
+        ])
+      );
+
+    await expect(
+      partialCheckinBooking(params([{ assetId: "asset-pool", consumed: 3 }]))
+    ).rejects.toThrow(
+      'Cannot check in 3 units for "Batteries". Only 2 are out on this booking.'
+    );
+    expect(bookingSources.commitSettlement).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -25413,3 +25600,67 @@ describe("resolveExpiredCheckoutState", () => {
     ).toThrow(/Use Check out on the booking page/);
   });
 });
+
+/** One source row of a converted slice, for {@link settlementSlice}. */
+type SettlementRowInput = {
+  kind: SourceKind;
+  locationId: string | null;
+  quantity: number;
+  out: number;
+};
+
+/** A converted slice of a settlement, its rows with `out` units out. */
+function settlementSlice(
+  id: string,
+  assetKitId: string | null,
+  rows: SettlementRowInput[]
+): WorkingSlice {
+  const working = rows.map((r, index) => ({
+    id: `${id}-row-${index}`,
+    kind: r.kind,
+    locationId: r.locationId,
+    quantity: r.quantity,
+    outQuantity: r.out,
+    releasedQuantity: 0,
+    dispatchedTotal: r.out,
+    sharedQuantity: 0,
+  }));
+  return {
+    id,
+    assetKitId,
+    quantity: rows.reduce((sum, r) => sum + r.quantity, 0),
+    checkedOutQuantity: rows.reduce((sum, r) => sum + r.out, 0),
+    originalMode: assetKitId ? "KIT" : "AUTO",
+    mode: assetKitId ? "KIT" : "AUTO",
+    rows: working,
+    originalRows: new Map(),
+  };
+}
+
+/**
+ * A settlement whose one group (the asset on the booking) is converted, as
+ * `openSettlement` returns it; `settleUnits` runs for real on it.
+ */
+function convertedSettlement(
+  assetId: string,
+  slices: WorkingSlice[]
+): Settlement {
+  return {
+    organizationId: "org-1",
+    bookingId: "booking-1",
+    groups: new Map<string, WorkingGroup>([
+      [
+        assetId,
+        {
+          key: { bookingId: "booking-1", assetId },
+          status: "converted",
+          slices,
+          insertShares: [],
+          free: [],
+        },
+      ],
+    ]),
+    planned: [],
+    session: null,
+  };
+}
