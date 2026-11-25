@@ -86,6 +86,11 @@ tags:
 - tapOn: "OK"
 
 # Cancel: overflow -> action-sheet "Cancel booking" -> confirm by point.
+- scrollUntilVisible:
+    element:
+      text: "More booking actions"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Cancel booking"
@@ -104,6 +109,11 @@ tags:
 - takeScreenshot: cancel-action-cancelled
 
 # Cleanup: delete the cancelled disposable booking (single-word "Delete" taps fine).
+- scrollUntilVisible:
+    element:
+      text: "More booking actions"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Delete booking"

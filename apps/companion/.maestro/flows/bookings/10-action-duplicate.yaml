@@ -64,6 +64,11 @@ tags:
     timeout: 20000
 
 # Duplicate -> confirm -> lands on the new draft's EDIT screen.
+- scrollUntilVisible:
+    element:
+      text: "More booking actions"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Duplicate booking"
@@ -106,6 +111,11 @@ tags:
     timeout: 20000
 - tapOn:
     text: "Booking: QA Dup Source.*Copy.*"
+- scrollUntilVisible:
+    element:
+      text: "More booking actions"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Delete booking"
@@ -128,6 +138,11 @@ tags:
     timeout: 20000
 - tapOn:
     text: "Booking: QA Dup Source,.*"
+- scrollUntilVisible:
+    element:
+      text: "More booking actions"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Delete booking"

@@ -2213,7 +2213,267 @@ function BookingDetailScreen({ id }: { id: string }) {
               </Text>
             ) : null}
 
-            {/* Action buttons */}
+            {/* The status action leads: approve a pending request, check out a
+                reserved booking, check in one that is out. Item editing follows,
+                because on a booking that is ready to move, moving it is what the
+                operator came to do. Mirrors the web booking header, where the
+                status action is the primary button. */}
+            {/* A pending reservation request offers Approve in place of the
+                check-out paths: the server refuses check-out until it is
+                approved, and `canApprove` is the server's own answer on who
+                may decide it. */}
+            {approvalView.showApprove && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleApprove}
+                disabled={isActioning}
+                accessibilityLabel="Approve this booking request"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.actionButtonText}>Approve request</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Full check-out is RESERVED-only (web parity); the loader's
+                canCheckout reflects that. It is hidden when the workspace
+                requires explicit check-out for this role, which leaves
+                "Select to Check Out" below as the way to check out.
+                Unassigned reservations don't hide it: handleCheckout names
+                them and asks before checking out. */}
+            {canCheckout && canQuickCheckout && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => void handleCheckout()}
+                accessibilityLabel="Check out all assets in this booking"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="log-out-outline"
+                  size={18}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.actionButtonText}>
+                  Check Out All Assets
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* The one line that says why the one-tap check-out is missing:
+                the workspace's rule for this role. The scan and select paths
+                below are how they check out. Same words as the web's settings
+                card, from @shelf/labels. */}
+            {canCheckout && !canQuickCheckout && (
+              <Text style={styles.explicitRequirementHint}>
+                {EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.PHONE_HINT}
+              </Text>
+            )}
+
+            {/* Book-by-model: a RESERVED booking with unfulfilled reservations
+                offers the fulfil-and-check-out SCANNER
+                (`bookingAction=fulfil`): it shows what's reserved, the
+                operator scans the physical units, and on submit the scanned
+                units are assigned AND the booking is checked out in one call
+                (`fulfilAndCheckOut`) — web parity with the web
+                `fulfil-and-checkout` scanner. The scan need not cover every
+                reserved unit; whatever it leaves unassigned stays open on the
+                booking, and the scanner confirms that before submitting.
+                Scan-first IS the point of book-by-model: reserve the count
+                now, scan the items when you grab them, no browse picker.
+                (Browse to Add below stays for hand-picking.) Gated on adding
+                items past DRAFT, like the add/browse affordances below: a
+                member who may not add items to a RESERVED booking cannot
+                complete the assign and check-out flow, so showing the CTA
+                would only lead to a rejected submit. Hidden while the request
+                waits for approval too: it is approved first, then checked
+                out. */}
+            {booking.status === "RESERVED" &&
+              canAddItems &&
+              approvalView.mayCheckOutNow &&
+              hasOutstandingModelRequests && (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => openBookingScanner("fulfil")}
+                  accessibilityLabel={`Scan to assign ${
+                    booking.outstandingModelUnitCount
+                  } reserved unit${
+                    booking.outstandingModelUnitCount === 1 ? "" : "s"
+                  } and check out`}
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="scan"
+                    size={18}
+                    color={colors.primaryForeground}
+                  />
+                  <Text style={styles.actionButtonText}>
+                    Scan to assign & check out
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+            {(canCheckin || canCheckinAll) && (
+              <View style={styles.checkinActions}>
+                {/* Quick "Check In All" is hidden when the workspace requires
+                    explicit check-in for this role — the scan/select paths
+                    below remain (they ARE explicit check-in). Mirrors web's
+                    CheckinDropdown, which offers this "Quick check-in" (full
+                    checkinBooking = return all remaining) on any ongoing
+                    booking, partial included — including one whose rows were
+                    all added after check-out, which the explicit paths below
+                    cannot act on because nothing on it ever left. */}
+                {canCheckinAll && (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={handleFullCheckin}
+                    accessibilityLabel="Check in all assets"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="log-in-outline"
+                      size={18}
+                      color={colors.primaryForeground}
+                    />
+                    <Text style={styles.actionButtonText}>Check In All</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* The check-in twin of the explicit check-out hint above. */}
+                {canCheckin && !canQuickCheckin && (
+                  <Text style={styles.explicitRequirementHint}>
+                    {EXPLICIT_REQUIREMENT_LABELS.CHECKIN.PHONE_HINT}
+                  </Text>
+                )}
+
+                {canCheckin && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.actionButtonOutline}
+                      onPress={() => openBookingScanner("checkin")}
+                      accessibilityLabel="Scan assets to check in"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name="scan"
+                        size={18}
+                        color={colors.buttonSecondaryText}
+                      />
+                      <Text style={styles.actionButtonOutlineText}>
+                        Scan to Check In
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButtonOutline,
+                        selectMode === "checkin" &&
+                          styles.actionButtonOutlineActive,
+                      ]}
+                      onPress={() => {
+                        toggleSelectMode("checkin");
+                      }}
+                      accessibilityLabel={
+                        selectMode === "checkin"
+                          ? "Cancel selection"
+                          : "Select assets to check in"
+                      }
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name={
+                          selectMode === "checkin"
+                            ? "close"
+                            : "checkbox-outline"
+                        }
+                        size={18}
+                        color={
+                          selectMode === "checkin"
+                            ? colors.error
+                            : colors.buttonSecondaryText
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.actionButtonOutlineText,
+                          selectMode === "checkin" && { color: colors.error },
+                        ]}
+                      >
+                        {selectMode === "checkin"
+                          ? "Cancel"
+                          : "Select to Check In"}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Progressive check-out persists while reserved assets remain, even
+                after the booking has gone ONGOING (canPartialCheckout, not
+                canCheckout) so the user can keep taking the rest. Scanning is
+                the twin of "Scan to Check In" above: one asset at a time,
+                batched, submitted to the partial-checkout endpoint. */}
+            {canUseProgressiveCheckout && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() => openBookingScanner("checkout")}
+                accessibilityLabel="Scan assets to check out"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Check Out
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {canUseProgressiveCheckout && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButtonOutline,
+                  selectMode === "checkout" && styles.actionButtonOutlineActive,
+                ]}
+                onPress={() => {
+                  toggleSelectMode("checkout");
+                }}
+                accessibilityLabel={
+                  selectMode === "checkout"
+                    ? "Cancel selection"
+                    : "Select assets to check out"
+                }
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={
+                    selectMode === "checkout" ? "close" : "checkbox-outline"
+                  }
+                  size={18}
+                  color={
+                    selectMode === "checkout"
+                      ? colors.error
+                      : colors.buttonSecondaryText
+                  }
+                />
+                <Text
+                  style={[
+                    styles.actionButtonOutlineText,
+                    selectMode === "checkout" && { color: colors.error },
+                  ]}
+                >
+                  {selectMode === "checkout" ? "Cancel" : "Select to Check Out"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Booking management: edit, lifecycle menu, add and remove items. */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(
               booking.status
             ) && (
@@ -2247,10 +2507,10 @@ function BookingDetailScreen({ id }: { id: string }) {
                       reserveBlockedReason ? styles.actionButtonDisabled : null,
                     ]}
                     // why: `disabled` is the real prop. Setting only
-                    // `accessibilityState={{ disabled }}` ALSO disables the
-                    // touchable — RN's `_createPressabilityConfig` falls back
-                    // to it — which silently made an onPress fallback here
-                    // unreachable. RN copies this prop back into
+                    // `accessibilityState={{ disabled }}` also disables the
+                    // touchable (RN's `_createPressabilityConfig` falls back
+                    // to it), so an onPress fallback here would never run.
+                    // RN copies this prop back into
                     // `accessibilityState`, so screen readers still announce
                     // the disabled state without setting it by hand.
                     disabled={!!reserveBlockedReason}
@@ -2277,8 +2537,8 @@ function BookingDetailScreen({ id }: { id: string }) {
             )}
 
             {/* More lifecycle actions (extend / duplicate / archive / cancel / delete).
-                Shows for ANY status — including closed ones (Archive on
-                COMPLETE, Duplicate always) — gated by server-computed flags. */}
+                Shows for any status, closed ones included (Archive on
+                COMPLETE, Duplicate always), gated by server-computed flags. */}
             {lifecycleActions.length > 0 && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
@@ -2377,261 +2637,6 @@ function BookingDetailScreen({ id }: { id: string }) {
                   {selectMode === "remove" ? "Cancel" : "Select to Remove"}
                 </Text>
               </TouchableOpacity>
-            )}
-
-            {/* A pending reservation request offers Approve in place of the
-                check-out paths: the server refuses check-out until it is
-                approved, and `canApprove` is the server's own answer on who
-                may decide it. */}
-            {approvalView.showApprove && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleApprove}
-                disabled={isActioning}
-                accessibilityLabel="Approve this booking request"
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name="checkmark-circle-outline"
-                  size={18}
-                  color={colors.primaryForeground}
-                />
-                <Text style={styles.actionButtonText}>Approve request</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Full check-out is RESERVED-only (web parity); the loader's
-                canCheckout reflects that. It is hidden when the workspace
-                requires explicit check-out for this role, which leaves
-                "Select to Check Out" below as the way to check out.
-                Unassigned reservations don't hide it: handleCheckout names
-                them and asks before checking out. */}
-            {canCheckout && canQuickCheckout && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => void handleCheckout()}
-                accessibilityLabel="Check out all assets in this booking"
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name="log-out-outline"
-                  size={18}
-                  color={colors.primaryForeground}
-                />
-                <Text style={styles.actionButtonText}>
-                  Check Out All Assets
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* The one line that says why the one-tap check-out is missing:
-                the workspace's rule for this role. The scan and select paths
-                below are how they check out. Same words as the web's settings
-                card, from @shelf/labels. */}
-            {canCheckout && !canQuickCheckout && (
-              <Text style={styles.explicitRequirementHint}>
-                {EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.PHONE_HINT}
-              </Text>
-            )}
-
-            {/* Progressive check-out persists while reserved assets remain, even
-                after the booking has gone ONGOING (canPartialCheckout, not
-                canCheckout) so the user can keep taking the rest. Scanning is
-                the twin of "Scan to Check In" below: one asset at a time,
-                batched, submitted to the partial-checkout endpoint. */}
-            {canUseProgressiveCheckout && (
-              <TouchableOpacity
-                style={styles.actionButtonOutline}
-                onPress={() => openBookingScanner("checkout")}
-                accessibilityLabel="Scan assets to check out"
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name="scan"
-                  size={18}
-                  color={colors.buttonSecondaryText}
-                />
-                <Text style={styles.actionButtonOutlineText}>
-                  Scan to Check Out
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {canUseProgressiveCheckout && (
-              <TouchableOpacity
-                style={[
-                  styles.actionButtonOutline,
-                  selectMode === "checkout" && styles.actionButtonOutlineActive,
-                ]}
-                onPress={() => {
-                  toggleSelectMode("checkout");
-                }}
-                accessibilityLabel={
-                  selectMode === "checkout"
-                    ? "Cancel selection"
-                    : "Select assets to check out"
-                }
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={
-                    selectMode === "checkout" ? "close" : "checkbox-outline"
-                  }
-                  size={18}
-                  color={
-                    selectMode === "checkout"
-                      ? colors.error
-                      : colors.buttonSecondaryText
-                  }
-                />
-                <Text
-                  style={[
-                    styles.actionButtonOutlineText,
-                    selectMode === "checkout" && { color: colors.error },
-                  ]}
-                >
-                  {selectMode === "checkout" ? "Cancel" : "Select to Check Out"}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Book-by-model: a RESERVED booking with unfulfilled reservations
-                offers the fulfil-and-check-out SCANNER
-                (`bookingAction=fulfil`): it shows what's reserved, the
-                operator scans the physical units, and on submit the scanned
-                units are assigned AND the booking is checked out in one call
-                (`fulfilAndCheckOut`) — web parity with the web
-                `fulfil-and-checkout` scanner. The scan need not cover every
-                reserved unit; whatever it leaves unassigned stays open on the
-                booking, and the scanner confirms that before submitting.
-                Scan-first IS the point of book-by-model: reserve the count
-                now, scan the items when you grab them, no browse picker.
-                (Browse to Add above stays for hand-picking.) Gated on adding
-                items past DRAFT, like the add/browse affordances above: a
-                member who may not add items to a RESERVED booking cannot
-                complete the assign and check-out flow, so showing the CTA
-                would only lead to a rejected submit. Hidden while the request
-                waits for approval too: it is approved first, then checked
-                out. */}
-            {booking.status === "RESERVED" &&
-              canAddItems &&
-              approvalView.mayCheckOutNow &&
-              hasOutstandingModelRequests && (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => openBookingScanner("fulfil")}
-                  accessibilityLabel={`Scan to assign ${
-                    booking.outstandingModelUnitCount
-                  } reserved unit${
-                    booking.outstandingModelUnitCount === 1 ? "" : "s"
-                  } and check out`}
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="scan"
-                    size={18}
-                    color={colors.primaryForeground}
-                  />
-                  <Text style={styles.actionButtonText}>
-                    Scan to assign & check out
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-            {(canCheckin || canCheckinAll) && (
-              <View style={styles.checkinActions}>
-                {/* Quick "Check In All" is hidden when the workspace requires
-                    explicit check-in for this role — the scan/select paths
-                    below remain (they ARE explicit check-in). Mirrors web's
-                    CheckinDropdown, which offers this "Quick check-in" (full
-                    checkinBooking = return all remaining) on any ongoing
-                    booking, partial included — including one whose rows were
-                    all added after check-out, which the explicit paths below
-                    cannot act on because nothing on it ever left. */}
-                {canCheckinAll && (
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={handleFullCheckin}
-                    accessibilityLabel="Check in all assets"
-                    accessibilityRole="button"
-                  >
-                    <Ionicons
-                      name="log-in-outline"
-                      size={18}
-                      color={colors.primaryForeground}
-                    />
-                    <Text style={styles.actionButtonText}>Check In All</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* The check-in twin of the line above "Scan to Check Out". */}
-                {canCheckin && !canQuickCheckin && (
-                  <Text style={styles.explicitRequirementHint}>
-                    {EXPLICIT_REQUIREMENT_LABELS.CHECKIN.PHONE_HINT}
-                  </Text>
-                )}
-
-                {canCheckin && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.actionButtonOutline}
-                      onPress={() => openBookingScanner("checkin")}
-                      accessibilityLabel="Scan assets to check in"
-                      accessibilityRole="button"
-                    >
-                      <Ionicons
-                        name="scan"
-                        size={18}
-                        color={colors.buttonSecondaryText}
-                      />
-                      <Text style={styles.actionButtonOutlineText}>
-                        Scan to Check In
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.actionButtonOutline,
-                        selectMode === "checkin" &&
-                          styles.actionButtonOutlineActive,
-                      ]}
-                      onPress={() => {
-                        toggleSelectMode("checkin");
-                      }}
-                      accessibilityLabel={
-                        selectMode === "checkin"
-                          ? "Cancel selection"
-                          : "Select assets to check in"
-                      }
-                      accessibilityRole="button"
-                    >
-                      <Ionicons
-                        name={
-                          selectMode === "checkin"
-                            ? "close"
-                            : "checkbox-outline"
-                        }
-                        size={18}
-                        color={
-                          selectMode === "checkin"
-                            ? colors.error
-                            : colors.buttonSecondaryText
-                        }
-                      />
-                      <Text
-                        style={[
-                          styles.actionButtonOutlineText,
-                          selectMode === "checkin" && { color: colors.error },
-                        ]}
-                      >
-                        {selectMode === "checkin"
-                          ? "Cancel"
-                          : "Select to Check In"}
-                      </Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
             )}
 
             {/* Reserved models (book-by-model): outstanding reservations that
