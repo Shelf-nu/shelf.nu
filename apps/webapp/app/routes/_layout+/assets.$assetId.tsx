@@ -9,6 +9,7 @@ import { redirect, data, useLoaderData, Outlet } from "react-router";
 import { z } from "zod";
 import { createSetReminderSchema } from "~/components/asset-reminder/set-or-edit-reminder-dialog";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
+import { canOpenAssetActionsMenu } from "~/components/assets/actions-menu-access";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown";
@@ -698,13 +699,7 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.asset,
-            action: [PermissionAction.update, PermissionAction.custody],
-          })}
-        >
+        <When truthy={canOpenAssetActionsMenu(roles)}>
           <ActionsDropdown />
         </When>
         <BookingActionsDropdown />

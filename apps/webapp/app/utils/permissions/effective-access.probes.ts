@@ -1550,9 +1550,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // ===================== Notifications =====================
 
   // B9:D-45/D-48/D-49: Prisma audience filters, `roles: { hasSome: rolesWhere(...) }`:
-  // orgBookingBroadcasts and lowStock modules/organization/service.server.ts
-  // (getOrganizationNotificationAudience, audiences `orgBookingBroadcasts` and
-  // `inventoryAlerts`); bookingNotifyPicker modules/team-member/service.server.ts
+  // orgBookingBroadcasts, lowStock and problemReports
+  // modules/organization/service.server.ts (getOrganizationNotificationAudience,
+  // audiences `orgBookingBroadcasts`, `inventoryAlerts` and `problemReports`); bookingNotifyPicker modules/team-member/service.server.ts
   // (getTeamMembersForNotify); reminderPicker routes/api+/reminders.team-members.ts;
   // modelFiltersRecipients routes/api+/model-filters.ts (selectableRecipientsOnly).
   // The last three read `notifications.selectableAsRecipient`.
@@ -1564,6 +1564,10 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     lowStock: holdsAny(
       roles,
       rolesWhere((p) => p.notifications.inventoryAlerts)
+    ),
+    problemReports: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.problemReports)
     ),
     bookingNotifyPicker: holdsAny(
       roles,
