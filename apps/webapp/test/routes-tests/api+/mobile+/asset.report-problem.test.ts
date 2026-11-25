@@ -59,7 +59,10 @@ import {
   reportAssetProblem,
 } from "~/modules/problem-report/service.server";
 import { action as mobileAction } from "~/routes/api+/mobile+/asset.report-problem";
-import { action as webAction } from "~/routes/_layout+/assets.$assetId.report-problem";
+import {
+  action as webAction,
+  loader as webLoader,
+} from "~/routes/_layout+/assets.$assetId.report-problem";
 import { ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -319,6 +322,17 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
         })
       );
     }
+    // The web action passes the member's workspaces and the request, so an
+    // asset in another of their workspaces answers like the asset page does.
+    // The phone has no workspace switch and passes neither.
+    expect(webCall[0]).toEqual(
+      expect.objectContaining({
+        userOrganizations: [{ organizationId: "org-1" }],
+        request: expect.any(Request),
+      })
+    );
+    expect(mobileCall[0]).not.toHaveProperty("userOrganizations");
+    expect(mobileCall[0]).not.toHaveProperty("request");
   });
 
   it.each([
@@ -348,4 +362,15 @@ describe("Report a problem: web and mobile refuse the same requests", () => {
       }
     }
   );
+});
+
+describe("Report a problem: the web route has no page of its own", () => {
+  it("sends a direct visit back to the asset page", () => {
+    const response = webLoader({
+      params: { assetId: "asset-1" },
+    } as never);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/assets/asset-1");
+  });
 });

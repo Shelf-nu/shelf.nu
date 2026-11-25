@@ -48,8 +48,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    // The same per-member write limit the mobile route applies, before any
-    // database work.
+    // The per-member write limit the mobile routes apply, before any database
+    // work. It is one budget across web and phone, on purpose: a member who
+    // has just made 60 phone writes in a minute waits up to a minute to report.
     await enforceUserRateLimit(userId, "write");
 
     const { organizationId, userOrganizations } = await requirePermission({
