@@ -29,6 +29,8 @@ const mockNavigation = vi.fn();
 const mockLocation = vi.fn();
 
 vi.mock("react-router", () => ({
+  // The draft reads the action's answer to keep a save that got none.
+  useActionData: () => undefined,
   useNavigation: () => mockNavigation(),
   useLocation: () => mockLocation(),
 }));

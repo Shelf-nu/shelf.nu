@@ -1,5 +1,8 @@
 /**
- * Route tests for the PKCE requirement on the native SSO start.
+ * Route tests for PKCE on the SSO start.
+ *
+ * Every sign-in started here keeps its Supabase code verifier in this
+ * browser's `sso_code_verifier` cookie, so only this browser can finish it.
  *
  * The native callback hands the authorization code back over the `shelf://`
  * custom scheme, which any app on the device may claim. PKCE is the only thing
@@ -9,10 +12,15 @@
  * @see apps/webapp/app/routes/_auth+/sso-login.tsx
  * @see apps/webapp/app/modules/auth/mobile-sso.server.ts — the redemption half
  */
+// @vitest-environment node
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
-import { createLoaderArgs } from "@mocks/remix";
-import { describe, expect, it, vi } from "vitest";
-import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
+import { createActionArgs, createLoaderArgs } from "@mocks/remix";
+import { Browser } from "happy-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  mobilePkceChallengeCookie,
+  ssoCodeVerifierCookie,
+} from "~/utils/cookies.server";
 
 // why: importing the route pulls the Prisma client transitively; without this
 // the suite emits an unhandled P1001 trying to reach a database it never uses.
@@ -24,14 +32,64 @@ vi.mock("~/config/shelf.config", () => ({
   config: { disableSSO: false },
 }));
 
-// why: a default SSO domain would short-circuit the web branch and change what
-// the non-mobile assertions exercise.
+/** The default SSO domain the loader reads; empty unless a case sets one. */
+const ssoEnv = vi.hoisted(() => ({ defaultDomain: "" }));
+
+// why: a default SSO domain short-circuits the web branch to the identity
+// provider; each case picks whether the instance has one.
 vi.mock("~/utils/env", async () => ({
   ...(await vi.importActual<typeof import("~/utils/env")>("~/utils/env")),
-  DEFAULT_SSO_DOMAIN: "",
+  get DEFAULT_SSO_DOMAIN() {
+    return ssoEnv.defaultDomain;
+  },
 }));
 
-const { loader } = await import("~/routes/_auth+/sso-login");
+// why: starting a sign-in calls Supabase Auth; its wire format is covered by
+// sso-pkce.server.test.ts.
+vi.mock("~/modules/auth/sso-pkce.server", () => ({
+  startSsoSignIn: vi.fn().mockResolvedValue({
+    url: "https://idp.example.com/saml",
+    codeVerifier: "v".repeat(56),
+  }),
+}));
+
+const { action, loader } = await import("~/routes/_auth+/sso-login");
+const { startSsoSignIn } = await import("~/modules/auth/sso-pkce.server");
+
+afterEach(() => {
+  ssoEnv.defaultDomain = "";
+  vi.mocked(startSsoSignIn).mockClear();
+  vi.unstubAllEnvs();
+});
+
+/**
+ * Which of the given URLs a browser holding this `Set-Cookie` sends the
+ * verifier to, using a real browser cookie jar rather than a hand-set header.
+ *
+ * @param setCookie - The `Set-Cookie` value the response carried
+ * @param urls - The URLs to check
+ * @returns The URLs the verifier is sent to
+ */
+async function urlsCarryingVerifier(setCookie: string, urls: string[]) {
+  // document.cookie cannot write HttpOnly; path matching is the same without it.
+  const browserCookie = setCookie
+    .split(";")
+    .filter((part) => !/httponly/i.test(part))
+    .join(";");
+  const browser = new Browser();
+  try {
+    const page = browser.newPage();
+    page.url = "http://localhost/sso-login";
+    page.mainFrame.document.cookie = browserCookie;
+    return urls.filter((url) =>
+      browser.defaultContext.cookieContainer
+        .getCookies(new URL(url), false)
+        .some((cookie) => cookie.key === "sso_code_verifier")
+    );
+  } finally {
+    await browser.close();
+  }
+}
 
 /** A well-formed S256 challenge: 43 chars of base64url. */
 const VALID_CHALLENGE = "a".repeat(43);
@@ -108,5 +166,112 @@ describe("GET /sso-login — PKCE requirement", () => {
     // its session over a cookie and must keep working without one.
     const result = await invoke("");
     expect(result).toBeDefined();
+  });
+});
+
+describe("POST /sso-login", () => {
+  it.each(["web", "mobile"] as const)(
+    "sends a %s sign-in to the identity provider and keeps the verifier in this browser",
+    async (platform) => {
+      const request = new Request("http://localhost/sso-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ domain: "acme.com", platform }),
+      });
+
+      const result = await action(createActionArgs({ request }));
+
+      expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+        platform,
+        clientIp: null,
+      });
+      expect(result).toBeInstanceOf(Response);
+      const response = result as Response;
+      expect(response.headers.get("Location")).toBe(
+        "https://idp.example.com/saml"
+      );
+      const setCookie = response.headers.get("set-cookie");
+      expect(setCookie).toContain("HttpOnly");
+      await expect(ssoCodeVerifierCookie.parse(setCookie)).resolves.toBe(
+        "v".repeat(56)
+      );
+    }
+  );
+});
+
+describe("POST /sso-login: visitor address", () => {
+  it("passes the visitor's address to Supabase when starting the sign-in", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+    const request = new Request("http://localhost/sso-login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Forwarded-For": "203.0.113.7",
+      },
+      body: new URLSearchParams({ domain: "acme.com", platform: "web" }),
+    });
+
+    await action(createActionArgs({ request }));
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+      platform: "web",
+      clientIp: "203.0.113.7",
+    });
+  });
+});
+
+describe("the verifier cookie", () => {
+  it("reaches the URLs the callback pages post to, and stays off the rest of the app", async () => {
+    const setCookie = await ssoCodeVerifierCookie.serialize("v".repeat(56));
+
+    // The callback pages post through React Router, to `<path>.data`.
+    await expect(
+      urlsCarryingVerifier(setCookie, [
+        "http://localhost/oauth/callback.data",
+        "http://localhost/oauth/callback/mobile.data",
+        "http://localhost/oauth/callback",
+        "http://localhost/assets",
+        "http://localhost/sso-login",
+      ])
+    ).resolves.toEqual([
+      "http://localhost/oauth/callback.data",
+      "http://localhost/oauth/callback/mobile.data",
+      "http://localhost/oauth/callback",
+    ]);
+  });
+});
+
+describe("GET /sso-login with a default SSO domain", () => {
+  it("sends the browser to the identity provider and keeps the verifier", async () => {
+    ssoEnv.defaultDomain = "acme.com";
+
+    const result = await invoke("");
+
+    expect(startSsoSignIn).toHaveBeenCalledWith("acme.com", {
+      clientIp: null,
+    });
+    expect(result).toBeInstanceOf(Response);
+    const response = result as Response;
+    expect(response.headers.get("Location")).toBe(
+      "https://idp.example.com/saml"
+    );
+    await expect(
+      ssoCodeVerifierCookie.parse(response.headers.get("set-cookie"))
+    ).resolves.toBe("v".repeat(56));
+  });
+
+  it("still lets the companion app start its own sign-in", async () => {
+    ssoEnv.defaultDomain = "acme.com";
+
+    const result = await invoke(
+      `?platform=mobile&code_challenge=${VALID_CHALLENGE}`
+    );
+
+    expect(startSsoSignIn).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
   });
 });

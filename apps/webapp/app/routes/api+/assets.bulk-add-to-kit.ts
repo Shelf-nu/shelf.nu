@@ -6,7 +6,14 @@ import {
 } from "react-router";
 import { BulkAddToKitSchema } from "~/components/assets/bulk-add-to-kit-dialog";
 import { db } from "~/database/db.server";
+import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
+import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { updateKitAssets } from "~/modules/kit/service.server";
+import { getClientHint } from "~/utils/client-hints";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
@@ -56,7 +63,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      access,
+      currentOrganization,
+    } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -65,22 +78,54 @@ export async function action({ request, context }: ActionFunctionArgs) {
       matrixOnly: true,
     });
 
-    const { assetIds, kit } = parseData(
+    const {
+      assetIds: selectedIds,
+      kit,
+      currentSearchParams,
+    } = parseData(
       await request.formData(),
-      BulkAddToKitSchema,
+      BulkAddToKitSchema.and(CurrentSearchParamsSchema),
       {
         additionalData: { userId, organizationId },
       }
     );
 
+    // "Select all" posts the loaded rows plus a marker, and means every asset
+    // the list's filters match. The resolver expands it from the submitted
+    // search params; hand-picked ids come back unchanged.
+    const settings = await getAssetIndexSettings({
+      userId,
+      organizationId,
+      canUseBarcodes,
+      role,
+    });
+    // Acting user's timezone: the select-all set is resolved from the current
+    // date filters, which must truncate the day in the user's tz.
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+    const assetIds = await resolveAssetIdsForBulkOperation({
+      assetIds: selectedIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      timeZone,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      custodySearchScope: "all",
+      lastAuditDateAccess: lastAuditDateAccessFor(access, currentOrganization),
+      bookableScope: resolveBookableListScope({ access, userId }),
+    });
+
     /**
      * Filter out QUANTITY_TRACKED assets — they require a per-asset slice
      * quantity that the bulk dialog has no UX to collect (the kit's own
-     * manage-assets picker is the canonical place for that). The dialog
-     * already shows a `WarningBox` listing how many will be skipped; here
-     * we enforce the skip server-side and refuse the request when the
-     * entire selection is qty-tracked. Mirror of `bulkUpdateAssetLocation`
-     * (asset/service.server.ts).
+     * manage-assets picker is the canonical place for that). The dialog warns
+     * that they will be skipped; here the skip is enforced server-side, and
+     * the request is refused when the entire selection is qty-tracked. Mirror
+     * of `bulkUpdateAssetLocation` (asset/service.server.ts).
      */
     const selectedAssets = await db.asset.findMany({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type split only; archived ids must reach updateKitAssets so its archive guard refuses them instead of silently dropping them here
@@ -100,6 +145,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
           "All selected assets are quantity-tracked. Quantity-tracked assets must be added to a kit individually with a specific quantity from the kit's manage-assets page.",
         additionalData: { userId, organizationId, assetIds, kit },
         label: "Kit",
+        // Explicit: with no status and no cause this would answer 500 for a
+        // selection the user can simply change.
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -115,7 +163,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const skippedNote =
       skippedQuantityTracked > 0
-        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — add them individually from the kit's manage-assets page.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Add them individually from the kit's manage-assets page.`
         : "";
 
     sendNotification({

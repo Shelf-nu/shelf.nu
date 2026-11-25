@@ -7,7 +7,7 @@ name: 🧪 Test
 # precisely what makes it safe to run untrusted contributor code automatically.
 #
 # Therefore: any job that consumes a secret MUST NOT live in this workflow.
-# Secret-bearing jobs (e.g. the Playwright/E2E suite below) belong in a separate
+# Secret-bearing jobs (e.g. an end-to-end suite) belong in a separate
 # workflow gated behind the `external` environment, and must never check out
 # fork PR code in that trusted context.
 #
@@ -17,23 +17,9 @@ name: 🧪 Test
 
 on:
   pull_request:
-  # Called by deploy.yml on pushes to main/dev. The secrets below are declared
-  # for the E2E job that currently lives commented-out at the bottom of this
-  # file; deploy.yml passes all six, so this block must not be removed.
+  # Called by deploy.yml on pushes to main/dev. It passes no secrets: no job
+  # here needs one (see the SECURITY INVARIANT above).
   workflow_call:
-    secrets:
-      SESSION_SECRET:
-        required: true
-      SUPABASE_ANON_PUBLIC:
-        required: true
-      SUPABASE_SERVICE_ROLE:
-        required: true
-      SUPABASE_URL:
-        required: true
-      SERVER_URL:
-        required: true
-      DATABASE_URL:
-        required: true
 
 # Least privilege, pinned explicitly. The repo default is already `read`, but
 # pinning it means a future org-level default change cannot silently escalate
@@ -227,49 +213,3 @@ jobs:
 
       - name: 🛠️ Run watchdog bash suite
         run: pnpm test:tooling
-
-  # NOTE: this job consumes secrets — see the SECURITY INVARIANT at the top of
-  # this file. Do NOT re-enable it here. It belongs in its own workflow gated
-  # behind the `external` environment, and must not check out fork PR code.
-  # playwright:
-  #   name: 🎭 Playwright
-  #   timeout-minutes: 60
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: ⬇️ Checkout repo
-  #       uses: actions/checkout@v4
-
-  #     - name: 🔑 Make envfile
-  #       uses: SpicyPizza/create-envfile@v2.0
-  #       with:
-  #         envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-  #         envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
-  #         envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-  #         envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  #         envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
-  #         envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  #         file_name: .env
-
-  #     - name: ⎔ Setup node
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version-file: .nvmrc
-
-  #     - name: 📥 Download deps
-  #       uses: bahmutov/npm-install@v1
-
-  #     - name: 📥 Install Playwright Browsers
-  #       run: npm run test:e2e:install
-
-  #     - name: ⚙️ Build
-  #       run: npm run build
-
-  #     - name: Run Playwright tests
-  #       run: npx playwright test
-
-  #     - uses: actions/upload-artifact@v4
-  #       if: always()
-  #       with:
-  #         name: playwright-report
-  #         path: playwright-report/
-  #         retention-days: 30

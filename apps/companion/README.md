@@ -124,7 +124,7 @@ The monorepo approach is what Expo recommends for apps that share a backend.
 
 | Tool      | Version        | Install                                                      |
 | --------- | -------------- | ------------------------------------------------------------ |
-| Node.js   | >= 24.22.1     | `nvm install 24`                                             |
+| Node.js   | >= 24.22.3     | `nvm install 24`                                             |
 | pnpm      | 9.15.9         | `corepack enable && corepack prepare pnpm@9.15.9 --activate` |
 | Xcode     | 16.4+ (stable) | App Store                                                    |
 | CocoaPods | Any            | `sudo gem install cocoapods`                                 |
@@ -143,7 +143,9 @@ pnpm install
 # 2. Set up webapp environment (monorepo root)
 cp .env.example .env
 # Fill in: DATABASE_URL, DIRECT_URL, SUPABASE_URL, SUPABASE_ANON_PUBLIC,
-#          SUPABASE_SERVICE_ROLE, SESSION_SECRET
+#          SUPABASE_SECRET_KEY, SESSION_SECRET
+# Local stack: `supabase status` prints the API URL (use it as SUPABASE_URL)
+# and the Publishable and Secret keys. Those keys only work with that local URL.
 
 # 3. Set up companion app environment
 # Get your Mac's LAN IP:
@@ -151,11 +153,11 @@ ipconfig getifaddr en0   # e.g. 192.168.1.100
 
 cat > apps/companion/.env.local << 'EOF'
 EXPO_PUBLIC_SUPABASE_URL="http://<YOUR_LAN_IP>:54321"
-EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="<your-supabase-anon-key>"
+EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="<your-publishable-key>"
 EXPO_PUBLIC_API_URL="http://<YOUR_LAN_IP>:3000"
 EOF
 # Replace <YOUR_LAN_IP> with your actual LAN IP from step above
-# Get the anon key from: supabase status (Publishable key)
+# Get the publishable key (sb_publishable_...) from: supabase status
 #
 # IMPORTANT: All 3 URLs must use your LAN IP, NOT 127.0.0.1 or localhost.
 # Your phone cannot reach localhost — it's a different device.
@@ -419,4 +421,4 @@ reads them as off, which only under-offers.
 | Scanner    | expo-camera (QR + barcode types)  |
 | E2E Tests  | Maestro                           |
 | iOS Min    | iOS 16.4                          |
-| Node       | >= 24.22.1                        |
+| Node       | >= 24.22.3                        |

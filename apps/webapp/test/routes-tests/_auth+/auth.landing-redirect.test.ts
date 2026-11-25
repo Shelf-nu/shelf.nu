@@ -66,12 +66,19 @@ vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn(),
 }));
 
+// why: trading Supabase's code for the session calls Supabase Auth; its wire
+// format is covered by sso-pkce.server.test.ts.
+vi.mock("~/modules/auth/sso-pkce.server", () => ({
+  exchangeSsoCode: vi.fn(),
+  readTokenAccount: vi.fn(),
+  ssoSignInExpiredError: vi.fn(),
+}));
+
 const login = await import("~/routes/_auth+/login");
 const oauthCallback = await import("~/routes/_auth+/oauth.callback");
 const ssoLogin = await import("~/routes/_auth+/sso-login");
-const { signInWithEmail, refreshAccessToken } = await import(
-  "~/modules/auth/service.server"
-);
+const { exchangeSsoCode } = await import("~/modules/auth/sso-pkce.server");
+const { signInWithEmail } = await import("~/modules/auth/service.server");
 const { getSsoClaimsForAuthUser, resolveUserAndOrgForSsoCallback } =
   await import("~/utils/sso.server");
 const { getSelectedOrganization, setSelectedOrganizationIdCookie } =
@@ -197,7 +204,7 @@ describe("SSO callback", () => {
    * @param redirectTo - The page the sign-in link asked for, if any
    */
   async function postCallback(redirectTo?: string) {
-    vi.mocked(refreshAccessToken).mockResolvedValue(authSession);
+    vi.mocked(exchangeSsoCode).mockResolvedValue(authSession);
     vi.mocked(getSsoClaimsForAuthUser).mockResolvedValue({
       groups: ["idp-managers"],
       firstName: "Mia",
@@ -221,7 +228,8 @@ describe("SSO callback", () => {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({
-            refreshToken: "client-refresh-token",
+            intent: "code",
+            code: "auth-code",
             ...(redirectTo ? { redirectTo } : {}),
           }),
         }),

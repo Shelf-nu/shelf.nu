@@ -38,6 +38,7 @@ import { useAssetIndexFreezeColumn } from "~/hooks/use-asset-index-freeze-column
 import { useAssetIndexShowImage } from "~/hooks/use-asset-index-show-image";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { ListContextLinkState } from "~/hooks/use-list-context";
@@ -53,6 +54,10 @@ import { formatCustodyList } from "~/modules/custody/utils";
 import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -1121,6 +1126,10 @@ function UpcomingBookingsColumn({
 }) {
   const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
+  // A reservation request still waiting for a decision is drawn in the
+  // pending palette here as on the calendar, so the asset index tells staff
+  // the booking is not settled without opening it.
+  const requireBookingApproval = isBookingApprovalEnabled(useBookingSettings());
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
     organization: organization as OrganizationPermissionSettings, // Here we can be sure as TeamMemberBadge is only used in the context of an organization/logged in route
@@ -1156,6 +1165,11 @@ function UpcomingBookingsColumn({
               if (canSeeAllCustody) {
                 title += ` | ${custodianName}`;
               }
+              const isPendingApproval = isBookingPendingApproval({
+                status: booking.status,
+                approvedAt: booking.approvedAt,
+                requireBookingApproval,
+              });
 
               return (
                 <HoverCard key={booking.id} openDelay={0} closeDelay={0}>
@@ -1163,7 +1177,9 @@ function UpcomingBookingsColumn({
                     className={tw(
                       getStatusClasses(
                         booking.status,
-                        isOneDayEvent(booking.from, booking.to)
+                        isOneDayEvent(booking.from, booking.to),
+                        undefined,
+                        { pendingApproval: isPendingApproval }
                       ),
                       "min-w-48 border px-2 py-1 text-left"
                     )}
@@ -1182,6 +1198,7 @@ function UpcomingBookingsColumn({
                         name: booking.name,
                         description: booking.description,
                         status: booking.status,
+                        isPendingApproval,
                         tags: booking.tags,
                         start: booking.from,
                         end: booking.to,

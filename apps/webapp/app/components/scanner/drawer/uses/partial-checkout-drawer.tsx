@@ -54,6 +54,10 @@ import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
 import {
+  bookingSavedCheck,
+  ScanSubmitFailureAlert,
+} from "../scan-submit-failure-alert";
+import {
   buildPartialCheckoutBlockers,
   isAssetFullyCheckedOut,
 } from "./partial-checkout-blockers";
@@ -868,6 +872,7 @@ export default function PartialCheckoutDrawer({
   return (
     <CheckoutDispositionContext.Provider value={contextValue}>
       <ConfigurableDrawer
+        savedCheck={bookingSavedCheck(booking.id)}
         schema={partialCheckoutAssetsSchema}
         items={items}
         onClearItems={clearList}
@@ -1481,6 +1486,13 @@ const CustomForm = ({
             expired check-out, a plain submit otherwise */}
         {isEarlyCheckout || isExpiredCheckout ? (
           <CheckoutDialog
+            // The drawer's own notice is behind this dialog, so this one
+            // carries the same link to where the save can be checked.
+            notice={
+              <ScanSubmitFailureAlert
+                savedCheck={bookingSavedCheck(booking.id)}
+              />
+            }
             booking={{
               id: booking.id,
               name: booking.name,

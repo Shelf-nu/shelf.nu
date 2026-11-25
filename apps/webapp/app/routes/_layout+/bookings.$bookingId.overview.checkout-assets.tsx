@@ -30,6 +30,7 @@ import {
   getBooking,
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
+  assertRequestMayBeCheckedOut,
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -44,6 +45,8 @@ import {
 import { canPartialCheckInOut } from "~/utils/permissions/role-access";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
+import { scanSaveError } from "~/utils/scan-save-error.server";
+import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -137,6 +140,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // A pending request is approved first, never checked out: the scanner is
+    // not opened for it. Its check-out is refused in the service too.
+    await assertRequestMayBeCheckedOut({
+      bookingId: booking.id,
+      organizationId,
+    });
+
     // Always fetch partial check-out data for scanner validation. We need this
     // to detect blockers for already-checked-out assets/kits and to feed the
     // drawer's asset-scoped "remaining to check out" count.
@@ -182,7 +192,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * kit-driven-first, so per-slice and per-asset agree on the pool size.
      *
      * Calling `computeBookingAssetSliceRemainingToCheckOut` (and NOT
-     * `computeBookingAssetSliceRemaining`, which is the check-IN equivalent)
+     * `computeBookingCheckinRemaining`, which is the check-IN equivalent)
      * is load-bearing — using the wrong helper silently shows check-IN
      * remaining counts on the checkout drawer.
      */
@@ -456,9 +466,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
+
+/**
+ * Keeps the scanner, and the list on it, on screen when the save request gets
+ * no answer (a gateway timeout, an unreachable server, a dropped connection).
+ * The drawer then tells the operator to check before confirming again,
+ * because a request cut off in transit may still have been saved.
+ */
+export const clientAction = keepScanListOnSubmitFailure;
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -484,6 +502,7 @@ export default function CheckoutAssetsFromBooking() {
    * different booking (or to check-in) doesn't see stale data.
    */
   useBookingCheckinSessionInitialization({
+    draftScope: "checkout",
     session: {
       bookingId: booking.id,
       bookingName: booking.name,

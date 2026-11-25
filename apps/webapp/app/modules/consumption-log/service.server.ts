@@ -34,7 +34,10 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 // the cycle `consumption-log → availability.server → booking/service.server →
 // consumption-log`, which corrupts Vitest partial-mock bindings on
 // `createConsumptionLog` in the booking suite. See the leaf's header doc.
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertAssetQuantityNotBelowReservations,
+  reservedUnitsStillHeld,
+} from "~/modules/asset/availability-primitives.server";
 import {
   bookedOutFromSource,
   custodyFromSource,
@@ -394,7 +397,12 @@ export async function computeBookingAvailableQuantity(
      */
     const reservedRows = await db.bookingAsset.findMany({
       where: bookingAssetWhere,
-      select: { bookingId: true, assetId: true, quantity: true },
+      select: {
+        bookingId: true,
+        assetId: true,
+        quantity: true,
+        checkedOutQuantity: true,
+      },
     });
 
     let reserved = 0;
@@ -439,13 +447,13 @@ export async function computeBookingAvailableQuantity(
 
       /**
        * For each active reservation, subtract the logged dispositions from
-       * the booked quantity. Clamp at 0 per row so an over-logged booking
-       * (should not happen, but defence-in-depth) can't push `reserved`
-       * negative and silently inflate availability elsewhere.
+       * the booked quantity. The result is never negative, and never below
+       * the units the row has out right now: a slice returned in full and
+       * checked out again still holds the units of its second trip.
        */
       for (const row of reservedRows) {
         const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-        const remaining = Math.max(0, row.quantity - logged);
+        const remaining = reservedUnitsStillHeld(row, logged);
         reserved += remaining;
       }
     }

@@ -67,12 +67,19 @@ vi.mock("~/modules/organization/service.server", async (importOriginal) => ({
   isSsoUser: vi.fn(),
 }));
 
+// why: trading Supabase's code for the session calls Supabase Auth; its wire
+// format is covered by sso-pkce.server.test.ts.
+vi.mock("~/modules/auth/sso-pkce.server", () => ({
+  exchangeSsoCode: vi.fn(),
+  readTokenAccount: vi.fn(),
+  ssoSignInExpiredError: vi.fn(),
+}));
+
 const logout = await import("~/routes/_auth+/logout");
 const login = await import("~/routes/_auth+/login");
 const oauthCallback = await import("~/routes/_auth+/oauth.callback");
-const { signInWithEmail, refreshAccessToken } = await import(
-  "~/modules/auth/service.server"
-);
+const { exchangeSsoCode } = await import("~/modules/auth/sso-pkce.server");
+const { signInWithEmail } = await import("~/modules/auth/service.server");
 const { getSsoClaimsForAuthUser, resolveUserAndOrgForSsoCallback } =
   await import("~/utils/sso.server");
 const { getSelectedOrganization, setSelectedOrganizationIdCookie } =
@@ -247,9 +254,9 @@ describe("signing in", () => {
   });
 });
 
-/** Makes the SSO callback's Supabase refresh and claims lookup succeed. */
+/** Makes the SSO callback's code exchange and claims lookup succeed. */
 function mockSsoClaims() {
-  vi.mocked(refreshAccessToken).mockResolvedValue(authSession);
+  vi.mocked(exchangeSsoCode).mockResolvedValue(authSession);
   vi.mocked(getSsoClaimsForAuthUser).mockResolvedValue({
     groups: [],
     firstName: "Sam",
@@ -270,7 +277,8 @@ function ssoCallback() {
   return oauthCallback.action(
     createActionArgs({
       request: postWithLeftovers("http://localhost/oauth/callback", {
-        refreshToken: "client-refresh-token",
+        intent: "code",
+        code: "auth-code",
       }),
       context: { setSession: vi.fn() } as never,
     })

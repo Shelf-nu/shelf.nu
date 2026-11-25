@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -34,6 +35,10 @@ import {
   renderAuditPendingRows,
   renderAuditScannedRows,
 } from "~/components/audit/audit-item-row";
+import {
+  refusedRemovalMessage,
+  reloadWouldLoseWork,
+} from "~/components/audit/audit-remove-scan";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import {
   createBlockers,
@@ -104,6 +109,7 @@ type AuditDrawerProps = {
  */
 function AuditDrawerFooter({
   disabled,
+  disabledReason,
   auditName,
   portalContainer,
   stats,
@@ -111,6 +117,8 @@ function AuditDrawerFooter({
   expanded,
 }: {
   disabled: boolean;
+  /** Why completion is disabled, for the open dialog to show. */
+  disabledReason: string | null;
   auditName: string;
   portalContainer?: HTMLElement;
   stats: {
@@ -137,8 +145,11 @@ function AuditDrawerFooter({
       {/* Complete Audit dialog trigger */}
       <CompleteAuditDialog
         disabled={disabled}
+        disabledReason={disabledReason}
         auditName={auditName}
         portalContainer={portalContainer}
+        // The scan route's client action reads the intent from the URL.
+        intentInActionUrl
         stats={stats}
         units={units}
       />
@@ -374,6 +385,34 @@ export default function AuditDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
   const removeScanFetcher = useFetcher();
+  // The server's reason when it refused a removal: the list may be out of
+  // date until the page is reloaded. It belongs to the list on screen, so a
+  // change of audit (which rebuilds the list from the server) clears it.
+  const [removeRefusal, setRemoveRefusal] = useState<string | null>(null);
+  useEffect(() => {
+    setRemoveRefusal(null);
+  }, [auditSession?.id]);
+  // The audit the last removal was sent for, and the last answer read, so an
+  // answer is read once and only shown on the audit that sent the removal. A
+  // new removal replaces the fetcher's request, so the answer read here is
+  // always the last removal's.
+  const removalAuditIdRef = useRef<string | undefined>(undefined);
+  const readRemoveAnswerRef = useRef<unknown>(undefined);
+  const removeAnswer = removeScanFetcher.data;
+  useEffect(() => {
+    if (
+      removeScanFetcher.state !== "idle" ||
+      removeAnswer === undefined ||
+      removeAnswer === readRemoveAnswerRef.current
+    ) {
+      return;
+    }
+    readRemoveAnswerRef.current = removeAnswer;
+    const message = refusedRemovalMessage(removeAnswer);
+    if (message && removalAuditIdRef.current === auditSession?.id) {
+      setRemoveRefusal(message);
+    }
+  }, [removeScanFetcher.state, removeAnswer, auditSession?.id]);
 
   // Show location when the audit is not already scoped to a specific location
   const showLocation = contextLabel.toLowerCase() !== "location";
@@ -594,6 +633,7 @@ export default function AuditDrawer({
         formData.append("assetId", scannedItem.data.id);
         formData.append("qrId", qrId);
 
+        removalAuditIdRef.current = auditSession.id;
         void removeScanFetcher.submit(formData, {
           method: "post",
           action: `/audits/${auditSession.id}/scan`,
@@ -679,10 +719,13 @@ export default function AuditDrawer({
   // outcome before anything is committed, so the button itself stays enabled.
   //
   // A count the auditor entered but the server has not saved yet also holds
-  // completion: completing first would print the previous count.
+  // completion: completing first would print the previous count. So does a
+  // refused removal: the list may be out of date, and the completion would
+  // confirm its totals. A reload clears it.
   const shouldDisableSubmit =
     hasBlockers ||
     !auditSession ||
+    removeRefusal !== null ||
     hasUnsavedCounts(auditCounts, scannedAssetIds);
 
   return (
@@ -715,20 +758,82 @@ export default function AuditDrawer({
       // Larger collapsed height to fit first item with larger header
       collapsedHeight={193}
       form={(expanded) => (
-        <AuditDrawerFooter
-          disabled={shouldDisableSubmit}
-          auditName={auditSession?.name || ""}
-          portalContainer={portalContainer}
-          stats={{
-            expectedCount: stats.totalExpected,
-            foundCount: stats.foundCount,
-            missingCount: stats.missingCount,
-            unexpectedCount: stats.unexpectedCount,
-          }}
-          units={units}
-          expanded={expanded}
-        />
+        <>
+          {removeRefusal ? (
+            <RemoveRefusalNotice
+              message={removeRefusal}
+              unsavedWork={
+                removeScanFetcher.state !== "idle" ||
+                reloadWouldLoseWork({
+                  pendingScanCount,
+                  items,
+                  auditCounts,
+                  listedAssetIds: scannedAssetIds,
+                })
+              }
+            />
+          ) : null}
+          <AuditDrawerFooter
+            disabled={shouldDisableSubmit}
+            disabledReason={
+              removeRefusal
+                ? `The server refused to remove a scan: ${removeRefusal} Reload to see the audit as it is before you complete it.`
+                : null
+            }
+            auditName={auditSession?.name || ""}
+            portalContainer={portalContainer}
+            stats={{
+              expectedCount: stats.totalExpected,
+              foundCount: stats.foundCount,
+              missingCount: stats.missingCount,
+              unexpectedCount: stats.unexpectedCount,
+            }}
+            units={units}
+            expanded={expanded}
+          />
+        </>
       )}
     />
+  );
+}
+
+/**
+ * Says the server refused a removal, so the list may be out of date, and
+ * offers a reload to show the audit as the server holds it. Reload is never
+ * disabled: when work is still on its way to the server, the notice says a
+ * reload now drops it, and the operator decides.
+ *
+ * @param props.message - The server's reason
+ * @param props.unsavedWork - Whether a reload now would drop work not saved
+ *   yet (a lookup, a scan, a count, or a removal still waiting)
+ */
+function RemoveRefusalNotice({
+  message,
+  unsavedWork,
+}: {
+  message: string;
+  unsavedWork: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      className="mx-3 mt-2 rounded border border-warning-300 bg-warning-25 px-3 py-2 text-[13px] text-warning-800"
+    >
+      <p className="font-semibold">The server refused to remove a scan.</p>
+      <p>
+        {message} The list may be out of date until you reload.
+        {unsavedWork
+          ? " Some scans or counts are not saved yet: wait for them, or a reload now drops them."
+          : null}{" "}
+        <Button
+          type="button"
+          variant="link"
+          onClick={() => window.location.reload()}
+          className="inline text-[13px] font-semibold text-warning-800 underline"
+        >
+          Reload
+        </Button>
+      </p>
+    </div>
   );
 }

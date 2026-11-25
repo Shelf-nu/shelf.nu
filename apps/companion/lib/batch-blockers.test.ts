@@ -293,8 +293,39 @@ test("each blocker removes only the rows it names", () => {
 // It raises its own blocker and nothing else, so the operator reads one reason
 // for it rather than a list of side effects.
 
-test("update location can raise only the archived blocker", () => {
-  assert.deepEqual(blockerKeysFor("update_location"), ["asset-archived"]);
+test("update location can raise the archived and quantity blockers", () => {
+  assert.deepEqual(blockerKeysFor("update_location"), [
+    "asset-archived",
+    "qty-needs-placement",
+  ]);
+});
+
+test("update location blocks a quantity-tracked asset it cannot place", () => {
+  // The scan list has no unit count per row and the server moves whole
+  // assets only, so the row would be skipped while the move reports success.
+  const groups = computeBlockers("update_location", [
+    quantityRow(),
+    asset({ qrId: "qr-new", targetId: "asset-new" }),
+  ]);
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.qrIds, g.message]),
+    [
+      [
+        "qty-needs-placement",
+        ["qr-q"],
+        "1 asset is quantity-tracked and needs a unit count per location.",
+      ],
+    ]
+  );
+});
+
+test("update location flags an archived quantity-tracked asset as archived only", () => {
+  assert.deepEqual(
+    computeBlockers("update_location", [quantityRow({ archived: true })]).map(
+      (g) => g.key
+    ),
+    ["asset-archived"]
+  );
 });
 
 test("the booking modes raise the archived blocker first", () => {

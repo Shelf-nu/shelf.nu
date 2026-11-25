@@ -851,12 +851,17 @@ export type UpdateImageResponse = {
 
 /**
  * Response of the three mobile bulk endpoints (bulk-assign-custody,
- * bulk-release-custody, bulk-update-location). Mixed selections skip
- * QUANTITY_TRACKED assets server-side and report the count via
- * `skippedQuantityTracked`; selections that are 100% quantity-tracked
- * surface as an error envelope instead (never a skip count). For every
- * other eligibility rule the client-side blockers (lib/batch-blockers.ts)
- * keep batches clean before submit.
+ * bulk-release-custody, bulk-update-location).
+ *
+ * The two custody endpoints skip QUANTITY_TRACKED assets in a mixed selection
+ * and report the count via `skippedQuantityTracked`; a selection that is 100%
+ * quantity-tracked surfaces as an error envelope instead (never a skip count).
+ *
+ * bulk-update-location never skips: a list holding a QUANTITY_TRACKED asset is
+ * refused with an error envelope that names the assets, and no assets move.
+ *
+ * For every other eligibility rule the client-side blockers
+ * (lib/batch-blockers.ts) keep batches clean before submit.
  */
 export type BulkActionResponse = {
   success: boolean;
@@ -1178,6 +1183,34 @@ export type BookingDetail = {
    */
   hasAlreadyBookedAssets?: boolean;
   /**
+   * True while this reservation request awaits a decision (the workspace
+   * requires approval for a role and the booking has no `approvedAt`).
+   * Optional for rolling-deploy safety: an older server omits it, and absent
+   * must read as `false` so nothing is hidden.
+   */
+  isPendingApproval?: boolean;
+  /**
+   * Whether this caller may approve the pending request: the server's
+   * `booking:approve` answer (Owner, Administrator, Manager), false unless
+   * {@link isPendingApproval}. The booking screen offers "Approve request"
+   * only when true; the approve endpoint enforces the permission on its own.
+   * Absent on an older server.
+   */
+  canApprove?: boolean;
+  /**
+   * The request version this screen shows (the booking plus everything it
+   * holds), sent back with Approve so a request that changed since is
+   * refused. Present only with `canApprove`; absent on an older server.
+   */
+  requestVersion?: string | null;
+  /**
+   * True on a DRAFT whose reservation by this caller would wait for approval
+   * (workspace requires it, and the caller's role is one whose reservations
+   * do). The screen then words Reserve as a request. Absent on an older
+   * server, which reads as a plain reservation.
+   */
+  reservationNeedsApproval?: boolean;
+  /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview
    * uses, so the mobile progress bar shows identical numbers to web. `null` /
@@ -1333,6 +1366,12 @@ export type BookingMutationResponse = {
     name: string;
     status: BookingStatus;
   };
+  /**
+   * Reserve only: whether the reservation became a request waiting for
+   * approval, decided by the write itself. Absent on other mutations and on
+   * servers that predate it.
+   */
+  isPendingApproval?: boolean;
   /**
    * Duplicate only: how many archived assets the server left out of the copy
    * (archived assets cannot be booked). Absent on other mutations and on

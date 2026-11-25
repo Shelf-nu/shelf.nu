@@ -3,7 +3,9 @@ import { data, Link, Outlet, useLoaderData, useMatches } from "react-router";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { SectionLinksProvider } from "~/components/shared/card";
 import When from "~/components/when/when";
+import { useSectionHashSync } from "~/hooks/use-section-hash-sync";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -81,6 +83,10 @@ export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
   const { tabs } = useLoaderData<typeof loader>();
+  // Settings cards are linkable: a link opens the page at its card, and the
+  // URL hash follows the card being read. `SectionLinksProvider` below gives
+  // each card title its copy-link button.
+  useSectionHashSync();
 
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
@@ -96,7 +102,9 @@ export default function SettingsPage() {
       >
         <HorizontalTabs items={tabs} />
       </When>
-      <Outlet />
+      <SectionLinksProvider>
+        <Outlet />
+      </SectionLinksProvider>
     </>
   );
 }

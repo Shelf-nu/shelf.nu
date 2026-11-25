@@ -2,21 +2,29 @@
  * Mobile SSO callback (native-app web-delegated auth).
  *
  * Supabase redirects here (instead of `/oauth/callback`) after it validates the
- * SAML assertion for a `platform=mobile` SSO sign-in. SSO completion is
- * identical to the web callback — user/org provisioning + SCIM linking via
- * `resolveUserAndOrgForSsoCallback` — except that instead of establishing a web
- * session we mint a single-use authorization code and hand it back to the app
- * through the `shelf://auth-callback?code=…` deeplink. The app then redeems the
- * code at `POST /api/mobile/exchange` for this SSO session, refreshed.
+ * SAML assertion for a `platform=mobile` SSO sign-in, with an authorization
+ * code on the URL. The action trades that code for the SSO session using the
+ * PKCE verifier this browser kept when `/sso-login` started the sign-in, so a
+ * callback link opened in any other browser cannot complete. A sign-in started
+ * from the identity provider's dashboard never lands here, so tokens in the URL
+ * fragment are never accepted.
  *
- * No tokens ever appear in the deeplink — only the short-lived, single-use code.
+ * SSO completion then matches the web callback (user and workspace
+ * provisioning, SCIM linking via `resolveUserAndOrgForSsoCallback`), except
+ * that instead of setting a web session it mints a single-use authorization
+ * code for the app and hands it back through the `shelf://auth-callback?code=`
+ * deeplink. The app redeems that code at `POST /api/mobile/exchange`, proving
+ * with its own PKCE verifier that it started the sign-in.
+ *
+ * No tokens ever appear in the deeplink, only the short-lived, single-use code.
  *
  * @see apps/webapp/app/modules/auth/mobile-sso.server.ts
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
- * @see apps/webapp/app/routes/_auth+/oauth.callback.tsx — web counterpart
+ * @see apps/webapp/app/modules/auth/sso-pkce.server.ts
+ * @see apps/webapp/app/routes/_auth+/oauth.callback.tsx (web counterpart)
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
 import { data, useFetcher } from "react-router";
@@ -24,17 +32,21 @@ import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
-import { supabaseClient } from "~/integrations/supabase/client";
+import { useSearchParams } from "~/hooks/search-params";
 import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import {
   createMobileAuthCode,
   deleteExpiredMobileAuthCodes,
 } from "~/modules/auth/mobile-sso.server";
-import { refreshAccessToken } from "~/modules/auth/service.server";
+import { exchangeSsoCode } from "~/modules/auth/sso-pkce.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { createSSOFormData } from "~/utils/auth";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
-import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
+import {
+  clearSsoCodeVerifier,
+  mobilePkceChallengeCookie,
+  ssoCodeVerifierCookie,
+} from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   getActionMethod,
@@ -43,6 +55,7 @@ import {
   payload,
   readFormData,
 } from "~/utils/http.server";
+import { readProviderError } from "~/utils/sso-callback";
 import {
   assertSsoAuthenticatedSession,
   getSsoClaimsForAuthUser,
@@ -54,16 +67,12 @@ import {
 const MOBILE_CALLBACK_URL = "shelf://auth-callback";
 
 /**
- * Mirrors the web callback's payload: the client reads the Supabase session
- * from the URL fragment and posts only the refresh token. We re-derive the
- * session server-side and never trust the client-supplied tokens. Every claim
- * the action acts on (groups, names, contact info) is read server-side with
- * `getSsoClaimsForAuthUser`, never from the form.
+ * What the page posts: only the `?code=` Supabase put on the callback URL.
+ * Every claim the action acts on (groups, names, contact info) is read
+ * server-side with `getSsoClaimsForAuthUser`, never from the form.
  */
 const MobileCallbackSchema = z.object({
-  refreshToken: z.string().min(1),
-  // `createSSOFormData` always includes a redirectTo; it is unused on mobile.
-  redirectTo: z.string().optional(),
+  code: z.string().min(1),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -74,6 +83,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const clearChallengeCookie = await mobilePkceChallengeCookie.serialize("", {
     maxAge: 0,
   });
+  // The SSO code verifier is single-use as well, and cleared on the same paths.
+  const responseHeaders = new Headers();
+  responseHeaders.append("Set-Cookie", clearChallengeCookie);
+  responseHeaders.append("Set-Cookie", await clearSsoCodeVerifier());
   try {
     if (disableSSO) {
       throw new ShelfError({
@@ -94,16 +107,21 @@ export async function action({ request }: ActionFunctionArgs) {
         // why: readFormData (not request.formData()) so a malformed body / wrong
         // Content-Type is downgraded to a non-captured 400, rather than a
         // TypeError that logException would otherwise surface as a captured 5xx.
-        const { refreshToken } = parseData(
+        const { code: supabaseCode } = parseData(
           await readFormData(request),
           MobileCallbackSchema
         );
 
-        // Don't trust client tokens: re-derive the session from the refresh
-        // token server-side (same trust boundary as the web callback).
-        const authSession = await refreshAccessToken(refreshToken);
-        // Any Supabase refresh token refreshes, so refuse a session that was
-        // not obtained through SSO before anything is provisioned or synced.
+        // Only the browser that started this sign-in holds the verifier.
+        const authSession = await exchangeSsoCode({
+          code: supabaseCode,
+          codeVerifier: await ssoCodeVerifierCookie.parse(
+            request.headers.get("Cookie")
+          ),
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
+        // Any Supabase session would pass the steps below, so refuse one that
+        // was not obtained through SSO before anything is provisioned or synced.
         await assertSsoAuthenticatedSession(authSession);
         const { groups, firstName, lastName, contactInfo } =
           await getSsoClaimsForAuthUser({
@@ -174,10 +192,8 @@ export async function action({ request }: ActionFunctionArgs) {
           payload({
             deeplink: `${MOBILE_CALLBACK_URL}?code=${encodeURIComponent(code)}`,
           }),
-          {
-            // Clear the one-shot challenge cookie now that it's bound to the code.
-            headers: { "Set-Cookie": clearChallengeCookie },
-          }
+          // Clear the one-shot cookies now that the challenge is bound to the code.
+          { headers: responseHeaders }
         );
       }
     }
@@ -189,7 +205,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (isSsoAccountLinkedError(cause)) {
       return data(
         payload({ ssoAccountLinked: true as const, message: cause.message }),
-        { headers: { "Set-Cookie": clearChallengeCookie } }
+        { headers: responseHeaders }
       );
     }
     const reason = makeShelfError(cause);
@@ -202,7 +218,7 @@ export async function action({ request }: ActionFunctionArgs) {
       { error: { message: reason.message } },
       {
         status: reason.status,
-        headers: { "Set-Cookie": clearChallengeCookie },
+        headers: responseHeaders,
       }
     );
   }
@@ -221,27 +237,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function MobileLoginCallback() {
   const fetcher = useFetcher<typeof action>();
-  const result = fetcher.data;
+  const { data: result, submit } = fetcher;
+  const [searchParams] = useSearchParams();
+  const code = searchParams.get("code");
+  /** Supabase reports a failed sign-in on the callback URL itself. */
+  const providerError = readProviderError(searchParams);
+  /** The code is posted once, re-renders included. */
+  const codePosted = useRef(false);
 
   useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
-      if (event === "SIGNED_IN") {
-        // Supabase reads the session from the URL fragment (client-only). We
-        // forward only the refresh token; the action re-derives the session.
-        const refreshToken = supabaseSession?.refresh_token;
-        if (!refreshToken) return;
-
-        const formData = createSSOFormData(refreshToken, "");
-        void fetcher.submit(formData, { method: "post" });
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [fetcher]);
+    if (!code || codePosted.current) return;
+    codePosted.current = true;
+    void submit({ code }, { method: "post" });
+  }, [code, submit]);
 
   // Once the server returns the deeplink, bounce back into the app. In the
   // system browser opened by `expo-web-browser`, navigating to the `shelf://`
@@ -257,7 +265,10 @@ export default function MobileLoginCallback() {
       ? result.message
       : null;
   const errorMessage =
-    result && "error" in result ? result.error?.message : undefined;
+    (result && "error" in result ? result.error?.message : undefined) ??
+    providerError ??
+    // Without a code this page was not reached from a sign-in the app started.
+    (code ? undefined : "Please start the sign-in from the Shelf app.");
 
   return (
     <div className="flex justify-center text-center">

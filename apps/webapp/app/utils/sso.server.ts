@@ -270,34 +270,36 @@ function readAmrMethods(accessToken: string): string[] {
 }
 
 /**
- * A session as `refreshAccessToken` returns it. Structurally the same as
+ * A session Supabase Auth issued to the server in this request, from
+ * `refreshAccessToken` or `exchangeSsoCode`. Structurally the same as
  * `AuthSession`; the name states where `assertSsoAuthenticatedSession` expects
  * its input to come from.
  */
-type RefreshedAuthSession = Awaited<ReturnType<typeof refreshAccessToken>>;
+type ServerIssuedAuthSession = Awaited<ReturnType<typeof refreshAccessToken>>;
 
 /**
  * Refuses an SSO callback whose session was not obtained through SSO.
  *
- * The callback routes accept a refresh token posted by the browser, and any
- * Supabase refresh token refreshes into a session, including one from a
- * password or email-code sign-in. Only a session whose access token records a
+ * The callback routes obtain a session from a code or a refresh token the
+ * browser posted, and either can belong to any Supabase sign-in, including a
+ * password or email-code one. Only a session whose access token records a
  * SAML sign-in may provision users or sync roles. A refused session is revoked
- * (scope `local`) before the error is thrown, so the session the refresh just
- * opened does not outlive the request. Call it right after
- * `refreshAccessToken` and before anything else reads the session.
+ * (scope `local`) before the error is thrown, so the session just obtained
+ * does not outlive the request. Call it right after obtaining the session and
+ * before anything else reads it.
  *
- * SECURITY: pass only a session returned by `refreshAccessToken` in this same
- * request. The check reads the access token's `amr` claim WITHOUT verifying
- * its signature, which is sound only because that token came straight from
- * GoTrue over the server-side refresh. A token taken from a cookie, a header or
- * a form could carry any `amr` its author wrote.
+ * SECURITY: pass only a session Supabase Auth issued to the server in this
+ * same request: the result of `refreshAccessToken` or `exchangeSsoCode`. The
+ * check reads the access token's `amr` claim WITHOUT verifying its signature,
+ * which is sound only because that token came straight from GoTrue in the
+ * server's own call. A token taken from a cookie, a header or a form could
+ * carry any `amr` its author wrote.
  *
- * @param authSession - the session just refreshed server-side
+ * @param authSession - the session the server just obtained
  * @throws {ShelfError} 403 when the session's `amr` has no SAML entry
  */
 export async function assertSsoAuthenticatedSession(
-  authSession: RefreshedAuthSession
+  authSession: ServerIssuedAuthSession
 ): Promise<void> {
   if (readAmrMethods(authSession.accessToken).includes(SSO_SAML_AMR_METHOD)) {
     return;

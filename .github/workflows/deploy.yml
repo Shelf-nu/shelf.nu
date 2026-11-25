@@ -13,13 +13,6 @@ permissions:
 jobs:
   tests:
     uses: ./.github/workflows/test.yml
-    secrets:
-      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-      SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
-      SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SERVER_URL: ${{ secrets.SERVER_URL }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
   build:
     name: 🐳 Build

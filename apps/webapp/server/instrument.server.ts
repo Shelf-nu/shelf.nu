@@ -21,6 +21,7 @@ import {
 } from "~/utils/error";
 import { redactSensitive } from "~/utils/redact";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
+import { withoutUnloggedHeaders } from "~/utils/unlogged-headers";
 
 /**
  * Resolve the release identifier for this server process. Read from the
@@ -74,13 +75,12 @@ if (SENTRY_DSN) {
       return breadcrumb;
     },
     /**
-     * Performance transactions are kept, with email addresses masked. They
+     * Performance transactions are kept, with credentials scrubbed from the
+     * request (see {@link scrubEventRequest}) and email addresses masked. They
      * must NOT go through the error-event filter: a transaction carries no
      * exception, and that filter drops every event without one.
      */
-    beforeSendTransaction(event) {
-      return maskEmailsInSentryPayload(event);
-    },
+    beforeSendTransaction: handleBeforeSendTransaction,
     beforeSend(event, hint) {
       const kept = handleBeforeSendError(event, hint);
       return kept && maskEmailsInSentryPayload(kept);
@@ -97,12 +97,42 @@ if (SENTRY_DSN) {
 }
 
 /**
+ * Hook for performance transactions: scrubs credentials from the request
+ * (see {@link scrubEventRequest}) and masks email addresses.
+ *
+ * @param event - The transaction about to be sent
+ * @returns The transaction to send
+ */
+export function handleBeforeSendTransaction<E extends Event>(event: E): E {
+  scrubEventRequest(event);
+  return maskEmailsInSentryPayload(event);
+}
+
+/**
+ * Removes credentials from the request Sentry attached to an event, in place:
+ * every parsed cookie (the session and the SSO verifier and challenge among
+ * them), and every `UNLOGGED_HEADERS` header (raw `cookie`, `authorization`,
+ * the Cloudflare proxy secret). Sentry's SDK copies the incoming request's
+ * headers and cookies onto errors and transactions alike.
+ *
+ * @param event - The event about to be sent
+ */
+export function scrubEventRequest(event: Event): void {
+  if (event.request?.cookies) {
+    delete event.request.cookies;
+  }
+  if (event.request?.headers) {
+    event.request.headers = withoutUnloggedHeaders(event.request.headers);
+  }
+}
+
+/**
  * Filter for ERROR events (not transactions). Drops:
  *  - non-Error exceptions
  *  - ShelfError instances flagged `shouldBeCaptured: false`
  *  - client-disconnect / abort errors that bypass `makeShelfError`
  *
- * Also redacts the auth-session cookie and attaches our ShelfError
+ * Also scrubs credentials from the request (see {@link scrubEventRequest}) and attaches our ShelfError
  * metadata as Sentry tags / extras. Email masking runs on the result, in the
  * `beforeSend` hook.
  */
@@ -130,10 +160,7 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
     return null;
   }
 
-  /** Hide the __authSession cookie */
-  if (event.request?.cookies) {
-    event.request.cookies["__authSession"] = "hidden";
-  }
+  scrubEventRequest(event);
 
   const context = makeSentryContext(exception);
   if (!context) {
