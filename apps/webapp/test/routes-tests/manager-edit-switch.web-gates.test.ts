@@ -164,7 +164,10 @@ vi.mock("~/modules/asset/service.server", () => ({
   })),
   bulkMarkAvailability: vi.fn(async () => undefined),
   bulkUpdateAssetCategory: vi.fn(async () => undefined),
-  bulkUpdateAssetLocation: vi.fn(async () => undefined),
+  bulkUpdateAssetLocation: vi.fn(async () => ({
+    success: true,
+    skippedQuantityTracked: 0,
+  })),
   bulkUpdateAssetMinQuantity: vi.fn(async () => 1),
   bulkUpdateAssetModel: vi.fn(async () => ({
     linked: true,

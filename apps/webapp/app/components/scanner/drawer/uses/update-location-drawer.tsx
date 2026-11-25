@@ -186,7 +186,15 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             ? () =>
                 sendPart(
                   "/api/assets/bulk-update-location",
-                  objectToFormData({ assetIds, newLocationId })
+                  // `refuse`: the blocker list already keeps quantity-tracked
+                  // assets out, and the server holds the same line, so a list
+                  // that slips one through fails rather than saving the rest
+                  // under a success message.
+                  objectToFormData({
+                    assetIds,
+                    newLocationId,
+                    quantityTracked: "refuse",
+                  })
                 )
             : null,
           sendKits: kitIds.length

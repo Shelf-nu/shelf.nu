@@ -18,6 +18,7 @@
  */
 
 import type { ScanListItems } from "~/atoms/qr-scanner";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type { BlockerConfig } from "../blockers-factory";
 import {
   archivedAssetIdsOf,
@@ -118,6 +119,11 @@ export function buildAddToLocationBlockers({
  * Blockers for the drawer that moves scanned assets and kits to a location
  * picked in the drawer.
  *
+ * A quantity-tracked asset is blocked: it is placed per location with a unit
+ * count, this drawer has no count per row, and the bulk service moves whole
+ * assets only. Left in the list it would be skipped while the save reports
+ * success. An archived one raises only `assets-archived`.
+ *
  * @param args - The scanned rows and the removers
  * @returns The blocker configs, in display order
  */
@@ -126,12 +132,31 @@ export function buildUpdateLocationBlockers({
   removeAssetsFromList,
   removeItemsFromList,
 }: UpdateLocationBlockerArgs): ScanBlockers {
+  const assets = assetsOf(items);
+  const quantityTrackedIds = assets
+    .filter((asset) => !asset.archivedAt && isQuantityTracked(asset))
+    .map((asset) => asset.id);
+
   const blockerConfigs: BlockerConfig[] = [
     archivedAssetsBlocker(
-      archivedAssetIdsOf(assetsOf(items)),
+      archivedAssetIdsOf(assets),
       removeAssetsFromList,
       ARCHIVED_DESCRIPTION
     ),
+    {
+      id: "assets-quantity-tracked",
+      condition: quantityTrackedIds.length > 0,
+      count: quantityTrackedIds.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          quantity-tracked.
+        </>
+      ),
+      description:
+        "Quantity-tracked assets are placed per location with a unit count. Set their placements on the asset page.",
+      onResolve: () => removeAssetsFromList(quantityTrackedIds),
+    },
     invalidCodesBlocker(errorQrIdsOf(items), removeItemsFromList),
   ];
 

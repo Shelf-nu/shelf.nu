@@ -142,6 +142,41 @@ describe("POST /api/mobile/bulk-update-location", () => {
     );
   });
 
+  it("asks the service to refuse a list holding quantity-tracked assets", async () => {
+    // The phone shows one result for the whole scan list, so a row the
+    // service cannot place must fail the move, not be skipped under success.
+    const request = createBulkUpdateLocationRequest({
+      assetIds: ["asset-1", "pool-1"],
+      locationId: "location-1",
+    });
+
+    await action(createActionArgs({ request }));
+
+    expect(bulkUpdateAssetLocation).toHaveBeenCalledWith(
+      expect.objectContaining({ quantityTracked: "refuse" })
+    );
+  });
+
+  it("answers 400 with the service's message when the list is refused", async () => {
+    const refusal = new Error(
+      "1 quantity-tracked asset can't be moved this way, so nothing was moved."
+    );
+    (refusal as any).status = 400;
+    (bulkUpdateAssetLocation as any).mockRejectedValueOnce(refusal);
+
+    const request = createBulkUpdateLocationRequest({
+      assetIds: ["asset-1", "pool-1"],
+      locationId: "location-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("quantity-tracked");
+    expect(body.success).toBeUndefined();
+  });
+
   it("should return error when permission is denied", async () => {
     const permError = new Error("Permission denied");
     (permError as any).status = 403;

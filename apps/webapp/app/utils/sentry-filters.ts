@@ -326,12 +326,17 @@ export function handleClientBeforeSend(event: ErrorEvent): ErrorEvent | null {
   // "Expected fetcher: " and "No result found for routeId" are React
   // Router internal races during navigation. "Cannot submit a <button>"
   // is a fetcher.submit edge case from React Router's form helper.
+  // "Object Not Found Matching Id:" is a string rejected by the
+  // CefSharp bridge that email link scanners (Outlook Safe Links and
+  // similar) inject into the pages they open; Shelf code never rejects
+  // with it.
   const ignoredPatterns = [
     "feature named",
     "Unexpected identifier 'https'",
     "Expected fetcher: ",
     "No result found for routeId",
     "Cannot submit a <button>",
+    "Object Not Found Matching Id:",
   ];
   if (ignoredPatterns.some((pattern) => message.includes(pattern))) {
     return null;

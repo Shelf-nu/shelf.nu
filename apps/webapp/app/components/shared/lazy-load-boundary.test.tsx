@@ -21,7 +21,11 @@ const { mockCheck, mockGetSnapshot } = vi.hoisted(() => ({
 }));
 
 // why: Sentry is a network side effect; the test asserts what would be sent.
-vi.mock("@sentry/react-router", () => ({ captureException: vi.fn() }));
+vi.mock("@sentry/react-router", () => ({
+  captureException: vi.fn(),
+  logger: { info: vi.fn() },
+  flush: vi.fn(),
+}));
 
 // why: the real checker fetches the server's build id; the test controls the
 // comparison it answers with.
@@ -61,6 +65,8 @@ function renderChunkFailure() {
 describe("LazyLoadBoundary", () => {
   beforeEach(() => {
     vi.mocked(Sentry.captureException).mockReset();
+    vi.mocked(Sentry.logger.info).mockReset();
+    vi.mocked(Sentry.flush).mockReset();
     mockCheck.mockReset();
     mockCheck.mockResolvedValue("unknown");
     mockGetSnapshot.mockReset();
@@ -134,32 +140,39 @@ describe("LazyLoadBoundary", () => {
     );
   });
 
-  it("reports a chunk failure as a superseded-build warning when a newer build is live", async () => {
+  it("logs a chunk failure instead of raising an issue when a newer build is live", async () => {
     mockCheck.mockResolvedValue("newer");
+    // The checker latches the newer build it just saw.
+    mockGetSnapshot.mockReturnValue({ status: "newer", serverBuildId: "2" });
     renderChunkFailure();
 
     await waitFor(() =>
-      expect(Sentry.captureException).toHaveBeenCalledWith(
-        expect.objectContaining({ message: CHUNK_ERROR_MESSAGE }),
-        {
-          tags: {
-            source: "lazy-load-boundary",
-            chunk_load_error: true,
-            build: "superseded",
-          },
-          level: "warning",
-        }
+      expect(Sentry.logger.info).toHaveBeenCalledWith(
+        "Chunk from a superseded build failed to load",
+        expect.objectContaining({
+          message: CHUNK_ERROR_MESSAGE,
+          serverBuildId: "2",
+        })
       )
     );
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 
-  it("keeps a chunk failure superseded when the tab already saw a newer build", async () => {
+  it("logs a chunk failure when the tab already saw a newer build", async () => {
     // A rolling deploy: an earlier check latched a newer build, this one
     // reached a machine still on the tab's build.
     mockGetSnapshot.mockReturnValue({ status: "newer", serverBuildId: "2" });
     mockCheck.mockResolvedValue("same");
     renderChunkFailure();
 
+    await waitFor(() => expect(Sentry.logger.info).toHaveBeenCalled());
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("raises an issue when the check reaches a machine older than the tab", async () => {
+    mockCheck.mockResolvedValue("older");
+    renderChunkFailure();
+
     await waitFor(() =>
       expect(Sentry.captureException).toHaveBeenCalledWith(
         expect.objectContaining({ message: CHUNK_ERROR_MESSAGE }),
@@ -167,12 +180,12 @@ describe("LazyLoadBoundary", () => {
           tags: {
             source: "lazy-load-boundary",
             chunk_load_error: true,
-            build: "superseded",
+            build: "unknown",
           },
-          level: "warning",
         }
       )
     );
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
   });
 
   it("reports a chunk failure on the live build as an error", async () => {
@@ -191,6 +204,7 @@ describe("LazyLoadBoundary", () => {
         }
       )
     );
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
   });
 
   it("reports at pagehide when the page unloads before the check answers", async () => {
@@ -212,6 +226,22 @@ describe("LazyLoadBoundary", () => {
         },
       }
     );
+    expect(Sentry.logger.info).not.toHaveBeenCalled();
+  });
+
+  it("logs at pagehide when the tab already saw a newer build", async () => {
+    mockCheck.mockReturnValue(new Promise<BuildComparison>(() => {}));
+    mockGetSnapshot.mockReturnValue({ status: "newer", serverBuildId: "2" });
+    renderChunkFailure();
+    expect(await screen.findByText("Reload")).toBeInTheDocument();
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(Sentry.logger.info).toHaveBeenCalledTimes(1);
+    // The SDK flushed its log buffer when the tab turned hidden, before
+    // pagehide, so this log is sent only if the report flushes it itself.
+    expect(Sentry.flush).toHaveBeenCalledTimes(1);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 
   it("reports a chunk failure once, whichever of check and pagehide comes first", async () => {

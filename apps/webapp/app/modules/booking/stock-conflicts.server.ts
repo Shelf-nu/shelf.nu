@@ -60,6 +60,7 @@ import {
   buildActiveBookingWhere,
   overCommittedWindows,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 } from "~/modules/asset/availability.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -215,6 +216,7 @@ export async function flagBookingStockConflicts({
             assetId: true,
             bookingId: true,
             quantity: true,
+            checkedOutQuantity: true,
             booking: { select: { from: true, to: true, status: true } },
           },
         }),
@@ -285,9 +287,15 @@ export async function flagBookingStockConflicts({
         if (!row.booking) continue;
 
         const logged = loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0;
-        // Clamp at 0 per row, same defence-in-depth as the availability
-        // primitives — an over-logged booking can't push demand negative.
-        const remaining = Math.max(0, row.quantity - logged);
+        // Never negative, and never below the units the row has out right
+        // now, same as the availability primitives.
+        const remaining = reservedUnitsStillHeld(
+          {
+            quantity: row.quantity,
+            checkedOutQuantity: row.checkedOutQuantity ?? null,
+          },
+          logged
+        );
         if (remaining === 0) continue;
 
         // `windowTo` fallback is unreachable here (`row.booking.to` is

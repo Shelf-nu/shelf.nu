@@ -369,6 +369,25 @@ describe("handleClientBeforeSend — non-boundary passthrough", () => {
   });
 });
 
+describe("handleClientBeforeSend: email link scanner rejections", () => {
+  it("drops the string a link scanner's injected bridge rejects with", () => {
+    const event = makeEvent({
+      type: "UnhandledRejection",
+      value:
+        "Non-Error promise rejection captured with value: Object Not Found Matching Id:2, MethodName:update, ParamCount:4",
+    });
+    expect(handleClientBeforeSend(event)).toBeNull();
+  });
+
+  it("keeps other non-Error promise rejections", () => {
+    const event = makeEvent({
+      type: "UnhandledRejection",
+      value: "Non-Error promise rejection captured with value: Not Found",
+    });
+    expect(handleClientBeforeSend(event)).toBe(event);
+  });
+});
+
 /**
  * An unhandled rejection as Sentry reports it for a non-Error value: the
  * message names the keys, the mechanism names the global handler, and the
