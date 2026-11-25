@@ -9836,17 +9836,19 @@ export async function partialCheckinBooking({
       }
 
       /**
-       * Slices this request never saw.
+       * Slices still out as the transaction sees them.
        *
-       * The booking was loaded before the transaction opened — several
-       * round-trips earlier — so a progressive checkout that committed in
-       * between is invisible to it, and releasing a kit whose gear left in that
-       * window is the failure this gate exists to prevent.
+       * The booking was loaded before the transaction opened, several
+       * round-trips earlier, so a check-out that committed in between is
+       * invisible to it: a slice it never saw, or one it calls returned that
+       * has gone out again. Releasing a kit whose gear left in that window is
+       * the failure this gate exists to prevent.
        *
        * Read as a VETO only: it runs when a kit is already a candidate, and
-       * only slices absent from the snapshot contribute. It can hold a kit
-       * back; it can never release one. So a read that comes back short leaves
-       * the decision exactly where the snapshot put it.
+       * every slice it finds can only hold a kit back, never release one. So
+       * a read that comes back short leaves the decision exactly where the
+       * loaded booking put it. Slices settled above are stamped before this
+       * read, so they are not in it.
        */
       if (kitIdsSettledHere.size > 0) {
         const stillOutNow = await tx.bookingAsset.findMany({
@@ -9869,6 +9871,13 @@ export async function partialCheckinBooking({
             },
           },
         });
+        // A slice the loaded booking knows but calls returned: it went out
+        // again since the load. Its kits are already resolved.
+        for (const slice of stillOutNow) {
+          for (const kitId of kitIdsBySliceId.get(slice.id) ?? []) {
+            kitIdsStillOut.add(kitId);
+          }
+        }
         const unseenSlices = stillOutNow.filter(
           (slice) => !sliceById.has(slice.id)
         );

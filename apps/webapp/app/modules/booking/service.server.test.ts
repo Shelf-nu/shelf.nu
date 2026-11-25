@@ -23586,6 +23586,75 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 
+  it("holds a kit back for a slice the loaded booking calls returned that has gone out again", async () => {
+    expect.assertions(1);
+
+    // Kit A's ladder came back on an earlier trip, so the loaded booking
+    // marks its slice returned. Another session sent it out again while this
+    // request ran: only the read made inside the transaction sees it as out.
+    const ladderSlice = {
+      id: "ba-kit-a-ladder",
+      assetId: "asset-ladder",
+      quantity: 1,
+      assetKitId: null,
+      sourceKitId: "kit-a",
+      checkedOutAt: OUT,
+      checkedInAt: OUT,
+      asset: {
+        id: "asset-ladder",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [{ kitId: "kit-a" }],
+      },
+    };
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      ladderSlice,
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({
+      slices,
+      stillOutNow: [
+        {
+          id: "ba-kit-a-ladder",
+          assetKitId: null,
+          sourceKitId: "kit-a",
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: [{ kitId: "kit-a" }],
+          },
+        },
+      ],
+    });
+    // why: `mockSliceReads` answers every still-out read alike. The release
+    // helper's own "held by another booking" read is one of them, told apart
+    // by its `bookingId.notIn`; no other booking holds kit A here, so the
+    // decision under test is the gate's, not that helper's.
+    const sliceReads = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
+    const routed = sliceReads.getMockImplementation() as
+      | ((q: unknown) => Promise<unknown>)
+      | undefined;
+    sliceReads.mockImplementation(
+      (q?: { where?: { bookingId?: { notIn?: string[] } } }) =>
+        q?.where?.bookingId?.notIn ? Promise.resolve([]) : routed?.(q)
+    );
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 6 },
+        ],
+      })
+    );
+
+    expect(releasedKitIds()).toEqual([]);
+  });
+
   it("still releases a kit whose member was detached mid-booking", async () => {
     expect.assertions(1);
 
