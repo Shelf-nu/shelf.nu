@@ -34,6 +34,7 @@ import {
   InsufficientStockBadge,
   PendingReturnBadge,
 } from "./availability-label";
+import { BookingSourceCell, type PoolSourceCell } from "./booking-source-cell";
 import { FulfilsModelBadge } from "./fulfils-model-badge";
 import { NextReservationBadge } from "./next-reservation-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";
@@ -93,13 +94,23 @@ export default function ListAssetContent({
    * working — the lookup just returns `undefined` and both the badge
    * condition and the dialog fall back to their pre-existing behavior.
    */
-  const { booking, availableUnitsByAsset } = useLoaderData<{
+  const { booking, availableUnitsByAsset, poolSourcesBySlice } = useLoaderData<{
     booking: BookingWithCustodians;
     availableUnitsByAsset?: Record<
       string,
       { bookable: number; physicalNow: number; reserved: number }
     >;
+    /**
+     * Location cell sources for standalone pool slices, keyed by
+     * `bookingAssetId`. Only slices that show their sources are present
+     * (see `selectPoolSourceCell`); every other row keeps its primary
+     * location. Absent on surfaces that do not ship it.
+     */
+    poolSourcesBySlice?: Record<string, PoolSourceCell>;
   }>();
+  const sourceCell = item.bookingAssetId
+    ? poolSourcesBySlice?.[item.bookingAssetId] ?? null
+    : null;
   const currentOrganization = useCurrentOrganization();
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
@@ -401,18 +412,6 @@ export default function ListAssetContent({
                 {item.fulfilsModelName ? (
                   <FulfilsModelBadge modelName={item.fulfilsModelName} />
                 ) : null}
-                {/* Where this pool slice's units left from. Recorded only when
-                    the slice goes out, so its presence alone means it went
-                    out (the row's unit counter is session-derived and reads 0
-                    after a one-click check-out). Resolved in the overview
-                    loader, only for pools at two or more placements. It is
-                    also what check-in takes used-up units off, so a location
-                    picked by default is never a silent guess. */}
-                {item.sourceLocation ? (
-                  <span className="text-xs text-gray-500">
-                    from {item.sourceLocation.name}
-                  </span>
-                ) : null}
               </div>
             </div>
           </div>
@@ -620,7 +619,9 @@ export default function ListAssetContent({
           isKitAsset ? "bg-gray-50/50" : "" // Light background for kit assets
         )}
       >
-        {item.location ? (
+        {sourceCell ? (
+          <BookingSourceCell cell={sourceCell} rowLocation={item.location} />
+        ) : item.location ? (
           <LocationBadge
             location={{
               id: item.location.id,

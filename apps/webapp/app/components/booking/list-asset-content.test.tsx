@@ -1008,29 +1008,74 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/counts toward it/i);
     });
 
-    it("says which location a checked-out pool slice left from, even when its unit counter reads 0", () => {
+    it("no longer prints a from-location line under the title", () => {
       mockUseLoaderData.mockReturnValue(finishedBooking);
 
       renderRow({
         ...baseAsset,
-        // A one-click check-out writes no scan session, so the row's
-        // session-derived counter stays 0; the recorded source still shows.
-        checkedOutQuantity: 0,
         sourceLocation: { id: "loc-studio", name: "Studio" },
       } as unknown as AssetWithBooking);
 
-      expect(screen.getByText("from Studio")).toBeInTheDocument();
+      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
     });
 
-    it("says nothing about a source the loader did not resolve", () => {
-      mockUseLoaderData.mockReturnValue(finishedBooking);
+    it("shows a pool slice's split sources in the Location cell", () => {
+      mockUseLoaderData.mockReturnValue({
+        ...finishedBooking,
+        poolSourcesBySlice: {
+          "ba-1": {
+            short: true,
+            parts: [
+              {
+                key: "LOCATION:loc-a",
+                kind: "LOCATION",
+                locationId: "loc-a",
+                label: "Demo Warehouse",
+                planned: 8,
+                out: 0,
+                short: true,
+              },
+              {
+                key: "UNPLACED",
+                kind: "UNPLACED",
+                locationId: null,
+                label: "Unplaced",
+                planned: 7,
+                out: 0,
+                short: false,
+              },
+            ],
+          },
+        },
+      });
 
       renderRow({
         ...baseAsset,
-        sourceLocation: null,
+        bookingAssetId: "ba-1",
+        location: { id: "loc-b", name: "Primary Shelf", _count: {} },
       } as unknown as AssetWithBooking);
 
-      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Demo Warehouse 8 · Unplaced 7")
+      ).toBeInTheDocument();
+      expect(screen.getByText("Short at Demo Warehouse")).toBeInTheDocument();
+      expect(screen.queryByText("Primary Shelf")).not.toBeInTheDocument();
+    });
+
+    it("keeps the primary location for a row without sources", () => {
+      mockUseLoaderData.mockReturnValue({
+        ...finishedBooking,
+        poolSourcesBySlice: {},
+      });
+
+      renderRow({
+        ...baseAsset,
+        bookingAssetId: "ba-1",
+        location: { id: "loc-b", name: "Primary Shelf", _count: {} },
+      } as unknown as AssetWithBooking);
+
+      expect(screen.getByText("Primary Shelf")).toBeInTheDocument();
+      expect(screen.queryByText(/ · /)).not.toBeInTheDocument();
     });
 
     it("does NOT label a row that answered no reservation", () => {
