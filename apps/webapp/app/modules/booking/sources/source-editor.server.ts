@@ -11,6 +11,10 @@
  * on a booking that is still open. Everything else gets `null`, decided from
  * the slice the caller already read, so a LEGACY slice costs no query here.
  *
+ * Units held at a location that is no longer a placement of the pool are
+ * listed apart (`stranded`); while any exist the section is read-only and
+ * offers only Auto, because a MANUAL request cannot name that location.
+ *
  * No lock is taken: the figures are a preview. The adjust action re-reads
  * and admits under its locks.
  *
@@ -23,7 +27,11 @@ import { sourceKey } from "@shelf/quantity-control";
 import { db } from "~/database/db.server";
 
 import { computeFreeBySourceForPools } from "./capacity.server";
-import type { SourceEditorData, SourceEditorRow } from "./source-editor";
+import type {
+  SourceEditorData,
+  SourceEditorRow,
+  StrandedSource,
+} from "./source-editor";
 
 /** Booking statuses whose slices can still change sources. */
 const EDITABLE_STATUSES: ReadonlySet<string> = new Set([
@@ -56,7 +64,8 @@ export type SourceEditorSlice = {
  * Reads the From section of one standalone pool slice.
  *
  * Queries, only once the slice qualifies: free units per source (five) and
- * the slice's source rows (one) in parallel, then location names (one).
+ * the slice's source rows (one) in parallel, then location names (one,
+ * placements and former placements together).
  *
  * @param args.organizationId - The trusted workspace id
  * @param args.bookingId - The booking (its own holds are not competition)
@@ -100,15 +109,6 @@ export async function getSourceEditorData(args: {
   // A pool without manual placements has one source (Unplaced): nothing to split.
   if (placements.length === 0) return null;
 
-  const locationIds = placements.flatMap((s) =>
-    s.locationId ? [s.locationId] : []
-  );
-  const locations = await db.location.findMany({
-    where: { id: { in: locationIds }, organizationId },
-    select: { id: true, name: true },
-  });
-  const names = new Map(locations.map((l) => [l.id, l.name]));
-
   // Pending and out per loose source; "Needs a location" and unknown origins apart.
   const pendingByKey = new Map<string, number>();
   const outByKey = new Map<string, number>();
@@ -133,6 +133,47 @@ export async function getSourceEditorData(args: {
     outByKey.set(key, (outByKey.get(key) ?? 0) + row.outQuantity);
   }
 
+  // Locations the slice still holds units at that are no longer placements:
+  // a MANUAL split cannot name them, so they lock the section.
+  const placementIds = new Set(
+    placements.flatMap((s) => (s.locationId ? [s.locationId] : []))
+  );
+  const strandedIds = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.kind === "LOCATION" &&
+        row.locationId &&
+        !placementIds.has(row.locationId)
+          ? [row.locationId]
+          : []
+      )
+    ),
+  ].filter((locationId) => {
+    const key = sourceKey({ kind: "LOCATION", locationId });
+    return (pendingByKey.get(key) ?? 0) + (outByKey.get(key) ?? 0) > 0;
+  });
+
+  const locations = await db.location.findMany({
+    where: { id: { in: [...placementIds, ...strandedIds] }, organizationId },
+    select: { id: true, name: true },
+  });
+  const names = new Map(locations.map((l) => [l.id, l.name]));
+  const nameOf = (locationId: string | null) =>
+    (locationId && names.get(locationId)) || "Unknown location";
+
+  const stranded: StrandedSource[] = strandedIds
+    .map((locationId) => {
+      const key = sourceKey({ kind: "LOCATION", locationId });
+      return {
+        key,
+        locationId,
+        label: nameOf(locationId),
+        pending: pendingByKey.get(key) ?? 0,
+        out: outByKey.get(key) ?? 0,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+
   const toRow = (
     source: (typeof free)[number],
     label: string
@@ -149,9 +190,7 @@ export async function getSourceEditorData(args: {
   };
 
   const locationRows = placements
-    .map((s) =>
-      toRow(s, (s.locationId && names.get(s.locationId)) || "Unknown location")
-    )
+    .map((s) => toRow(s, nameOf(s.locationId)))
     .sort((a, b) => a.label.localeCompare(b.label));
   const unplaced = free.find((s) => s.kind === "UNPLACED");
 
@@ -163,5 +202,6 @@ export async function getSourceEditorData(args: {
       : locationRows,
     unassignedPending,
     unknownOut,
+    stranded,
   };
 }

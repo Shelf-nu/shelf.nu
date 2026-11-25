@@ -11,7 +11,10 @@ import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getSourceEditorData } from "~/modules/booking/sources/source-editor.server";
-import { loader } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
+import {
+  loader,
+  shouldRevalidate,
+} from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: data() returns a fetch Response so the loader can be invoked directly
@@ -54,6 +57,8 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+// why: only `data` is swapped (for a plain Response, see createDataMock);
+// everything else stays real.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return { ...actual, data: createDataMock() };
@@ -97,6 +102,7 @@ beforeEach(() => {
     rows: [],
     unassignedPending: 0,
     unknownOut: 0,
+    stranded: [],
   });
 });
 
@@ -183,5 +189,11 @@ describe("api/bookings/:bookingId/adjust-asset-quantity loader", () => {
 
     expect(response.status).toBe(400);
     expect(dbMocks.bookingAssetFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("is never revalidated after other actions on the page", () => {
+    // The dialog loads it on each opening; the action's own result reaches
+    // the submitting fetcher whatever this returns.
+    expect(shouldRevalidate()).toBe(false);
   });
 });

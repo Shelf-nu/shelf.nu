@@ -14,6 +14,10 @@
  * dialog decides on submit whether the split is sent and checks it with
  * `resolveManualSources`.
  *
+ * While some units sit at a location that is no longer a placement of the
+ * pool, the section is read-only: it lists those units and offers only
+ * Auto, because a hand-made split cannot name that location.
+ *
  * Free figures cover loose units only: units inside kits are not part of any
  * source and are checked against the asset's total stock. The help text says
  * so.
@@ -26,6 +30,7 @@ import { useCallback, useId, useReducer } from "react";
 import { Button } from "~/components/shared/button";
 import {
   initialSplitValues,
+  isSplitLocked,
   type SourceEditorData,
   type SourceSplitValues,
 } from "~/modules/booking/sources/source-editor";
@@ -173,6 +178,7 @@ export function BookingSourceEditor({
   const errorId = `${baseId}-error`;
   const anyOut =
     editor.rows.some((row) => row.out > 0) || editor.unknownOut > 0;
+  const locked = isSplitLocked(editor);
 
   const typedTotal = editor.rows.reduce((sum, row) => {
     const n = Number(values[row.key]);
@@ -192,7 +198,14 @@ export function BookingSourceEditor({
           units only: units inside kits are not part of any location here and
           are checked against the asset&apos;s total stock.
         </p>
-        {anyOut ? (
+        {locked ? (
+          <p>
+            Some {unitLabel} are booked from a location that no longer holds
+            this asset, so the split cannot be changed by hand. Use Auto to let
+            Shelf choose the sources again.
+          </p>
+        ) : null}
+        {anyOut && !locked ? (
           <p>
             {unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} already out
             stay where they are. Only those still to go out can move.
@@ -206,38 +219,64 @@ export function BookingSourceEditor({
           const hintId = `${inputId}-hint`;
           return (
             <li key={row.key} className="flex items-center gap-3">
-              <label
-                htmlFor={inputId}
-                className="min-w-0 flex-1 truncate text-sm text-gray-700"
-              >
-                {row.label}
-              </label>
+              {locked ? (
+                <span className="min-w-0 flex-1 truncate text-sm text-gray-700">
+                  {row.label}
+                </span>
+              ) : (
+                <label
+                  htmlFor={inputId}
+                  className="min-w-0 flex-1 truncate text-sm text-gray-700"
+                >
+                  {row.label}
+                </label>
+              )}
               <span id={hintId} className="text-xs text-gray-600">
                 {row.free} free
                 {row.out > 0 ? ` · ${row.out} out` : ""}
               </span>
-              <input
-                id={inputId}
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={values[row.key] ?? ""}
-                onChange={(event) => onChange(row.key, event.target.value)}
-                aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-                aria-invalid={error ? true : undefined}
-                disabled={disabled}
-                className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-sm"
-              />
+              {locked ? (
+                <span
+                  id={inputId}
+                  className="w-20 text-right text-sm text-gray-700"
+                >
+                  {row.pending}
+                </span>
+              ) : (
+                <input
+                  id={inputId}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={values[row.key] ?? ""}
+                  onChange={(event) => onChange(row.key, event.target.value)}
+                  aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+                  aria-invalid={error ? true : undefined}
+                  disabled={disabled}
+                  className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-sm"
+                />
+              )}
             </li>
           );
         })}
       </ul>
 
+      {editor.stranded.length > 0 ? (
+        <ul className="flex flex-col gap-1">
+          {editor.stranded.map((part) => (
+            <li key={part.key} className="text-xs text-warning-700">
+              No longer holds this asset: {part.label}
+              {part.out > 0 ? `, ${part.out} out` : ""}
+              {part.pending > 0 ? `, ${part.pending} planned` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {editor.unassignedPending > 0 ? (
         <p className="text-xs text-warning-700">
-          Needs a location: {editor.unassignedPending} {unitLabel}. Place them
-          above.
+          Needs a location: {editor.unassignedPending} {unitLabel}.
+          {locked ? "" : " Place them above."}
         </p>
       ) : null}
       {editor.unknownOut > 0 ? (

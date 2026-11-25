@@ -122,6 +122,7 @@ describe("getSourceEditorData", () => {
       ],
       unassignedPending: 0,
       unknownOut: 0,
+      stranded: [],
     });
     expect(freeMock).toHaveBeenCalledWith(expect.anything(), {
       organizationId: "org-1",
@@ -174,6 +175,81 @@ describe("getSourceEditorData", () => {
     expect(editor?.rows[0]).toMatchObject({ pending: 6, out: 2 });
     expect(editor?.unassignedPending).toBe(3);
     expect(editor?.unknownOut).toBe(1);
+  });
+
+  it("lists units at a former placement apart, with its name", async () => {
+    // loc-gone is no longer a placement but still has 2 out and 1 pending.
+    dbMocks.sourceFindMany.mockResolvedValue([
+      {
+        kind: "LOCATION",
+        locationId: "loc-gone",
+        quantity: 3,
+        outQuantity: 2,
+        releasedQuantity: 0,
+      },
+      {
+        kind: "UNPLACED",
+        locationId: null,
+        quantity: 7,
+        outQuantity: 0,
+        releasedQuantity: 0,
+      },
+    ]);
+    dbMocks.locationFindMany.mockResolvedValue([
+      { id: "loc-a", name: "Annex" },
+      { id: "loc-b", name: "Basement" },
+      { id: "loc-gone", name: "Old Shed" },
+    ]);
+
+    const editor = await getSourceEditorData({
+      organizationId: "org-1",
+      bookingId: "booking-1",
+      slice: slice({ booking: { status: "ONGOING", from: FROM, to: TO } }),
+    });
+
+    expect(editor?.stranded).toEqual([
+      {
+        key: "LOCATION:loc-gone",
+        locationId: "loc-gone",
+        label: "Old Shed",
+        pending: 1,
+        out: 2,
+      },
+    ]);
+    // Placements keep their rows; the former placement is not one of them.
+    expect(editor?.rows.map((r) => r.locationId)).toEqual([
+      "loc-a",
+      "loc-b",
+      null,
+    ]);
+    // One names read covers placements and the former placement.
+    expect(dbMocks.locationFindMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["loc-b", "loc-a", "loc-gone"] },
+        organizationId: "org-1",
+      },
+      select: { id: true, name: true },
+    });
+  });
+
+  it("ignores a former placement with nothing left there", async () => {
+    dbMocks.sourceFindMany.mockResolvedValue([
+      {
+        kind: "LOCATION",
+        locationId: "loc-gone",
+        quantity: 3,
+        outQuantity: 0,
+        releasedQuantity: 3,
+      },
+    ]);
+
+    const editor = await getSourceEditorData({
+      organizationId: "org-1",
+      bookingId: "booking-1",
+      slice: slice(),
+    });
+
+    expect(editor?.stranded).toEqual([]);
   });
 
   it("returns null for a pool without manual placements", async () => {

@@ -459,6 +459,7 @@ describe("AdjustBookingAssetQuantityDialog", () => {
         ],
         unassignedPending: 0,
         unknownOut: 0,
+        stranded: [],
         ...overrides,
       };
     }
@@ -677,6 +678,28 @@ describe("AdjustBookingAssetQuantityDialog", () => {
           { locationId: null, quantity: 13 },
         ],
       });
+    });
+
+    it("offers only Auto while units sit at a former placement", () => {
+      const editor = editorData({
+        stranded: [
+          {
+            key: "LOCATION:loc-gone",
+            locationId: "loc-gone",
+            label: "Old Shed",
+            pending: 0,
+            out: 2,
+          },
+        ],
+      });
+      render(dialog(editor));
+
+      expect(screen.queryByLabelText("Demo Warehouse")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      expect(sentSources()).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+      expect(sentSources(1)).toEqual({ mode: "AUTO" });
     });
 
     it("gives every button an explicit type and disables through the fetcher", () => {

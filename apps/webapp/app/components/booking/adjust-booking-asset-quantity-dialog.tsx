@@ -44,6 +44,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import {
+  isSplitLocked,
   requiredPending,
   resolveManualSources,
   type SourceEditorData,
@@ -293,7 +294,12 @@ export function AdjustBookingAssetQuantityDialog({
     if (sourceEditor && auto) {
       formData.set("sources", JSON.stringify({ mode: "AUTO" }));
       hasSources = true;
-    } else if (sourceEditor && split.edited) {
+    } else if (
+      sourceEditor &&
+      split.edited &&
+      // A locked split offers only Auto; nothing typed is sent.
+      !isSplitLocked(sourceEditor)
+    ) {
       const resolved = resolveManualSources({
         editor: sourceEditor,
         values: split.values,

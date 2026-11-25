@@ -56,6 +56,7 @@ function editorData(
     ],
     unassignedPending: 0,
     unknownOut: 0,
+    stranded: [],
     ...overrides,
   };
 }
@@ -193,6 +194,46 @@ describe("BookingSourceEditor", () => {
     });
 
     expect(screen.getByText("11 of 15 units placed")).toBeInTheDocument();
+  });
+});
+
+describe("BookingSourceEditor with units at a former placement", () => {
+  const lockedEditor = () =>
+    editorData({
+      stranded: [
+        {
+          key: "LOCATION:loc-gone",
+          locationId: "loc-gone",
+          label: "Old Shed",
+          pending: 1,
+          out: 2,
+        },
+      ],
+    });
+
+  it("shows no inputs, only the split as text", () => {
+    renderEditor({ editor: lockedEditor() });
+
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.getByText("Demo Warehouse")).toBeInTheDocument();
+  });
+
+  it("lists the units still held there", () => {
+    renderEditor({ editor: lockedEditor() });
+
+    expect(
+      screen.getByText("No longer holds this asset: Old Shed, 2 out, 1 planned")
+    ).toBeInTheDocument();
+  });
+
+  it("explains why and still offers Auto", () => {
+    const props = renderEditor({ editor: lockedEditor() });
+
+    expect(
+      screen.getByText(/the split cannot be changed by hand/i)
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    expect(props.onAuto).toHaveBeenCalledTimes(1);
   });
 });
 

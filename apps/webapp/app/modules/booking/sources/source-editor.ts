@@ -21,6 +21,13 @@
 
 import type { BookingSourcesInput } from "./sources-input";
 
+/**
+ * Key prefix of the fetcher that loads a slice's From section (followed by
+ * the booking and asset ids). The section shows nothing until it loads, so
+ * the global progress bar stays off for it.
+ */
+export const SOURCE_EDITOR_FETCHER_KEY_PREFIX = "adjust-booking-asset-sources-";
+
 /** One loose source of the pool, as the From section shows it. */
 export type SourceEditorRow = {
   /** Stable key: `LOCATION:{id}` or `UNPLACED:`. */
@@ -37,6 +44,23 @@ export type SourceEditorRow = {
   free: number;
 };
 
+/**
+ * Units of the slice held at a location that is no longer a manual placement
+ * of the pool. They cannot be named in a split, so the section is read-only
+ * while any exist (see {@link isSplitLocked}).
+ */
+export type StrandedSource = {
+  /** `LOCATION:{id}`. */
+  key: string;
+  locationId: string;
+  /** Location name, or "Unknown location". */
+  label: string;
+  /** Units still to go out from there. */
+  pending: number;
+  /** Units out from there right now. */
+  out: number;
+};
+
 /** What the From section needs for one standalone pool slice. */
 export type SourceEditorData = {
   /** The slice (`BookingAsset.id`). */
@@ -49,7 +73,18 @@ export type SourceEditorData = {
   unassignedPending: number;
   /** Units out from an unknown source: shown, never part of the split. */
   unknownOut: number;
+  /** Units held at former placements; any entry locks the split. */
+  stranded: StrandedSource[];
 };
+
+/**
+ * True when the split cannot be edited by hand: some units sit at a
+ * location that is no longer a placement, which a MANUAL request cannot
+ * name. Only Auto (back to the allocation rule) is offered then.
+ */
+export function isSplitLocked(editor: SourceEditorData): boolean {
+  return editor.stranded.length > 0;
+}
 
 /** Raw input text per source key, as typed by the operator. */
 export type SourceSplitValues = Record<string, string>;

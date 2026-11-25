@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   initialSplitValues,
+  isSplitLocked,
   pendingTotal,
   requiredPending,
   resolveManualSources,
@@ -43,6 +44,7 @@ function reservedEditor(
     ],
     unassignedPending: 0,
     unknownOut: 0,
+    stranded: [],
     ...overrides,
   };
 }
@@ -56,6 +58,27 @@ describe("pendingTotal / requiredPending", () => {
   it("follows a quantity change", () => {
     expect(requiredPending(reservedEditor(), 2)).toBe(17);
     expect(requiredPending(reservedEditor(), -5)).toBe(10);
+  });
+});
+
+describe("isSplitLocked", () => {
+  it("locks the split while units sit at a former placement", () => {
+    expect(isSplitLocked(reservedEditor())).toBe(false);
+    expect(
+      isSplitLocked(
+        reservedEditor({
+          stranded: [
+            {
+              key: "LOCATION:loc-gone",
+              locationId: "loc-gone",
+              label: "Old Shed",
+              pending: 0,
+              out: 2,
+            },
+          ],
+        })
+      )
+    ).toBe(true);
   });
 });
 

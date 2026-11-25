@@ -40,7 +40,10 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import type { SourceEditorData } from "~/modules/booking/sources/source-editor";
+import {
+  SOURCE_EDITOR_FETCHER_KEY_PREFIX,
+  type SourceEditorData,
+} from "~/modules/booking/sources/source-editor";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
@@ -130,12 +133,12 @@ const ConditionalActionsDropdown = ({
     });
 
   /**
-   * The From section's data, read when the dialog opens (one query for a
-   * slice it does not apply to). Shown only once loaded, so a reopened dialog
-   * never starts from the previous opening's figures.
+   * The From section's data, read each time the dialog opens (one query for
+   * a slice it does not apply to). The route never revalidates it, so it
+   * changes only through these loads.
    */
   const sourceEditorFetcher = useFetcher<SourceEditorResponse>({
-    key: `adjust-booking-asset-sources-${booking.id}-${asset.id}`,
+    key: `${SOURCE_EDITOR_FETCHER_KEY_PREFIX}${booking.id}-${asset.id}`,
   });
   const loadSourceEditor = sourceEditorFetcher.load;
   const sourceEditorUrl = `/api/bookings/${
@@ -146,10 +149,28 @@ const ConditionalActionsDropdown = ({
       void loadSourceEditor(sourceEditorUrl);
     }
   }, [isAdjustDialogOpen, canAdjust, loadSourceEditor, sourceEditorUrl]);
-  const sourceEditor =
-    sourceEditorFetcher.state === "idle"
-      ? sourceEditorFetcher.data?.sourceEditor ?? null
-      : null;
+  /**
+   * What the fetcher held when the dialog last opened: the previous
+   * opening's answer, never shown again. Recorded in the render that opens
+   * the dialog (React's pattern for state derived from a prop change), so
+   * no frame shows the old figures.
+   */
+  const [opening, setOpening] = useState<{ open: boolean; stale: unknown }>({
+    open: false,
+    stale: undefined,
+  });
+  if (opening.open !== isAdjustDialogOpen) {
+    setOpening({ open: isAdjustDialogOpen, stale: sourceEditorFetcher.data });
+  }
+  const loadedThisOpening =
+    isAdjustDialogOpen &&
+    opening.open &&
+    sourceEditorFetcher.state === "idle" &&
+    sourceEditorFetcher.data !== undefined &&
+    sourceEditorFetcher.data !== opening.stale;
+  const sourceEditor = loadedThisOpening
+    ? sourceEditorFetcher.data?.sourceEditor ?? null
+    : null;
 
   /**
    * `skipDefault: true` — we don't want the hook's auto-open-on-QR-scan

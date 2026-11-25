@@ -23,7 +23,8 @@
  * asset's standalone slice, as `{ sourceEditor }` (null when the section
  * does not apply, including when the caller may not change this booking's
  * items in its current status). Same permission and ownership guards as the
- * action.
+ * action. It is never revalidated (`shouldRevalidate`): the dialog loads it
+ * on each opening.
  *
  * Status rule: the manage-items one (`canManageBookingItems`), checked by
  * the service against the locked booking status, the same gate as the
@@ -77,6 +78,14 @@ export const AdjustBookingAssetQuantitySchema = z.object({
     .positive("Quantity must be a positive integer"),
   [SOURCES_FORM_FIELD]: sourcesFormFieldSchema,
 });
+
+/**
+ * The loader never re-runs on its own. Its only consumer, the adjust dialog's
+ * From section, loads it fresh each time the dialog opens, so re-reading it
+ * after every action on the booking page would only cost queries. This does
+ * not touch the action: a fetcher that submits here still gets its result.
+ */
+export const shouldRevalidate = () => false;
 
 /**
  * Reads the From section for one asset's standalone slice.
