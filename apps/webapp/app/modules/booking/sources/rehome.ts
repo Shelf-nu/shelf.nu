@@ -318,6 +318,12 @@ export type EvacuationRow = SourceRowState & {
   mode: "AUTO" | "MANUAL";
   /** `BookingAsset.checkedOutAt` of the slice; orders the out drain. */
   sliceCheckedOutAt: Date | null;
+  /**
+   * True when the slice's booking holds units (RESERVED, ONGOING, OVERDUE).
+   * Drafts and finished bookings hold nothing: their parts still move, but
+   * never use up free units another slice could take.
+   */
+  holds: boolean;
 };
 
 /**
@@ -365,18 +371,20 @@ type Part = { toKey: string; units: number };
  *   UNASSIGNED; MANUAL slices put it on UNASSIGNED;
  * - released: UNASSIGNED.
  *
- * Free units claimed by one slice (and out units placed at the unplaced
- * units) are taken off every other slice's free, since the planner cannot
- * tell whether their windows overlap. Rows of other kinds are targets, never
- * origins.
+ * Rows of holding slices are planned first. Free units they claim (and out
+ * units they place at the unplaced units) are taken off every later slice's
+ * free, since the planner cannot tell whether their windows overlap. Rows of
+ * slices that hold nothing (drafts, finished bookings) are planned last and
+ * claim nothing: they go wherever free units remain, without reducing
+ * anyone's. Rows of other kinds are targets, never origins.
  *
  * @param args.deletedLocationIds - Locations being deleted
  * @param args.rows - Source rows of the pool's slices
  * @param args.freeBySlice - Free units of the remaining sources over each
  *   slice's window, by slice id
  * @param args.unplacedRoomForOut - Unplaced units free to take out units now
- * @returns Writes per origin row (latest dispatched first), each ending in
- *   `deleteRow`
+ * @returns Writes per origin row (holding slices first, then latest
+ *   dispatched first), each ending in `deleteRow`
  */
 export function planLocationDeleteEvacuation({
   deletedLocationIds,
@@ -397,14 +405,17 @@ export function planLocationDeleteEvacuation({
         row.locationId !== null &&
         deleted.has(row.locationId)
     )
-    .sort((a, b) =>
-      compareLatestDispatchedFirst(
-        { checkedOutAt: a.sliceCheckedOutAt, id: a.id },
-        { checkedOutAt: b.sliceCheckedOutAt, id: b.id }
-      )
+    .sort(
+      (a, b) =>
+        Number(b.holds) - Number(a.holds) ||
+        compareLatestDispatchedFirst(
+          { checkedOutAt: a.sliceCheckedOutAt, id: a.id },
+          { checkedOutAt: b.sliceCheckedOutAt, id: b.id }
+        )
     );
 
-  // Out units: Unplaced while it covers them, else UNKNOWN.
+  // Out units: Unplaced while it covers them, else UNKNOWN. Only holding
+  // slices use up the room.
   const outParts = new Map<string, Part[]>();
   let unplacedLeft = Math.max(0, unplacedRoomForOut);
   const claimed = new Map<string, number>();
@@ -413,8 +424,10 @@ export function planLocationDeleteEvacuation({
     const toUnplaced = Math.min(row.outQuantity, unplacedLeft);
     if (toUnplaced > 0) {
       parts.push({ toKey: UNPLACED_KEY, units: toUnplaced });
-      unplacedLeft -= toUnplaced;
-      bump(claimed, UNPLACED_KEY, toUnplaced);
+      if (row.holds) {
+        unplacedLeft -= toUnplaced;
+        bump(claimed, UNPLACED_KEY, toUnplaced);
+      }
     }
     const toUnknown = row.outQuantity - toUnplaced;
     if (toUnknown > 0) parts.push({ toKey: UNKNOWN_KEY, units: toUnknown });
@@ -447,8 +460,10 @@ export function planLocationDeleteEvacuation({
       quantity: demand,
       sources,
     });
+    // A slice's rows all share its `holds`.
+    const holding = autoRows.some((row) => row.holds);
     const queue: Part[] = parts.map((p) => {
-      bump(claimed, sourceKey(p), p.quantity);
+      if (holding) bump(claimed, sourceKey(p), p.quantity);
       return { toKey: sourceKey(p), units: p.quantity };
     });
     if (unassigned > 0)

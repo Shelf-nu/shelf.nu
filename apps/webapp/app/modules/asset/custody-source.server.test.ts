@@ -272,6 +272,7 @@ describe("rehomeCustodyForPlacementChange: booking units out", () => {
 
     const result = await rehomeCustodyForPlacementChange(tx, {
       assetId: POOL,
+      organizationId: ORG,
       total: 10,
       before: before(10, [[A, 10]]),
       destinationLocationId: B,
@@ -339,6 +340,7 @@ describe("rehomeCustodyForPlacementChange: booking units out", () => {
 
     const result = await rehomeCustodyForPlacementChange(tx, {
       assetId: POOL,
+      organizationId: ORG,
       total: 10,
       before: before(16, [
         [A, 6],
@@ -356,6 +358,31 @@ describe("rehomeCustodyForPlacementChange: booking units out", () => {
     applyAndCheck([atA], plan);
   });
 
+  it("reads and writes booking units only in the caller's workspace", async () => {
+    const atA = returnedFour();
+    const foreignSlice = {
+      ...slice("s1", "ONGOING"),
+      booking: { status: "ONGOING", organizationId: "org-2" },
+    };
+    const { tx, calls } = fakeTx({
+      placements: [[B, 10]],
+      slices: [foreignSlice],
+      rows: [{ ...atA, organizationId: "org-2" }],
+    });
+
+    const result = await rehomeCustodyForPlacementChange(tx, {
+      assetId: POOL,
+      organizationId: ORG,
+      total: 10,
+      before: before(10, [[A, 10]]),
+      destinationLocationId: B,
+    });
+
+    expect(result).toEqual({ moves: [], multiSource: false });
+    expect(calls).not.toContain("bookingAssetSource.findMany");
+    expect(mocks.writeSourcePlan).not.toHaveBeenCalled();
+  });
+
   it("A manual placement reduced to 0 while pending units are held there: the row stays, the slice is short", async () => {
     const pendingAtA = sourceRow("r-a", "s1", "LOCATION", A, { q: 5 });
     const { tx, calls } = fakeTx({
@@ -366,6 +393,7 @@ describe("rehomeCustodyForPlacementChange: booking units out", () => {
 
     const result = await rehomeCustodyForPlacementChange(tx, {
       assetId: POOL,
+      organizationId: ORG,
       total: 10,
       before: before(10, [[A, 10]]),
       destinationLocationId: null,
@@ -427,6 +455,7 @@ describe("rehomeCustodyForPlacementChange: booking units out", () => {
 
     const result = await rehomeCustodyForPlacementChange(tx, {
       assetId: POOL,
+      organizationId: ORG,
       total: 10,
       before: beforeState,
     });
@@ -462,10 +491,12 @@ describe("rehomeCustodyForPlacementChanges (bulk)", () => {
       rows: [atA],
     });
 
-    const custodyBefore = await loadCustodySourcesForAssets(tx, [
-      { id: POOL, total: 10 },
-    ]);
-    expect(custodyBefore.get(POOL)?.bookingOut?.rows).toHaveLength(1);
+    const custodyBefore = await loadCustodySourcesForAssets(
+      tx,
+      [{ id: POOL, total: 10 }],
+      { organizationId: ORG }
+    );
+    expect(custodyBefore.get(POOL)?.bookingOut).toHaveLength(1);
 
     // The placement write: A's units move to B.
     tables.assetLocation = [
@@ -479,6 +510,7 @@ describe("rehomeCustodyForPlacementChanges (bulk)", () => {
     ];
 
     const results = await rehomeCustodyForPlacementChanges(tx, {
+      organizationId: ORG,
       before: custodyBefore,
       totals: new Map([[POOL, 10]]),
       destinationFor: () => B,
@@ -502,9 +534,11 @@ describe("rehomeCustodyForPlacementChanges (bulk)", () => {
       placements: [[A, 10]],
       slices: [slice("s1", "RESERVED")],
     });
-    const custodyBefore = await loadCustodySourcesForAssets(tx, [
-      { id: POOL, total: 10 },
-    ]);
+    const custodyBefore = await loadCustodySourcesForAssets(
+      tx,
+      [{ id: POOL, total: 10 }],
+      { organizationId: ORG }
+    );
     expect(custodyBefore.size).toBe(0);
   });
 });

@@ -81,22 +81,29 @@ const ACTIVE_STATUSES: ReadonlySet<string> = new Set<string>(
 );
 
 /** One pool's loose sources: capacity per key and placement creation order. */
-type PoolSources = {
+export type PoolSources = {
   /** sourceKey -> placed minus custody taken from it. */
   capacity: Map<string, number>;
-  /** Location ids of manual placements, oldest first. */
+  /**
+   * Location ids of the pool's manual placements, oldest first (placement
+   * `createdAt`, then id). This is the order the allocation rule's
+   * `createdOrder` follows; a location with custody but no placement is not
+   * a source and is not listed.
+   */
   locationOrder: string[];
 };
 
 /**
  * Reads capacity and placement order for several pools in three queries.
+ * Readers that hand sources to the allocation rule take their order from
+ * `locationOrder`, never from the iteration order of `capacity`.
  *
  * @param tx - The caller's transaction
  * @param args.organizationId - The trusted workspace id
  * @param args.assetIds - Pools to read
  * @returns Per asset id; an asset outside the workspace is absent
  */
-async function loadPoolSources(
+export async function loadPoolSources(
   tx: CapacityTx,
   { organizationId, assetIds }: { organizationId: string; assetIds: string[] }
 ): Promise<Map<string, PoolSources>> {

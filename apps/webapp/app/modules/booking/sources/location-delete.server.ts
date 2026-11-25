@@ -15,7 +15,9 @@
  * - released units: UNASSIGNED.
  * Every part of every row at every deleted location is planned first and
  * summed per target row, so each target is written once and two deleted
- * locations never claim the same free units. The emptied rows are deleted,
+ * locations never claim the same free units. Slices on RESERVED, ONGOING and
+ * OVERDUE bookings are planned first; drafts and finished bookings hold
+ * nothing, so their parts go wherever free units remain and claim none. The emptied rows are deleted,
  * and the function refuses (500, nothing deleted) when a row is still at a
  * deleted location afterwards, before the foreign key would.
  *
@@ -47,9 +49,9 @@ import { ShelfError } from "~/utils/error";
 import {
   loadCompetingHoldsByPool,
   loadPhysicalNow,
-  loadSourceCapacity,
+  loadPoolSources,
 } from "./capacity.server";
-import type { CapacityTx } from "./capacity.server";
+import type { CapacityTx, PoolSources } from "./capacity.server";
 import {
   aggregateEvacuationTargets,
   planLocationDeleteEvacuation,
@@ -121,20 +123,21 @@ export function sliceEvacuationWindow(
  * there, this booking's included (the units being re-allocated are new
  * demand at those sources). Deleted locations are left out.
  *
- * @param args.capacity - sourceKey -> placed minus custody, before the delete,
- *   unplaced units first, then placements oldest first
+ * @param args.pool - The pool's capacity per source (placed minus custody,
+ *   before the delete) and its placements oldest first, as `loadPoolSources`
+ *   returns them; the location order comes from `locationOrder` only
  * @param args.holds - Active holds on the pool
  * @param args.deletedLocationIds - Locations being deleted
  * @param args.window - The slice's window, or null when nothing competes
  * @returns Sources in allocation order (unplaced first, then placements)
  */
 export function freeAfterDelete({
-  capacity,
+  pool,
   holds,
   deletedLocationIds,
   window,
 }: {
-  capacity: Map<string, number>;
+  pool: PoolSources;
   holds: SourceHold[];
   deletedLocationIds: ReadonlySet<string>;
   window: SliceWindow | null;
@@ -156,23 +159,24 @@ export function freeAfterDelete({
     return peakConcurrent(intervals);
   };
 
+  const { capacity, locationOrder } = pool;
+  // Every deleted location's capacity joins the unplaced units, also one with
+  // custody but no placement (its custody becomes unplaced too).
   let unplaced = capacity.get(UNPLACED_KEY) ?? 0;
+  for (const locationId of deletedLocationIds) {
+    unplaced += capacity.get(sourceKey({ kind: "LOCATION", locationId })) ?? 0;
+  }
   const locations: SourceFree[] = [];
-  for (const [key, units] of capacity) {
-    if (key === UNPLACED_KEY) continue;
-    const { kind, locationId } = parseSourceKey(key);
-    if (kind !== "LOCATION" || locationId === null) continue;
-    if (deletedLocationIds.has(locationId)) {
-      unplaced += units;
-      continue;
-    }
+  locationOrder.forEach((locationId, index) => {
+    if (deletedLocationIds.has(locationId)) return;
+    const key = sourceKey({ kind: "LOCATION", locationId });
     locations.push({
       kind: "LOCATION",
       locationId,
-      free: Math.max(0, units - peakAt(key)),
-      createdOrder: locations.length,
+      free: Math.max(0, (capacity.get(key) ?? 0) - peakAt(key)),
+      createdOrder: index,
     });
-  }
+  });
   return [
     {
       kind: "UNPLACED",
@@ -421,6 +425,9 @@ export async function evacuateLocationsForDelete(
       sliceId: slice.id,
       mode,
       sliceCheckedOutAt: slice.checkedOutAt,
+      // Drafts and finished bookings hold nothing: their rows move, but
+      // never use up free units a holding slice could take.
+      holds: ACTIVE.has(slice.booking.status),
       assetId: slice.assetId,
     });
   }
@@ -446,8 +453,8 @@ export async function evacuateLocationsForDelete(
           to: new Date(Math.max(...planned.map((w) => w.to.getTime()))),
         };
 
-  const [capacity, holdsByPool, physical] = await Promise.all([
-    loadSourceCapacity(tx, { organizationId, assetIds }),
+  const [pools, holdsByPool, physical] = await Promise.all([
+    loadPoolSources(tx, { organizationId, assetIds }),
     loadCompetingHoldsByPool(tx, {
       organizationId,
       assetIds,
@@ -459,7 +466,10 @@ export async function evacuateLocationsForDelete(
   const writes: EvacuationWrite[] = [];
   for (const assetId of assetIds) {
     const poolOrigins = origins.filter((o) => o.assetId === assetId);
-    const poolCapacity = capacity.get(assetId) ?? new Map<string, number>();
+    const poolSources = pools.get(assetId) ?? {
+      capacity: new Map<string, number>(),
+      locationOrder: [],
+    };
     const poolHolds = holdsByPool.get(assetId) ?? [];
     const poolPhysical = physical.get(assetId) ?? new Map<string, number>();
 
@@ -468,7 +478,7 @@ export async function evacuateLocationsForDelete(
       freeBySlice.set(
         sliceId,
         freeAfterDelete({
-          capacity: poolCapacity,
+          pool: poolSources,
           holds: poolHolds,
           deletedLocationIds: deleted,
           window: windows.get(sliceId) ?? null,

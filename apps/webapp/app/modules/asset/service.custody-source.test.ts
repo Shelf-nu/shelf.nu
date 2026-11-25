@@ -1135,10 +1135,14 @@ describe("rehomeCustodyForPlacementChanges: many pools at once", () => {
     seedCustody(AHMED, STUDIO, 2);
     const tx = (await import("~/database/db.server")).db as never;
 
-    const before = await loadCustodySourcesForAssets(tx, [
-      { id: "pool-1", total: 4 },
-      { id: "pool-without-custody", total: 9 },
-    ]);
+    const before = await loadCustodySourcesForAssets(
+      tx,
+      [
+        { id: "pool-1", total: 4 },
+        { id: "pool-without-custody", total: 9 },
+      ],
+      { organizationId: ORG }
+    );
     // Only pools with custody are read in full.
     expect(Array.from(before.keys())).toEqual(["pool-1"]);
 
@@ -1148,6 +1152,7 @@ describe("rehomeCustodyForPlacementChanges: many pools at once", () => {
     );
 
     const results = await rehomeCustodyForPlacementChanges(tx, {
+      organizationId: ORG,
       before,
       totals: new Map([["pool-1", 4]]),
       destinationFor: () => null,

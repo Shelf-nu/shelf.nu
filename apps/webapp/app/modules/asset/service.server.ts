@@ -2613,6 +2613,7 @@ export async function updateAsset({
         if (custodyBefore) {
           placementRehome = await rehomeCustodyForPlacementChange(tx, {
             assetId: id,
+            organizationId,
             total: updated.quantity ?? 0,
             before: custodyBefore,
             destinationLocationId: newLocationId ?? null,
@@ -4815,6 +4816,7 @@ export async function replaceAssetPlacements({
       if (custodyBefore) {
         rehome = await rehomeCustodyForPlacementChange(tx, {
           assetId,
+          organizationId,
           total: locked.quantity ?? 0,
           before: custodyBefore,
         });
@@ -11254,6 +11256,7 @@ export async function moveAssetLocationUnits(
        */
       const rehome = await rehomeCustodyForPlacementChange(tx, {
         assetId,
+        organizationId,
         total: asset.quantity ?? 0,
         before: custodyBefore,
         destinationLocationId: toLocationId,
@@ -11589,6 +11592,7 @@ export async function placeUnplacedUnits(
        */
       const rehome = await rehomeCustodyForPlacementChange(tx, {
         assetId,
+        organizationId,
         total: totalQuantity,
         before: custodyBefore,
         destinationLocationId: toLocationId,

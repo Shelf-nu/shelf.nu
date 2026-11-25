@@ -29,7 +29,7 @@ import type { SourcePlanWrite } from "./repository.server";
 const mocks = vi.hoisted(() => ({
   lock: vi.fn(),
   writeSourcePlan: vi.fn(),
-  loadSourceCapacity: vi.fn(),
+  loadPoolSources: vi.fn(),
   loadCompetingHoldsByPool: vi.fn(),
   loadPhysicalNow: vi.fn(),
 }));
@@ -47,7 +47,7 @@ vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // why: the capacity readers have their own tests over placements, custody
 // and holds; here each test states the numbers they return.
 vi.mock("./capacity.server", () => ({
-  loadSourceCapacity: mocks.loadSourceCapacity,
+  loadPoolSources: mocks.loadPoolSources,
   loadCompetingHoldsByPool: mocks.loadCompetingHoldsByPool,
   loadPhysicalNow: mocks.loadPhysicalNow,
 }));
@@ -98,14 +98,24 @@ function row(
 function origin(
   r: ModelRow,
   mode: "AUTO" | "MANUAL",
-  checkedOutAt: Date | null = new Date("2026-11-19T10:00:00Z")
+  checkedOutAt: Date | null = new Date("2026-11-19T10:00:00Z"),
+  holds = true
 ): EvacuationRow {
   return {
     ...r,
     sliceId: r.bookingAssetId,
     mode,
     sliceCheckedOutAt: checkedOutAt,
+    holds,
   };
+}
+
+/** A pool's sources: capacity per key and placements oldest first. */
+function poolSources(
+  capacity: Array<[string, number]>,
+  locationOrder: string[]
+) {
+  return { capacity: new Map(capacity), locationOrder };
 }
 
 /**
@@ -175,18 +185,44 @@ function find(rows: ModelRow[], sliceId: string, key: string) {
 describe("freeAfterDelete", () => {
   it("adds a deleted location's capacity to the unplaced units and leaves it out", () => {
     const free = freeAfterDelete({
-      capacity: new Map([
-        [UNPLACED_KEY, 4],
-        [`LOCATION:${A}`, 10],
-        [`LOCATION:${B}`, 6],
-      ]),
+      pool: poolSources(
+        [
+          [UNPLACED_KEY, 4],
+          [`LOCATION:${A}`, 10],
+          [`LOCATION:${B}`, 6],
+        ],
+        [A, B]
+      ),
       holds: [],
       deletedLocationIds: new Set([A]),
       window: { from: NOW, to: new Date("2026-11-21T10:00:00Z") },
     });
     expect(free).toEqual([
       { kind: "UNPLACED", locationId: null, free: 14, createdOrder: -1 },
-      { kind: "LOCATION", locationId: B, free: 6, createdOrder: 0 },
+      { kind: "LOCATION", locationId: B, free: 6, createdOrder: 1 },
+    ]);
+  });
+
+  it("orders locations by the pool's placement order, never by the capacity map", () => {
+    const free = freeAfterDelete({
+      pool: poolSources(
+        [
+          [UNPLACED_KEY, 0],
+          // Custody taken from a location with no placement: not a source.
+          [`LOCATION:${A}`, -1],
+          [`LOCATION:${B}`, 3],
+          [`LOCATION:${C}`, 3],
+        ],
+        [C, B]
+      ),
+      holds: [],
+      deletedLocationIds: new Set(["loc-gone"]),
+      window: null,
+    });
+    expect(free).toEqual([
+      { kind: "UNPLACED", locationId: null, free: 0, createdOrder: -1 },
+      { kind: "LOCATION", locationId: C, free: 3, createdOrder: 0 },
+      { kind: "LOCATION", locationId: B, free: 3, createdOrder: 1 },
     ]);
   });
 
@@ -203,10 +239,13 @@ describe("freeAfterDelete", () => {
       pending,
     });
     const free = freeAfterDelete({
-      capacity: new Map([
-        [UNPLACED_KEY, 0],
-        [`LOCATION:${B}`, 6],
-      ]),
+      pool: poolSources(
+        [
+          [UNPLACED_KEY, 0],
+          [`LOCATION:${B}`, 6],
+        ],
+        [B]
+      ),
       holds: [
         hold("2026-11-20T12:00:00Z", "2026-11-20T14:00:00Z", 4),
         // Ends exactly when the window starts: no overlap.
@@ -548,17 +587,22 @@ function fakeTx(seed: { rows: ModelRow[]; slices: Slice[] }) {
   return { tx: tx as unknown as LocationDeleteTx, state, calls };
 }
 
-/** One ongoing slice of pool `pool-1`. */
-function slice(id: string, mode: Slice["sourceAllocation"] = "AUTO"): Slice {
+/** One slice of pool `pool-1`, on an ongoing booking unless told otherwise. */
+function slice(
+  id: string,
+  mode: Slice["sourceAllocation"] = "AUTO",
+  status = "ONGOING"
+): Slice {
   return {
     id,
     assetId: "pool-1",
     bookingId: `booking-${id}`,
-    checkedOutAt: new Date("2026-11-19T10:00:00Z"),
+    checkedOutAt:
+      status === "ONGOING" ? new Date("2026-11-19T10:00:00Z") : null,
     sourceAllocation: mode,
     organizationId: ORG,
     booking: {
-      status: "ONGOING",
+      status,
       from: new Date("2026-11-19T00:00:00Z"),
       to: new Date("2026-11-22T00:00:00Z"),
       organizationId: ORG,
@@ -578,15 +622,18 @@ describe("evacuateLocationsForDelete", () => {
         }))
       )
     );
-    mocks.loadSourceCapacity.mockResolvedValue(
+    mocks.loadPoolSources.mockResolvedValue(
       new Map([
         [
           "pool-1",
-          new Map([
-            [UNPLACED_KEY, 4],
-            [`LOCATION:${A}`, 10],
-            [`LOCATION:${B}`, 6],
-          ]),
+          poolSources(
+            [
+              [UNPLACED_KEY, 4],
+              [`LOCATION:${A}`, 10],
+              [`LOCATION:${B}`, 6],
+            ],
+            [A, B]
+          ),
         ],
       ])
     );
@@ -652,11 +699,65 @@ describe("evacuateLocationsForDelete", () => {
     expect(mocks.lock.mock.calls[0][1]).toEqual(["pool-1"]);
     expect(mocks.lock.mock.calls[0][2]).toBe(ORG);
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.loadSourceCapacity.mock.invocationCallOrder[0]
+      mocks.loadPoolSources.mock.invocationCallOrder[0]
     );
     expect(mocks.writeSourcePlan).toHaveBeenCalledTimes(1);
     expect(state.rows.some((r) => r.locationId === A)).toBe(false);
     expect(state.rows.reduce((sum, r) => sum + r.quantity, 0)).toBe(10);
+    expectValidRows(state.rows);
+  });
+
+  it("a cancelled slice never takes the free units a reserved slice needs", async () => {
+    // Only A's 5 units exist; once A is gone they are unplaced, enough for
+    // one of the two slices. The cancelled slice's row sorts first by id.
+    mocks.loadPoolSources.mockResolvedValue(
+      new Map([
+        [
+          "pool-1",
+          poolSources(
+            [
+              [UNPLACED_KEY, 0],
+              [`LOCATION:${A}`, 5],
+            ],
+            [A]
+          ),
+        ],
+      ])
+    );
+    const cancelled = row("r-1", "s-a", "LOCATION", A, { q: 5 });
+    const reserved = row("r-2", "s-b", "LOCATION", A, { q: 5 });
+    const { tx, state } = fakeTx({
+      rows: [cancelled, reserved],
+      slices: [
+        slice("s-a", "AUTO", "CANCELLED"),
+        slice("s-b", "AUTO", "RESERVED"),
+      ],
+    });
+    mocks.writeSourcePlan.mockImplementation(
+      (_tx: unknown, args: { plan: SourcePlanWrite }) => {
+        state.rows = applyPlan(state.rows, args.plan).map((r) => ({
+          ...r,
+          organizationId: ORG,
+        }));
+        return Promise.resolve();
+      }
+    );
+
+    await evacuateLocationsForDelete(tx, {
+      organizationId: ORG,
+      locationIds: [A],
+      now: NOW,
+    });
+
+    // The reserved slice lands on a real source.
+    expect(find(state.rows, "s-b", UNPLACED_KEY)).toMatchObject({
+      quantity: 5,
+    });
+    expect(find(state.rows, "s-b", UNASSIGNED_KEY)).toBeUndefined();
+    // The cancelled slice goes where something is left: nothing is.
+    expect(find(state.rows, "s-a", UNASSIGNED_KEY)).toMatchObject({
+      quantity: 5,
+    });
     expectValidRows(state.rows);
   });
 

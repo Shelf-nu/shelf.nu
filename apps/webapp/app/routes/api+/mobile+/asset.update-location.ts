@@ -296,6 +296,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const rehomeResult = custodyBefore
         ? await rehomeCustodyForPlacementChange(tx, {
             assetId,
+            organizationId,
             total: locked.quantity ?? 0,
             before: custodyBefore,
             destinationLocationId: locationId,

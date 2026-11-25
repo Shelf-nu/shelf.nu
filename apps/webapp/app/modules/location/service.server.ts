@@ -2488,7 +2488,8 @@ export async function updateLocationAssets({
       );
       const custodyBefore = await loadCustodySourcesForAssets(
         tx,
-        lockedPools.map((pool) => ({ id: pool.id, total: pool.quantity ?? 0 }))
+        lockedPools.map((pool) => ({ id: pool.id, total: pool.quantity ?? 0 })),
+        { organizationId }
       );
       /** The pools' stock before the writes, for the ledger's MOVE rows. */
       const stockBefore = await readStockStates(tx, {
@@ -2648,6 +2649,7 @@ export async function updateLocationAssets({
        */
       rehomes.push(
         ...(await rehomeCustodyForPlacementChanges(tx, {
+          organizationId,
           before: custodyBefore,
           totals: poolTotals,
           destinationFor: (assetId) =>

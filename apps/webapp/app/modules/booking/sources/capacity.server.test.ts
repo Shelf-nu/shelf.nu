@@ -19,6 +19,7 @@ import {
   loadCompetingHolds,
   loadCompetingHoldsByPool,
   loadPhysicalNow,
+  loadPoolSources,
   loadSourceCapacity,
   type CapacityTx,
 } from "./capacity.server";
@@ -279,6 +280,37 @@ describe("loadSourceCapacity", () => {
     });
 
     expect(capacity.size).toBe(0);
+  });
+});
+
+describe("loadPoolSources", () => {
+  it("lists manual placements oldest first, and never a location with custody but no placement", async () => {
+    // The fake returns placements in the order stored, which stands for the
+    // reader's createdAt-then-id order.
+    const tx = fakeTx({
+      ...pool(20, [
+        ["loc-b", 5],
+        ["loc-a", 8],
+      ]),
+      custody: [
+        {
+          assetId: POOL,
+          locationId: "loc-c",
+          sourceUnknown: false,
+          kitCustodyId: null,
+          quantity: 1,
+        },
+      ],
+    });
+
+    const pools = await loadPoolSources(asTx(tx), {
+      organizationId: ORG,
+      assetIds: [POOL],
+    });
+
+    expect(pools.get(POOL)?.locationOrder).toEqual(["loc-b", "loc-a"]);
+    // Custody taken from loc-c still shows in its capacity.
+    expect(pools.get(POOL)?.capacity.get("LOCATION:loc-c")).toBe(-1);
   });
 });
 

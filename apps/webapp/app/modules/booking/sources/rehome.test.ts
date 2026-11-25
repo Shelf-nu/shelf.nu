@@ -96,6 +96,7 @@ function sourceRow(
     sharedQuantity: 0,
     mode: "AUTO",
     sliceCheckedOutAt: null,
+    holds: true,
     ...overrides,
   };
 }
@@ -806,6 +807,107 @@ describe("planLocationDeleteEvacuation", () => {
         dispatchedTotal: 0,
         sharedQuantity: 0,
       },
+    ]);
+  });
+});
+
+describe("planLocationDeleteEvacuation: slices that hold nothing", () => {
+  /** Free units of the remaining sources: Unplaced 5, B 5. */
+  const free = () => [
+    { kind: "UNPLACED" as const, locationId: null, free: 5, createdOrder: -1 },
+    { kind: "LOCATION" as const, locationId: B, free: 5, createdOrder: 0 },
+  ];
+
+  it("plans a reserved slice before a cancelled one, so the cancelled slice never takes its free units", () => {
+    const writes = planLocationDeleteEvacuation({
+      deletedLocationIds: [A],
+      rows: [
+        // The cancelled slice's row sorts first by id.
+        sourceRow({
+          id: "r-1",
+          sliceId: "s-cancelled",
+          quantity: 5,
+          holds: false,
+        }),
+        sourceRow({ id: "r-2", sliceId: "s-reserved", quantity: 5 }),
+      ],
+      freeBySlice: new Map([
+        ["s-cancelled", free()],
+        ["s-reserved", free()],
+      ]),
+      unplacedRoomForOut: 0,
+    });
+    const pendingWrites = (rowId: string) =>
+      writes.filter((w) => w.type === "movePending" && w.fromRowId === rowId);
+
+    expect(pendingWrites("r-2")).toEqual([
+      expect.objectContaining({ toKey: "UNPLACED:", units: 5 }),
+    ]);
+    // What the reserved slice took is gone; the cancelled one fits at B.
+    expect(pendingWrites("r-1")).toEqual([
+      expect.objectContaining({ toKey: loc(B), units: 5 }),
+    ]);
+  });
+
+  it("lets slices that hold nothing use free units without claiming them", () => {
+    const writes = planLocationDeleteEvacuation({
+      deletedLocationIds: [A],
+      rows: [
+        sourceRow({ id: "r-1", sliceId: "s-draft", quantity: 5, holds: false }),
+        sourceRow({ id: "r-2", sliceId: "s-done", quantity: 5, holds: false }),
+        sourceRow({ id: "r-3", sliceId: "s-live", quantity: 5 }),
+      ],
+      freeBySlice: new Map([
+        ["s-draft", free()],
+        ["s-done", free()],
+        ["s-live", free()],
+      ]),
+      unplacedRoomForOut: 0,
+    });
+    const targets = writes
+      .filter((w) => w.type === "movePending")
+      .map((w) => (w.type === "movePending" ? [w.fromRowId, w.toKey] : []));
+
+    // The live slice takes Unplaced first; neither of the others reduces
+    // what the other one sees, so both land at B.
+    expect(targets).toEqual([
+      ["r-3", "UNPLACED:"],
+      ["r-1", loc(B)],
+      ["r-2", loc(B)],
+    ]);
+  });
+
+  it("plans a finished booking's out units after holding slices, so they never take the unplaced room", () => {
+    const writes = planLocationDeleteEvacuation({
+      deletedLocationIds: [A],
+      rows: [
+        sourceRow({
+          id: "r-1",
+          sliceId: "s-cancelled",
+          quantity: 4,
+          outQuantity: 4,
+          dispatchedTotal: 4,
+          holds: false,
+        }),
+        sourceRow({
+          id: "r-2",
+          sliceId: "s-ongoing",
+          quantity: 4,
+          outQuantity: 4,
+          dispatchedTotal: 4,
+        }),
+      ],
+      freeBySlice: new Map(),
+      unplacedRoomForOut: 4,
+    });
+    const outOf = (rowId: string) =>
+      writes.filter((w) => w.type === "partialMove" && w.fromRowId === rowId);
+
+    expect(outOf("r-2")).toEqual([
+      expect.objectContaining({ toKey: "UNPLACED:", units: 4 }),
+    ]);
+    expect(outOf("r-1")).toEqual([
+      expect.objectContaining({ toKey: "UNKNOWN:", units: 4 }),
     ]);
   });
 });

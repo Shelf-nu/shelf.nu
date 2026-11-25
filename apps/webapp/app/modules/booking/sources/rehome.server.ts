@@ -103,32 +103,25 @@ export function plannerFailure(
   });
 }
 
-/** Booking units out on one pool, with the workspace of its slices. */
-export type PoolBookingOut = {
-  /** Workspace of the pool's slices (every slice of a pool shares it). */
-  organizationId: string;
-  /** Source rows of the pool's converted slices with units out. */
-  rows: BookingOutRow[];
-};
-
 /**
  * Reads the source rows with units out on converted slices of several pools.
  *
  * One indexed probe on `BookingAsset` (AUTO / MANUAL slices of the pools on
  * ONGOING or OVERDUE bookings); only when it finds some, one read of their
- * LOCATION and UNPLACED rows with `outQuantity > 0`. The pools come from the
- * caller's locked, workspace-scoped rows, so the workspace of each pool is
- * read from its slices' booking.
+ * LOCATION and UNPLACED rows with `outQuantity > 0`. Both reads are scoped
+ * by the caller's trusted workspace id, so a pool id from another workspace
+ * reads nothing.
  *
  * @param tx - The caller's transaction, holding the pools' asset locks
+ * @param args.organizationId - The trusted workspace id
  * @param args.assetIds - Pools to read
- * @returns assetId -> its rows; a pool with nothing out is absent
+ * @returns assetId -> its rows with units out; a pool with none is absent
  */
 export async function loadBookingOutRows(
   tx: Pick<SourcesTx, "bookingAsset" | "bookingAssetSource">,
-  { assetIds }: { assetIds: string[] }
-): Promise<Map<string, PoolBookingOut>> {
-  const result = new Map<string, PoolBookingOut>();
+  { organizationId, assetIds }: { organizationId: string; assetIds: string[] }
+): Promise<Map<string, BookingOutRow[]>> {
+  const result = new Map<string, BookingOutRow[]>();
   const ids = [...new Set(assetIds)];
   if (ids.length === 0) return result;
 
@@ -137,6 +130,7 @@ export async function loadBookingOutRows(
       assetId: { in: ids },
       sourceAllocation: { in: ["AUTO", "MANUAL"] },
       booking: {
+        organizationId,
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
       },
     },
@@ -145,7 +139,7 @@ export async function loadBookingOutRows(
       assetId: true,
       checkedOutAt: true,
       sourceAllocation: true,
-      booking: { select: { status: true, organizationId: true } },
+      booking: { select: { status: true } },
     },
   });
   // The query already filters these; re-checking keeps the rule readable in
@@ -159,12 +153,9 @@ export async function loadBookingOutRows(
   if (slices.length === 0) return result;
 
   const sliceById = new Map(slices.map((s) => [s.id, s]));
-  const organizationIds = [
-    ...new Set(slices.map((s) => s.booking?.organizationId ?? "")),
-  ];
   const rows = await tx.bookingAssetSource.findMany({
     where: {
-      organizationId: { in: organizationIds },
+      organizationId,
       bookingAssetId: { in: [...sliceById.keys()] },
       kind: { in: ["LOCATION", "UNPLACED"] },
       outQuantity: { gt: 0 },
@@ -181,13 +172,10 @@ export async function loadBookingOutRows(
 
   for (const row of rows) {
     const slice = sliceById.get(row.bookingAssetId);
-    if (!slice?.booking || row.outQuantity <= 0) continue;
+    if (!slice || row.outQuantity <= 0) continue;
     if (row.kind !== "LOCATION" && row.kind !== "UNPLACED") continue;
-    const pool = result.get(slice.assetId) ?? {
-      organizationId: slice.booking.organizationId,
-      rows: [],
-    };
-    pool.rows.push({
+    const pool = result.get(slice.assetId) ?? [];
+    pool.push({
       sourceRowId: row.id,
       sliceId: slice.id,
       // A slice with units out always has a check-out time; the epoch keeps

@@ -21,9 +21,11 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import { loadUnitsOutBySource } from "~/modules/booking/sources/capacity.server";
-import type { SourceMove } from "~/modules/booking/sources/rehome";
+import type {
+  BookingOutRow,
+  SourceMove,
+} from "~/modules/booking/sources/rehome";
 import { planSourceRehome } from "~/modules/booking/sources/rehome";
-import type { PoolBookingOut } from "~/modules/booking/sources/rehome.server";
 import {
   applySourceMoves,
   loadBookingOutRows,
@@ -71,7 +73,7 @@ export type LoadedCustodySources = {
    * the loader read them ({@link loadCustodySourcesForAssets} before a
    * placement change). Absent when nothing is out or it was not read.
    */
-  bookingOut?: PoolBookingOut;
+  bookingOut?: BookingOutRow[];
 };
 
 /**
@@ -135,6 +137,8 @@ export async function loadCustodySources(
  * is out) in parallel; then placements (one) when any pool is returned.
  *
  * @param assets - Pools (already locked by the caller) with their totals
+ * @param options.organizationId - The trusted workspace id; booking slices
+ *   are read only in it
  * @param options.withBookingOut - Also read booking units out per source row
  *   (the state before a placement change); default true
  * @param options.everyAsset - Return every given pool, held or not (the state
@@ -143,9 +147,13 @@ export async function loadCustodySources(
 export async function loadCustodySourcesForAssets(
   tx: CustodySourceTxClient,
   assets: Array<{ id: string; total: number }>,
-  options: { withBookingOut?: boolean; everyAsset?: boolean } = {}
+  options: {
+    organizationId: string;
+    withBookingOut?: boolean;
+    everyAsset?: boolean;
+  }
 ): Promise<Map<string, LoadedCustodySources>> {
-  const { withBookingOut = true, everyAsset = false } = options;
+  const { organizationId, withBookingOut = true, everyAsset = false } = options;
   const result = new Map<string, LoadedCustodySources>();
   if (assets.length === 0) return result;
   const assetIds = assets.map((a) => a.id);
@@ -165,8 +173,8 @@ export async function loadCustodySourcesForAssets(
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
     withBookingOut
-      ? loadBookingOutRows(tx, { assetIds })
-      : Promise.resolve(new Map<string, PoolBookingOut>()),
+      ? loadBookingOutRows(tx, { organizationId, assetIds })
+      : Promise.resolve(new Map<string, BookingOutRow[]>()),
   ]);
 
   const heldIds = everyAsset
@@ -202,7 +210,9 @@ export async function loadCustodySourcesForAssets(
  * Plans one pool's combined re-home and writes it: booking partial moves
  * through the sources repository, then custody moves.
  *
- * @param before - The pool before the placement write (with its booking out)
+ * @param organizationId - The trusted workspace id the moves are written in
+ * @param before - The pool before the placement write
+ * @param bookingOut - The pool's booking rows with units out
  * @param after - The pool after the placement write
  * @param destinationLocationId - The single location the change sent units to
  * @returns The custody and booking moves applied
@@ -212,15 +222,17 @@ async function planAndApplyRehome(
   tx: CustodySourceTxClient,
   {
     assetId,
+    organizationId,
     before,
     after,
     bookingOut,
     destinationLocationId,
   }: {
     assetId: string;
+    organizationId: string;
     before: LoadedCustodySources;
     after: LoadedCustodySources;
-    bookingOut: PoolBookingOut | undefined;
+    bookingOut: BookingOutRow[] | undefined;
     destinationLocationId: string | null | undefined;
   }
 ): Promise<{ moves: RehomeMove[]; bookingMoves: SourceMove[] }> {
@@ -229,7 +241,7 @@ async function planAndApplyRehome(
     planned = planSourceRehome({
       before: before.state,
       after: after.state,
-      bookingOutRows: bookingOut?.rows ?? [],
+      bookingOutRows: bookingOut ?? [],
       custodyRows: after.rows,
       destinationLocationId,
     });
@@ -237,9 +249,9 @@ async function planAndApplyRehome(
     throw plannerFailure(cause, { assetId });
   }
 
-  if (bookingOut && planned.bookingMoves.length > 0) {
+  if (planned.bookingMoves.length > 0) {
     await applySourceMoves(tx, {
-      organizationId: bookingOut.organizationId,
+      organizationId,
       moves: planned.bookingMoves,
     });
   }
@@ -252,6 +264,7 @@ async function planAndApplyRehome(
  * after-state in two queries, then plans and applies each pool's moves
  * (booking units out first, then custody).
  *
+ * @param organizationId - The trusted workspace id of every pool
  * @param before - {@link loadCustodySourcesForAssets} taken before the writes
  * @param totals - `Asset.quantity` per pool after the change
  * @param destinationFor - The single location a pool's change sent units to
@@ -260,10 +273,12 @@ async function planAndApplyRehome(
 export async function rehomeCustodyForPlacementChanges(
   tx: CustodySourceTxClient,
   {
+    organizationId,
     before,
     totals,
     destinationFor,
   }: {
+    organizationId: string;
     before: Map<string, LoadedCustodySources>;
     totals: Map<string, number>;
     destinationFor: (assetId: string) => string | null | undefined;
@@ -277,7 +292,7 @@ export async function rehomeCustodyForPlacementChanges(
   const after = await loadCustodySourcesForAssets(
     tx,
     assetIds.map((id) => ({ id, total: totals.get(id) ?? 0 })),
-    { withBookingOut: false, everyAsset: true }
+    { organizationId, withBookingOut: false, everyAsset: true }
   );
 
   const results: Array<{ assetId: string; result: CustodyRehomeResult }> = [];
@@ -288,6 +303,7 @@ export async function rehomeCustodyForPlacementChanges(
 
     const { moves, bookingMoves } = await planAndApplyRehome(tx, {
       assetId,
+      organizationId,
       before: beforeState,
       after: afterState,
       bookingOut: beforeState.bookingOut,
@@ -445,6 +461,7 @@ export type CustodyRehomeResult = {
  * booking slices out on the pool, plus their rows and one repository write
  * only when there are some.
  *
+ * @param organizationId - The trusted workspace id of the pool
  * @param before - {@link loadCustodySources} output taken before the write
  * @param destinationLocationId - The single location the change sent units
  *   to (a move, or a whole-pool relocation). Omit when there is none.
@@ -454,11 +471,13 @@ export async function rehomeCustodyForPlacementChange(
   tx: CustodySourceTxClient,
   {
     assetId,
+    organizationId,
     total,
     before,
     destinationLocationId,
   }: {
     assetId: string;
+    organizationId: string;
     /** `Asset.quantity` after the change. */
     total: number;
     before: LoadedCustodySources;
@@ -469,7 +488,7 @@ export async function rehomeCustodyForPlacementChange(
   // sides of the plan.
   const [after, bookingOut] = await Promise.all([
     loadCustodySources(tx, { assetId, total }),
-    loadBookingOutRows(tx, { assetIds: [assetId] }),
+    loadBookingOutRows(tx, { organizationId, assetIds: [assetId] }),
   ]);
   const poolBookingOut = bookingOut.get(assetId);
 
@@ -480,6 +499,7 @@ export async function rehomeCustodyForPlacementChange(
 
   const { moves, bookingMoves } = await planAndApplyRehome(tx, {
     assetId,
+    organizationId,
     before,
     after,
     bookingOut: poolBookingOut,
