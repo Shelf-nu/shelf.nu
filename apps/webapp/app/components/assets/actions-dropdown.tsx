@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -15,12 +15,14 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowUpDownIcon,
+  MessageSquareWarningIcon,
 } from "lucide-react";
 import { useFetcher, useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -41,11 +43,13 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { firstDisplayedElement } from "~/utils/sheet-viewport";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { QuantityCustodyDialog } from "./quantity-custody-dialog";
 import { QuickAdjustDialog } from "./quick-adjust-dialog";
 import RelinkQrCodeDialog from "./relink-qr-code-dialog";
+import { ReportProblemDialog } from "./report-problem-dialog";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dialog";
 import Icon from "../icons/icon";
@@ -62,15 +66,25 @@ import {
 } from "../shared/modal";
 import When from "../when/when";
 
+/** The dialogs the Actions menu opens beside itself. */
+type ActionsMenuDialog =
+  | "adjust-quantity"
+  | "quantity-custody"
+  | "relink-qr"
+  | "set-reminder"
+  | "report-problem";
+
 // react-doctor:no-giant-component — deferred for follow-up refactor
 const ConditionalActionsDropdown = () => {
   const { asset, custodySources } = useLoaderData<typeof loader>();
-  const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
-  const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
-  const [isQuantityCustodyDialogOpen, setIsQuantityCustodyDialogOpen] =
-    useState(false);
-  const [isAdjustQuantityDialogOpen, setIsAdjustQuantityDialogOpen] =
-    useState(false);
+  /** The menu's dialogs open one at a time; `null` when none is open. */
+  const [openDialog, setOpenDialog] = useState<ActionsMenuDialog | null>(null);
+  /** Controlled `onOpenChange` for one dialog: closing it clears `openDialog`. */
+  const dialogOpenChange = (dialog: ActionsMenuDialog) => (next: boolean) =>
+    setOpenDialog(next ? dialog : null);
+  /** The two Actions triggers (desktop and phone); one is hidden by CSS. */
+  const desktopTriggerRef = useRef<HTMLElement>(null);
+  const mobileTriggerRef = useRef<HTMLElement>(null);
 
   const isQtyTracked = isQuantityTracked(asset);
   const assetCanBeReleased = hasCustody(asset.custody);
@@ -104,6 +118,23 @@ const ConditionalActionsDropdown = () => {
     entity: PermissionEntity.assetReminders,
     action: PermissionAction.create,
   });
+  const canAssignCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.custody,
+  });
+  /**
+   * Every role holds the grant; checked like any other. A Personal workspace
+   * has one person, so a report there would go to its own author.
+   */
+  const isPersonalWorkspace = useCurrentOrganization()?.type === "PERSONAL";
+  const canReportProblem =
+    !isPersonalWorkspace &&
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.problemReport,
+      action: PermissionAction.create,
+    });
   /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
   const canArchiveAsset = useCanArchiveAssets();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
@@ -182,8 +213,8 @@ const ConditionalActionsDropdown = () => {
    */
   const archivedActionDisabled: { reason: string } | false = isArchived
     ? {
-        // Members who see this menu without the archive grant (Manager, self
-        // service) cannot reinstate, so they are told who can instead.
+        // Members who see this menu without the archive grant cannot
+        // reinstate, so they are told who can instead.
         reason: archivedAssetBlockedReason({ canReinstate: canArchiveAsset }),
       }
     : false;
@@ -210,6 +241,7 @@ const ConditionalActionsDropdown = () => {
           <Button
             type="button"
             variant="secondary"
+            ref={desktopTriggerRef}
             data-test-id="assetActionsButton"
             className="asset-actions hidden md:flex"
           >
@@ -223,6 +255,7 @@ const ConditionalActionsDropdown = () => {
         <Button
           type="button"
           variant="secondary"
+          ref={mobileTriggerRef}
           data-test-id="assetActionsButton"
           className="asset-actions md:hidden"
           onClick={() => setOpen(true)}
@@ -257,7 +290,7 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={() => {
                       handleMenuClose();
-                      setIsAdjustQuantityDialogOpen(true);
+                      setOpenDialog("adjust-quantity");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -266,13 +299,7 @@ const ConditionalActionsDropdown = () => {
                   </Button>
                 </div>
               </When>
-              <When
-                truthy={userHasPermission({
-                  roles,
-                  entity: PermissionEntity.asset,
-                  action: PermissionAction.custody,
-                })}
-              >
+              <When truthy={canAssignCustody}>
                 <div
                   className="border-b px-0 py-1 md:p-0"
                   aria-disabled={custodyActionDisabled}
@@ -295,7 +322,7 @@ const ConditionalActionsDropdown = () => {
                       }
                       onClick={() => {
                         handleMenuClose();
-                        setIsQuantityCustodyDialogOpen(true);
+                        setOpenDialog("quantity-custody");
                       }}
                     >
                       <span className="flex items-center gap-2">
@@ -412,7 +439,7 @@ const ConditionalActionsDropdown = () => {
                     disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
-                      setIsRelinkQrDialogOpen(true);
+                      setOpenDialog("relink-qr");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -435,7 +462,7 @@ const ConditionalActionsDropdown = () => {
                     disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
-                      setIsSetReminderDialogOpen(true);
+                      setOpenDialog("set-reminder");
                     }}
                   >
                     <span className="flex items-center gap-2">
@@ -547,6 +574,27 @@ const ConditionalActionsDropdown = () => {
                   </div>
                 </When>
               </When>
+              <When truthy={canReportProblem}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    role="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    disabled={archivedActionDisabled}
+                    onClick={() => {
+                      handleMenuClose();
+                      setOpenDialog("report-problem");
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <MessageSquareWarningIcon className="size-5" />
+                      Report a problem
+                    </span>
+                  </Button>
+                </div>
+              </When>
               {/* Outside the update group: everyone who can open this menu
                   (custody-only members included) can close it on mobile and
                   sees why an action is disabled. */}
@@ -562,12 +610,13 @@ const ConditionalActionsDropdown = () => {
                   Close
                 </Button>
               </div>
-              {assetIsCheckedOut ? (
+              {assetIsCheckedOut && (canUpdateAsset || canAssignCustody) ? (
                 <div className=" border-t p-2 text-left text-xs">
                   Some actions are disabled due to the asset being checked out.
                 </div>
               ) : null}
-              {assetIsPartOfUnavailableKit ? (
+              {assetIsPartOfUnavailableKit &&
+              (canUpdateAsset || canAssignCustody) ? (
                 <div className=" border-t p-2 text-left text-xs">
                   Some actions are disabled due to the asset being part of a
                   kit.
@@ -619,25 +668,25 @@ const ConditionalActionsDropdown = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <When truthy={isRelinkQrDialogOpen}>
+      <When truthy={openDialog === "relink-qr"}>
         <RelinkQrCodeDialog
           key={asset.qrCodes[0]?.id || asset.id}
-          open={isRelinkQrDialogOpen}
+          open={openDialog === "relink-qr"}
           onClose={() => {
-            setIsRelinkQrDialogOpen(false);
+            setOpenDialog(null);
           }}
         />
       </When>
-      <When truthy={isSetReminderDialogOpen && canSetReminder}>
+      <When truthy={openDialog === "set-reminder" && canSetReminder}>
         <SetOrEditReminderDialog
           action={`/assets/${asset.id}`}
-          open={isSetReminderDialogOpen}
+          open={openDialog === "set-reminder"}
           onClose={() => {
-            setIsSetReminderDialogOpen(false);
+            setOpenDialog(null);
           }}
         />
       </When>
-      <When truthy={isQuantityCustodyDialogOpen}>
+      <When truthy={openDialog === "quantity-custody"}>
         {/* Max and sources come from the same loader summary the custody
             card's dialog reads, so both entry points agree. */}
         <QuantityCustodyDialog
@@ -645,11 +694,25 @@ const ConditionalActionsDropdown = () => {
           unitOfMeasure={asset.unitOfMeasure}
           availableQuantity={custodySources.poolAvailable}
           sources={custodySources}
-          open={isQuantityCustodyDialogOpen}
-          onOpenChange={setIsQuantityCustodyDialogOpen}
+          open={openDialog === "quantity-custody"}
+          onOpenChange={dialogOpenChange("quantity-custody")}
         />
       </When>
-      <When truthy={isAdjustQuantityDialogOpen}>
+      <When truthy={openDialog === "report-problem" && canReportProblem}>
+        <ReportProblemDialog
+          assetId={asset.id}
+          assetTitle={asset.title}
+          open={openDialog === "report-problem"}
+          onOpenChange={dialogOpenChange("report-problem")}
+          returnFocusTo={() =>
+            firstDisplayedElement(
+              desktopTriggerRef.current,
+              mobileTriggerRef.current
+            )
+          }
+        />
+      </When>
+      <When truthy={openDialog === "adjust-quantity"}>
         <QuickAdjustDialog
           assetId={asset.id}
           unitOfMeasure={asset.unitOfMeasure}
@@ -662,8 +725,8 @@ const ConditionalActionsDropdown = () => {
               0
             ) ?? 0)
           }
-          open={isAdjustQuantityDialogOpen}
-          onOpenChange={setIsAdjustQuantityDialogOpen}
+          open={openDialog === "adjust-quantity"}
+          onOpenChange={dialogOpenChange("adjust-quantity")}
         />
       </When>
     </>

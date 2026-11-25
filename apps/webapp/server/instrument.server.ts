@@ -13,6 +13,7 @@
 import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
 
+import { SENTRY_TRACES_SAMPLE_RATE } from "~/utils/constants";
 import { SENTRY_DSN } from "~/utils/env";
 import {
   isAbortError,
@@ -51,9 +52,8 @@ if (SENTRY_DSN) {
       // imports this file first, so that ordering is preserved.
       Sentry.prismaIntegration(),
     ],
-    // Performance Monitoring — 10% sampling matches the client. Tune via
-    // a tracesSampler later if specific routes need higher fidelity.
-    tracesSampleRate: 0.1,
+    // Shared with the client, so a sampled browser trace keeps its server half.
+    tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
     beforeBreadcrumb(breadcrumb) {
       // Remove some noisy breadcrumbs
       if (
@@ -97,15 +97,88 @@ if (SENTRY_DSN) {
 }
 
 /**
- * Hook for performance transactions: scrubs credentials from the request
+ * Hook for performance transactions: drops Prisma's bookkeeping spans (see
+ * {@link dropPrismaBookkeepingSpans}), scrubs credentials from the request
  * (see {@link scrubEventRequest}) and masks email addresses.
  *
  * @param event - The transaction about to be sent
  * @returns The transaction to send
  */
 export function handleBeforeSendTransaction<E extends Event>(event: E): E {
+  dropPrismaBookkeepingSpans(event);
   scrubEventRequest(event);
   return maskEmailsInSentryPayload(event);
+}
+
+/** A span as it sits on a transaction event. */
+type TransactionSpan = NonNullable<Event["spans"]>[number];
+
+/**
+ * `db` spans Prisma emits around every query that carry no query of ours: the
+ * pooled connection checkout, and the `BEGIN` / `DEALLOCATE ALL` / `COMMIT`
+ * wrapper it sends through PgBouncer. Matched exactly, so a real query that
+ * merely contains one of these words is kept.
+ */
+const PRISMA_WRAPPER_DB_SPANS = new Set([
+  "prisma:engine:connection",
+  "BEGIN",
+  "DEALLOCATE ALL",
+  "COMMIT",
+]);
+
+/**
+ * Whether a span is Prisma bookkeeping rather than a query worth seeing: its
+ * client and engine phases (`prisma:client:*`, `prisma:engine:*`, op
+ * `default`) and the wrapper statements in {@link PRISMA_WRAPPER_DB_SPANS}.
+ * The `db` span holding the SQL that ran is never matched.
+ *
+ * @param span - A span from a transaction event
+ */
+function isPrismaBookkeepingSpan(span: TransactionSpan): boolean {
+  const description = span.description ?? "";
+  if (span.op === "default") return description.startsWith("prisma:");
+  if (span.op === "db") return PRISMA_WRAPPER_DB_SPANS.has(description);
+  return false;
+}
+
+/**
+ * Removes Prisma's bookkeeping spans from a transaction, in place.
+ *
+ * `Sentry.prismaIntegration()` reports about ten spans per query, and only the
+ * one carrying the SQL is useful. The rest outnumber every other span we
+ * send, and they are what spends the monthly span quota.
+ *
+ * A kept span whose parent is dropped is re-attached to its nearest kept
+ * ancestor, so the trace never points at a span that was not sent.
+ *
+ * @param event - The transaction about to be sent
+ */
+export function dropPrismaBookkeepingSpans(event: Event): void {
+  if (!event.spans?.length) return;
+
+  // span id -> parent id, for every span being dropped
+  const droppedParents = new Map<string, string | undefined>();
+  for (const span of event.spans) {
+    if (isPrismaBookkeepingSpan(span)) {
+      droppedParents.set(span.span_id, span.parent_span_id);
+    }
+  }
+  if (droppedParents.size === 0) return;
+
+  const kept: TransactionSpan[] = [];
+  for (const span of event.spans) {
+    if (droppedParents.has(span.span_id)) continue;
+
+    // Bounded by the number of dropped spans, so a malformed parent loop
+    // cannot spin forever.
+    let parent = span.parent_span_id;
+    for (let hops = 0; hops < droppedParents.size; hops++) {
+      if (parent === undefined || !droppedParents.has(parent)) break;
+      parent = droppedParents.get(parent);
+    }
+    kept.push({ ...span, parent_span_id: parent });
+  }
+  event.spans = kept;
 }
 
 /**

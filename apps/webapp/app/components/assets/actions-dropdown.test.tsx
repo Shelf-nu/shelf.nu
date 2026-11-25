@@ -25,9 +25,9 @@
  */
 import type { ReactNode } from "react";
 import { OrganizationRoles } from "@prisma/client";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withWorkspaceGrants } from "~/utils/permissions/member-roles";
 import ActionsDropdown from "./actions-dropdown";
 
@@ -35,6 +35,7 @@ import ActionsDropdown from "./actions-dropdown";
 const caller = vi.hoisted(() => ({
   roles: [] as string[],
   assign: "anyone" as "anyone" | "self" | "none",
+  workspaceType: "TEAM" as "TEAM" | "PERSONAL",
 }));
 
 /** The asset the route loader returns for the current render. */
@@ -82,6 +83,12 @@ vi.mock("~/hooks/use-organization-roles", () => ({
   useOrganizationRoles: () => caller.roles,
 }));
 
+// why: the workspace type hides "Report a problem" in a Personal workspace;
+// the real hook reads the `_layout` loader, which is not mounted here.
+vi.mock("~/hooks/use-current-organization", () => ({
+  useCurrentOrganization: () => ({ type: caller.workspaceType }),
+}));
+
 // why: drives `assignsSelfOnly`; the real hook reads the `_layout` loader.
 vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => ({ custody: { assign: caller.assign } }),
@@ -108,6 +115,12 @@ vi.mock("./quantity-custody-dialog", () => ({
 }));
 vi.mock("./quick-adjust-dialog", () => ({ QuickAdjustDialog: () => null }));
 vi.mock("./relink-qr-code-dialog", () => ({ default: () => null }));
+// why: the report dialog brings its own fetcher form; here the question is
+// only whether the menu row opens it
+vi.mock("./report-problem-dialog", () => ({
+  ReportProblemDialog: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Report a problem dialog" /> : null,
+}));
 vi.mock("../asset-reminder/set-or-edit-reminder-dialog", () => ({
   default: () => null,
 }));
@@ -168,6 +181,19 @@ describe("ActionsDropdown: custody-only caller (SELF_SERVICE)", () => {
 });
 
 describe("ActionsDropdown: custody of kit members", () => {
+  it("explains the actions a kit in use disables", () => {
+    caller.roles = [OrganizationRoles.ADMIN];
+    renderMenu({
+      assetKits: [
+        { kit: { id: "kit-1", name: "Camera Kit", status: "CHECKED_OUT" } },
+      ],
+    });
+
+    expect(
+      screen.getByText(/disabled due to the asset being part of a kit/i)
+    ).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     // An admin sees every item.
     caller.roles = [OrganizationRoles.ADMIN];
@@ -296,5 +322,88 @@ describe('ActionsDropdown: a Manager under "Managers can edit assets"', () => {
     renderMenu();
 
     expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
+  });
+});
+
+describe("ActionsDropdown: Base member", () => {
+  beforeEach(() => {
+    caller.roles = [OrganizationRoles.BASE];
+    caller.assign = "none";
+  });
+
+  /** Every row the open menu offers, by its accessible name. */
+  function menuRows() {
+    return [
+      ...screen.queryAllByRole("button"),
+      ...screen.queryAllByRole("link"),
+    ]
+      .map((row) => row.textContent?.trim() ?? "")
+      .filter((name) => name && !/^actions/i.test(name));
+  }
+
+  it("offers only Report a problem, plus the mobile Close button", () => {
+    renderMenu();
+
+    expect(menuRows().sort()).toEqual(["Close", "Report a problem"]);
+  });
+
+  it("opens the report dialog from the row", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: /report a problem/i }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Report a problem dialog" })
+    ).toBeInTheDocument();
+  });
+
+  it("shows no notice about a kit that holds actions it does not have", () => {
+    renderMenu({
+      assetKits: [
+        { kit: { id: "kit-1", name: "Camera Kit", status: "CHECKED_OUT" } },
+      ],
+    });
+
+    expect(
+      screen.queryByText(/disabled due to the asset being part of a kit/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows no notice about disabled actions it does not have", () => {
+    renderMenu({ status: "CHECKED_OUT" });
+
+    expect(
+      screen.queryByText(/some actions are disabled/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it("disables Report a problem on an archived asset, with the reason", () => {
+    renderMenu({ archivedAt: new Date() } as Partial<typeof baseAsset>);
+
+    const item = screen.getByRole("button", { name: /report a problem/i });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("ActionsDropdown: Personal workspace", () => {
+  beforeEach(() => {
+    // The one person in a Personal workspace is its owner.
+    caller.roles = [OrganizationRoles.OWNER];
+    caller.assign = "anyone";
+    caller.workspaceType = "PERSONAL";
+  });
+
+  afterEach(() => {
+    caller.workspaceType = "TEAM";
+  });
+
+  it("does not offer Report a problem, since there is no one else to report to", () => {
+    renderMenu();
+
+    expect(
+      screen.queryByRole("button", { name: /report a problem/i })
+    ).not.toBeInTheDocument();
+    // The owner's own actions are unchanged.
+    expect(screen.getByRole("link", { name: /^edit$/i })).toBeTruthy();
   });
 });

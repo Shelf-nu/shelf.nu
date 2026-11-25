@@ -19,6 +19,12 @@ describe("describeRoleAudience", () => {
     ).toBe("owners, administrators and managers");
   });
 
+  it("names everyone who receives problem reports", () => {
+    expect(describeRoleAudience((p) => p.notifications.problemReports)).toBe(
+      "owners, administrators and managers"
+    );
+  });
+
   it("names everyone who can be picked as a recipient", () => {
     expect(
       describeRoleAudience((p) => p.notifications.selectableAsRecipient)
