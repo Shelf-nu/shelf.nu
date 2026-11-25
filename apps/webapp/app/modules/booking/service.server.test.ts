@@ -18309,8 +18309,10 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     /**
      * The booking holds the pool twice: a standalone slice of 4 that left from
      * Studio, and a kit slice of 6. Both went out.
+     *
+     * @param loose - Fields to override on the standalone slice
      */
-    function arrangeLooseAndKitSlices() {
+    function arrangeLooseAndKitSlices(loose: { checkedInAt?: Date } = {}) {
       setupQtyMocks();
       const booking = makeQtyBooking();
       const [base] = booking.bookingAssets;
@@ -18337,6 +18339,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
             assetKitId: null,
             sourceKitId: null,
             sourceLocationId: "loc-studio",
+            ...loose,
           },
         ],
       });
@@ -18441,6 +18444,67 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       });
 
       expect(returnLogs()).toEqual([["ba-loose", 6]]);
+    });
+
+    it("settles a slice the loaded booking calls returned when it has gone out again", async () => {
+      // The loaded booking shows the loose slice as already returned. A
+      // check-out committed since then sent it out again, which only the
+      // read under the lock can see.
+      arrangeLooseAndKitSlices({
+        checkedInAt: new Date("2026-01-06T09:00:00.000Z"),
+      });
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      const looseNow: Record<string, unknown> = {
+        id: "ba-loose",
+        quantity: 4,
+        checkedOutQuantity: 4,
+        checkedOutAt: new Date("2026-01-07T09:00:00.000Z"),
+        checkedInAt: null,
+        sourceLocationId: "loc-studio",
+        sourceKitId: null,
+      };
+      // Only the selected fields come back, as from the database.
+      sliceRows.mockImplementation(
+        (args: { select?: Record<string, boolean> }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                Object.fromEntries(
+                  Object.keys(args.select).map((key) => [key, looseNow[key]])
+                ),
+              ])
+            : genericRows?.(args)
+      );
+
+      // why: settling reads the booking's logs back after writing them. With
+      // `createConsumptionLog` mocked nothing reaches the database, so this
+      // answers the log reads with the RETURN logs written so far.
+      (
+        db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() =>
+        Promise.resolve(
+          returnLogs().map(([bookingAssetId, quantity]) => ({
+            assetId: mockQtyAssetId,
+            bookingAssetId,
+            quantity,
+          }))
+        )
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 4 }],
+      });
+
+      expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ["ba-loose"] } }),
+        })
+      );
     });
 
     it("settles only the loose slice when the units that came back fit on it", async () => {

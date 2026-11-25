@@ -9059,8 +9059,9 @@ export async function partialCheckinBooking({
       /**
        * The booking's slices as they stand under the locks. The booking was
        * loaded before the transaction, and a check-out of the same booking
-       * that commits in between changes what a slice sent and where it left
-       * from. Everything below that sizes or places a slice reads these rows.
+       * that commits in between changes what a slice sent, where it left from
+       * and whether it is still out. Everything below that sizes, places or
+       * settles a slice reads these rows.
        */
       const dispatchBySliceId = new Map(
         (qtyAssetIdsInSession.length > 0
@@ -9071,6 +9072,7 @@ export async function partialCheckinBooking({
                 quantity: true,
                 checkedOutAt: true,
                 checkedOutQuantity: true,
+                checkedInAt: true,
                 sourceLocationId: true,
                 sourceKitId: true,
               },
