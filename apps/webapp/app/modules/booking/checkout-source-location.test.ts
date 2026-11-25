@@ -550,6 +550,34 @@ describe("checkoutSourceOptions", () => {
     });
     expect(options).toHaveLength(4);
   });
+
+  it('names the plan in the "As planned" option when the question carries one', () => {
+    const options = checkoutSourceOptions({
+      unitOfMeasure: "pcs",
+      unplaced: 5,
+      placements: [cameraRoom, studio],
+      defaultLocationId: ALLOCATION_SOURCE_FORM_VALUE,
+      plannedSummary: "Studio 8 · Unplaced 7",
+    });
+    expect(options[0]).toEqual({
+      value: ALLOCATION_SOURCE_FORM_VALUE,
+      label: "As planned: Studio 8 · Unplaced 7",
+    });
+  });
+
+  it("offers no plan option to a question that defaults to a location", () => {
+    const options = checkoutSourceOptions({
+      unitOfMeasure: "pcs",
+      unplaced: 0,
+      placements: [cameraRoom, studio],
+      defaultLocationId: cameraRoom.locationId,
+      plannedSummary: "Studio 8 · Unplaced 7",
+    });
+    expect(options.map((option) => option.value)).toEqual([
+      cameraRoom.locationId,
+      studio.locationId,
+    ]);
+  });
 });
 
 describe("untaggedCheckinPlacementSources", () => {

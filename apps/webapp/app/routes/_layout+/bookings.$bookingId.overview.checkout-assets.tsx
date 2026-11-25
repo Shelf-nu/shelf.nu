@@ -31,6 +31,8 @@ import {
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
+import { getSliceSourceSummaries } from "~/modules/booking/sources/booking-sources.server";
+import { shortPoolAssetIds } from "~/modules/booking/sources/short-pools";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -387,6 +389,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       })
     ).map(({ id, assetIds }) => ({ id, assetIds }));
 
+    /**
+     * Pools whose standalone slice is short at its sources, so the drawer
+     * raises the `short-source` blocker instead of the check-out refusing at
+     * submit. Read only when some standalone pool slice has planned sources;
+     * a booking of LEGACY slices pays no query.
+     */
+    const hasSourcedPoolSlice = booking.bookingAssets.some(
+      (ba) =>
+        ba.asset?.type === AssetType.QUANTITY_TRACKED &&
+        !ba.assetKitId &&
+        (ba.sourceAllocation === "AUTO" || ba.sourceAllocation === "MANUAL")
+    );
+    const shortSourceAssetIds = hasSourcedPoolSlice
+      ? shortPoolAssetIds(
+          booking.bookingAssets,
+          await getSliceSourceSummaries({
+            organizationId,
+            bookingId: booking.id,
+          })
+        )
+      : [];
+
     return payload({
       title,
       header,
@@ -398,6 +422,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       expectedKits,
       checkoutSourceQuestions,
       kitsBookedElsewhere,
+      shortSourceAssetIds,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

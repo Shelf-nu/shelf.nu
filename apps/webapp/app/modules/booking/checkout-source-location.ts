@@ -233,6 +233,14 @@ export type CheckoutSourceQuestion = {
    * false (a LEGACY slice).
    */
   fromAllocation?: boolean;
+  /**
+   * What "as planned" sends out, as one line per source in the booking's own
+   * words ("Demo Warehouse 8 · Unplaced 7"). Set only for a client with the
+   * `booking-sources` capability on a slice whose sources are planned;
+   * absent while nothing is planned yet (a LEGACY slice converts at
+   * check-out and picks its sources then).
+   */
+  plannedSummary?: string;
 };
 
 /**
@@ -251,7 +259,7 @@ export function sourceUnitLabel(unitOfMeasure: string | null): string {
  * booking" when some of those units are out, then "Unplaced · 5 pcs" when the
  * pool has unplaced units. The same words as the location page's row and the
  * custody dialog. A question that defaults to "as planned" lists that option
- * first.
+ * first, naming the plan when the question carries one.
  *
  * @param question - The pool being asked about
  * @returns `value` is the form value (a location id, or the unplaced sentinel)
@@ -261,7 +269,9 @@ export function checkoutSourceOptions(
     CheckoutSourceQuestion,
     "placements" | "unplaced" | "unitOfMeasure"
   > &
-    Partial<Pick<CheckoutSourceQuestion, "defaultLocationId">>
+    Partial<
+      Pick<CheckoutSourceQuestion, "defaultLocationId" | "plannedSummary">
+    >
 ): Array<{ value: string; label: string }> {
   const unit = sourceUnitLabel(question.unitOfMeasure);
   const options = question.placements.map((placement) => {
@@ -278,14 +288,26 @@ export function checkoutSourceOptions(
       label: `Unplaced · ${question.unplaced} ${unit}`,
     });
   }
-  // A slice that defaults to its plan needs that plan as an option to select.
+  // A slice that defaults to its plan needs that plan as an option to select,
+  // and the option names the plan when there is one.
   if (question.defaultLocationId === ALLOCATION_SOURCE_FORM_VALUE) {
     options.unshift({
       value: ALLOCATION_SOURCE_FORM_VALUE,
-      label: "As planned",
+      label: asPlannedLabel(question.plannedSummary),
     });
   }
   return options;
+}
+
+/**
+ * The words of the "as planned" option: the plan itself when it is known
+ * ("As planned: Demo Warehouse 8 · Unplaced 7"), else just "As planned".
+ *
+ * @param plannedSummary - {@link CheckoutSourceQuestion.plannedSummary}
+ * @returns The option label
+ */
+export function asPlannedLabel(plannedSummary?: string | null): string {
+  return plannedSummary ? `As planned: ${plannedSummary}` : "As planned";
 }
 
 /**

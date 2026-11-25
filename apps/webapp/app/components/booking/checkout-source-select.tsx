@@ -17,12 +17,18 @@
  * deleted while the dialog was open) therefore never comes back as a refused
  * "pick".
  *
+ * A slice that goes out by its plan pre-selects "As planned". The option names
+ * the plan ("As planned: Demo Warehouse 8 · Unplaced 7") and a line under the
+ * select says what leaving it alone does, linked to the select by
+ * `aria-describedby`.
+ *
  * @see {@link file://../../modules/booking/checkout-source-location.ts} the rule and the option labels
  */
 import { useId, useState } from "react";
 
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import {
+  ALLOCATION_SOURCE_FORM_VALUE,
   checkoutSourceOptions,
   sourceLocationFieldName,
   sourceUnitLabel,
@@ -41,6 +47,7 @@ type CheckoutSourceSelectProps = {
     | "placements"
     | "unplaced"
     | "defaultLocationId"
+    | "plannedSummary"
   >;
   /**
    * What the answer is keyed by: the slice id (`BookingAsset.id`) when the
@@ -75,16 +82,18 @@ export function CheckoutSourceSelect({
   className,
 }: CheckoutSourceSelectProps) {
   const id = useId();
+  const hintId = `${id}-hint`;
   /** Whether the operator changed the answer: only then is it posted. */
   const [picked, setPicked] = useState(false);
   const options = checkoutSourceOptions(question);
   const defaultValue = question.defaultLocationId ?? UNPLACED_SOURCE_FORM_VALUE;
   const isInline = variant === "inline";
+  const hint = asPlannedHint(question);
 
   return (
     <div
       className={tw(
-        isInline ? "flex items-center gap-2" : "flex flex-col gap-1",
+        isInline ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-1",
         className
       )}
     >
@@ -109,6 +118,7 @@ export function CheckoutSourceSelect({
       </label>
       <select
         id={id}
+        aria-describedby={hint ? hintId : undefined}
         name={picked ? sourceLocationFieldName(fieldKey) : undefined}
         defaultValue={defaultValue}
         onChange={() => setPicked(true)}
@@ -129,6 +139,30 @@ export function CheckoutSourceSelect({
           </option>
         ))}
       </select>
+      {hint ? (
+        <p
+          id={hintId}
+          className={tw("text-xs text-gray-600", isInline && "basis-full")}
+        >
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * The line under a select that pre-selects "As planned": where the units go
+ * out from when nothing is picked. Nothing for any other default.
+ *
+ * @param question - The pool being asked about
+ * @returns The hint, or `null`
+ */
+export function asPlannedHint(
+  question: Pick<CheckoutSourceQuestion, "defaultLocationId" | "plannedSummary">
+): string | null {
+  if (question.defaultLocationId !== ALLOCATION_SOURCE_FORM_VALUE) return null;
+  return question.plannedSummary
+    ? `Leaves from ${question.plannedSummary}. Pick a location to take these units from it instead.`
+    : "Shelf picks the locations with room for these units. Pick a location to take them from it instead.";
 }

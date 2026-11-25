@@ -77,6 +77,8 @@ import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { loadMultiPlacedPoolIds } from "~/modules/booking/checkout-source-location.server";
+import { formatLocationPoolLine } from "~/modules/booking/sources/location-holds";
+import { loadReservedNextAtLocation } from "~/modules/booking/sources/location-holds.server";
 import { countUnitsOnBookingsFromLocation } from "~/modules/booking/units-out-by-source.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
@@ -222,34 +224,43 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
     /**
-     * For pools placed at two or more locations, how many of this location's
-     * units are out with people ("· 2 in custody"), and how many are out on a
-     * booking having left from here ("· 10 on a booking"). Counts only,
-     * never a name, and neither changes the location's placed count.
+     * The now-figures and the reservation behind each pool's line ("8 here ·
+     * 2 out on bookings · 1 in custody · 3 reserved next"): for pools placed
+     * at two or more locations, how many of this location's units are out
+     * with people and out on a booking having left from here; for every pool,
+     * the peak of units still to leave here over the next booking window.
+     * Counts only, never a name, and none changes the location's placed
+     * count. "Reserved next" is one probe while every group is LEGACY.
      */
     const pools = assets.filter((asset) => isQuantityTracked(asset));
-    const [custodyFromHere, onBookingByAssetId] = await Promise.all([
-      getCustodyFromLocationByPool({
-        locationId,
-        organizationId,
-        pools: pools.map((asset) => ({
-          id: asset.id,
-          total: asset.quantity ?? 0,
-        })),
-      }),
-      // Only pools at two or more placements say where booked units came
-      // from; a pool at one location shows nothing new.
-      loadMultiPlacedPoolIds({
-        organizationId,
-        assetIds: pools.map((asset) => asset.id),
-      }).then((multiPlaced) =>
-        countUnitsOnBookingsFromLocation({
+    const [custodyFromHere, onBookingByAssetId, reservedNextByAssetId] =
+      await Promise.all([
+        getCustodyFromLocationByPool({
+          locationId,
+          organizationId,
+          pools: pools.map((asset) => ({
+            id: asset.id,
+            total: asset.quantity ?? 0,
+          })),
+        }),
+        // Only pools at two or more placements say where booked units came
+        // from; a pool at one location shows nothing new.
+        loadMultiPlacedPoolIds({
+          organizationId,
+          assetIds: pools.map((asset) => asset.id),
+        }).then((multiPlaced) =>
+          countUnitsOnBookingsFromLocation({
+            organizationId,
+            locationId,
+            assetIds: [...multiPlaced],
+          })
+        ),
+        loadReservedNextAtLocation({
           organizationId,
           locationId,
-          assetIds: [...multiPlaced],
-        })
-      ),
-    ]);
+          assetIds: pools.map((asset) => asset.id),
+        }),
+      ]);
     // Rows carry each custodian's name and email whether or not the UI draws
     // them, so a viewer without custody visibility could read them out of the
     // route's data payload. Redact here, not in the component.
@@ -266,6 +277,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ...asset,
       inCustodyHere: custodyFromHere[asset.id] ?? 0,
       onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,
+      reservedNextHere: reservedNextByAssetId.get(asset.id) ?? 0,
     }));
 
     const header: HeaderData = {
@@ -607,6 +619,13 @@ const ListAssetContent = ({
      * sources; 0 otherwise. Set by the loader.
      */
     inCustodyHere?: number;
+    /**
+     * Peak of this pool's units still to leave THIS location for bookings,
+     * over the next booking window (see `loadReservedNextAtLocation`); 0
+     * otherwise. Set by the loader. Never read by the status badge, which
+     * shows now-figures only.
+     */
+    reservedNextHere?: number;
     custody: Array<{
       quantity: number;
       custodian: {
@@ -719,15 +738,28 @@ const ListAssetContent = ({
                         });
                       }
                       const kitEntries = Array.from(kitRowsByKitId.values());
+                      // A manual placement here gets the pool line; units
+                      // here only through kits keep the plain count, and the
+                      // kit badge explains them. A placement reduced to 0
+                      // still has its row, so the line still renders.
+                      const manualRows = rowsAtThisLocation.filter(
+                        (al) => al.assetKitId === null
+                      );
+                      const poolLine =
+                        manualRows.length > 0
+                          ? formatLocationPoolLine({
+                              placed: manualRows.reduce(
+                                (sum, al) => sum + (al.quantity ?? 0),
+                                0
+                              ),
+                              outOnBookings: item.onBookingFromHere ?? 0,
+                              inCustody: item.inCustodyHere ?? 0,
+                              reservedNext: item.reservedNextHere ?? 0,
+                            })
+                          : `${atLocation} ${unit} at this location`;
                       return (
-                        <span className="ml-2 inline-flex items-center gap-2 text-xs font-normal text-gray-500">
-                          · {atLocation} {unit} at this location
-                          {item.inCustodyHere
-                            ? ` · ${item.inCustodyHere} in custody`
-                            : null}
-                          {item.onBookingFromHere
-                            ? ` · ${item.onBookingFromHere} on a booking`
-                            : null}
+                        <span className="ml-2 inline-flex flex-wrap items-center gap-2 text-xs font-normal text-gray-500">
+                          · {poolLine}
                           {kitEntries.length > 0 ? (
                             <TooltipProvider delayDuration={150}>
                               <Tooltip>

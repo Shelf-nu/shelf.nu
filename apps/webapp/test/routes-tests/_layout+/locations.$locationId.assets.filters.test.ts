@@ -40,6 +40,11 @@ vi.mock("~/modules/booking/checkout-source-location.server", () => ({
 vi.mock("~/modules/booking/units-out-by-source.server", () => ({
   countUnitsOnBookingsFromLocation: vi.fn(),
 }));
+// why: "reserved next" reads booking source rows; the default is none, and
+// the reserved-next cases choose what it returns.
+vi.mock("~/modules/booking/sources/location-holds.server", () => ({
+  loadReservedNextAtLocation: vi.fn().mockResolvedValue(new Map()),
+}));
 // why: the permission resolver needs a session and a database.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
@@ -56,6 +61,7 @@ vi.mock("~/modules/team-member/service.server", async (importOriginal) => ({
 import { db } from "~/database/db.server";
 import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.server";
 import { loadMultiPlacedPoolIds } from "~/modules/booking/checkout-source-location.server";
+import { loadReservedNextAtLocation } from "~/modules/booking/sources/location-holds.server";
 import { countUnitsOnBookingsFromLocation } from "~/modules/booking/units-out-by-source.server";
 import { getLocation } from "~/modules/location/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -300,5 +306,90 @@ describe("locations.$locationId.assets loader: custodian privacy", () => {
     expect(JSON.stringify(loaderData(result).items)).toContain(
       "colleague@example.com"
     );
+  });
+});
+
+describe("locations.$locationId.assets loader: reserved next", () => {
+  /** A pool placed here with `placed` units, as getLocation selects it. */
+  function poolPlacedHere(id: string, placed: number) {
+    return {
+      id,
+      type: "QUANTITY_TRACKED",
+      quantity: 20,
+      custody: [],
+      assetLocations: [
+        {
+          locationId: "location-1",
+          quantity: placed,
+          assetKitId: null,
+          assetKit: null,
+        },
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    signInAs({ seeAllCustody: true });
+    vi.mocked(getTeamMemberForCustodianFilter).mockResolvedValue({
+      teamMembers: [],
+      totalTeamMembers: 0,
+    } as never);
+    vi.mocked(getCustodyFromLocationByPool).mockResolvedValue({} as never);
+    vi.mocked(loadMultiPlacedPoolIds).mockResolvedValue(new Set() as never);
+    vi.mocked(countUnitsOnBookingsFromLocation).mockResolvedValue(
+      new Map() as never
+    );
+    vi.mocked(db.asset.count).mockResolvedValue(0);
+  });
+
+  it("asks for the page's pools only and puts the peak on each row", async () => {
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 2,
+      assets: [
+        poolPlacedHere("cables", 11),
+        { id: "camera", type: "INDIVIDUAL", quantity: null, custody: [] },
+      ],
+    } as never);
+    vi.mocked(loadReservedNextAtLocation).mockResolvedValue(
+      new Map([["cables", 3]])
+    );
+
+    const result = await loader(buildArgs(""));
+
+    expect(loadReservedNextAtLocation).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      locationId: "location-1",
+      assetIds: ["cables"],
+    });
+    const items = loaderData(result).items as Array<{
+      id: string;
+      reservedNextHere: number;
+    }>;
+    expect(items.map((item) => [item.id, item.reservedNextHere])).toEqual([
+      ["cables", 3],
+      ["camera", 0],
+    ]);
+  });
+
+  it("keeps the row of a placement reduced to 0 with pending units held there", async () => {
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 1,
+      assets: [poolPlacedHere("cables", 0)],
+    } as never);
+    vi.mocked(loadReservedNextAtLocation).mockResolvedValue(
+      new Map([["cables", 5]])
+    );
+
+    const result = await loader(buildArgs(""));
+
+    const items = loaderData(result).items as Array<{
+      id: string;
+      reservedNextHere: number;
+    }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: "cables", reservedNextHere: 5 });
   });
 });

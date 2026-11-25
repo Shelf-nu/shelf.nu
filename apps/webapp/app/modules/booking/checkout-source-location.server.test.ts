@@ -775,6 +775,55 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     });
   });
 
+  it('names a split plan for the "As planned" option', async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 8 },
+      { kind: "UNPLACED", locationId: null, quantity: 7 },
+    ]);
+
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+    });
+
+    expect(question.plannedSummary).toBe("Studio 8 · Unplaced 7");
+  });
+
+  it("names a planned location the pool is no longer placed at", async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-back", quantity: 5 },
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 10 },
+    ]);
+    const findLocations = vi.fn(() =>
+      resolved([{ id: "loc-back", name: "Back Room" }])
+    );
+    Object.assign(db, { location: { findMany: findLocations } });
+
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+    });
+
+    expect(question.plannedSummary).toBe("Back Room 5 · Studio 10");
+    // Only the missing name is looked up, inside the workspace.
+    expect(findLocations).toHaveBeenCalledWith({
+      where: { id: { in: ["loc-back"] }, organizationId: ORG },
+      select: { id: true, name: true },
+    });
+  });
+
+  it("names no plan for a LEGACY slice", async () => {
+    stageConverted([], "LEGACY");
+
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      adoptionEnabled: true,
+    });
+
+    expect(question.plannedSummary).toBeUndefined();
+  });
+
   it("asks an older phone nothing about a split slice", async () => {
     stageConverted([
       { kind: "LOCATION", locationId: "loc-studio", quantity: 8 },

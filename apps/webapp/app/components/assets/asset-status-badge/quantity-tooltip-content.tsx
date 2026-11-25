@@ -4,7 +4,8 @@
  * Renders the hover-card body for a quantity-tracked asset:
  * - "X of Y checked out" / "reserved" headlines
  * - Standalone vs via-kit slice breakdown (Polish-6 discriminator)
- * - Per-booking bullets with each booking name as a link
+ * - Per-booking bullets with each booking name as a link, and for a
+ *   reserved booking with planned sources, where its units come from
  * - Custody line + "N available" footer
  *
  * Lives next to {@link AssetStatusBadge} but separately so the badge
@@ -114,6 +115,8 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
     quantity: number;
     /** Booking start, when the loader selected it. Absent on surfaces that don't. */
     from?: string | Date | null;
+    /** Planned sources of a reserved standalone slice, when the loader sent them. */
+    sourceSummary?: string;
   };
   type Buckets = { standalone: Slice[]; kitDriven: Slice[] };
 
@@ -127,6 +130,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
       bookingName: ba.booking?.name ?? "Untitled booking",
       quantity: ba.quantity ?? 0,
       from: ba.booking?.from ?? null,
+      sourceSummary: ba.sourceSummary,
     };
     if (ba.assetKitId) {
       slice.viaKitName = kitNameByAssetKitId.get(ba.assetKitId) ?? "kit";
@@ -206,6 +210,11 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
                 overlap. Flag it here, on the booking responsible. */}
             {total > 0 && b.quantity > total ? (
               <span className="text-violet-700"> · more than you own</span>
+            ) : null}
+            {b.sourceSummary ? (
+              <span className="block pl-3 text-gray-600">
+                Sources: {b.sourceSummary}
+              </span>
             ) : null}
           </p>
         ))}

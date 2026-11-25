@@ -21,6 +21,7 @@ import { data } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
+import { withReservedSourceSummaries } from "~/modules/booking/sources/reserved-source-summaries.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import {
@@ -46,8 +47,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // bug-#96 fix) lives in the shared helper so the mobile asset-detail
     // endpoint and this web tooltip endpoint can't drift.
     const rows = await getAssetQuantityRows(db, { assetId, organizationId });
+    // Reserved bookings with planned sources list them in the tooltip.
+    const bookingAssets = await withReservedSourceSummaries(db, {
+      organizationId,
+      assetId: rows.id,
+      rows: rows.bookingAssets,
+    });
 
-    return data(payload(rows));
+    return data(payload({ ...rows, bookingAssets }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetId });
     throw data(error(reason), { status: reason.status });

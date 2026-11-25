@@ -206,6 +206,7 @@ function makeLoaderData(
     remainingToCheckOutByAsset: overrides.remainingToCheckOutByAsset ?? {},
     checkoutSourceQuestions: overrides.checkoutSourceQuestions ?? [],
     kitsBookedElsewhere: [] as { id: string; assetIds: string[] }[],
+    shortSourceAssetIds: [] as string[],
   };
 }
 
@@ -373,6 +374,7 @@ function makeLoaderDataFromExpected(
     remainingToCheckOutByAsset,
     checkoutSourceQuestions: [] as CheckoutSourceQuestion[],
     kitsBookedElsewhere: [] as { id: string; assetIds: string[] }[],
+    shortSourceAssetIds: [] as string[],
   };
 }
 

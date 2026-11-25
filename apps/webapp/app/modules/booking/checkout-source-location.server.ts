@@ -18,6 +18,10 @@
  */
 
 import { AssetType } from "@prisma/client";
+import {
+  describeBookingSources,
+  formatSourceSummary,
+} from "@shelf/quantity-control";
 
 import { db } from "~/database/db.server";
 import type { ExtendedPrismaClient } from "~/database/db.server";
@@ -365,6 +369,9 @@ export async function recordCheckoutSourceLocations(
  * (`ALLOCATION_SOURCE_FORM_VALUE`): submitting the default dispatches by
  * allocation like no pick, so a source the plan avoids is never forced. A
  * LEGACY slice with adoption off defaults to the shelf (the most units left).
+ * A converted slice also carries its plan as one line (`plannedSummary`, such
+ * as "Demo Warehouse 8 · Unplaced 7"), so the select can say what "as
+ * planned" sends out.
  *
  * A client without the capability has no "as planned" option, so its default
  * is always a real location: a converted slice's single pending LOCATION or
@@ -419,9 +426,9 @@ export async function getCheckoutSourceQuestions({
   });
   if (slices.length === 0) return [];
 
-  // Converted slices already have sources planned. Their rows are read only
-  // for an older phone: it is asked nothing about a split plan, and a single
-  // pending source is its default.
+  // Converted slices already have sources planned. Their rows name the plan
+  // behind "as planned"; an older phone is asked nothing about a split plan,
+  // and a single pending source is its default.
   const convertedIds = slices
     .filter(
       (slice) =>
@@ -433,7 +440,7 @@ export async function getCheckoutSourceQuestions({
       organizationId,
       assetIds: slices.map((slice) => slice.assetId),
     }),
-    convertedIds.length === 0 || clientSupportsSources
+    convertedIds.length === 0
       ? Promise.resolve([])
       : db.bookingAssetSource.findMany({
           where: {
@@ -454,6 +461,9 @@ export async function getCheckoutSourceQuestions({
   const convertedSet = new Set(convertedIds);
   /** The converted slices' rows, as one array type whichever branch ran. */
   const sourceRows: Array<(typeof rows)[number]> = rows;
+  const locationNames = clientSupportsSources
+    ? await planLocationNames({ organizationId, rows: sourceRows, snapshots })
+    : new Map<string, string>();
 
   const questions: CheckoutSourceQuestion[] = [];
   for (const slice of slices) {
@@ -489,6 +499,18 @@ export async function getCheckoutSourceQuestions({
           ? ALLOCATION_SOURCE_FORM_VALUE
           : defaultSourceLocationId(snapshot);
     }
+    // What "as planned" sends out, for the select to name. Only a capable
+    // client offers that option, and only a converted slice has a plan.
+    const plannedSummary =
+      clientSupportsSources && fromAllocation
+        ? formatSourceSummary(
+            describeBookingSources({
+              rows: sourceRows.filter((row) => row.bookingAssetId === slice.id),
+              locationNames,
+              shortSourceKeys: new Set(),
+            })
+          )
+        : "";
     questions.push({
       sliceId: slice.id,
       assetId: slice.assetId,
@@ -499,10 +521,53 @@ export async function getCheckoutSourceQuestions({
       unplaced: snapshot.unplaced,
       defaultLocationId,
       fromAllocation,
+      ...(plannedSummary ? { plannedSummary } : {}),
     });
   }
 
   return questions.sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/**
+ * Names of the locations a set of planned source rows points at. Placements
+ * already read for the pools supply most of them; a row at a location the
+ * pool is no longer placed at (its placement was removed while units stay
+ * held there) is looked up, scoped to the workspace.
+ *
+ * @param args.organizationId - Scopes the lookup
+ * @param args.rows - The planned rows
+ * @param args.snapshots - The pools' placements, keyed by asset id
+ * @returns Location id to name; one query only when a name is missing
+ */
+async function planLocationNames({
+  organizationId,
+  rows,
+  snapshots,
+}: {
+  organizationId: string;
+  rows: ReadonlyArray<{ locationId: string | null }>;
+  snapshots: ReadonlyMap<string, Pick<PoolSourceSnapshot, "placements">>;
+}): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (const snapshot of snapshots.values()) {
+    for (const placement of snapshot.placements) {
+      names.set(placement.locationId, placement.name);
+    }
+  }
+  const missing = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.locationId && !names.has(row.locationId) ? [row.locationId] : []
+      )
+    ),
+  ];
+  if (missing.length === 0) return names;
+  const locations = await db.location.findMany({
+    where: { id: { in: missing }, organizationId },
+    select: { id: true, name: true },
+  });
+  for (const location of locations) names.set(location.id, location.name);
+  return names;
 }
 
 /** One slice a check-out sends units out of, as the writers know it. */

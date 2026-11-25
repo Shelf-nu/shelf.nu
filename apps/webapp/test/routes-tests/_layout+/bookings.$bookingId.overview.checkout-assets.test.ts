@@ -66,6 +66,15 @@ vi.mock("~/modules/booking/checkout-source-location.server", () => ({
 // why: loader-only database access on import
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
+// why: the source summaries read the booking's source rows and competing
+// holds from the database; each case chooses which slices are short
+const { getSliceSourceSummariesMock } = vi.hoisted(() => ({
+  getSliceSourceSummariesMock: vi.fn(),
+}));
+vi.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  getSliceSourceSummaries: getSliceSourceSummariesMock,
+}));
+
 import {
   action,
   loader,
@@ -248,5 +257,91 @@ describe("checkout-assets loader: kits another booking holds", () => {
     expect(findKitsBookedElsewhereMock).toHaveBeenCalledWith(
       expect.objectContaining({ ignoreReservedConflicts: true })
     );
+  });
+});
+
+describe("checkout-assets loader: pools short at their sources", () => {
+  /** A standalone slice of a quantity-tracked pool in `mode`. */
+  function poolSlice(id: string, assetId: string, mode: string) {
+    return {
+      id,
+      assetId,
+      assetKitId: null,
+      sourceKitId: null,
+      quantity: 5,
+      sourceAllocation: mode,
+      asset: {
+        id: assetId,
+        title: assetId,
+        type: "QUANTITY_TRACKED",
+        consumptionType: "TWO_WAY",
+        unitOfMeasure: null,
+        assetKits: [],
+        mainImage: null,
+        thumbnailImage: null,
+        assetModel: null,
+      },
+    };
+  }
+
+  /** Loads the page for a RESERVED booking holding `slices`. */
+  async function load(slices: ReturnType<typeof poolSlice>[]) {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] })
+    );
+    getBookingMock.mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      status: "RESERVED",
+      creatorId: CALLER,
+      custodianUserId: CALLER,
+      from: new Date("2026-01-01T09:00:00Z"),
+      to: new Date("2099-01-02T09:00:00Z"),
+      bookingAssets: slices,
+    });
+    vi.mocked(getDetailedPartialCheckoutData).mockResolvedValue({
+      checkedOutAssetIds: [],
+    } as never);
+    vi.mocked(getPartiallyCheckedInAssetIds).mockResolvedValue([]);
+    findKitsBookedElsewhereMock.mockResolvedValue([]);
+
+    return (await loader({
+      request: new Request(
+        "https://app.shelf.nu/bookings/booking-1/overview/checkout-assets"
+      ),
+      params: { bookingId: "booking-1" },
+      context: { getSession: () => ({ userId: CALLER }) },
+    } as never)) as { shortSourceAssetIds: string[] };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hands the drawer every pool whose slice is short", async () => {
+    getSliceSourceSummariesMock.mockResolvedValue(
+      new Map([
+        ["ba-1", { parts: [], short: true, mode: "AUTO" }],
+        ["ba-2", { parts: [], short: false, mode: "MANUAL" }],
+      ])
+    );
+
+    const result = await load([
+      poolSlice("ba-1", "cables", "AUTO"),
+      poolSlice("ba-2", "tape", "MANUAL"),
+    ]);
+
+    expect(getSliceSourceSummariesMock).toHaveBeenCalledWith({
+      organizationId: expect.any(String),
+      bookingId: "booking-1",
+    });
+    expect(result.shortSourceAssetIds).toEqual(["cables"]);
+  });
+
+  it("reads no summaries for a booking of LEGACY slices", async () => {
+    const result = await load([poolSlice("ba-1", "cables", "LEGACY")]);
+
+    expect(getSliceSourceSummariesMock).not.toHaveBeenCalled();
+    expect(result.shortSourceAssetIds).toEqual([]);
   });
 });

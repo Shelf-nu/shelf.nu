@@ -89,6 +89,14 @@ export type PartialCheckoutBlockerArgs = {
   kitsBookedElsewhere: Set<string>;
   /** The assets this booking took from those kits. */
   assetsInKitsBookedElsewhere: Set<string>;
+  /**
+   * Quantity-tracked assets whose standalone slice on this booking is short:
+   * some of its pending units have no source with room for them, or sit on
+   * "Needs a location". The loader takes them from the booking's source
+   * summaries, the same short flags the booking page shows, and the check-out
+   * refuses such a slice until its sources are changed.
+   */
+  shortSourceAssetIds: Set<string>;
   /** Drops rows by ASSET id. */
   removeAssetsFromList: (assetIds: string[]) => void;
   /** Drops rows by the CODE that scanned them, which is how kits are keyed. */
@@ -153,6 +161,7 @@ export function buildPartialCheckoutBlockers({
   alreadyCheckedOut,
   kitsBookedElsewhere,
   assetsInKitsBookedElsewhere,
+  shortSourceAssetIds,
   removeAssetsFromList,
   removeItemsFromList,
 }: PartialCheckoutBlockerArgs): PartialCheckoutBlockers {
@@ -195,6 +204,23 @@ export function buildPartialCheckoutBlockers({
     )
     .map((a) => a.id);
   const qrIdsOfAssetsInCustody = qrIdsFor(items, "asset", assetsInCustody);
+
+  // A booked pool whose units still to go out have no source with room.
+  // Assets already reported as not booked or fully out are left to those
+  // blockers.
+  const assetsShortAtSource = assets
+    .filter(
+      (asset) =>
+        bookingAssetIds.has(asset.id) &&
+        shortSourceAssetIds.has(asset.id) &&
+        !alreadyCheckedOutAssets.includes(asset.id)
+    )
+    .map((a) => a.id);
+  const qrIdsOfAssetsShortAtSource = qrIdsFor(
+    items,
+    "asset",
+    assetsShortAtSource
+  );
 
   // A kit is "in this booking" when any of its members is booked.
   const kitsNotInBooking = kits
@@ -317,6 +343,20 @@ export function buildPartialCheckoutBlockers({
       ),
       description: "Release custody before checking these assets out",
       onResolve: () => removeItemsFromList(qrIdsOfAssetsInCustody),
+    },
+    {
+      id: "short-source",
+      condition: assetsShortAtSource.length > 0,
+      count: assetsShortAtSource.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          short at {count > 1 ? "their" : "its"} source location.
+        </>
+      ),
+      description:
+        "Some booked units have no location with room for them. Change where they come from on the booking, then scan again.",
+      onResolve: () => removeItemsFromList(qrIdsOfAssetsShortAtSource),
     },
     {
       id: "kits-already-checked-out",

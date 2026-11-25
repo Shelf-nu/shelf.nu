@@ -27,6 +27,7 @@ const EXPECTED_IDS = [
   "assets-not-in-booking",
   "assets-already-checked-out",
   "assets-in-custody",
+  "short-source",
   "kits-already-checked-out",
   "kit-in-custody",
   "kits-booked-elsewhere",
@@ -90,12 +91,14 @@ function build(
     alreadyCheckedOut = [],
     kitsBookedElsewhere = [],
     assetsInKitsBookedElsewhere = [],
+    shortSourceAssetIds = [],
   }: {
     bookingAssetIds?: string[];
     remainingByAssetId?: Record<string, number>;
     alreadyCheckedOut?: string[];
     kitsBookedElsewhere?: string[];
     assetsInKitsBookedElsewhere?: string[];
+    shortSourceAssetIds?: string[];
   } = {}
 ): PartialCheckoutBlockers & {
   removeAssetsFromList: ReturnType<typeof vi.fn>;
@@ -112,6 +115,7 @@ function build(
       alreadyCheckedOut: new Set(alreadyCheckedOut),
       kitsBookedElsewhere: new Set(kitsBookedElsewhere),
       assetsInKitsBookedElsewhere: new Set(assetsInKitsBookedElsewhere),
+      shortSourceAssetIds: new Set(shortSourceAssetIds),
       removeAssetsFromList,
       removeItemsFromList,
     }),
@@ -188,6 +192,32 @@ describe("buildPartialCheckoutBlockers", () => {
       { remainingByAssetId: { a1: 1 } }
     );
     expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a pool whose slice is short at its source", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      { remainingByAssetId: { a1: 5 }, shortSourceAssetIds: ["a1"] }
+    );
+    expect(activeIds(built)).toEqual(["short-source"]);
+    built.blockerConfigs.find((b) => b.id === "short-source")?.onResolve();
+    expect(built.removeItemsFromList).toHaveBeenCalledWith(["qrPool"]);
+  });
+
+  it("short-source: a pool with room at its sources does not block", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      { remainingByAssetId: { a1: 5 }, shortSourceAssetIds: ["a2"] }
+    );
+    expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a pool with nothing left to go out is reported as already out only", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      { remainingByAssetId: { a1: 0 }, shortSourceAssetIds: ["a1"] }
+    );
+    expect(activeIds(built)).toEqual(["assets-already-checked-out"]);
   });
 
   it("kits-already-checked-out: every booked member is already out", () => {
