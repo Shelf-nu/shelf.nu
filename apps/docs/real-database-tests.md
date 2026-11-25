@@ -7,14 +7,15 @@ database and are named `*.db.test.ts`.
 
 ## Where things live
 
-| File                                     | Purpose                                                |
-| ---------------------------------------- | ------------------------------------------------------ |
-| `apps/webapp/vitest.db.config.ts`        | Vitest config for `test/db/**/*.db.test.ts`            |
-| `apps/webapp/test/db/global-setup.ts`    | Name guard, Supabase roles, `prisma migrate deploy`    |
-| `apps/webapp/test/db/setup-env.ts`       | Placeholder app env, database URLs set to the test URL |
-| `apps/webapp/test/db/client.ts`          | `getTestDb()`, `withRollback()`, `commitAndExpect()`   |
-| `apps/webapp/test/db/fixtures.ts`        | `seedOrgWithPool()`, `seedBooking()`                   |
-| `apps/webapp/test/db/harness.db.test.ts` | Self-test proving the harness works                    |
+| File                                                     | Purpose                                                          |
+| -------------------------------------------------------- | ---------------------------------------------------------------- |
+| `apps/webapp/vitest.db.config.ts`                        | Vitest config for `test/db/**/*.db.test.ts`                      |
+| `apps/webapp/test/db/global-setup.ts`                    | Name guard, Supabase roles, `prisma migrate deploy`              |
+| `apps/webapp/test/db/setup-env.ts`                       | Placeholder app env, database URLs set to the test URL           |
+| `apps/webapp/test/db/client.ts`                          | `getTestDb()`, `withRollback()`, `commitAndExpect()`             |
+| `apps/webapp/test/db/fixtures.ts`                        | `seedOrgWithPool()`, `seedBooking()`                             |
+| `apps/webapp/test/db/harness.db.test.ts`                 | Self-test proving the harness works                              |
+| `apps/webapp/test/db/booking-sources-rollout.db.test.ts` | Rollout compatibility: pre-deploy-1 writes, mixed adoption flags |
 
 The main suite (`pnpm webapp:test`) excludes `test/db/**`, so these files
 never run without a database. Older `*.db.test.ts` files under `app/` gate

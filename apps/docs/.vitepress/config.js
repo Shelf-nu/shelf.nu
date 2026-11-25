@@ -122,6 +122,10 @@ export default {
             link: "/booking-conflict-queries",
           },
           {
+            text: "Booking source locations",
+            link: "/booking-source-locations",
+          },
+          {
             text: "Security Review Agent",
             link: "/security-review-agent",
           },
