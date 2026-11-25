@@ -87,17 +87,138 @@ test("gives no fallback for a location that is not an embedded resource, or with
   assert.equal(helper(undefined, metaInThisBuild), null);
 });
 
-test("downloadAsync retries with the fallback name and only then rethrows", () => {
+test("fromMetadata remembers the fallback name on the asset", () => {
   assert.match(
     assetSource,
-    /asset\._embeddedResourceUriFromBundle = embeddedResourceUriFromMetadata\(asset\.uri, meta\)/,
-    "fromMetadata must remember the fallback name"
+    /asset\._embeddedResourceUriFromBundle = embeddedResourceUriFromMetadata\(asset\.uri, meta\)/
   );
-  const retry = assetSource.match(
-    /catch \(error\) \{[\s\S]*?const fallbackUri = this\._embeddedResourceUriFromBundle;[\s\S]*?if \(!fallbackUri\) \{\s*throw error;\s*\}[\s\S]*?downloadAsync\(fallbackUri, this\.hash, this\.type\)/
+});
+
+/**
+ * The installed `Asset.prototype.downloadAsync`, run against a controlled downloader.
+ *
+ * `Asset.js` imports React Native, so it cannot be imported here. The method is the last
+ * member of the class, so its source is cut out and evaluated on a bare object.
+ *
+ * @param downloader - Stands in for the native `ExpoAsset.downloadAsync`
+ * @param fallbackUri - What `fromMetadata` stored, or null when there is no other name
+ * @returns The asset-like object and the list of URIs the downloader was asked for
+ */
+function makeAsset(downloader, fallbackUri) {
+  const match = assetSource.match(
+    /async downloadAsync\(\) \{[\s\S]*?\n {4}\}\n\}\s*\n\/\/# sourceMappingURL/
   );
-  assert.ok(
-    retry,
-    "downloadAsync must fall back, and rethrow when there is no fallback"
+  assert.ok(match, "could not find Asset.downloadAsync in the installed file");
+  const methodSource = match[0].replace(/\n\}\s*\n\/\/# sourceMappingURL$/, "");
+  const asked = [];
+  const method = new Function(
+    "downloadAsync",
+    "Platform",
+    "ImageAssets",
+    "AssetUris",
+    `return (${methodSource.replace(
+      "async downloadAsync()",
+      "async function()"
+    )});`
+  )(
+    (uri, hash, type) => {
+      asked.push(uri);
+      return downloader(uri, hash, type);
+    },
+    { OS: "android" },
+    {},
+    {}
   );
+  const asset = {
+    uri: storedFromOldBuild,
+    hash: "hash",
+    type: "ttf",
+    localUri: null,
+    downloaded: false,
+    downloading: false,
+    _downloadCallbacks: [],
+    _embeddedResourceUriFromBundle: fallbackUri,
+    downloadAsync: method,
+  };
+  return { asset, asked };
+}
+
+const missing = () => Promise.reject(new Error("Unable to download asset"));
+
+test("downloadAsync uses the stored location when it loads, and asks for nothing else", async () => {
+  const { asset, asked } = makeAsset(
+    () => Promise.resolve("file:///cache/a.ttf"),
+    nameInThisBuild
+  );
+  await asset.downloadAsync();
+  assert.deepEqual(asked, [storedFromOldBuild]);
+  assert.equal(asset.localUri, "file:///cache/a.ttf");
+  assert.equal(asset.uri, storedFromOldBuild);
+  assert.equal(asset.downloaded, true);
+});
+
+test("downloadAsync loads the file under this build's name when the stored one is gone", async () => {
+  const { asset, asked } = makeAsset(
+    (uri) =>
+      uri === nameInThisBuild
+        ? Promise.resolve("file:///cache/a.ttf")
+        : missing(),
+    nameInThisBuild
+  );
+  await asset.downloadAsync();
+  assert.deepEqual(asked, [storedFromOldBuild, nameInThisBuild]);
+  assert.equal(asset.localUri, "file:///cache/a.ttf");
+  assert.equal(asset.uri, nameInThisBuild);
+  assert.equal(asset.downloaded, true);
+});
+
+test("downloadAsync rejects with the retry's error when both names are gone", async () => {
+  const { asset, asked } = makeAsset(
+    (uri) => Promise.reject(new Error(`missing ${uri}`)),
+    nameInThisBuild
+  );
+  await assert.rejects(asset.downloadAsync(), {
+    message: `missing ${nameInThisBuild}`,
+  });
+  assert.deepEqual(asked, [storedFromOldBuild, nameInThisBuild]);
+  assert.equal(asset.downloaded, false);
+  assert.equal(asset.downloading, false);
+});
+
+test("downloadAsync rethrows the original error when there is no other name", async () => {
+  const { asset, asked } = makeAsset(missing, null);
+  await assert.rejects(asset.downloadAsync(), {
+    message: "Unable to download asset",
+  });
+  assert.deepEqual(asked, [storedFromOldBuild]);
+  assert.equal(asset.downloaded, false);
+});
+
+test("a second caller settles only after the retry has finished", async () => {
+  let releaseRetry;
+  const retryGate = new Promise((resolve) => {
+    releaseRetry = resolve;
+  });
+  const { asset } = makeAsset(
+    (uri) =>
+      uri === nameInThisBuild
+        ? retryGate.then(() => "file:///cache/a.ttf")
+        : missing(),
+    nameInThisBuild
+  );
+  const first = asset.downloadAsync();
+  let secondSettled = false;
+  const second = asset.downloadAsync().then(() => {
+    secondSettled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    secondSettled,
+    false,
+    "the waiting caller must not settle before the retry"
+  );
+  releaseRetry();
+  await Promise.all([first, second]);
+  assert.equal(secondSettled, true);
+  assert.equal(asset.localUri, "file:///cache/a.ttf");
 });
