@@ -120,6 +120,7 @@ test("Auto is posted in the shape the server reads", () => {
 test("the row's screen-reader label names the sources and a short one", () => {
   assert.equal(
     describeSourcesForA11y({
+      type: "QUANTITY_TRACKED",
       slices: [
         slice({
           sources: [
@@ -131,5 +132,48 @@ test("the row's screen-reader label names the sources and a short one", () => {
     }),
     ", units from Demo Warehouse 8 · Unplaced 7, Short at Demo Warehouse"
   );
-  assert.equal(describeSourcesForA11y({ slices: [slice()] }), "");
+  assert.equal(
+    describeSourcesForA11y({ type: "QUANTITY_TRACKED", slices: [slice()] }),
+    ""
+  );
+});
+
+test("a slice with planned sources is described once, never also by where it left from", () => {
+  assert.equal(
+    describeSourcesForA11y({
+      type: "QUANTITY_TRACKED",
+      slices: [
+        slice({
+          sources: [part("Demo Warehouse", 15)],
+          sourceLocation: { id: "loc-old", name: "Old Shelf" },
+        }),
+      ],
+    }),
+    ", units from Demo Warehouse"
+  );
+});
+
+test("a slice without planned sources is described by where its units left from", () => {
+  assert.equal(
+    describeSourcesForA11y({
+      type: "QUANTITY_TRACKED",
+      slices: [
+        slice({ sourceLocation: { id: "cam", name: "Camera Room" } }),
+        slice({
+          bookingAssetId: "ba-kit",
+          assetKitId: "ak-1",
+          kit: { id: "kit-1", name: "Event kit" },
+          sourceLocation: { id: "stu", name: "Studio" },
+        }),
+      ],
+    }),
+    ", booked units from Camera Room"
+  );
+  assert.equal(
+    describeSourcesForA11y({
+      type: "INDIVIDUAL",
+      slices: [slice({ sourceLocation: { id: "cam", name: "Camera Room" } })],
+    }),
+    ""
+  );
 });

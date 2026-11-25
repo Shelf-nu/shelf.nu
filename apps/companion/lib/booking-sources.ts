@@ -82,23 +82,36 @@ export function adjustSheetSources(slice: BookingAssetSlice | null): {
 }
 
 /**
- * The sources of a booking row for its screen-reader label: ", units from
- * Demo Warehouse 8 · Unplaced 7, Short at Demo Warehouse". The row's explicit
- * label replaces the text of its children, so the visible line is not
- * announced on its own.
+ * Where a booking row's units come from, for its screen-reader label. The
+ * row's explicit label replaces the text of its children, so the visible
+ * lines are not announced on their own.
+ *
+ * Each standalone slice is described once: its planned sources when it has
+ * them (", units from Demo Warehouse 8 · Unplaced 7, Short at Demo
+ * Warehouse"), else the location its units left from at check-out, gathered
+ * into ", booked units from Camera Room, Studio". Kit slices and individual
+ * assets add nothing.
  *
  * @param asset - One booking asset row
- * @returns The fragment, or an empty string when no slice has sources
+ * @returns The fragment, or an empty string when no slice has either
  */
 export function describeSourcesForA11y(
-  asset: Pick<BookingAsset, "slices">
+  asset: Pick<BookingAsset, "type" | "slices">
 ): string {
-  const lines = (asset.slices ?? []).flatMap((slice) => {
+  if (asset.type !== "QUANTITY_TRACKED") return "";
+  const planned: string[] = [];
+  const leftFrom: string[] = [];
+  for (const slice of asset.slices ?? []) {
+    if (slice.kit) continue;
     const line = sliceSourceLine(slice);
-    return line ? [line] : [];
-  });
-  if (lines.length === 0) return "";
-  return lines
-    .map((line) => [`, units from ${line.text}`, ...line.warnings].join(", "))
-    .join("");
+    if (line) {
+      planned.push([`, units from ${line.text}`, ...line.warnings].join(", "));
+    } else if (slice.sourceLocation) {
+      leftFrom.push(slice.sourceLocation.name);
+    }
+  }
+  return (
+    planned.join("") +
+    (leftFrom.length > 0 ? `, booked units from ${leftFrom.join(", ")}` : "")
+  );
 }

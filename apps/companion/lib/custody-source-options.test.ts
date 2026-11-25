@@ -18,6 +18,7 @@ import {
   assignSourceRequestValue,
   checkoutSourceAnswers,
   checkoutSourceOptions,
+  checkoutSourceRowA11yLabel,
   defaultAssignSourceOption,
   defaultCheckoutSource,
   describeHolderSources,
@@ -340,6 +341,30 @@ test("picking As planned again sends nothing for that slice", () => {
       "slice-2",
     ]),
     { "slice-2": "stu" }
+  );
+});
+
+test("a screen reader hears As planned as a choice, not a place", () => {
+  const rows = checkoutSourceOptions(
+    question({
+      defaultLocationId: AS_PLANNED_SOURCE,
+      plannedSummary: "Camera Room 6 · Studio 4",
+    })
+  );
+  assert.equal(
+    checkoutSourceRowA11yLabel("Gloves", rows[0]),
+    "Gloves, as planned, Camera Room 6 · Studio 4"
+  );
+  assert.equal(
+    checkoutSourceRowA11yLabel("Gloves", rows[1]),
+    "Gloves from Camera Room, 60 boxes"
+  );
+  assert.equal(
+    checkoutSourceRowA11yLabel("Gloves", {
+      value: AS_PLANNED_SOURCE,
+      label: "As planned",
+    }),
+    "Gloves, as planned"
   );
 });
 

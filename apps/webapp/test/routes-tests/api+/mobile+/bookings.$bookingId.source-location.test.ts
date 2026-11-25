@@ -8,7 +8,9 @@
  * 2. `checkoutSourceQuestions` lists the pools that sit at two or more
  *    locations and have not gone out yet, with the location the server picks
  *    when nothing is sent, so the phone can ask the same question the web
- *    check-out dialogs ask.
+ *    check-out dialogs ask. An app with the `booking-sources` capability also
+ *    gets the plan behind "As planned" (`plannedSummary`); an older app never
+ *    does.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.$bookingId.ts} loader under test
  */
@@ -58,6 +60,9 @@ vi.mock("~/database/db.server", () => ({
     assetLocation: { findMany: vi.fn().mockResolvedValue([]) },
     custody: { findMany: vi.fn().mockResolvedValue([]) },
     location: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: a converted slice's planned source rows, read for the plan the
+    // "As planned" option names (and an older phone's default).
+    bookingAssetSource: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -122,6 +127,7 @@ beforeEach(() => {
   // case may have replaced.
   vi.mocked(db.bookingAsset.findMany).mockResolvedValue([] as never);
   vi.mocked(db.assetLocation.findMany).mockResolvedValue([] as never);
+  vi.mocked(db.bookingAssetSource.findMany).mockResolvedValue([] as never);
   requireMobileAuthMock.mockResolvedValue({
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
@@ -178,11 +184,12 @@ function bookingRow(
   };
 }
 
-async function getBooking() {
+async function getBooking(headers?: Record<string, string>) {
   const response = await loader(
     createLoaderArgs({
       request: new Request(
-        "http://localhost:3000/api/mobile/bookings/booking-1"
+        "http://localhost:3000/api/mobile/bookings/booking-1",
+        { headers }
       ),
       params: { bookingId: "booking-1" },
     })
@@ -202,6 +209,7 @@ async function getBooking() {
       sliceId: string;
       defaultLocationId: string | null;
       placements: Array<{ locationId: string; placed: number }>;
+      plannedSummary?: string;
     }>;
   };
 }
@@ -333,6 +341,95 @@ describe("GET /api/mobile/bookings/:bookingId source locations", () => {
         { locationId: "loc-store", placed: 60 },
       ],
     });
+  });
+
+  it("names the plan behind As planned for an app with the capability, and only for it", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow("RESERVED", [
+        {
+          id: "ba-pool",
+          quantity: 10,
+          assetKitId: null,
+          sourceLocationId: null,
+          asset: POOL,
+        },
+      ]) as never
+    );
+    // The questions read sees a converted (MANUAL) slice still at 0 out.
+    vi.mocked(db.bookingAsset.findMany).mockImplementation(((args: {
+      where?: { checkedOutQuantity?: number };
+    }) =>
+      Promise.resolve(
+        args?.where?.checkedOutQuantity === 0
+          ? [
+              {
+                id: "ba-pool",
+                assetId: "pool-1",
+                quantity: 10,
+                sourceAllocation: "MANUAL",
+              },
+            ]
+          : []
+      )) as never);
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        id: "pool-1",
+        title: "AA Batteries",
+        quantity: 100,
+        unitOfMeasure: "pcs",
+      },
+    ] as never);
+    vi.mocked(db.assetLocation.findMany).mockResolvedValue([
+      {
+        assetId: "pool-1",
+        locationId: "loc-studio",
+        quantity: 40,
+        location: { name: "Studio" },
+      },
+      {
+        assetId: "pool-1",
+        locationId: "loc-store",
+        quantity: 60,
+        location: { name: "Store Room" },
+      },
+    ] as never);
+    // The plan: 6 from Store Room, 4 still needing a location. The read
+    // honours its `kind` filter, as the database would.
+    const planRows = [
+      { kind: "LOCATION", locationId: "loc-store", quantity: 6 },
+      { kind: "UNASSIGNED", locationId: null, quantity: 4 },
+    ].map((row) => ({
+      ...row,
+      bookingAssetId: "ba-pool",
+      outQuantity: 0,
+      releasedQuantity: 0,
+    }));
+    vi.mocked(db.bookingAssetSource.findMany).mockImplementation(((args: {
+      where?: { kind?: { in?: string[] } };
+    }) =>
+      Promise.resolve(
+        planRows.filter(
+          (row) => args?.where?.kind?.in?.includes(row.kind) ?? true
+        )
+      )) as never);
+
+    const capable = await getBooking({
+      "X-Shelf-Capabilities": "booking-sources",
+    });
+    expect(capable.checkoutSourceQuestions[0]).toMatchObject({
+      sliceId: "ba-pool",
+      defaultLocationId: "__allocation__",
+      plannedSummary: "Store Room 6 · Needs a location 4",
+    });
+
+    const older = await getBooking();
+    expect(older.checkoutSourceQuestions[0]).toMatchObject({
+      sliceId: "ba-pool",
+      defaultLocationId: "loc-store",
+    });
+    expect(older.checkoutSourceQuestions[0]).not.toHaveProperty(
+      "plannedSummary"
+    );
   });
 
   it("asks nothing on a booking that can no longer check out", async () => {

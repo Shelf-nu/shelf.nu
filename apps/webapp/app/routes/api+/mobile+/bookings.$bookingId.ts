@@ -1108,6 +1108,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             request,
             "booking-sources"
           ),
+          // The phone's "As planned" row names the plan; only a capable
+          // client gets it (the loader checks the capability too).
+          withPlannedSummary: true,
         })
       : [];
 

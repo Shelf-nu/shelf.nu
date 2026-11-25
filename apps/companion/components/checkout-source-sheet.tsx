@@ -39,6 +39,7 @@ import {
   AS_PLANNED_SOURCE,
   checkoutSourceAnswers,
   checkoutSourceOptions,
+  checkoutSourceRowA11yLabel,
   defaultCheckoutSource,
 } from "@/lib/custody-source-options";
 import { useSheetColumnStyle } from "@/lib/use-content-gutter";
@@ -164,11 +165,10 @@ export function CheckoutSourceSheet({
                       activeOpacity={0.7}
                       accessibilityRole="radio"
                       accessibilityState={{ selected, disabled: isSubmitting }}
-                      accessibilityLabel={
-                        option.hint
-                          ? `${question.title} from ${option.label}, ${option.hint}`
-                          : `${question.title} from ${option.label}`
-                      }
+                      accessibilityLabel={checkoutSourceRowA11yLabel(
+                        question.title,
+                        option
+                      )}
                     >
                       <Ionicons
                         name={selected ? "radio-button-on" : "radio-button-off"}

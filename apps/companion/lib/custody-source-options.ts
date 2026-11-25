@@ -238,6 +238,25 @@ export function checkoutSourceOptions(
 }
 
 /**
+ * What a screen reader says for one check-out row: "Gloves from Studio, 40
+ * boxes" for a location, "Gloves, as planned, Camera Room 6 · Studio 4" for
+ * the "As planned" row (it is no place the units come "from").
+ *
+ * @param title - The pool's name
+ * @param option - One row from {@link checkoutSourceOptions}
+ */
+export function checkoutSourceRowA11yLabel(
+  title: string,
+  option: SourcePickerOption
+): string {
+  const base =
+    option.value === AS_PLANNED_SOURCE
+      ? `${title}, as planned`
+      : `${title} from ${option.label}`;
+  return option.hint ? `${base}, ${option.hint}` : base;
+}
+
+/**
  * The row a check-out question opens on: the server's own default, which is
  * {@link AS_PLANNED_SOURCE} for a slice with sources planned. A null default
  * means the unplaced units (every location is empty but unplaced units are

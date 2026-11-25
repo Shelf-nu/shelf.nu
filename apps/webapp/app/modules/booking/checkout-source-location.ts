@@ -28,6 +28,10 @@
  * @see {@link file://../asset/placement-reconcile.server.ts} what check-in does with the answer
  */
 
+import {
+  AS_PLANNED_SOURCE,
+  asPlannedSourceLabel,
+} from "@shelf/quantity-control";
 import { z } from "zod";
 import type { StockEvent } from "~/modules/consumption-log/stock-ledger";
 import {
@@ -52,9 +56,11 @@ export const UNPLACED_SOURCE_FORM_VALUE = "";
  * default for every slice that dispatches through its source rows (a
  * converted group, or a LEGACY group that converts at check-out), so leaving
  * the select alone never forces a source the plan avoids. Parsers drop it,
- * so it reaches the server as "not picked".
+ * so it reaches the server as "not picked". The same value the companion's
+ * "As planned" row sends: both read `AS_PLANNED_SOURCE` from
+ * `@shelf/quantity-control`.
  */
-export const ALLOCATION_SOURCE_FORM_VALUE = "__allocation__";
+export const ALLOCATION_SOURCE_FORM_VALUE = AS_PLANNED_SOURCE;
 
 /** Prefix of the form fields that carry a source per slice or asset. */
 export const SOURCE_LOCATION_FIELD_PREFIX = "sourceLocation.";
@@ -303,13 +309,14 @@ export function checkoutSourceOptions(
 /**
  * The words of the "as planned" option: the plan itself when it is known
  * ("As planned: Demo Warehouse 8 · Unplaced 7"), else just "As planned".
+ * `asPlannedSourceLabel` from `@shelf/quantity-control`, which the companion
+ * reads too.
  *
  * @param plannedSummary - {@link CheckoutSourceQuestion.plannedSummary}
  * @returns The option label
  */
-export function asPlannedLabel(plannedSummary?: string | null): string {
-  return plannedSummary ? `As planned: ${plannedSummary}` : "As planned";
-}
+export const asPlannedLabel: (plannedSummary?: string | null) => string =
+  asPlannedSourceLabel;
 
 /**
  * Whether a check-out asks where this pool's units come from.

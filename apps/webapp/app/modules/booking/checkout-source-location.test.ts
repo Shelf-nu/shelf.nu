@@ -1,3 +1,7 @@
+import {
+  AS_PLANNED_SOURCE,
+  asPlannedSourceLabel,
+} from "@shelf/quantity-control";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -6,6 +10,7 @@ import type {
 } from "./checkout-source-location";
 import {
   ALLOCATION_SOURCE_FORM_VALUE,
+  asPlannedLabel,
   checkinPlacementSources,
   checkinStockEvents,
   isManualSourceSlice,
@@ -638,5 +643,18 @@ describe("untaggedCheckinPlacementSources", () => {
         consumed: 6,
       })
     ).toEqual([{ locationId: "loc-studio", quantity: 6 }]);
+  });
+});
+
+describe("as planned", () => {
+  it("is the value and the words the companion uses", () => {
+    // why: the web select and the phone sheet send the same sentinel and
+    // name the plan the same way; both read the shared package.
+    expect(ALLOCATION_SOURCE_FORM_VALUE).toBe(AS_PLANNED_SOURCE);
+    expect(asPlannedLabel).toBe(asPlannedSourceLabel);
+    expect(asPlannedLabel("Demo Warehouse 8 · Unplaced 7")).toBe(
+      "As planned: Demo Warehouse 8 · Unplaced 7"
+    );
+    expect(asPlannedLabel()).toBe("As planned");
   });
 });
