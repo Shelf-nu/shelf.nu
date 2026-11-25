@@ -1043,6 +1043,51 @@ describe("booking source contract", () => {
     }
   });
 
+  it("a converted group's log updated on columns the checks do not read queues no check", async () => {
+    const seeded = await commitSeed(seedConvertedGroup);
+    const tempTables: Array<{ checked: string | null }> = [];
+    try {
+      const [locationId] = seeded.locationIds;
+      const result = await commitAndExpect(async (tx) => {
+        // A location set on the log, then cleared the way deleting that
+        // location does (ON DELETE SET NULL), and a note edit.
+        await tx.$executeRaw`
+          UPDATE "ConsumptionLog" SET "locationId" = ${locationId}
+          WHERE "id" = ${seeded.logId}
+        `;
+        await tx.$executeRaw`
+          UPDATE "ConsumptionLog" SET "locationId" = NULL, "note" = 'edited'
+          WHERE "id" = ${seeded.logId}
+        `;
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        const rows = await tx.$queryRaw<Array<{ checked: string | null }>>`
+          SELECT to_regclass('pg_temp.booking_source_checked')::text AS "checked"
+        `;
+        tempTables.push(...rows);
+      });
+      expect(result).toEqual({ ok: true });
+      expect(tempTables).toEqual([{ checked: null }]);
+    } finally {
+      await cleanup([seeded]);
+    }
+  });
+
+  it("a quantity change on a converted group's log still queues check 9", async () => {
+    const seeded = await commitSeed(seedConvertedGroup);
+    try {
+      // Only the log changes: its 2 shared units no longer cover 3.
+      const result = await commitAndExpect(async (tx) => {
+        await tx.$executeRaw`
+          UPDATE "ConsumptionLog" SET "quantity" = 3
+          WHERE "id" = ${seeded.logId}
+        `;
+      });
+      expectCheckFailure(result, 9);
+    } finally {
+      await cleanup([seeded]);
+    }
+  });
+
   it("a LEGACY slice inserted into a group that already has shares fails check 2", async () => {
     // Committed first, so the slice insert alone must bring the group check:
     // the booking has no slice, only a RETURN log fully covered by an

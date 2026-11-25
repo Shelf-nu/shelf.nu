@@ -223,9 +223,32 @@ describe("computeCandidateShares", () => {
 
   it("property: per-slice candidate totals equal attributeDispositionsByBookingAsset", () => {
     const rand = prng(20261111);
+    // How often each case the generator aims for came up, so a change to the
+    // generator that stops producing one fails here instead of passing idly.
+    const seen = {
+      taggedInGroup: 0,
+      taggedOutside: 0,
+      untagged: 0,
+      kitSlice: 0,
+      untaggedOverflow: 0,
+    };
     for (let i = 0; i < 500; i++) {
       const { slices, logs } = generateGroup(rand);
       const shares = computeCandidateShares({ slices, logs });
+      const sliceIds = new Set(slices.map((s) => s.id));
+      for (const l of logs) {
+        if (l.bookingAssetId === null) seen.untagged++;
+        else if (sliceIds.has(l.bookingAssetId)) seen.taggedInGroup++;
+        else seen.taggedOutside++;
+      }
+      seen.kitSlice += slices.filter((s) => s.assetKitId !== null).length;
+      seen.untaggedOverflow += shares.filter(
+        (sh) =>
+          sh.origin === "OVERFLOW" &&
+          logs.some(
+            (l) => l.id === sh.consumptionLogId && l.bookingAssetId === null
+          )
+      ).length;
 
       const expected = greedyTotals(slices, logs);
       const actual = totalsBySlice(shares);
@@ -240,6 +263,9 @@ describe("computeCandidateShares", () => {
           .reduce((acc, s) => acc + s.quantity, 0);
         expect(sum).toBe(l.quantity);
       }
+    }
+    for (const count of Object.values(seen)) {
+      expect(count).toBeGreaterThan(0);
     }
   });
 });

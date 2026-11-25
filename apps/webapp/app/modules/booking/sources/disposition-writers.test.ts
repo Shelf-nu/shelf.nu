@@ -19,6 +19,18 @@
  * for it. No other file writes `ConsumptionLog` rows through the client
  * directly, so the writers are the only way in.
  *
+ * Lock order. Inserting a log (or a share) with a `bookingId` makes Postgres
+ * take FOR KEY SHARE on that `Booking` row for the foreign key, and FOR KEY
+ * SHARE waits for a FOR UPDATE holder. A writer holding only an asset lock
+ * that tagged a log with a booking would take that share after the asset,
+ * the reverse of a booking writer (booking FOR UPDATE, then the assets), and
+ * the two could deadlock. Only the booking disposition writers tag a log with
+ * a booking, and they lock the booking first, so they already hold it when
+ * the foreign key asks; every other caller writes logs with no booking (no
+ * `bookingId` in its body, pinned below). The kit detach paths are outside
+ * this inventory: they write no log, but with adoption on a LEGACY group they
+ * convert seeds shares on another booking under the asset lock alone.
+ *
  * @see {@link file://./settlement.ts}
  * @see {@link file://../service.server.ts} `checkinBooking`, `partialCheckinBooking`
  */
@@ -229,6 +241,13 @@ describe("disposition log writers", () => {
     for (const [key, entry] of Object.entries(CALLERS)) {
       const settles = /\bsettleUnits\(/.test(callers.get(key) ?? "");
       expect(settles, key).toBe(entry.writesBookingDispositions);
+    }
+  });
+
+  it("tags a log with a booking only in a booking disposition writer", () => {
+    for (const [key, entry] of Object.entries(CALLERS)) {
+      if (entry.writesBookingDispositions) continue;
+      expect(callers.get(key) ?? "", key).not.toMatch(/\bbookingId\b/);
     }
   });
 

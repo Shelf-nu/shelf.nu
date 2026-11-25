@@ -239,14 +239,16 @@ describe("countUnitsOnBookingsFromLocation", () => {
 
   /** Converted slices with the status of their booking. */
   const convertedSlices = [
-    { id: "ba-on", assetId: "pool-1", status: "ONGOING" },
-    { id: "ba-reserved", assetId: "pool-1", status: "RESERVED" },
-    { id: "ba-done", assetId: "pool-1", status: "COMPLETE" },
+    { id: "ba-on", assetId: "pool-1", status: "ONGOING", mode: "AUTO" },
+    { id: "ba-reserved", assetId: "pool-1", status: "RESERVED", mode: "AUTO" },
+    { id: "ba-done", assetId: "pool-1", status: "COMPLETE", mode: "MANUAL" },
+    { id: "ba-kit", assetId: "pool-1", status: "ONGOING", mode: "KIT" },
   ];
 
   /**
    * Seeds the stubs: `sourceRows` answer the source-row read; the slice read
-   * applies the `id`, `assetId` and `booking.status` filters the reader sends,
+   * applies the `id`, `assetId`, `sourceAllocation` and `booking.status`
+   * filters the reader sends,
    * and the LEGACY read (it filters on `sourceLocationId`) finds nothing.
    */
   function seed(
@@ -260,19 +262,21 @@ describe("countUnitsOnBookingsFromLocation", () => {
           sourceLocationId?: unknown;
           id?: { in: string[] };
           assetId?: { in: string[] };
+          sourceAllocation?: { in: string[] };
           booking?: { status?: { in: string[] } };
         };
       }) => {
         if (args.where.sourceLocationId !== undefined) {
           return Promise.resolve([]);
         }
-        const { id, assetId, booking } = args.where;
+        const { id, assetId, sourceAllocation, booking } = args.where;
         return Promise.resolve(
           convertedSlices
             .filter(
               (s) =>
                 (!id || id.in.includes(s.id)) &&
                 (!assetId || assetId.in.includes(s.assetId)) &&
+                (!sourceAllocation || sourceAllocation.in.includes(s.mode)) &&
                 (!booking?.status || booking.status.in.includes(s.status))
             )
             .map(({ id: sliceId, assetId: sliceAsset }) => ({
@@ -317,6 +321,24 @@ describe("countUnitsOnBookingsFromLocation", () => {
     const counts = await countUnitsOnBookingsFromLocation(args);
 
     expect(counts.get("pool-1")).toBeUndefined();
+  });
+
+  it("counts only rows whose slice is AUTO or MANUAL", async () => {
+    seed([
+      { bookingAssetId: "ba-on", outQuantity: 4 },
+      { bookingAssetId: "ba-kit", outQuantity: 2 },
+    ]);
+
+    const counts = await countUnitsOnBookingsFromLocation(args);
+
+    expect(counts.get("pool-1")).toBe(4);
+    expect(dbMock.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceAllocation: { in: ["AUTO", "MANUAL"] },
+        }),
+      })
+    );
   });
 
   it("issues no converted slice query when no source row is out at the location", async () => {

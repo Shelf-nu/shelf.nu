@@ -110,6 +110,14 @@ describe("BookingSourceEditor", () => {
     ).toMatch(/units inside kits are not part of any location/i);
   });
 
+  it("says that free units include this booking's own planned units", () => {
+    renderEditor();
+
+    expect(
+      screen.getByText(/Free counts loose units only/i).textContent
+    ).toMatch(/include the units this booking already plans from each place/i);
+  });
+
   it("reports each change with the source key", () => {
     const props = renderEditor();
 

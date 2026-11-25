@@ -93,6 +93,8 @@ const store = vitest.hoisted(() => ({
   }>,
   /** The status the booking lock reads. */
   lockedStatus: "DRAFT",
+  /** The window the booking lock reads, for callers that lock it too. */
+  lockedWindow: null as { from: Date; to: Date } | null,
   /** Source rows (`BookingAssetSource`) of converted slices. */
   sourceRows: [] as Array<{
     bookingAssetId: string;
@@ -149,12 +151,14 @@ vitest.mock("~/database/db.server", () => {
     db: {
       $transaction: vitest.fn(),
       $executeRaw: vitest.fn().mockResolvedValue(0),
-      // why: `lockBookingForStatusCheck` is a raw `SELECT … FOR UPDATE` that
-      // returns the status it locked.
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` that returns the
+      // status it locked, and the window when the caller locks that too.
       $queryRaw: vitest
         .fn()
         .mockImplementation(() =>
-          Promise.resolve([{ status: store.lockedStatus }])
+          Promise.resolve([
+            { status: store.lockedStatus, ...(store.lockedWindow ?? {}) },
+          ])
         ),
       booking: {
         findUniqueOrThrow: vitest.fn(),
@@ -468,6 +472,7 @@ beforeEach(() => {
   store.assetTypes = {};
   store.slices = [];
   store.lockedStatus = BookingStatus.DRAFT;
+  store.lockedWindow = null;
   store.sourceRows = [];
   store.bookable = 100;
   store.adoptionEnabled = false;
@@ -1434,6 +1439,7 @@ describe("extendBooking source admission", () => {
     store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
     store.slices = [slice];
     store.lockedStatus = BookingStatus.ONGOING;
+    store.lockedWindow = { from: startedAt, to: currentEnd };
     vitest.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
       id: BOOKING_ID,
       status: BookingStatus.ONGOING,
@@ -1550,6 +1556,37 @@ describe("extendBooking source admission", () => {
     const [, options] = vitest.mocked(getAssetAvailabilityBatch).mock
       .calls[0] as unknown as [string[], { window: { to: Date } }];
     expect(options.window.to).toEqual(newEndDate);
+  });
+
+  it("takes no second pool lock after the facade locked every pool of the booking", async () => {
+    stageBooking("AUTO");
+    store.sourceRows = [
+      { bookingAssetId: "ba-qt-1", quantity: 5, releasedQuantity: 0 },
+    ];
+
+    await extend();
+
+    expect(admitWindowChange).toHaveBeenCalledTimes(1);
+    expect(getAssetAvailabilityBatch).toHaveBeenCalledTimes(1);
+    expect(lockEveryAssetForQuantityUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses without admitting or writing when the end moved between the read and the lock", async () => {
+    const tx = stageBooking("AUTO");
+    store.lockedWindow = {
+      from: startedAt,
+      to: new Date(currentEnd.getTime() + 30 * 60 * 1000),
+    };
+
+    const error = await extend().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect((error as ShelfError).status).toBe(400);
+    expect((error as ShelfError).message).toContain(
+      "The booking changed while you were changing its end date"
+    );
+    expect(admitWindowChange).not.toHaveBeenCalled();
+    expect(tx.booking.update).not.toHaveBeenCalled();
   });
 
   it("converts and admits a LEGACY group when adoption is on", async () => {
@@ -1690,7 +1727,7 @@ describe("removeAssets", () => {
     });
   }
 
-  it("Remove the kit slice after it recorded returns, standalone converted: deletes only that slice under the booking and pool locks, rewriting no source row or share", async () => {
+  it("removing a kit from a converted group deletes only the kit slice, after the booking and pool locks, and writes no source row or share", async () => {
     const tx = stageKitRemoval("AUTO");
 
     await removeKit();

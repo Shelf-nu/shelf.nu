@@ -7,7 +7,6 @@
  * below the units physically out.
  *
  * @see {@link file://./types.ts}
- * @see superpowers/2026-11-10-booking-source-locations-design.md section 6.4
  */
 import { decreaseSliceQuantity } from "@shelf/quantity-control";
 import type { SourceRowState } from "@shelf/quantity-control";

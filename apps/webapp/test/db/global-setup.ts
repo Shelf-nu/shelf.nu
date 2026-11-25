@@ -9,7 +9,10 @@
  * 2. Creates the `anon` and `authenticated` roles when missing. Supabase
  *    provides them; plain Postgres does not. Migrations grant and revoke on
  *    these roles, which fails when a role is absent, so the setup creates
- *    them first.
+ *    them first. It also gives them Supabase's default privileges (every
+ *    new public table granted to both roles), so a migration's REVOKE is
+ *    what leaves a table closed to them, as on Supabase, and the privilege
+ *    tests check that REVOKE rather than plain Postgres's empty defaults.
  * 3. Applies every migration with `prisma migrate deploy`, using the
  *    `@shelf/database` package's Prisma binary and schema. `DATABASE_URL`
  *    and `DIRECT_URL` point at the test database for that child process
@@ -31,7 +34,9 @@ const DATABASE_PACKAGE_DIR = fileURLToPath(
 );
 
 /**
- * Creates the Supabase API roles when the database does not have them.
+ * Creates the Supabase API roles when the database does not have them, and
+ * grants them every table this role creates in `public` from now on, the
+ * way Supabase's default privileges do. Both statements are idempotent.
  *
  * @param url - Validated test database URL.
  */
@@ -49,6 +54,12 @@ async function ensureSupabaseRoles(url: string): Promise<void> {
         END IF;
       END
       $$;
+    `);
+    // Applies to tables created by the connecting role, which is also the
+    // role `migrate` runs as.
+    await client.$executeRawUnsafe(`
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT ALL ON TABLES TO anon, authenticated;
     `);
   } finally {
     await client.$disconnect();

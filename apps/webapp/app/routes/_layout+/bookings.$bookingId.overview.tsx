@@ -13,11 +13,6 @@ import type {
   MetaFunction,
 } from "react-router";
 import { z } from "zod";
-import {
-  isStandalonePoolSlice,
-  selectPoolSourceCell,
-  type PoolSourceCell,
-} from "~/components/booking/booking-source-cell";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -83,6 +78,11 @@ import {
   getSliceSourceSummaries,
   type SliceSourceSummary,
 } from "~/modules/booking/sources/booking-sources.server";
+import {
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+  type PoolSourceCell,
+} from "~/modules/booking/sources/pool-source-cell";
 import {
   buildArchivedAssets,
   buildUnavailableAssets,

@@ -2041,15 +2041,17 @@ enum DispositionShareOrigin {
  * `organizationId` CASCADE), the CHECK constraints and the unique key
  * `BookingAssetSource_slice_kind_location_key` on
  * `(bookingAssetId, kind, locationId) NULLS NOT DISTINCT`, which Prisma
- * cannot express. All are registered in `src/protected-indexes.ts`.
+ * cannot express. The foreign keys and the unique key are registered in
+ * `src/protected-indexes.ts`. Prisma does not model CHECK constraints and
+ * its schema diffs leave them alone, so they are not registered.
  */
 model BookingAssetSource {
   id               String            @id @default(cuid())
   organizationId   String
   bookingAssetId   String
   kind             BookingSourceKind
-  // Set if and only if `kind` is LOCATION. NO ACTION: a location with source
-  // rows must be evacuated before it can be deleted.
+  // Set if and only if `kind` is LOCATION. NO ACTION: deleting a location
+  // that a source row still names fails, so the rows are moved off it first.
   locationId       String?
   // Planned units on this row (its share of the slice's booked quantity).
   quantity         Int

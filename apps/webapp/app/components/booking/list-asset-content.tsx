@@ -14,6 +14,7 @@ import type {
   PartialCheckinDetailsType,
   PartialCheckoutDetailsType,
 } from "~/modules/booking/service.server";
+import type { PoolSourceCell } from "~/modules/booking/sources/pool-source-cell";
 import type { BookingWithCustodians } from "~/modules/booking/types";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import {
@@ -34,7 +35,7 @@ import {
   InsufficientStockBadge,
   PendingReturnBadge,
 } from "./availability-label";
-import { BookingSourceCell, type PoolSourceCell } from "./booking-source-cell";
+import { BookingSourceCell } from "./booking-source-cell";
 import { FulfilsModelBadge } from "./fulfils-model-badge";
 import { NextReservationBadge } from "./next-reservation-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";

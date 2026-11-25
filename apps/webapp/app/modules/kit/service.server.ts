@@ -50,7 +50,6 @@ import {
   assertBulkDeleteConfirmed,
   assertDeleteConfirmedFor,
 } from "~/utils/delete-confirmation.server";
-import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isLikeShelfError,
@@ -133,6 +132,7 @@ import {
   detachKitSliceSources,
   isConvertedSlice,
   lockKitDetachPools,
+  probeKitDetachPools,
   resizeKitSourceRows,
 } from "../booking/sources/kit-sources.server";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
@@ -394,6 +394,12 @@ export type RemovedPlanningBookingSlice = {
  * {@link getBookingImpactForAssetKits} (see
  * `.claude/rules/org-scope-user-supplied-ids.md`).
  *
+ * Every membership-removal path calls this first, so it takes the path's one
+ * asset lock ({@link lockKitDetachPools}): the assets of every membership in
+ * `assetKitIds`, when any of their slices is converted or adoption is on. The
+ * deletes below and the source detach that follows run under it, and every
+ * read here happens after it.
+ *
  * @param tx Active transaction — must be the one deleting the `AssetKit` rows
  * @param assetKitIds `AssetKit` rows about to be deleted
  * @param options.actorUserId Acting user, for the event actor + note attribution
@@ -403,11 +409,6 @@ export type RemovedPlanningBookingSlice = {
  *   the kit ceased to exist); `"units-not-returned"` when a check-in on another
  *   booking consumed, lost or damaged the kit's last units of the asset;
  *   `"membership-removed"` otherwise.
- * Every detach path calls this first, so it takes the path's one asset lock
- * ({@link lockKitDetachPools}): the assets of every membership in
- * `assetKitIds`, when any of their slices is converted or adoption is on. The
- * deletes below and the source detach that follows run under it, and every
- * read here happens after it.
  *
  * @returns One entry per deleted row, for callers that need to report further.
  */
@@ -6725,37 +6726,35 @@ export async function updateKitAssets({
     let locationCascadedAssetIds = new Set<string>();
 
     /**
-     * Assets whose kit slices the removal below detaches. When one of their
-     * memberships in this kit has a converted slice, or adoption is on (a
-     * LEGACY group may then convert), they join the first lock statement, so
-     * the edit takes one sorted lock over every asset it touches and the
-     * detach's own locks re-lock rows already held. With adoption off a LEGACY
-     * slice cannot become converted, so the modes read with the kit decide.
+     * Memberships of this kit whose kit slices the removal below detaches.
+     * The probe over them is the transaction's first statement and its assets
+     * join the first lock, so the edit takes one sorted lock over every asset
+     * it touches and the detach's own locks re-lock rows already held.
      */
     const removedAssetIds = new Set(
       (addOnly ? [] : removedAssets).map((asset) => asset.id)
     );
-    const removedMemberships = (kitWithRelations.assetKits ?? []).filter((ak) =>
-      removedAssetIds.has(ak.asset.id)
-    );
-    const removalTouchesSources =
-      removedMemberships.length > 0 &&
-      (BOOKING_SOURCES_ENABLED ||
-        removedMemberships.some((ak) =>
-          ak.asset.bookingAssets.some(
-            (ba) => ba.assetKitId === ak.id && isConvertedSlice(ba)
-          )
-        ));
-    const firstLockAssetIds = removalTouchesSources
-      ? [...archiveGuardAssetIds, ...removedAssetIds]
-      : archiveGuardAssetIds;
+    const removedMembershipIds = (kitWithRelations.assetKits ?? [])
+      .filter((ak) => removedAssetIds.has(ak.asset.id))
+      .map((ak) => ak.id);
 
     await db.$transaction(async (tx) => {
+      // Which removed assets carry sources (a converted kit slice, or any
+      // when adoption is on), read inside the transaction so the decision is
+      // as fresh as the lock that follows. No query when nothing is removed.
+      const detachPoolIds = await probeKitDetachPools(tx, {
+        organizationId,
+        assetKitIds: removedMembershipIds,
+      });
       // The archived check above is a read; an archive committing before this
       // write would still join the kit. Re-checked under the row lock the
       // archive paths take, so the two serialize (issue #382). The same
-      // statement locks the removed assets when their slices carry sources.
-      await lockAssetsForArchiveGuard(tx, firstLockAssetIds, organizationId);
+      // statement locks the removed assets whose slices carry sources.
+      await lockAssetsForArchiveGuard(
+        tx,
+        [...archiveGuardAssetIds, ...detachPoolIds],
+        organizationId
+      );
       await assertAssetsAreNotArchived(
         { assetIds: archiveGuardAssetIds, organizationId, actorUserId: userId },
         tx

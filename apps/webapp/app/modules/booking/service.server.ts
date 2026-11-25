@@ -14437,13 +14437,21 @@ export async function extendBooking({
       async (tx) => {
         // The booking row is locked before any stock row, the order check-out
         // and check-in take them in, so a check-in of this booking and this
-        // change queue behind each other instead of deadlocking.
-        const lockedStatus = await lockBookingForStatusCheck(
+        // change queue behind each other instead of deadlocking. Every check
+        // below measures the window read before the lock, so a status or end
+        // that moved in between refuses here instead of measuring the wrong
+        // interval.
+        const locked = await lockBookingWithWindow(
           tx,
           booking.id,
           organizationId
         );
-        if (lockedStatus !== booking.status) throw bookingChangedError();
+        if (
+          locked.status !== booking.status ||
+          locked.to.getTime() !== booking.to.getTime()
+        ) {
+          throw bookingChangedError();
+        }
 
         // Only a later end adds time to the booking's window; an earlier end
         // shrinks it and cannot overlap anything it did not already overlap.
@@ -14654,12 +14662,16 @@ export async function extendBooking({
             // check-out measuring the same pool waits for this end date to
             // land instead of both committing against one stale read. Taken in
             // sorted id order, like every other multi-pool locker, so two
-            // transactions over the same pools cannot deadlock.
-            await lockEveryAssetForQuantityUpdate(
-              tx,
-              [...quantityUnitsOut.keys()],
-              organizationId
-            );
+            // transactions over the same pools cannot deadlock. With sources
+            // in play the facade already locked every pool of the booking,
+            // a superset of these, so a second statement would add nothing.
+            if (!sourcesInPlay) {
+              await lockEveryAssetForQuantityUpdate(
+                tx,
+                [...quantityUnitsOut.keys()],
+                organizationId
+              );
+            }
             const availabilityByAsset = await getAssetAvailabilityBatch(
               [...quantityUnitsOut.keys()],
               {

@@ -8,18 +8,21 @@
  * its own target, never merging a row whole:
  * - out units: the unplaced units while they physically cover them, else the
  *   slice's UNKNOWN row (partial move of `quantity`, `out`, `dispatchedTotal`);
- * - history (`dispatchedTotal - out`, with its shares): the slice's UNKNOWN row;
+ * - history (`dispatchedTotal - out`, with its shares): the slice's UNKNOWN
+ *   row;
  * - pending units: AUTO slices re-allocate them by the allocation rule over
  *   the remaining sources, involuntary (what fits nowhere goes to
  *   UNASSIGNED); MANUAL slices put them on UNASSIGNED;
  * - released units: UNASSIGNED.
+ *
  * Every part of every row at every deleted location is planned first and
  * summed per target row, so each target is written once and two deleted
  * locations never claim the same free units. Slices on RESERVED, ONGOING and
  * OVERDUE bookings are planned first; drafts and finished bookings hold
- * nothing, so their parts go wherever free units remain and claim none. The emptied rows are deleted,
- * and the function refuses (500, nothing deleted) when a row is still at a
- * deleted location afterwards, before the foreign key would.
+ * nothing, so their parts go wherever free units remain and claim none. The
+ * emptied rows are deleted, and the function refuses (500, nothing deleted)
+ * when a row is still at a deleted location afterwards, before the foreign
+ * key would.
  *
  * Locking: asset locks only, one sorted statement, before every read that
  * decides; source rows and shares are the only writes. Workspaces without

@@ -673,6 +673,10 @@ CREATE CONSTRAINT TRIGGER booking_source_contract_share
 
 -- A WHEN clause cannot name OLD on INSERT or NEW on DELETE, so the log
 -- trigger is one per event. Each condition reads only the row being written.
+-- An update queues only when it changes a column the checks read from a log
+-- ("bookingId", "assetId", "quantity", "category") or its slice tag
+-- ("bookingAssetId"), so a location foreign key set to NULL, a note edit or
+-- any other column change on a booking log queues nothing.
 CREATE CONSTRAINT TRIGGER booking_source_contract_log_insert
   AFTER INSERT ON "ConsumptionLog"
   DEFERRABLE INITIALLY DEFERRED
@@ -684,7 +688,16 @@ CREATE CONSTRAINT TRIGGER booking_source_contract_log_update
   AFTER UPDATE ON "ConsumptionLog"
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW
-  WHEN (OLD."bookingId" IS NOT NULL OR NEW."bookingId" IS NOT NULL)
+  WHEN (
+    (OLD."bookingId" IS NOT NULL OR NEW."bookingId" IS NOT NULL)
+    AND (
+      OLD."bookingId" IS DISTINCT FROM NEW."bookingId"
+      OR OLD."assetId" IS DISTINCT FROM NEW."assetId"
+      OR OLD."quantity" IS DISTINCT FROM NEW."quantity"
+      OR OLD."category" IS DISTINCT FROM NEW."category"
+      OR OLD."bookingAssetId" IS DISTINCT FROM NEW."bookingAssetId"
+    )
+  )
   EXECUTE FUNCTION booking_source_contract_on_log();
 
 CREATE CONSTRAINT TRIGGER booking_source_contract_log_delete

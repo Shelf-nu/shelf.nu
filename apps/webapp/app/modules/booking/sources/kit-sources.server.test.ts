@@ -16,6 +16,7 @@ import type { BookingSourcesTx } from "./conversion.server";
 import {
   detachKitSliceSources,
   lockKitDetachPools,
+  probeKitDetachPools,
   resizeKitSourceRows,
 } from "./kit-sources.server";
 import type * as RepositoryModule from "./repository.server";
@@ -865,6 +866,22 @@ describe("lockKitDetachPools", () => {
 
     expect(locked.size).toBe(0);
     expect(h.order).toEqual(["probe"]);
+  });
+
+  it("the probe alone returns the assets to lock and locks nothing", async () => {
+    const tx = fakeTx({ probeAssetIds: [POOL, "pool-2"] });
+
+    const assetIds = await probeKitDetachPools(tx, {
+      organizationId: ORG,
+      assetKitIds: ["ak-1", "ak-2", "ak-1"],
+      adoptionEnabled: false,
+    });
+
+    expect(assetIds).toEqual([POOL, "pool-2"]);
+    expect(h.order).toEqual(["probe"]);
+    const probe = tx.$queryRaw.mock.calls[0][0] as { values: unknown[] };
+    // Membership ids are sent once each.
+    expect(probe.values).toContainEqual(["ak-1", "ak-2"]);
   });
 
   it("sends no query for no memberships", async () => {

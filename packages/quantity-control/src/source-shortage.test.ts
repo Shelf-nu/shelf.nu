@@ -30,7 +30,7 @@ function hold(over: Partial<SourceHold> & { sliceId: string }): SourceHold {
 const cap = (n: number) => new Map([[KEY, n]]);
 const none = new Map<string, number>();
 
-test("section 11 example 1: out is granted first, nobody short", () => {
+test("out is granted first, so a later pending hold that fits is not short", () => {
   const out = computeShortSlices({
     capacityBySource: cap(10),
     holds: [
@@ -42,7 +42,7 @@ test("section 11 example 1: out is granted first, nobody short", () => {
   assert.deepEqual(out, []);
 });
 
-test("section 11 example 2: only the later booking is short", () => {
+test("two pending holds over capacity: only the later booking is short", () => {
   const out = computeShortSlices({
     capacityBySource: cap(10),
     holds: [
@@ -52,6 +52,30 @@ test("section 11 example 2: only the later booking is short", () => {
     unassignedPendingBySlice: none,
   });
   assert.deepEqual(out, [{ sliceId: "late", sourceKey: KEY, shortBy: 2 }]);
+});
+
+test("booking start outranks creation time over the same window", () => {
+  // Both holds cover the same window, so only the priority decides. "first"
+  // was created later but its booking starts earlier, so it is granted first.
+  const out = computeShortSlices({
+    capacityBySource: cap(6),
+    holds: [
+      hold({
+        sliceId: "second",
+        pending: 6,
+        bookingFrom: d(2),
+        bookingCreatedAt: d(1),
+      }),
+      hold({
+        sliceId: "first",
+        pending: 6,
+        bookingFrom: d(1),
+        bookingCreatedAt: d(5),
+      }),
+    ],
+    unassignedPendingBySlice: none,
+  });
+  assert.deepEqual(out, [{ sliceId: "second", sourceKey: KEY, shortBy: 6 }]);
 });
 
 test("out is granted once across a window with several instants", () => {

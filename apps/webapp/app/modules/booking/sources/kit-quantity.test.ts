@@ -56,6 +56,16 @@ describe("resizeKitRow", () => {
     });
   });
 
+  it("returns the row unchanged when the quantity is the same", () => {
+    expect(resizeKitRow(kitRow, 5)).toEqual({ ok: true, row: kitRow });
+  });
+
+  it.each([-1, 2.5, Number.NaN])("throws for newQuantity %s", (quantity) => {
+    expect(() => resizeKitRow(kitRow, quantity)).toThrow(
+      "newQuantity must be a non-negative integer"
+    );
+  });
+
   it("throws for a row that is not a KIT row", () => {
     expect(() => resizeKitRow({ ...kitRow, kind: "UNPLACED" }, 6)).toThrow();
   });

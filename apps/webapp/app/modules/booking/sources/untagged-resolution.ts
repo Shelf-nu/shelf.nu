@@ -6,7 +6,6 @@
  * id. Each (slice, row) used becomes one share.
  *
  * @see {@link file://./types.ts}
- * @see superpowers/2026-11-10-booking-source-locations-design.md section 16
  */
 import type { SourceRowState } from "@shelf/quantity-control";
 
@@ -40,9 +39,11 @@ const RESOLVABLE_KINDS: readonly SourceRowState["kind"][] = [
  * Spreads `units` settled units over the rows that have units out.
  *
  * @param args.slices - The slices of one converted group with their rows
- * @param args.units - Units to attribute, a positive integer
+ * @param args.units - Units to attribute, a non-negative integer (0 returns
+ *   no shares)
  * @returns One share per (slice, row) used, `units > 0`, in resolution order
- * @throws {Error} When a slice is LEGACY, or `units` exceeds the total out
+ * @throws {Error} When `units` is not a non-negative integer, a slice is
+ *   LEGACY, or `units` exceeds the total out
  */
 export function resolveUntaggedDisposition(args: {
   slices: Array<{
@@ -54,6 +55,9 @@ export function resolveUntaggedDisposition(args: {
   units: number;
 }): ResolvedShare[] {
   const { slices, units } = args;
+  if (!Number.isInteger(units) || units < 0) {
+    throw new Error(`units must be a non-negative integer (got ${units})`);
+  }
   const candidates: Array<{
     sliceId: string;
     rowId: string;

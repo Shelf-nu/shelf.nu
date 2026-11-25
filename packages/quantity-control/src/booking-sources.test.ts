@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  compareCodeUnits,
   decreaseSliceQuantity,
   dispatchFromRow,
   historyOf,
@@ -316,6 +317,39 @@ test("decrease takes UNASSIGNED pending, then smallest known pending, then relea
   assert.throws(() => decreaseSliceQuantity(rows, 11));
   // input untouched
   assert.equal(rows[0].quantity, 6);
+});
+
+test("history move refuses an origin whose shares do not cover its history", () => {
+  const origin = row({ dispatchedTotal: 5, sharedQuantity: 3 });
+  assert.throws(
+    () => moveHistory(origin, row({ kind: "UNKNOWN" })),
+    /only 3 shared/
+  );
+});
+
+test("decrease breaks a pending tie by source key, whatever the input order", () => {
+  // Same pending (2) on three known rows: the key order is
+  // LOCATION:A < LOCATION:B < UNPLACED:, so d=3 empties A and takes 1 from B.
+  const rows = [
+    row({ kind: "UNPLACED", quantity: 2 }),
+    row({ locationId: "B", quantity: 2 }),
+    row({ locationId: "A", quantity: 2 }),
+  ];
+  assert.deepEqual(
+    decreaseSliceQuantity(rows, 3).map((r) => r.quantity),
+    [2, 1, 0]
+  );
+  assert.deepEqual(
+    decreaseSliceQuantity([...rows].reverse(), 3).map((r) => r.quantity),
+    [0, 1, 2]
+  );
+});
+
+test("compareCodeUnits orders by code unit, not by locale", () => {
+  assert.equal(compareCodeUnits("a", "a"), 0);
+  assert.equal(compareCodeUnits("LOCATION:A", "UNPLACED:"), -1);
+  // Upper case sorts before lower case by code unit.
+  assert.equal(compareCodeUnits("b", "B"), 1);
 });
 
 test("decrease keeps removable rows in the array", () => {

@@ -456,7 +456,7 @@ async function finishCall(tx: BookingSourcesTx, ctx: CallContext) {
  * @param args.holdsNow - True for an active booking (admitted, refuses);
  *   false for a draft (never refuses, the rest waits on UNASSIGNED)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
- * @throws {ShelfError} 400 naming each source's free units (rule 7.4); 404 for
+ * @throws {ShelfError} 400 naming each source's free units; 404 for
  *   a slice not on this booking, except when adoption is off and the booking
  *   has no converted group (nothing is planned or written then)
  */

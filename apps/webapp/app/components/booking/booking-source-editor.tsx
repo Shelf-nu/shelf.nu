@@ -19,8 +19,9 @@
  * Auto, because a hand-made split cannot name that location.
  *
  * Free figures cover loose units only: units inside kits are not part of any
- * source and are checked against the asset's total stock. The help text says
- * so.
+ * source and are checked against the asset's total stock. They also count
+ * this booking's own planned units at each source as free, the same way the
+ * server admits the split. The help text says both.
  *
  * @see {@link file://./adjust-booking-asset-quantity-dialog.tsx} the dialog that mounts it
  * @see {@link file://../../modules/booking/sources/source-editor.ts} the data and split rules
@@ -196,7 +197,8 @@ export function BookingSourceEditor({
         <p>
           Choose how many {unitLabel} come from each place. Free counts loose
           units only: units inside kits are not part of any location here and
-          are checked against the asset&apos;s total stock.
+          are checked against the asset&apos;s total stock. Free counts also
+          include the {unitLabel} this booking already plans from each place.
         </p>
         {locked ? (
           <p>

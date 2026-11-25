@@ -27,6 +27,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 
 import {
+  buildGroupFilter,
   buildRowCounterUpdateSql,
   buildShareRepointSql,
   loadGroupStates,
@@ -255,7 +256,56 @@ function emptyPlan(over: Partial<SourcePlanWrite>): SourcePlanWrite {
   };
 }
 
+describe("buildGroupFilter", () => {
+  it("sends one booking's groups as a single clause with the assets in a list", () => {
+    expect(
+      buildGroupFilter([
+        { bookingId: "b1", assetId: "a1" },
+        { bookingId: "b1", assetId: "a2" },
+      ])
+    ).toEqual({ bookingId: "b1", assetId: { in: ["a1", "a2"] } });
+  });
+
+  it("sends one clause per booking when the groups span bookings", () => {
+    expect(
+      buildGroupFilter([
+        { bookingId: "b1", assetId: "a1" },
+        { bookingId: "b2", assetId: "a2" },
+        { bookingId: "b1", assetId: "a3" },
+      ])
+    ).toEqual({
+      OR: [
+        { bookingId: "b1", assetId: { in: ["a1", "a3"] } },
+        { bookingId: "b2", assetId: { in: ["a2"] } },
+      ],
+    });
+  });
+});
+
 describe("loadGroupStates", () => {
+  it("reads exactly the requested groups when they span bookings", async () => {
+    const { tx } = fakeTx({
+      slices: [
+        slice({ id: "s-b1-a1", bookingId: "b1", assetId: "a1" }),
+        slice({ id: "s-b2-a2", bookingId: "b2", assetId: "a2" }),
+        // Same booking as one group and same asset as the other: not asked.
+        slice({ id: "s-b1-a2", bookingId: "b1", assetId: "a2" }),
+      ],
+    });
+
+    const states = await loadGroupStates(tx, {
+      organizationId: ORG,
+      groups: [
+        { bookingId: "b1", assetId: "a1" },
+        { bookingId: "b2", assetId: "a2" },
+      ],
+    });
+
+    expect([...states.keys()]).toEqual(["b1:a1", "b2:a2"]);
+    expect(states.get("b1:a1")?.slices.map((s) => s.id)).toEqual(["s-b1-a1"]);
+    expect(states.get("b2:a2")?.slices.map((s) => s.id)).toEqual(["s-b2-a2"]);
+  });
+
   it("treats a group with only orphaned shares as converted", async () => {
     const { tx } = fakeTx({
       shares: [share({ id: "sh1", consumptionLogId: "l1", quantity: 3 })],
@@ -991,6 +1041,101 @@ describe("writeSourcePlan", () => {
     expect(writeCount(calls)).toBe(0);
   });
 
+  it("skips a move onto the row the shares already sit on", async () => {
+    const { tx, tables, calls } = historyFixture();
+
+    await writeSourcePlan(tx, {
+      organizationId: ORG,
+      plan: emptyPlan({
+        repointShares: [
+          {
+            fromRowId: "r-a",
+            toBookingAssetId: "s1",
+            toKey: "LOCATION:loc-a",
+          },
+        ],
+      }),
+    });
+
+    // No share statement at all. The one write is the plan's usual cleanup:
+    // the slice is affected, so its empty UNKNOWN row `r-u` is dropped.
+    expect(calls["bookingDispositionShare.executeRaw"]).toBeUndefined();
+    expect(writeCount(calls)).toBe(1);
+    expect(calls["bookingAssetSource.deleteMany"]).toBe(1);
+    expect(tables.bookingAssetSource.map((r) => r.id).sort()).toEqual([
+      "r-a",
+      "r-b",
+    ]);
+    expect(
+      tables.bookingDispositionShare.map((sh) => sh.bookingAssetSourceId)
+    ).toEqual(["r-a", "r-b"]);
+  });
+
+  it("moves shares onto a row whose only listed move is onto itself", async () => {
+    const { tx, tables, calls } = historyFixture();
+
+    await writeSourcePlan(tx, {
+      organizationId: ORG,
+      plan: emptyPlan({
+        upsertRows: [
+          {
+            bookingAssetId: "s1",
+            kind: "LOCATION",
+            locationId: "loc-a",
+            quantity: 5,
+            outQuantity: 0,
+            releasedQuantity: 2,
+            dispatchedTotal: 4,
+          },
+          {
+            bookingAssetId: "s1",
+            kind: "LOCATION",
+            locationId: "loc-b",
+            quantity: 5,
+            outQuantity: 0,
+            releasedQuantity: 2,
+            dispatchedTotal: 0,
+          },
+        ],
+        repointShares: [
+          {
+            fromRowId: "r-a",
+            toBookingAssetId: "s1",
+            toKey: "LOCATION:loc-a",
+          },
+          {
+            fromRowId: "r-b",
+            toBookingAssetId: "s1",
+            toKey: "LOCATION:loc-a",
+          },
+        ],
+      }),
+    });
+
+    expect(calls["bookingDispositionShare.executeRaw"]).toBe(1);
+    expect(
+      tables.bookingDispositionShare.map((sh) => sh.bookingAssetSourceId)
+    ).toEqual(["r-a", "r-a"]);
+  });
+
+  it("refuses a plan that moves the shares of one row twice", async () => {
+    const { tx, tables, calls } = historyFixture();
+
+    await expect(
+      writeSourcePlan(tx, {
+        organizationId: ORG,
+        plan: emptyPlan({
+          repointShares: [
+            { fromRowId: "r-a", toBookingAssetId: "s1", toKey: "UNKNOWN:" },
+            { fromRowId: "r-a", toBookingAssetId: null, toKey: null },
+          ],
+        }),
+      })
+    ).rejects.toMatchObject({ status: 500 });
+    expect(writeCount(calls)).toBe(0);
+    expect(tables.bookingDispositionShare[0].bookingAssetSourceId).toBe("r-a");
+  });
+
   it("refuses a row of another workspace in deleteRowIds and writes nothing", async () => {
     const { tx, tables, calls } = historyFixture(OTHER_ORG);
 
@@ -1125,7 +1270,7 @@ describe("batched update statements", () => {
       },
     ]);
     expect(rows.sql).toContain('UPDATE "BookingAssetSource"');
-    expect(rows.sql).toContain('"updatedAt" = now()');
+    expect(rows.sql).toContain(`"updatedAt" = now() AT TIME ZONE 'UTC'`);
     expect(rows.sql).toContain('s."organizationId" =');
     expect(rows.values).toEqual(["r1", 5, 1, 2, 3, ORG]);
 

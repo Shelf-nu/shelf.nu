@@ -24,6 +24,7 @@ import type * as KitSourcesModule from "~/modules/booking/sources/kit-sources.se
 import {
   deleteKit,
   mergeStandaloneCollisionsForKitDetachment,
+  moveAssetKitUnits,
   removeDestroyedUnitsFromKits,
   removeKitSlicesFromPlanningBookings,
   updateKitAssets,
@@ -32,8 +33,10 @@ import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
 import {
   detachKitSliceSources,
   lockKitDetachPools,
+  probeKitDetachPools,
   resizeKitSourceRows,
 } from "../booking/sources/kit-sources.server";
+import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 
 // @vitest-environment node
 
@@ -333,6 +336,7 @@ vitest.mock(
       Promise.resolve({ convertedSliceIds: new Set<string>() })
     ),
     lockKitDetachPools: vitest.fn(() => Promise.resolve(new Set<string>())),
+    probeKitDetachPools: vitest.fn(() => Promise.resolve([] as string[])),
   })
 );
 
@@ -716,6 +720,60 @@ describe("removeKitSlicesFromPlanningBookings: converted slices", () => {
   });
 });
 
+describe("moveAssetKitUnits: converted destination slices", () => {
+  it("grows a converted destination slice's KIT row with clamp, never a refusal", async () => {
+    mocked(lockAssetForQuantityUpdate).mockResolvedValue({
+      id: "pens",
+      title: "Pens",
+      organizationId: "org-1",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 100,
+      unitOfMeasure: null,
+    });
+    // why: `assertAssetsBelongToOrg` echoes the ids it was asked about.
+    mocked(db.asset.findMany).mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id })))
+    );
+    mocked(db.kit.findFirst).mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({ id: where.id, name: where.id, locationId: null })
+    );
+    mocked(db.assetKit.findFirst).mockResolvedValue({
+      id: "ak-src",
+      quantity: 50,
+    });
+    mocked(db.assetKit.upsert).mockResolvedValue({
+      id: "ak-dst",
+      quantity: 15,
+    });
+    // The source has no active slices; the destination has one converted.
+    mocked(db.bookingAsset.findMany).mockImplementation(
+      (args?: { where?: { sourceAllocation?: string } }) =>
+        Promise.resolve(
+          args?.where?.sourceAllocation === "KIT"
+            ? [{ id: "ba-dst", assetId: "pens" }]
+            : []
+        )
+    );
+
+    await moveAssetKitUnits({
+      assetId: "pens",
+      organizationId: "org-1",
+      userId: "user-1",
+      fromKitId: "kit-from",
+      toKitId: "kit-to",
+      quantity: 10,
+    });
+
+    expect(resizeKitSourceRows).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      slices: [{ sliceId: "ba-dst", assetId: "pens", quantity: 15 }],
+      belowOut: "clamp",
+    });
+  });
+});
+
 describe("removeDestroyedUnitsFromKits: converted planning slices", () => {
   it("caps a converted kit slice through its KIT row, never below its units out", async () => {
     mocked(db.assetKit.findMany).mockResolvedValueOnce([
@@ -824,9 +882,21 @@ describe("kit detach paths: one asset lock, workspace-scoped", () => {
 
   it("updateKitAssets removing a converted asset locks it in the first statement, before the detach lock", async () => {
     arrangeRemoval("KIT");
+    // The probe finds a converted kit slice on the removed membership.
+    mocked(probeKitDetachPools).mockResolvedValueOnce(["pens"]);
 
     await removeEveryMember();
 
+    // The probe opens the transaction, over the removed memberships.
+    expect(probeKitDetachPools).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      assetKitIds: ["ak-pens"],
+    });
+    expect(
+      mocked(probeKitDetachPools).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocked(lockAssetsForArchiveGuard).mock.invocationCallOrder[0]
+    );
     expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
       expect.anything(),
       ["pens"],
@@ -843,6 +913,8 @@ describe("kit detach paths: one asset lock, workspace-scoped", () => {
 
   it("updateKitAssets removing a LEGACY asset with adoption off leaves the first lock as it was", async () => {
     arrangeRemoval("LEGACY");
+    // The probe finds nothing: no converted slice and adoption off.
+    mocked(probeKitDetachPools).mockResolvedValueOnce([]);
 
     await removeEveryMember();
 

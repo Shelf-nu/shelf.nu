@@ -17,10 +17,6 @@ import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import type { BookingSourcePart } from "@shelf/quantity-control";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
-import {
-  isStandalonePoolSlice,
-  selectPoolSourceCell,
-} from "~/components/booking/booking-source-cell";
 import { db } from "~/database/db.server";
 import { clientHasCapability } from "~/modules/api/capabilities.server";
 import {
@@ -70,6 +66,10 @@ import {
   getSliceSourceSummaries,
   type SliceSourceSummary,
 } from "~/modules/booking/sources/booking-sources.server";
+import {
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+} from "~/modules/booking/sources/pool-source-cell";
 import type { SourceAllocationMode } from "~/modules/booking/sources/types";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";

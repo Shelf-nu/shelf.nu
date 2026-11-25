@@ -11120,8 +11120,8 @@ describe("extendBooking", () => {
     vitest.useFakeTimers({ toFake: ["Date"] });
     vitest.setSystemTime(EXTEND_NOW);
     // why: the booking row lock is a raw `FOR UPDATE` read. By default it
-    // answers with the status the case loaded, i.e. nothing changed between
-    // the read and the lock; the race cases override it.
+    // answers with the status and window the case loaded, i.e. nothing
+    // changed between the read and the lock; the race cases override it.
     (
       db.$queryRaw as unknown as ReturnType<typeof vitest.fn>
     ).mockImplementation(async () => {
@@ -11129,9 +11129,15 @@ describe("extendBooking", () => {
         db.booking.findUniqueOrThrow as unknown as ReturnType<typeof vitest.fn>
       ).mock.results;
       const loaded = (await loads.at(-1)?.value) as
-        | { status?: string }
+        | { status?: string; from?: Date; to?: Date }
         | undefined;
-      return [{ status: loaded?.status ?? "ONGOING" }];
+      return [
+        {
+          status: loaded?.status ?? "ONGOING",
+          from: loaded?.from,
+          to: loaded?.to,
+        },
+      ];
     });
   });
 
@@ -25035,6 +25041,23 @@ describe("booking emails name who acted", () => {
     ]);
   }
 
+  /**
+   * Answers the booking row lock with the status and window of `booking`, for
+   * this test only. `extendBooking` locks with `lockBookingWithWindow` and
+   * refuses when the locked end differs from the one it read, so the file's
+   * default lock answer (a status alone) would fail it before any email.
+   */
+  function mockLockedBooking(booking: {
+    status: BookingStatus;
+    from: Date;
+    to: Date;
+  }) {
+    // why: the booking row lock is a raw `SELECT ... FOR UPDATE`
+    restoreMockImplementationAfterTest(db.$queryRaw).fn.mockResolvedValue([
+      { status: booking.status, from: booking.from, to: booking.to },
+    ]);
+  }
+
   /** Asserts every sent email carries the actor line, in HTML and text. */
   function expectActorLine(label: string, emailCount = 1) {
     const payloads = vitest.mocked(sendEmail).mock.calls.map(([p]) => p);
@@ -25280,6 +25303,7 @@ describe("booking emails name who acted", () => {
     const newEndDate = new Date(futureToDate.getTime() + 24 * 60 * 60 * 1000);
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    mockLockedBooking(ongoing);
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
     mockBerlinRecipient();
@@ -25321,6 +25345,7 @@ describe("booking emails name who acted", () => {
     const newEndDate = new Date(futureToDate.getTime() - 4 * 60 * 60 * 1000);
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    mockLockedBooking(ongoing);
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
     mockBerlinRecipient();
@@ -25822,6 +25847,7 @@ describe("booking emails name who acted", () => {
     const newEndDate = new Date(ACTED_AT.getTime() + 30 * 60 * 1000);
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    mockLockedBooking(ongoing);
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
     // The stored end is this extension's, so it owns the reminder

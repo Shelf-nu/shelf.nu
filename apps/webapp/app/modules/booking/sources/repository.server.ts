@@ -102,7 +102,9 @@ export type SourcePlanWrite = {
   insertShares: PlannedShare[];
   /**
    * Moves every share on `fromRowId` to the row `toKey` of slice
-   * `toBookingAssetId`, or orphans them when both are null.
+   * `toBookingAssetId`, or orphans them when both are null. Each `fromRowId`
+   * appears at most once. A move whose target is `fromRowId` itself is a
+   * no-op and is skipped.
    */
   repointShares: Array<{
     fromRowId: string;
@@ -127,6 +129,34 @@ function distinctGroups(groups: GroupKey[]): GroupKey[] {
       seen.set(k, { bookingId: g.bookingId, assetId: g.assetId });
   }
   return [...seen.values()];
+}
+
+/** A filter on `bookingId` and `assetId` that matches exactly some groups. */
+type GroupFilter =
+  | { bookingId: string; assetId: { in: string[] } }
+  | { OR: Array<{ bookingId: string; assetId: { in: string[] } }> };
+
+/**
+ * Filters for exactly the given groups, one `bookingId = X AND assetId IN
+ * (...)` clause per booking. Groups almost always share one booking, so the
+ * common case is a single clause the `(bookingId, assetId)` indexes serve
+ * directly, instead of one OR arm per group.
+ *
+ * @param groups - Distinct groups, at least one
+ * @returns The filter to spread into a `where`
+ */
+export function buildGroupFilter(groups: GroupKey[]): GroupFilter {
+  const assetsByBooking = new Map<string, string[]>();
+  for (const g of groups) {
+    const list = assetsByBooking.get(g.bookingId) ?? [];
+    list.push(g.assetId);
+    assetsByBooking.set(g.bookingId, list);
+  }
+  const clauses = [...assetsByBooking].map(([bookingId, assetIds]) => ({
+    bookingId,
+    assetId: { in: assetIds },
+  }));
+  return clauses.length === 1 ? clauses[0] : { OR: clauses };
 }
 
 /**
@@ -156,13 +186,10 @@ export async function loadGroupStates(
   const result = new Map<string, GroupState>();
   if (groups.length === 0) return result;
 
-  const groupWhere = groups.map((g) => ({
-    bookingId: g.bookingId,
-    assetId: g.assetId,
-  }));
+  const groupFilter = buildGroupFilter(groups);
 
   const slices = await tx.bookingAsset.findMany({
-    where: { OR: groupWhere, booking: { organizationId } },
+    where: { ...groupFilter, booking: { organizationId } },
     select: {
       id: true,
       bookingId: true,
@@ -199,12 +226,12 @@ export async function loadGroupStates(
     // share sum of every row.
     tx.bookingDispositionShare.groupBy({
       by: ["bookingId", "assetId", "bookingAssetSourceId"],
-      where: { organizationId, OR: groupWhere },
+      where: { organizationId, ...groupFilter },
       _sum: { quantity: true },
     }),
     tx.consumptionLog.findMany({
       where: {
-        OR: groupWhere,
+        ...groupFilter,
         booking: { organizationId },
         category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
       },
@@ -293,6 +320,9 @@ type RowCounterUpdate = {
 /**
  * One statement that sets the counters of several source rows of one
  * workspace, and stamps `updatedAt` (the column has no database default).
+ * `updatedAt` is `timestamp without time zone` holding UTC, the way Prisma
+ * writes it, so the stamp is `now() AT TIME ZONE 'UTC'`, never a bare
+ * `now()` that the session time zone would shift.
  * Each VALUES tuple is `(id, quantity, outQuantity, releasedQuantity,
  * dispatchedTotal)`, followed by the workspace id as the last parameter.
  *
@@ -316,7 +346,7 @@ export function buildRowCounterUpdateSql(
         "outQuantity" = v.o,
         "releasedQuantity" = v.r,
         "dispatchedTotal" = v.d,
-        "updatedAt" = now()
+        "updatedAt" = now() AT TIME ZONE 'UTC'
     FROM (VALUES ${values}) AS v(id, q, o, r, d)
     WHERE s."id" = v.id AND s."organizationId" = ${organizationId}`;
 }
@@ -406,13 +436,16 @@ function compareKeepCandidates(a: WorkingRow, b: WorkingRow): number {
  * removable (all counters 0, no shares) are dropped, except that a KIT, AUTO
  * or MANUAL slice whose rows would all go keeps one (a row the caller did not
  * ask to delete, a known kind first), because such a slice needs at least one
- * row.
+ * row. That kept row can be one the caller listed in `deleteRowIds`: when
+ * every row of such a slice is listed, the first by the same order survives,
+ * so a listed delete is a request, not a guarantee.
  *
  * Writes: row updates in one `UPDATE ... FROM (VALUES ...)`, row creates in
  * one `createMany`, share moves in one `UPDATE ... FROM (VALUES ...)`, new
  * shares in one `createMany`, deletes in one `deleteMany`, modes one
  * `updateMany` per distinct change. A plan that moves shares onto a row whose
- * own shares it also moves is refused: one statement moves each share once.
+ * own shares it also moves, or names the same `fromRowId` twice, is refused:
+ * one statement moves each share once. A move onto its own row is skipped.
  *
  * Upserts are find-then-write, not `INSERT ... ON CONFLICT`: the rows of every
  * affected slice are read for validation anyway, the caller holds the asset
@@ -437,6 +470,16 @@ export async function writeSourcePlan(
     plan.setModes.length === 0
   ) {
     return;
+  }
+
+  const seenOrigins = new Set<string>();
+  for (const r of plan.repointShares) {
+    if (seenOrigins.has(r.fromRowId)) {
+      throw refusePlan("The plan moves the shares of one row twice.", {
+        fromRowId: r.fromRowId,
+      });
+    }
+    seenOrigins.add(r.fromRowId);
   }
 
   // 1. Rows named by id: their slices are affected too.
@@ -588,11 +631,16 @@ export async function writeSourcePlan(
     if (current?.id) rowById.set(current.id, next);
   }
 
-  const repointOrigins = new Set(plan.repointShares.map((r) => r.fromRowId));
-  for (const r of plan.repointShares) {
+  // Moves that change something: a move onto its own row is dropped, and it
+  // does not count as an origin for the chained-move refusal below.
+  const effectiveRepoints = plan.repointShares.filter((r) => {
+    if (r.toBookingAssetId === null || r.toKey === null) return true;
+    return findRow(r.toBookingAssetId, r.toKey)?.id !== r.fromRowId;
+  });
+  const repointOrigins = new Set(effectiveRepoints.map((r) => r.fromRowId));
+  for (const r of effectiveRepoints) {
     const from = rowById.get(r.fromRowId);
     if (!from) continue; // proven to exist in step 1
-    // Take the units off the origin first, so a move onto itself keeps them.
     const moved = from.sharedQuantity;
     from.sharedQuantity = 0;
     if (r.toBookingAssetId === null) {
@@ -759,7 +807,7 @@ export async function writeSourcePlan(
   const keyOf = (sliceId: string, key: string) => `${sliceId}|${key}`;
   const needsIds =
     plan.insertShares.some((s) => s.sourceKey !== null) ||
-    plan.repointShares.some((r) => r.toKey !== null);
+    effectiveRepoints.some((r) => r.toKey !== null);
   if (needsIds && toCreate.length > 0) {
     const fresh = await tx.bookingAssetSource.findMany({
       where: { organizationId, bookingAssetId: { in: sliceIds } },
@@ -786,11 +834,11 @@ export async function writeSourcePlan(
   };
 
   // 9. Move and insert shares before deleting rows, so no delete orphans one.
-  if (plan.repointShares.length > 0) {
+  if (effectiveRepoints.length > 0) {
     await tx.$executeRaw(
       buildShareRepointSql(
         organizationId,
-        plan.repointShares.map((r) => ({
+        effectiveRepoints.map((r) => ({
           fromRowId: r.fromRowId,
           toBookingAssetId: r.toBookingAssetId,
           toSourceId:

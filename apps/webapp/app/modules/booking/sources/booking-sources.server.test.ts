@@ -2361,7 +2361,7 @@ describe("slices removed from a converted group", () => {
     createdAt: new Date("2026-11-20T09:00:00Z"),
   };
 
-  it("Remove the kit slice after it recorded returns, standalone converted: standalone numbers unchanged, nothing redistributed", async () => {
+  it("a window change on a converted group whose kit slice is gone (its shares orphaned) leaves the standalone rows, shares and modes untouched", async () => {
     // The log was shared 5 on the standalone slice and 3 on the kit slice.
     // The kit slice is gone, so its 3 units of shares are orphaned; the
     // standalone slice keeps its rows and its 5 units of history.

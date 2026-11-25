@@ -11,10 +11,6 @@ import {
   describeSourceLine,
   type BookingSourceLine,
 } from "@shelf/quantity-control";
-import {
-  isStandalonePoolSlice,
-  selectPoolSourceCell,
-} from "~/components/booking/booking-source-cell";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
@@ -24,6 +20,10 @@ import {
 } from "~/modules/barcode/display";
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
+import {
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+} from "~/modules/booking/sources/pool-source-cell";
 import { formatTemplateCustomFieldValue } from "~/modules/pdf-template/format";
 import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";

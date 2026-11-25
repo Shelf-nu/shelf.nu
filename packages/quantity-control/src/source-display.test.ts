@@ -71,6 +71,39 @@ test("labels, planned = quantity - released, out, order", () => {
   assert.equal(parts[2].kind, "UNPLACED");
 });
 
+test("two locations of the same name are both shown, ordered by key", () => {
+  const parts = describeBookingSources({
+    rows: [r("LOCATION", "Y", 2), r("LOCATION", "X", 3)],
+    locationNames: new Map([
+      ["X", "Shelf"],
+      ["Y", "Shelf"],
+    ]),
+    shortSourceKeys: new Set(),
+  });
+  assert.deepEqual(
+    parts.map((p) => [p.key, p.planned]),
+    [
+      ["LOCATION:X", 3],
+      ["LOCATION:Y", 2],
+    ]
+  );
+});
+
+test("location names sort without regard to case", () => {
+  const parts = describeBookingSources({
+    rows: [r("LOCATION", "U", 1), r("LOCATION", "L", 1)],
+    locationNames: new Map([
+      ["U", "Basement"],
+      ["L", "annex"],
+    ]),
+    shortSourceKeys: new Set(),
+  });
+  assert.deepEqual(
+    parts.map((p) => p.label),
+    ["annex", "Basement"]
+  );
+});
+
 test("unknown location name falls back", () => {
   const [p] = describeBookingSources({
     rows: [r("LOCATION", "Z", 1)],

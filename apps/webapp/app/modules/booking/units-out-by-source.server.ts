@@ -312,8 +312,8 @@ export async function countUnitsOnBookingsFromLocation({
 
 /**
  * Units out right now from one location on converted groups, per pool: the
- * `outQuantity` of LOCATION source rows there whose slice is on an ONGOING or
- * OVERDUE booking. One indexed source-row read, then a slice read only when
+ * `outQuantity` of LOCATION source rows there whose AUTO or MANUAL slice is on
+ * an ONGOING or OVERDUE booking. One indexed source-row read, then a slice read only when
  * rows exist; none when no pool is asked about. KIT rows are never read.
  *
  * @param args.organizationId - Scopes both reads
@@ -352,6 +352,9 @@ async function loadConvertedOutAtLocation({
     where: {
       id: { in: [...new Set(rows.map((row) => row.bookingAssetId))] },
       assetId: { in: ids },
+      // Only converted slices carry LOCATION rows that count; the mode filter
+      // keeps the read honest even if a row survives on another mode.
+      sourceAllocation: { in: ["AUTO", "MANUAL"] },
       booking: {
         organizationId,
         status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },

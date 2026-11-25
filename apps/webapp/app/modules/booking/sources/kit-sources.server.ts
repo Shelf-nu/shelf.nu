@@ -250,36 +250,34 @@ export async function resizeKitSourceRows(
 }
 
 /**
- * The one asset lock a kit detach path takes, before it deletes or detaches
- * any kit slice: one sorted statement over the assets of every given
- * membership that has a converted slice (every membership when adoption is
- * on, since a LEGACY group may then convert). Every later lock in the path
- * (the detach, a resize) is a re-lock of rows this statement already holds,
- * so the path never locks assets in two batches.
+ * The assets a kit detach path must lock for its memberships: those of every
+ * given membership that has a converted slice (every membership when
+ * adoption is on, since a LEGACY group may then convert). One statement, no
+ * lock. Memberships outside the workspace are never matched, so a foreign
+ * `AssetKit` id reads nothing.
  *
- * One probe decides it: a single statement returns the memberships' asset ids
- * when the gate holds and nothing otherwise, so LEGACY slices with adoption
- * off cost that statement and no lock. Memberships outside the workspace are
- * never matched, so a foreign `AssetKit` id reads and locks nothing.
+ * A path that takes another asset lock first (a kit edit's archive guard)
+ * runs this as the first statement of its transaction and puts the result in
+ * that lock, so {@link lockKitDetachPools} later re-locks rows it holds.
  *
  * @param tx - The caller's transaction
  * @param args.organizationId - The trusted workspace id
  * @param args.assetKitIds - The memberships whose slices the path may delete
  *   or detach
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
- * @returns Ids of the locked assets; empty when nothing needed the lock
+ * @returns Distinct asset ids to lock; empty when nothing needs the lock
  */
-export async function lockKitDetachPools(
+export async function probeKitDetachPools(
   tx: BookingSourcesTx,
   args: {
     organizationId: string;
     assetKitIds: string[];
     adoptionEnabled?: boolean;
   }
-): Promise<Set<string>> {
+): Promise<string[]> {
   const { organizationId } = args;
   const assetKitIds = [...new Set(args.assetKitIds)];
-  if (assetKitIds.length === 0) return new Set();
+  if (assetKitIds.length === 0) return [];
   const adoptionEnabled = args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED;
 
   // `BookingAsset_assetKitId_idx` serves the EXISTS probe per membership.
@@ -296,11 +294,41 @@ export async function lockKitDetachPools(
             AND ba."sourceAllocation" <> 'LEGACY'
         )
       )`);
-  const assetIds = (rows ?? []).flatMap((r) =>
+  return (rows ?? []).flatMap((r) =>
     typeof r.assetId === "string" ? [r.assetId] : []
   );
+}
+
+/**
+ * The one asset lock a kit detach path takes, before it deletes or detaches
+ * any kit slice: one sorted statement over the assets
+ * {@link probeKitDetachPools} returns. Every later lock in the path (the
+ * detach, a resize) is a re-lock of rows this statement already holds, so the
+ * path never locks assets in two batches.
+ *
+ * LEGACY slices with adoption off cost the probe and no lock. INDIVIDUAL
+ * members are locked too when adoption is on: the sources detach that follows
+ * locks every candidate slice's asset, whatever its type, so leaving them out
+ * here would make that a second batch.
+ *
+ * @param tx - The caller's transaction
+ * @param args.organizationId - The trusted workspace id
+ * @param args.assetKitIds - The memberships whose slices the path may delete
+ *   or detach
+ * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @returns Ids of the locked assets; empty when nothing needed the lock
+ */
+export async function lockKitDetachPools(
+  tx: BookingSourcesTx,
+  args: {
+    organizationId: string;
+    assetKitIds: string[];
+    adoptionEnabled?: boolean;
+  }
+): Promise<Set<string>> {
+  const assetIds = await probeKitDetachPools(tx, args);
   if (assetIds.length === 0) return new Set();
-  await lockGroupAssets(tx, organizationId, assetIds);
+  await lockGroupAssets(tx, args.organizationId, assetIds);
   return new Set(assetIds);
 }
 

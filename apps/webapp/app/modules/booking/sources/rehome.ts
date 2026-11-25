@@ -367,8 +367,9 @@ type Part = { toKey: string; units: number };
  *   slice's UNKNOWN row;
  * - history: the slice's UNKNOWN row;
  * - pending: AUTO slices re-allocate the pending of all their deleted rows at
- *   once by rule 7 over `freeBySlice`, the part that fits nowhere going to
- *   UNASSIGNED; MANUAL slices put it on UNASSIGNED;
+ *   once with `allocateSourcesOrUnassigned` over `freeBySlice`, the part
+ *   that fits nowhere going to UNASSIGNED; MANUAL slices put it on
+ *   UNASSIGNED;
  * - released: UNASSIGNED.
  *
  * Rows of holding slices are planned first. Free units they claim (and out

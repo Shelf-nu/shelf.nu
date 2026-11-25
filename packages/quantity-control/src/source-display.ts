@@ -14,7 +14,11 @@
  * @see {@link file://./booking-sources.ts} for the row model and source keys.
  */
 
-import { sourceKey, type SourceRowState } from "./booking-sources";
+import {
+  compareCodeUnits,
+  sourceKey,
+  type SourceRowState,
+} from "./booking-sources";
 
 /** One displayed source of a booking line. */
 export type BookingSourcePart = {
@@ -64,7 +68,8 @@ function labelFor(
  * @param args.rows - Source rows (any slices of one line)
  * @param args.locationNames - Location id to display name
  * @param args.shortSourceKeys - Source keys flagged short by the sweep
- * @returns Parts ordered by location name, then Unplaced, Unknown, Needs a location
+ * @returns Parts ordered by location name (case-insensitive, then by key for
+ *   two locations of the same name), then Unplaced, Unknown, Needs a location
  */
 export function describeBookingSources(args: {
   rows: Array<
@@ -120,8 +125,9 @@ export function describeBookingSources(args: {
   return parts.sort(
     (a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      a.label.localeCompare(b.label) ||
-      a.key.localeCompare(b.key)
+      compareCodeUnits(a.label.toLowerCase(), b.label.toLowerCase()) ||
+      compareCodeUnits(a.label, b.label) ||
+      compareCodeUnits(a.key, b.key)
   );
 }
 

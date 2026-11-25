@@ -66,6 +66,19 @@ export function sourceKey(
   return `${row.kind}:${row.locationId ?? ""}`;
 }
 
+/**
+ * Orders two strings by UTF-16 code units: the same answer on every runtime
+ * and locale, unlike `localeCompare`, so the server, the browser and the
+ * phone always sort the same rows the same way.
+ *
+ * @returns Negative, zero or positive, as `Array.prototype.sort` expects
+ */
+export function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
 /** Planned units not yet out and not released: `quantity - released - out`. */
 export function pendingOf(row: SourceRowState): number {
   return row.quantity - row.releasedQuantity - row.outQuantity;
@@ -280,7 +293,9 @@ export function partialMoveOut(
  * Moves a row's whole history (`dispatchedTotal - out`, with its shares) to
  * another row of the same slice. Both rows keep the reconciliation invariant.
  *
- * @throws {Error} When either row is UNASSIGNED
+ * @throws {Error} When either row is UNASSIGNED, or the origin's shares do not
+ *   cover its history (a row breaking reconciliation; moving it would leave a
+ *   negative share sum behind)
  */
 export function moveHistory(
   origin: SourceRowState,
@@ -290,6 +305,11 @@ export function moveHistory(
     throw new Error("History cannot move to or from UNASSIGNED");
   }
   const history = historyOf(origin);
+  if (origin.sharedQuantity < history) {
+    throw new Error(
+      `Cannot move history ${history}: only ${origin.sharedQuantity} shared`
+    );
+  }
   return {
     origin: {
       ...origin,
@@ -335,7 +355,7 @@ export function decreaseSliceQuantity(
       const pa = pendingOf(ra);
       const pb = pendingOf(rb);
       if (pa !== pb) return pa - pb;
-      return sourceKey(ra).localeCompare(sourceKey(rb));
+      return compareCodeUnits(sourceKey(ra), sourceKey(rb));
     });
   const next = rows.map((r) => ({ ...r }));
   let left = d;

@@ -2,7 +2,7 @@
  * Booking sources: acceptance scenarios against a real database
  *
  * Runs the booking sources acceptance cases through the real services (the
- * facade, settlement, location delete) against a migrated database, so the
+ * facade, settlement, location delete, booking asset removal) against a migrated database, so the
  * deferred contract triggers judge every final state at COMMIT. Each test is
  * named after the scenario it covers. Cases already pinned by unit tests run
  * here only when the database adds something the mocks cannot: the trigger
@@ -40,6 +40,7 @@ import {
   computeFreeBySource,
   loadPhysicalNow,
 } from "~/modules/booking/sources/capacity.server";
+import { removeAssets } from "~/modules/booking/service.server";
 import { evacuateLocationsForDelete } from "~/modules/booking/sources/location-delete.server";
 
 import type {
@@ -159,6 +160,8 @@ type ConvertedPair = SeededOrgWithPool & {
   bookingId: string;
   standaloneId: string;
   kitSliceId: string;
+  /** The kit the kit slice belongs to. */
+  kitId: string;
   logId: string;
   locationA: string;
 };
@@ -181,7 +184,7 @@ async function seedConvertedStandaloneAndKit(
     });
     created.push(pool);
     const locationA = nth(pool.locationIds, 0);
-    const { assetKitId } = await seedKit(tx, pool, 5);
+    const { assetKitId, kitId } = await seedKit(tx, pool, 5);
     const booking = await seedBooking(tx, {
       organizationId: pool.organizationId,
       userId: pool.userId,
@@ -214,6 +217,7 @@ async function seedConvertedStandaloneAndKit(
       bookingId: booking.bookingId,
       standaloneId: nth(booking.sliceIds, 0),
       kitSliceId: nth(booking.sliceIds, 1),
+      kitId,
       logId,
       locationA,
     };
@@ -1044,6 +1048,60 @@ describe("booking sources scenarios", () => {
       });
 
       expect(await readSlice(seed.kitSliceId)).toBeNull();
+      const standaloneRows = await readRows(seed.standaloneId);
+      expect(shape(standaloneRows)).toEqual(before);
+      expect(await readShares(seed.logId)).toEqual([
+        {
+          bookingAssetId: seed.standaloneId,
+          bookingAssetSourceId: rowOf(
+            standaloneRows,
+            "LOCATION",
+            seed.locationA
+          ).id,
+          quantity: 5,
+          origin: "SEEDED",
+        },
+        {
+          bookingAssetId: null,
+          bookingAssetSourceId: null,
+          quantity: 3,
+          origin: "SEEDED",
+        },
+      ]);
+      await assertContractHolds({
+        sliceIds: [seed.standaloneId],
+        groups: [{ bookingId: seed.bookingId, assetId: seed.assetId }],
+      });
+    } finally {
+      await cleanupPools(created);
+    }
+  });
+
+  it("Remove the kit through the removeAssets service, standalone converted: only the kit slice goes, its shares orphaned, standalone numbers unchanged, all checks pass", async () => {
+    const created: SeededOrgWithPool[] = [];
+    try {
+      const seed = await seedConvertedStandaloneAndKit(created);
+      const before = shape(await readRows(seed.standaloneId));
+
+      // The booking page's kit removal: the kit named, no standalone row
+      // ticked, so the asset's standalone slice must stay.
+      await removeAssets({
+        booking: { id: seed.bookingId, assetIds: [seed.assetId] },
+        firstName: "Db",
+        lastName: "Test",
+        displayName: null,
+        userId: seed.userId,
+        kitIds: [seed.kitId],
+        kits: [{ id: seed.kitId, name: "Kit" }],
+        standaloneAssetIds: [],
+        organizationId: seed.organizationId,
+      });
+
+      expect(await readSlice(seed.kitSliceId)).toBeNull();
+      expect(await readSlice(seed.standaloneId)).toMatchObject({
+        sourceAllocation: "AUTO",
+        checkedOutQuantity: 10,
+      });
       const standaloneRows = await readRows(seed.standaloneId);
       expect(shape(standaloneRows)).toEqual(before);
       expect(await readShares(seed.logId)).toEqual([

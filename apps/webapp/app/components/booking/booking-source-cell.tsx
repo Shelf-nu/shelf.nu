@@ -12,11 +12,13 @@
  *   units over the booking window.
  *
  * The display parts come from `describeBookingSources` in
- * `@shelf/quantity-control`; this file only decides whether the cell applies
- * ({@link selectPoolSourceCell}) and renders it. Rows the selector rejects
- * keep the ordinary Location cell.
+ * `@shelf/quantity-control`, and whether the cell applies comes from
+ * `selectPoolSourceCell` in `~/modules/booking/sources/pool-source-cell`;
+ * this file only renders it. Rows the selector rejects keep the ordinary
+ * Location cell.
  *
  * @see {@link file://./list-asset-content.tsx} the row that mounts this
+ * @see {@link file://./../../modules/booking/sources/pool-source-cell.ts} the selector
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} the loader that builds the cells
  */
 
@@ -24,7 +26,7 @@ import {
   formatSourceSummary,
   type BookingSourcePart,
 } from "@shelf/quantity-control";
-import type { SourceAllocationMode } from "~/modules/booking/sources/types";
+import type { PoolSourceCell } from "~/modules/booking/sources/pool-source-cell";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { LocationBadge } from "../location/location-badge";
 import { Tag } from "../shared/tag";
@@ -34,62 +36,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../shared/tooltip";
-
-/** What the Location cell renders for one pool slice. */
-export type PoolSourceCell = {
-  /** Display parts, ordered by location name, then the non-location kinds. */
-  parts: BookingSourcePart[];
-};
-
-/**
- * Whether a booking slice is a standalone pool slice: a quantity-tracked
- * asset with no live kit (`assetKitId` null). `sourceKitId` is provenance
- * only, so units left behind when an asset leaves a kit count as standalone.
- *
- * @param slice - The booking slice with its asset's type
- * @returns True when the slice's Location cell may show its sources
- */
-export function isStandalonePoolSlice(slice: {
-  asset: { type: string };
-  assetKitId: string | null;
-}): boolean {
-  return slice.asset.type === "QUANTITY_TRACKED" && !slice.assetKitId;
-}
-
-/**
- * Decides whether a slice's Location cell shows its sources.
- *
- * Only standalone pool slices (quantity-tracked and not kit-driven, which
- * includes units left behind when an asset leaves a kit) allocated by source
- * (`AUTO` or `MANUAL`) with something to show qualify. A pool without manual placements keeps the
- * ordinary cell while all its units come from Unplaced: every unit of such a
- * pool is unplaced, so the sources would say nothing new. Individual assets,
- * kit rows and `LEGACY` slices never reach this cell.
- *
- * @param args.summary - The slice's source summary from the loader, if any
- * @param args.isStandalonePoolSlice - Output of {@link isStandalonePoolSlice}
- * @param args.hasManualPlacements - The pool has at least one non-kit placement
- * @returns The cell to render, or `null` to keep the ordinary Location cell
- */
-export function selectPoolSourceCell(args: {
-  summary:
-    | { parts: BookingSourcePart[]; mode: SourceAllocationMode }
-    | undefined;
-  isStandalonePoolSlice: boolean;
-  hasManualPlacements: boolean;
-}): PoolSourceCell | null {
-  const { summary, isStandalonePoolSlice, hasManualPlacements } = args;
-  if (!summary || !isStandalonePoolSlice) return null;
-  if (summary.mode !== "AUTO" && summary.mode !== "MANUAL") return null;
-  if (summary.parts.length === 0) return null;
-  if (
-    !hasManualPlacements &&
-    summary.parts.every((part) => part.kind === "UNPLACED")
-  ) {
-    return null;
-  }
-  return { parts: summary.parts };
-}
 
 /** Amber treatment for warnings; hoisted so the style keeps a stable identity. */
 const WARNING_STYLE = {
@@ -112,7 +58,7 @@ type RowLocation = {
 /**
  * Props for {@link BookingSourceCell}.
  *
- * @property cell - Output of {@link selectPoolSourceCell}
+ * @property cell - Output of `selectPoolSourceCell`
  * @property rowLocation - The asset's primary location; when the single
  *   source is this location, the badge keeps its hierarchy popover
  */

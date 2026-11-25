@@ -94,6 +94,70 @@ describe("resolveUntaggedDisposition", () => {
     ).toThrow();
   });
 
+  it("breaks a tie on units out and allocation order by row id", () => {
+    const shares = resolveUntaggedDisposition({
+      slices: [slice("s1", 1, [row("r-b", 3), row("r-a", 3)])],
+      units: 4,
+    });
+    expect(shares).toEqual([
+      { sliceId: "s1", sourceRowId: "r-a", units: 3 },
+      { sliceId: "s1", sourceRowId: "r-b", units: 1 },
+    ]);
+  });
+
+  it("takes from KIT, UNPLACED and UNKNOWN rows with units out", () => {
+    const other = (
+      id: string,
+      kind: "KIT" | "UNPLACED" | "UNKNOWN",
+      out: number
+    ): SourceRowState & { id: string } => ({
+      ...row(id, out),
+      kind,
+      locationId: null,
+    });
+    const shares = resolveUntaggedDisposition({
+      slices: [
+        slice("kit", 2, [other("k", "KIT", 4)], "KIT"),
+        slice("s1", 1, [other("p", "UNPLACED", 3), other("u", "UNKNOWN", 2)]),
+      ],
+      units: 9,
+    });
+    expect(shares).toEqual([
+      { sliceId: "kit", sourceRowId: "k", units: 4 },
+      { sliceId: "s1", sourceRowId: "p", units: 3 },
+      { sliceId: "s1", sourceRowId: "u", units: 2 },
+    ]);
+  });
+
+  it("takes part of a later row of the same slice after emptying the first", () => {
+    const shares = resolveUntaggedDisposition({
+      slices: [slice("s1", 1, [row("r1", 5), row("r2", 4), row("r3", 2)])],
+      units: 7,
+    });
+    expect(shares).toEqual([
+      { sliceId: "s1", sourceRowId: "r1", units: 5 },
+      { sliceId: "s1", sourceRowId: "r2", units: 2 },
+    ]);
+  });
+
+  it("returns no shares for zero units", () => {
+    expect(
+      resolveUntaggedDisposition({
+        slices: [slice("s1", 1, [row("r1", 2)])],
+        units: 0,
+      })
+    ).toEqual([]);
+  });
+
+  it.each([-1, 1.5, Number.NaN])("throws for units %s", (units) => {
+    expect(() =>
+      resolveUntaggedDisposition({
+        slices: [slice("s1", 1, [row("r1", 2)])],
+        units,
+      })
+    ).toThrow("units must be a non-negative integer");
+  });
+
   it("throws when a LEGACY slice is passed", () => {
     expect(() =>
       resolveUntaggedDisposition({

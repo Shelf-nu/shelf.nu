@@ -8,7 +8,7 @@
  * runs {@link planGroupConversion}, and writes only when it returns
  * `convert`; a `held_back` plan writes nothing.
  *
- * Steps (spec section 12.2):
+ * Steps:
  * 1. Candidate shares reproduce the greedy fill's per-slice totals in two
  *    passes: tagged logs first, then untagged logs in `(createdAt, id)` order
  *    poured into the slices in {@link compareSlicesForGreedyFill} order.
@@ -18,7 +18,6 @@
  *
  * @see {@link file://./types.ts} the shared types
  * @see {@link file://../checkout-attribution.ts} the greedy fill reproduced here
- * @see superpowers/2026-11-10-booking-source-locations-design.md section 12.2
  */
 
 import { sourceKey } from "@shelf/quantity-control";
@@ -175,6 +174,7 @@ function sharedBySlice(shares: PlannedShare[]): Map<string, number> {
  * shares as OVERFLOW (latest log `createdAt` first, then latest id), splitting
  * the last share touched when needed. Per-log totals stay unchanged.
  *
+ * @param logsById - Every log of the group; each share names one of them
  * @returns A new share list
  */
 function remarkExcessAsOverflow(
@@ -184,14 +184,12 @@ function remarkExcessAsOverflow(
   logsById: Map<string, ConversionLog>
 ): PlannedShare[] {
   const next = shares.map((s) => ({ ...s }));
+  // Shares are built from the group's logs, so every lookup finds its log.
+  const logOf = (share: PlannedShare) =>
+    logsById.get(share.consumptionLogId) as ConversionLog;
   const latestFirst = next
     .filter((s) => s.bookingAssetId === sliceId)
-    .sort((a, b) => {
-      const la = logsById.get(a.consumptionLogId);
-      const lb = logsById.get(b.consumptionLogId);
-      if (!la || !lb) return 0;
-      return compareLogsChronologically(lb, la);
-    });
+    .sort((a, b) => compareLogsChronologically(logOf(b), logOf(a)));
   const overflow: PlannedShare[] = [];
   let left = excess;
   for (const share of latestFirst) {
@@ -241,7 +239,7 @@ function carrierOf(
 }
 
 /**
- * Plans the conversion of one LEGACY group (spec section 12.2, steps 1 to 3).
+ * Plans the conversion of one LEGACY group (steps 1 to 3 above).
  *
  * Computes the candidate shares, applies the gate (`D - S <= Q` on every
  * slice, else the whole group is held back with its raw numbers), re-marks

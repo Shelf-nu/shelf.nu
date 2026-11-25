@@ -8,7 +8,6 @@
  * the pure planners and their tests can import it freely.
  *
  * @see {@link file://./conversion.ts} the legacy conversion planner
- * @see superpowers/2026-11-10-booking-source-locations-design.md sections 6 and 12.2
  */
 
 /** Identity of a group: every slice of one asset on one booking. */

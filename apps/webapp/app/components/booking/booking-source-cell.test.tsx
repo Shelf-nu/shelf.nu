@@ -1,7 +1,7 @@
 /**
- * Booking source cell tests: when a pool slice's Location cell shows its
- * sources, and what a single source, a split, a short source and an
- * unassigned source render.
+ * Booking source cell tests: what a single source, a split, a short source
+ * and an unassigned source render. Which rows show the cell at all is pinned
+ * in `~/modules/booking/sources/pool-source-cell.test.ts`.
  *
  * @see {@link file://./booking-source-cell.tsx}
  */
@@ -11,10 +11,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  BookingSourceCell,
   isStandalonePoolSlice,
   selectPoolSourceCell,
-} from "./booking-source-cell";
+} from "~/modules/booking/sources/pool-source-cell";
+import { BookingSourceCell } from "./booking-source-cell";
 
 // why: LocationBadge needs the `_layout` route loader (roles) and the location
 // tree API, neither mounted here; a double that records the location it was
@@ -69,113 +69,6 @@ const UNASSIGNED = part({
   label: "Needs a location",
   planned: 3,
   short: true,
-});
-
-describe("selectPoolSourceCell", () => {
-  const base = {
-    isStandalonePoolSlice: true,
-    hasManualPlacements: true,
-  };
-
-  it("returns the parts of an allocated standalone pool slice", () => {
-    expect(
-      selectPoolSourceCell({
-        ...base,
-        summary: { parts: [WAREHOUSE], mode: "AUTO" },
-      })
-    ).toEqual({ parts: [WAREHOUSE] });
-    expect(
-      selectPoolSourceCell({
-        ...base,
-        summary: { parts: [WAREHOUSE, UNPLACED], mode: "MANUAL" },
-      })
-    ).toEqual({ parts: [WAREHOUSE, UNPLACED] });
-  });
-
-  it("keeps the ordinary cell for LEGACY and KIT slices", () => {
-    for (const mode of ["LEGACY", "KIT"] as const) {
-      expect(
-        selectPoolSourceCell({
-          ...base,
-          summary: { parts: [WAREHOUSE], mode },
-        })
-      ).toBeNull();
-    }
-  });
-
-  it("keeps the ordinary cell for individual assets and kit rows", () => {
-    expect(
-      selectPoolSourceCell({
-        ...base,
-        isStandalonePoolSlice: false,
-        summary: { parts: [WAREHOUSE], mode: "AUTO" },
-      })
-    ).toBeNull();
-    expect(selectPoolSourceCell({ ...base, summary: undefined })).toBeNull();
-  });
-
-  it("keeps the ordinary cell when there is nothing to show", () => {
-    expect(
-      selectPoolSourceCell({
-        ...base,
-        summary: { parts: [], mode: "AUTO" },
-      })
-    ).toBeNull();
-  });
-
-  it("keeps the ordinary cell for a pool without manual placements drawing from Unplaced", () => {
-    expect(
-      selectPoolSourceCell({
-        ...base,
-        hasManualPlacements: false,
-        summary: { parts: [UNPLACED], mode: "AUTO" },
-      })
-    ).toBeNull();
-  });
-
-  it("still shows a pool without manual placements that needs a location", () => {
-    expect(
-      selectPoolSourceCell({
-        ...base,
-        hasManualPlacements: false,
-        summary: { parts: [UNASSIGNED], mode: "AUTO" },
-      })
-    ).toEqual({ parts: [UNASSIGNED] });
-  });
-});
-
-describe("isStandalonePoolSlice", () => {
-  it("counts a quantity-tracked slice with no live kit", () => {
-    expect(
-      isStandalonePoolSlice({
-        asset: { type: "QUANTITY_TRACKED" },
-        assetKitId: null,
-      })
-    ).toBe(true);
-  });
-
-  it("counts units left behind when the asset left its kit", () => {
-    // `sourceKitId` is provenance only; the slice is AUTO and standalone.
-    expect(
-      isStandalonePoolSlice({
-        asset: { type: "QUANTITY_TRACKED" },
-        assetKitId: null,
-        sourceKitId: "kit-1",
-      } as { asset: { type: string }; assetKitId: string | null })
-    ).toBe(true);
-  });
-
-  it("rejects kit-driven slices and individual assets", () => {
-    expect(
-      isStandalonePoolSlice({
-        asset: { type: "QUANTITY_TRACKED" },
-        assetKitId: "ak-1",
-      })
-    ).toBe(false);
-    expect(
-      isStandalonePoolSlice({ asset: { type: "INDIVIDUAL" }, assetKitId: null })
-    ).toBe(false);
-  });
 });
 
 describe("BookingSourceCell", () => {

@@ -21,7 +21,10 @@
 --
 -- Additive only: new enums, two new BookingAsset columns (the NOT NULL one
 -- has a constant default, so adding it does not rewrite the table), two new
--- empty tables. No backfill.
+-- empty tables. No backfill. Each foreign key takes a brief SHARE ROW
+-- EXCLUSIVE lock on the table it references ("BookingAsset", "Location",
+-- "Organization", "ConsumptionLog", "Booking", "Asset"), which blocks writes
+-- to that table until the key is added, so deploy it off-peak.
 
 -- CreateEnum
 CREATE TYPE "BookingSourceAllocation" AS ENUM ('LEGACY', 'KIT', 'AUTO', 'MANUAL');
@@ -123,10 +126,9 @@ ALTER TABLE "BookingAssetSource"
 
 -- NO ACTION: deleting a location first moves every source row off it; a row
 -- the service missed makes the delete fail loudly instead of losing units.
--- Not RESTRICT: RESTRICT is checked at once, so deleting a workspace would
--- fail whenever its locations cascade before its source rows (both cascade
--- from "Organization"). NO ACTION is checked at the end of the statement,
--- after every cascade of that statement has run.
+-- For a key that is not deferrable, NO ACTION and RESTRICT refuse the same
+-- deletes; NO ACTION is the Postgres default and is the only one of the two
+-- that could later be made deferrable without changing the action.
 ALTER TABLE "BookingAssetSource"
   ADD CONSTRAINT "BookingAssetSource_locationId_fkey"
   FOREIGN KEY ("locationId") REFERENCES "Location"("id")
