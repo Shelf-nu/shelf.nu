@@ -18312,7 +18312,13 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
      *
      * @param loose - Fields to override on the standalone slice
      */
-    function arrangeLooseAndKitSlices(loose: { checkedInAt?: Date } = {}) {
+    function arrangeLooseAndKitSlices(
+      loose: {
+        checkedInAt?: Date;
+        checkedOutAt?: Date | null;
+        checkedOutQuantity?: number;
+      } = {}
+    ) {
       setupQtyMocks();
       const booking = makeQtyBooking();
       const [base] = booking.bookingAssets;
@@ -18508,6 +18514,94 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
           where: expect.objectContaining({ id: { in: ["ba-loose"] } }),
         })
       );
+    });
+
+    it("fills around the logs the booking already has, read once for the request", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the logs stored before this request live in the database. This
+      // answers the log reads with 3 units already back on the loose slice.
+      const logReads = db.consumptionLog.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const priorLogReads = logReads.getMockImplementation();
+      onTestFinished(() => {
+        if (priorLogReads) logReads.mockImplementation(priorLogReads);
+        else logReads.mockReset();
+      });
+      logReads.mockClear();
+      logReads.mockResolvedValue([
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-loose", quantity: 3 },
+      ]);
+
+      // The loose slice has room for 1 more; the other 2 are the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 3 }],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 1],
+        ["ba-kit", 2],
+      ]);
+      // One read before the entries and one to settle, whatever the entries.
+      expect(logReads).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses an unnamed claim for more units than are out", async () => {
+      // The loose slice is booked but still on the shelf: only the kit's 6
+      // are out, so 8 cannot have come back.
+      arrangeLooseAndKitSlices({ checkedOutAt: null, checkedOutQuantity: 0 });
+
+      await expect(
+        partialCheckinBooking({
+          ...baseParams,
+          checkins: [{ assetId: mockQtyAssetId, returned: 8 }],
+        })
+      ).rejects.toThrow("Only 6 are out on this booking");
+      expect(returnLogs()).toEqual([]);
+    });
+
+    it("takes used-up units off the location a slice left from as read inside the transaction", async () => {
+      arrangeLooseAndKitSlices();
+      const placements = installStatefulPlacements([
+        { id: "al-store", locationId: "loc-store", quantity: 60 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+      // why: the loaded booking says the loose slice left from Studio. The
+      // read under the asset lock is the only place a later check-out from
+      // Store shows, so this answers that read with the slice as it stands.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation(
+        (args: { select?: { checkedOutQuantity?: boolean } }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                {
+                  id: "ba-loose",
+                  quantity: 4,
+                  checkedOutQuantity: 4,
+                  checkedOutAt: new Date("2026-01-07T09:00:00.000Z"),
+                  checkedInAt: null,
+                  sourceLocationId: "loc-store",
+                  sourceKitId: null,
+                },
+              ])
+            : genericRows?.(args)
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, consumed: 4 }],
+      });
+
+      expect(placements).toEqual([
+        { id: "al-store", locationId: "loc-store", quantity: 56 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
     });
 
     it("settles only the loose slice when the units that came back fit on it", async () => {

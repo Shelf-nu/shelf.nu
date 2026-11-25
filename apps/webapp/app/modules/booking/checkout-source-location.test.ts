@@ -16,7 +16,7 @@ import {
   sliceForDisposition,
   sourceLocationFieldName,
   spreadUntaggedCheckin,
-  untaggedCheckinPlacementSources,
+  placementSourcesForShares,
   sourceSubmissionFromRecord,
   submittedSourceForSlice,
 } from "./checkout-source-location";
@@ -524,7 +524,16 @@ describe("checkoutSourceOptions", () => {
   });
 });
 
-describe("untaggedCheckinPlacementSources", () => {
+describe("placementSourcesForShares", () => {
+  /** The placement drop of one unnamed disposition, split then placed. */
+  const placementSourcesOf = (
+    args: Parameters<typeof spreadUntaggedCheckin>[0]
+  ) =>
+    placementSourcesForShares({
+      slices: args.slices,
+      shares: spreadUntaggedCheckin(args),
+    });
+
   const loose = {
     id: "ba-loose",
     quantity: 4,
@@ -546,7 +555,7 @@ describe("untaggedCheckinPlacementSources", () => {
 
   it("fills the standalone slice first, as the readers do", () => {
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [kit, loose],
         priorLogs: [],
         consumed: 6,
@@ -557,7 +566,7 @@ describe("untaggedCheckinPlacementSources", () => {
   it("puts returned units first, so used-up ones land where the readers put them", () => {
     // 3 returned fill the loose slice to 1 left; 2 consumed: 1 there, 1 on the kit.
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [loose, kit],
         priorLogs: [],
         returned: 3,
@@ -568,7 +577,7 @@ describe("untaggedCheckinPlacementSources", () => {
 
   it("counts earlier logs, tagged or not, before filling", () => {
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [loose, kit],
         priorLogs: [{ bookingAssetId: null, quantity: 4 }],
         consumed: 2,
@@ -579,7 +588,7 @@ describe("untaggedCheckinPlacementSources", () => {
   it("takes the whole booked quantity of a dispatched slice with no counter", () => {
     // A stamped marker with a zero counter means every booked unit left.
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [{ ...loose, checkedOutQuantity: 0 }, kit],
         priorLogs: [],
         lost: 5,
@@ -589,7 +598,7 @@ describe("untaggedCheckinPlacementSources", () => {
 
   it("lets a slice that went out twice absorb both trips", () => {
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [{ ...loose, checkedOutQuantity: 8 }, kit],
         priorLogs: [],
         consumed: 6,

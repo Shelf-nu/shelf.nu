@@ -673,29 +673,3 @@ export function placementSourcesForShares({
     quantity,
   }));
 }
-
-/**
- * Which manual placements lose the units of a check-in disposition that names
- * no slice, for an asset with several slices on the booking.
- *
- * Runs {@link spreadUntaggedCheckin} and hands its shares to
- * {@link placementSourcesForShares}, so the units come off the same slices
- * their logs are tagged with.
- *
- * @param args.slices - The asset's slices on this booking
- * @param args.priorLogs - The asset's earlier check-in logs on this booking
- * @returns The `sources` for `reconcileManualPlacementsForStockDecrease`
- */
-export function untaggedCheckinPlacementSources(args: {
-  slices: readonly UntaggedCheckinSlice[];
-  priorLogs: ReadonlyArray<{ bookingAssetId: string | null; quantity: number }>;
-  returned?: number;
-  consumed?: number;
-  lost?: number;
-  damaged?: number;
-}): Array<{ locationId: string; quantity: number }> {
-  return placementSourcesForShares({
-    slices: args.slices,
-    shares: spreadUntaggedCheckin(args),
-  });
-}

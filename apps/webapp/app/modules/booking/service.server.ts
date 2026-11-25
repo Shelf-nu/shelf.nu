@@ -5869,7 +5869,8 @@ export type BookingCheckinRemaining = {
  * re-querying after every disposition, because the session's own logs are
  * the only ones written while it holds the locks, and each disposition writes
  * exactly the units it claims (a RETURN log plus the CONSUME / LOSS / DAMAGE
- * ledger rows), tagged with its slice when it names one.
+ * ledger rows). Each is tagged with a slice: the one the disposition names,
+ * or the one the writer assigns when it names none.
  *
  * - Asset level: `Σ(BookingAsset.quantity) − Σ(every check-in log of the
  *   asset)`, legacy untagged logs included.
@@ -9192,6 +9193,30 @@ export async function partialCheckinBooking({
           cap = Math.min(cap, sliceRemaining);
         }
 
+        /**
+         * Units of the asset that left and are not accounted for yet. Only
+         * these can come back or have been used up: consuming units that
+         * never left the shelf would destroy stock (and on a kit slice leave
+         * the kit holding units the stock no longer has), and returning them
+         * would log a return for units that never went out. Mirrors the
+         * auto-default in `checkinBooking`.
+         *
+         * An entry that names its slice is held to this by the slice checks
+         * before the transaction; one that names none is held to it here.
+         */
+        const slicesOfAsset = lockedSlices.filter(
+          (slice) => slice.assetId === disp.assetId
+        );
+        const unitsStillOut = Math.max(
+          0,
+          slicesOfAsset.reduce(
+            (sum, slice) => sum + resolveSentUnits(slice),
+            0
+          ) -
+            (slicesOfAsset.reduce((sum, slice) => sum + slice.quantity, 0) -
+              remaining)
+        );
+
         // Bare scan of a QUANTITY_TRACKED asset (no explicit disposition):
         // default to the units still out: return them for a returnable
         // (TWO_WAY) asset, consume them for a consumable (ONE_WAY) one. Mirrors
@@ -9214,24 +9239,6 @@ export async function partialCheckinBooking({
               shouldBeCaptured: false,
             });
           }
-          /**
-           * Units of the asset that left and are not accounted for yet. Only
-           * these can come back or have been used up: consuming units that
-           * never left the shelf would destroy stock (and on a kit slice leave
-           * the kit holding units the stock no longer has), and returning them
-           * would log a return for units that never went out. Mirrors the
-           * auto-default in `checkinBooking`.
-           */
-          const slices = lockedSlices.filter(
-            (slice) => slice.assetId === disp.assetId
-          );
-          const sentOut = slices.reduce(
-            (sum, slice) => sum + resolveSentUnits(slice),
-            0
-          );
-          const logged =
-            slices.reduce((sum, slice) => sum + slice.quantity, 0) - remaining;
-          const unitsStillOut = Math.max(0, sentOut - logged);
           if (unitsStillOut === 0) {
             throw new ShelfError({
               cause: null,
@@ -9256,6 +9263,15 @@ export async function partialCheckinBooking({
             status: 400,
             label,
             message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${cap} remaining on this booking.`,
+            shouldBeCaptured: false,
+          });
+        }
+        if (!disp.bookingAssetId && claimed > unitsStillOut) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label,
+            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${unitsStillOut} are out on this booking.`,
             shouldBeCaptured: false,
           });
         }
@@ -9474,19 +9490,12 @@ export async function partialCheckinBooking({
         }
 
         const pendingAfter = remaining - claimed;
-        // Count the claim off what is left, for the asset and for each slice
-        // a share was written to: this disposition just wrote logs for
-        // exactly these units, and a later entry of the same asset is capped
-        // by what they leave.
+        // Count the claim off what is left for the asset: this disposition
+        // just wrote logs for exactly these units. A slice's remaining needs
+        // no count-down: a session names each slice at most once (repeated
+        // asset and slice pairs collapse above), and an entry that names no
+        // slice runs after the named ones and sizes its shares from the logs.
         checkinRemaining.byAsset.set(disp.assetId, pendingAfter);
-        for (const share of shares) {
-          if (!share.bookingAssetId) continue;
-          checkinRemaining.bySlice.set(
-            share.bookingAssetId,
-            (checkinRemaining.bySlice.get(share.bookingAssetId) ?? 0) -
-              (share.returned + share.consumed + share.lost + share.damaged)
-          );
-        }
         if (pendingAfter === 0) {
           fullyReconciledQtyAssetIds.push(disp.assetId);
         }
