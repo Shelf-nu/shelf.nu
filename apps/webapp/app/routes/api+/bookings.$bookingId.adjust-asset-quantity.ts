@@ -19,6 +19,12 @@
  *   change. A blank or missing field leaves the sources alone; the literal
  *   JSON `null` is invalid (400), so omit the field instead.
  *
+ * Loader (GET `?assetId=`): the "From" section of the adjust dialog for the
+ * asset's standalone slice, as `{ sourceEditor }` (null when the section
+ * does not apply, including when the caller may not change this booking's
+ * items in its current status). Same permission and ownership guards as the
+ * action.
+ *
  * Status rule: the manage-items one (`canManageBookingItems`), checked by
  * the service against the locked booking status, the same gate as the
  * mobile route (403 with the same message).
@@ -27,7 +33,11 @@
  * @see {@link file://./../../modules/booking/booked-quantity.server.ts}
  */
 
-import { data, type ActionFunctionArgs } from "react-router";
+import {
+  data,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -35,6 +45,7 @@ import {
   noteBookedQuantityChanges,
   setStandaloneBookedQuantity,
 } from "~/modules/booking/booked-quantity.server";
+import { getSourceEditorData } from "~/modules/booking/sources/source-editor.server";
 import {
   SOURCES_FORM_FIELD,
   sourcesFormFieldSchema,
@@ -46,6 +57,7 @@ import {
   assertIsPost,
   payload,
   error,
+  getCurrentSearchParams,
   getParams,
   parseData,
 } from "~/utils/http.server";
@@ -53,6 +65,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 
 /** The adjust form: asset, new quantity and an optional sources change. */
@@ -64,6 +77,113 @@ export const AdjustBookingAssetQuantitySchema = z.object({
     .positive("Quantity must be a positive integer"),
   [SOURCES_FORM_FIELD]: sourcesFormFieldSchema,
 });
+
+/**
+ * Reads the From section for one asset's standalone slice.
+ *
+ * One query reads the slice with its booking (the ownership and status
+ * guards need it); a slice the section does not apply to, such as a LEGACY
+ * one, stops there. No lock: the figures are a preview the action re-checks.
+ */
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const userId = authSession.userId;
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId, access } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    const { assetId } = parseData(
+      getCurrentSearchParams(request),
+      z.object({ assetId: z.string().min(1, "Asset ID is required") })
+    );
+
+    const bookingAsset = await db.bookingAsset.findFirst({
+      where: {
+        bookingId,
+        assetId,
+        assetKitId: null,
+        booking: { organizationId },
+      },
+      select: {
+        id: true,
+        assetId: true,
+        sourceKitId: true,
+        sourceAllocation: true,
+        asset: { select: { type: true } },
+        booking: {
+          select: {
+            status: true,
+            from: true,
+            to: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
+        },
+      },
+    });
+
+    if (!bookingAsset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not found",
+        message: "This asset is not part of the booking.",
+        label: "Booking",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingAsset.booking.creatorId,
+        custodianUserId: bookingAsset.booking.custodianUserId,
+      },
+      userId,
+      access,
+      action: "adjust asset quantity on",
+    });
+
+    // The action refuses these callers in this status, so offer nothing to edit.
+    if (
+      !canManageBookingItems({
+        access,
+        bookingStatus: bookingAsset.booking.status,
+      })
+    ) {
+      return data(payload({ sourceEditor: null }));
+    }
+
+    const sourceEditor = await getSourceEditorData({
+      organizationId,
+      bookingId,
+      slice: {
+        id: bookingAsset.id,
+        assetId: bookingAsset.assetId,
+        sourceKitId: bookingAsset.sourceKitId,
+        sourceAllocation: bookingAsset.sourceAllocation,
+        isPool: isQuantityTracked(bookingAsset.asset),
+        booking: {
+          status: bookingAsset.booking.status,
+          from: bookingAsset.booking.from,
+          to: bookingAsset.booking.to,
+        },
+      },
+    });
+
+    return data(payload({ sourceEditor }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return data(error(reason), { status: reason.status });
+  }
+}
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();

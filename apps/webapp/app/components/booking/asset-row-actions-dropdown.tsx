@@ -14,9 +14,12 @@
  *   Popover menus.
  *
  * For QUANTITY_TRACKED assets, shows an "Adjust quantity" action that
- * opens a modal to change the booked quantity. Auto-opens that modal when
- * the URL carries `?adjustQty=<assetId>` (used when redirecting from
- * "Create new booking" for a qty-tracked asset).
+ * opens a modal to change the booked quantity, only where the viewer may
+ * change this booking's items in its status (`canManageBookingItems`, the
+ * rule the adjust route enforces). Auto-opens that modal when the URL
+ * carries `?adjustQty=<assetId>` (used when redirecting from "Create new
+ * booking" for a qty-tracked asset). While the modal is open, the slice's
+ * "From" section data is loaded from the adjust route's loader.
  */
 
 import { forwardRef, useEffect, useRef, useState } from "react";
@@ -28,15 +31,18 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { useLoaderData } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import type { SourceEditorData } from "~/modules/booking/sources/source-editor";
 import type { BookingWithCustodians } from "~/modules/booking/types";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import { AdjustBookingAssetQuantityDialog } from "./adjust-booking-asset-quantity-dialog";
 import { RemoveAssetFromBooking } from "./remove-asset-from-booking";
@@ -99,6 +105,12 @@ const TriggerButton = forwardRef<HTMLButtonElement, TriggerButtonProps>(
 );
 TriggerButton.displayName = "AssetRowActionsTrigger";
 
+/** What the adjust route's loader answers (`payload()` or `error()`). */
+type SourceEditorResponse = {
+  sourceEditor?: SourceEditorData | null;
+  error?: unknown;
+};
+
 const ConditionalActionsDropdown = ({
   asset,
   fullWidth,
@@ -107,6 +119,37 @@ const ConditionalActionsDropdown = ({
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
   const isQtyTracked = isQuantityTracked(asset);
+  // The adjust route refuses members held to drafts on a started booking,
+  // so the action is offered only where it can succeed.
+  const roleAccess = useRoleAccess();
+  const canAdjust =
+    isQtyTracked &&
+    canManageBookingItems({
+      access: roleAccess,
+      bookingStatus: booking.status,
+    });
+
+  /**
+   * The From section's data, read when the dialog opens (one query for a
+   * slice it does not apply to). Shown only once loaded, so a reopened dialog
+   * never starts from the previous opening's figures.
+   */
+  const sourceEditorFetcher = useFetcher<SourceEditorResponse>({
+    key: `adjust-booking-asset-sources-${booking.id}-${asset.id}`,
+  });
+  const loadSourceEditor = sourceEditorFetcher.load;
+  const sourceEditorUrl = `/api/bookings/${
+    booking.id
+  }/adjust-asset-quantity?${new URLSearchParams({ assetId: asset.id })}`;
+  useEffect(() => {
+    if (isAdjustDialogOpen && canAdjust) {
+      void loadSourceEditor(sourceEditorUrl);
+    }
+  }, [isAdjustDialogOpen, canAdjust, loadSourceEditor, sourceEditorUrl]);
+  const sourceEditor =
+    sourceEditorFetcher.state === "idle"
+      ? sourceEditorFetcher.data?.sourceEditor ?? null
+      : null;
 
   /**
    * `skipDefault: true` — we don't want the hook's auto-open-on-QR-scan
@@ -143,7 +186,7 @@ const ConditionalActionsDropdown = ({
   const didAutoOpenRef = useRef(false);
   useEffect(() => {
     if (didAutoOpenRef.current) return;
-    if (!isQtyTracked) return;
+    if (!canAdjust) return;
     if (searchParams.get("adjustQty") !== asset.id) return;
 
     didAutoOpenRef.current = true;
@@ -156,7 +199,7 @@ const ConditionalActionsDropdown = ({
       },
       { replace: true, preventScrollReset: true }
     );
-  }, [asset.id, isQtyTracked, searchParams, setSearchParams]);
+  }, [asset.id, canAdjust, searchParams, setSearchParams]);
 
   return (
     <>
@@ -199,7 +242,7 @@ const ConditionalActionsDropdown = ({
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[180px] md:rounded-t-[4px]"
           >
             <div className="order fixed bottom-0 left-0 max-h-[85dvh] w-screen overflow-y-auto rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:max-h-none md:w-full md:overflow-visible md:rounded-t-[4px]">
-              {isQtyTracked ? (
+              {canAdjust ? (
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
                     type="button"
@@ -252,7 +295,7 @@ const ConditionalActionsDropdown = ({
         </PopoverPortal>
       </Popover>
 
-      {isQtyTracked ? (
+      {canAdjust ? (
         <AdjustBookingAssetQuantityDialog
           bookingId={booking.id}
           assetId={asset.id}
@@ -269,6 +312,7 @@ const ConditionalActionsDropdown = ({
           unitOfMeasure={asset.unitOfMeasure}
           open={isAdjustDialogOpen}
           onOpenChange={setIsAdjustDialogOpen}
+          sourceEditor={sourceEditor}
         />
       ) : null}
     </>
