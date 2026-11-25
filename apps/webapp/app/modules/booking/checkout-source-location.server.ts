@@ -369,9 +369,9 @@ export async function recordCheckoutSourceLocations(
  * (`ALLOCATION_SOURCE_FORM_VALUE`): submitting the default dispatches by
  * allocation like no pick, so a source the plan avoids is never forced. A
  * LEGACY slice with adoption off defaults to the shelf (the most units left).
- * A converted slice also carries its plan as one line (`plannedSummary`, such
- * as "Demo Warehouse 8 · Unplaced 7"), so the select can say what "as
- * planned" sends out.
+ * With `withPlannedSummary`, a converted slice also carries its plan as one
+ * line (`plannedSummary`, such as "Demo Warehouse 8 · Needs a location 7"),
+ * so the select can say what "as planned" sends out.
  *
  * A client without the capability has no "as planned" option, so its default
  * is always a real location: a converted slice's single pending LOCATION or
@@ -391,6 +391,7 @@ export async function getCheckoutSourceQuestions({
   sliceIds,
   clientSupportsSources = true,
   adoptionEnabled = BOOKING_SOURCES_ENABLED,
+  withPlannedSummary = false,
 }: {
   organizationId: string;
   bookingId: string;
@@ -407,6 +408,13 @@ export async function getCheckoutSourceQuestions({
    * `BOOKING_SOURCES_ENABLED`. Decides the default of a LEGACY slice.
    */
   adoptionEnabled?: boolean;
+  /**
+   * Whether to name each converted slice's plan (`plannedSummary`). Only the
+   * surfaces that render the select (the check-out dialogs, the scanner
+   * drawer, fulfil-and-check-out) ask for it; guards and bulk paths that
+   * only test for questions skip the source row and location name reads.
+   */
+  withPlannedSummary?: boolean;
 }): Promise<CheckoutSourceQuestion[]> {
   const slices = await db.bookingAsset.findMany({
     where: {
@@ -427,26 +435,35 @@ export async function getCheckoutSourceQuestions({
   if (slices.length === 0) return [];
 
   // Converted slices already have sources planned. Their rows name the plan
-  // behind "as planned"; an older phone is asked nothing about a split plan,
-  // and a single pending source is its default.
+  // behind "as planned" (when asked for), and an older phone is asked
+  // nothing about a split plan, with a single pending source as its default.
+  // Nobody else needs them, so they are read only for those two.
   const convertedIds = slices
     .filter(
       (slice) =>
         slice.sourceAllocation === "AUTO" || slice.sourceAllocation === "MANUAL"
     )
     .map((slice) => slice.id);
+  /** A capable client's select names the plan behind "as planned". */
+  const namesPlan = clientSupportsSources && withPlannedSummary;
   const [snapshots, rows] = await Promise.all([
     loadPoolSourceSnapshots(db, {
       organizationId,
       assetIds: slices.map((slice) => slice.assetId),
     }),
-    convertedIds.length === 0
+    convertedIds.length === 0 || !(namesPlan || !clientSupportsSources)
       ? Promise.resolve([])
       : db.bookingAssetSource.findMany({
           where: {
             organizationId,
             bookingAssetId: { in: convertedIds },
-            kind: { in: ["LOCATION", "UNPLACED"] },
+            // The plan also names units on "Needs a location"; an older
+            // phone's default reads LOCATION and UNPLACED rows only.
+            kind: {
+              in: namesPlan
+                ? ["LOCATION", "UNPLACED", "UNASSIGNED"]
+                : ["LOCATION", "UNPLACED"],
+            },
           },
           select: {
             bookingAssetId: true,
@@ -461,7 +478,7 @@ export async function getCheckoutSourceQuestions({
   const convertedSet = new Set(convertedIds);
   /** The converted slices' rows, as one array type whichever branch ran. */
   const sourceRows: Array<(typeof rows)[number]> = rows;
-  const locationNames = clientSupportsSources
+  const locationNames = namesPlan
     ? await planLocationNames({ organizationId, rows: sourceRows, snapshots })
     : new Map<string, string>();
 
@@ -476,6 +493,7 @@ export async function getCheckoutSourceQuestions({
         ? sourceRows.filter(
             (row) =>
               row.bookingAssetId === slice.id &&
+              (row.kind === "LOCATION" || row.kind === "UNPLACED") &&
               row.quantity - row.releasedQuantity - row.outQuantity > 0
           )
         : [];
@@ -502,7 +520,7 @@ export async function getCheckoutSourceQuestions({
     // What "as planned" sends out, for the select to name. Only a capable
     // client offers that option, and only a converted slice has a plan.
     const plannedSummary =
-      clientSupportsSources && fromAllocation
+      namesPlan && fromAllocation
         ? formatSourceSummary(
             describeBookingSources({
               rows: sourceRows.filter((row) => row.bookingAssetId === slice.id),

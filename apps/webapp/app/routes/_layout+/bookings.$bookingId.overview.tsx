@@ -1259,6 +1259,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ? await getCheckoutSourceQuestions({
           organizationId,
           bookingId: booking.id,
+          withPlannedSummary: true,
         })
       : [];
 

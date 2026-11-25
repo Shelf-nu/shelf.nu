@@ -338,6 +338,28 @@ describe("checkout-assets loader: pools short at their sources", () => {
     expect(result.shortSourceAssetIds).toEqual(["cables"]);
   });
 
+  it("does not block a short pool that still has pending units at a healthy source", async () => {
+    getSliceSourceSummariesMock.mockResolvedValue(
+      new Map([
+        [
+          "ba-1",
+          {
+            parts: [
+              { kind: "LOCATION", planned: 7, out: 0, short: false },
+              { kind: "UNASSIGNED", planned: 3, out: 0, short: true },
+            ],
+            short: true,
+            mode: "AUTO",
+          },
+        ],
+      ])
+    );
+
+    const result = await load([poolSlice("ba-1", "cables", "AUTO")]);
+
+    expect(result.shortSourceAssetIds).toEqual([]);
+  });
+
   it("reads no summaries for a booking of LEGACY slices", async () => {
     const result = await load([poolSlice("ba-1", "cables", "LEGACY")]);
 

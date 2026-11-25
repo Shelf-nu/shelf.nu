@@ -235,8 +235,9 @@ export type CheckoutSourceQuestion = {
   fromAllocation?: boolean;
   /**
    * What "as planned" sends out, as one line per source in the booking's own
-   * words ("Demo Warehouse 8 · Unplaced 7"). Set only for a client with the
-   * `booking-sources` capability on a slice whose sources are planned;
+   * words ("Demo Warehouse 8 · Needs a location 7"). Set only when the loader
+   * asks for it (`withPlannedSummary`), for a client with the
+   * `booking-sources` capability, on a slice whose sources are planned;
    * absent while nothing is planned yet (a LEGACY slice converts at
    * check-out and picks its sources then).
    */

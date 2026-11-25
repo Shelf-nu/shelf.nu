@@ -15,7 +15,7 @@
  * @see {@link file://../../../routes/_layout+/locations.$locationId.assets.tsx}
  */
 
-import { peakConcurrent } from "@shelf/quantity-control";
+import { FAR_FUTURE_SENTINEL, peakConcurrent } from "@shelf/quantity-control";
 import type { AvailabilityInterval } from "@shelf/quantity-control";
 
 /** One booking's units still to leave a location, over its window. */
@@ -33,8 +33,11 @@ export type PendingHold = {
  *
  * The next window is that of the booking whose hold starts soonest (a booking
  * already running starts now), clipped to start no earlier than now; ties go
- * to the one ending first. Every hold overlapping that window counts toward
- * the peak, clipped to it. Holds already over count for nothing.
+ * to the one ending first. An overdue booking's hold has no end, so it never
+ * picks the window (it would stretch it over the whole future); it still
+ * counts toward the peak. Only when every hold is open-ended does the window
+ * run from now on. Every hold overlapping the window counts toward the peak,
+ * clipped to it. Holds already over count for nothing.
  *
  * @param holds - Pending holds at one location of one pool
  * @param now - The current instant
@@ -49,7 +52,10 @@ export function reservedNextAtLocation(
   if (live.length === 0) return 0;
 
   const startOf = (h: PendingHold) => Math.max(h.from.getTime(), nowMs);
-  const next = [...live].sort(
+  const isOpenEnded = (h: PendingHold) =>
+    h.to.getTime() >= FAR_FUTURE_SENTINEL.getTime();
+  const bounded = live.filter((h) => !isOpenEnded(h));
+  const next = [...(bounded.length > 0 ? bounded : live)].sort(
     (a, b) => startOf(a) - startOf(b) || a.to.getTime() - b.to.getTime()
   )[0];
   const windowFrom = startOf(next);

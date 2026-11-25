@@ -4,6 +4,7 @@
  * @see {@link file://./location-holds.ts}
  */
 
+import { FAR_FUTURE_SENTINEL } from "@shelf/quantity-control";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -112,6 +113,35 @@ describe("reservedNextAtLocation", () => {
         NOW
       )
     ).toBe(0);
+  });
+
+  it("lets an overdue hold count toward the peak without stretching the window", () => {
+    // Overdue: 2 pending, no known end. The next window is days 1 to 3, where
+    // the two future bookings overlap (3 + 4) on top of the overdue 2. The
+    // booking of 20 starts after that window, so it does not count.
+    expect(
+      reservedNextAtLocation(
+        [
+          { from: day(-3), to: FAR_FUTURE_SENTINEL, pending: 2 },
+          { from: day(1), to: day(3), pending: 3 },
+          { from: day(2), to: day(4), pending: 4 },
+          { from: day(5), to: day(6), pending: 20 },
+        ],
+        NOW
+      )
+    ).toBe(9);
+  });
+
+  it("runs from now on when every hold is overdue", () => {
+    expect(
+      reservedNextAtLocation(
+        [
+          { from: day(-3), to: FAR_FUTURE_SENTINEL, pending: 2 },
+          { from: day(-1), to: FAR_FUTURE_SENTINEL, pending: 1 },
+        ],
+        NOW
+      )
+    ).toBe(3);
   });
 
   it("lets back-to-back bookings not overlap", () => {

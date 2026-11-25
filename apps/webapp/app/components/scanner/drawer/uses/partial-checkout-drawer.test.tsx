@@ -64,6 +64,7 @@ vi.mock("react-router", async () => {
   return {
     ...actual,
     useLoaderData: vi.fn(),
+    useActionData: vi.fn(() => undefined),
     useRouteLoaderData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
     useLocation: vi.fn(() => ({

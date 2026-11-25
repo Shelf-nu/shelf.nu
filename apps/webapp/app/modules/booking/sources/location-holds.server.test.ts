@@ -8,13 +8,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 
-import { loadReservedNextAtLocation } from "./location-holds.server";
+import {
+  loadOperatorCustodyByPool,
+  loadReservedNextAtLocation,
+} from "./location-holds.server";
 
 // why: the reader goes through Prisma; each case stages the rows it returns
 vi.mock("~/database/db.server", () => ({
   db: {
     bookingAsset: { findMany: vi.fn() },
     bookingAssetSource: { findMany: vi.fn() },
+    custody: { groupBy: vi.fn() },
   },
 }));
 
@@ -37,7 +41,8 @@ describe("loadReservedNextAtLocation", () => {
       now: NOW,
     });
 
-    expect(result.size).toBe(0);
+    expect(result.reservedNext.size).toBe(0);
+    expect(result.convertedAssetIds.size).toBe(0);
     expect(db.bookingAsset.findMany).toHaveBeenCalledTimes(1);
     expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -101,7 +106,9 @@ describe("loadReservedNextAtLocation", () => {
       now: NOW,
     });
 
-    expect([...result]).toEqual([["cables", 3]]);
+    expect([...result.reservedNext]).toEqual([["cables", 3]]);
+    // Both pools are converted, whether or not anything is still to leave.
+    expect([...result.convertedAssetIds]).toEqual(["cables", "tape"]);
     expect(db.bookingAssetSource.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -139,6 +146,45 @@ describe("loadReservedNextAtLocation", () => {
       now: NOW,
     });
 
-    expect(result.get("cables")).toBe(5);
+    expect(result.reservedNext.get("cables")).toBe(5);
+  });
+});
+
+describe("loadOperatorCustodyByPool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sums operator custody per pool, leaving kit custody out", async () => {
+    vi.mocked(db.custody.groupBy).mockResolvedValue([
+      { assetId: "cables", _sum: { quantity: 2 } },
+      { assetId: "tape", _sum: { quantity: 0 } },
+    ] as never);
+
+    const result = await loadOperatorCustodyByPool({
+      organizationId: ORG,
+      assetIds: ["cables", "tape"],
+    });
+
+    expect([...result]).toEqual([["cables", 2]]);
+    expect(db.custody.groupBy).toHaveBeenCalledWith({
+      by: ["assetId"],
+      where: {
+        assetId: { in: ["cables", "tape"] },
+        kitCustodyId: null,
+        asset: { organizationId: ORG },
+      },
+      _sum: { quantity: true },
+    });
+  });
+
+  it("reads nothing for no pools", async () => {
+    const result = await loadOperatorCustodyByPool({
+      organizationId: ORG,
+      assetIds: [],
+    });
+
+    expect(result.size).toBe(0);
+    expect(db.custody.groupBy).not.toHaveBeenCalled();
   });
 });

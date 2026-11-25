@@ -685,7 +685,7 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
    */
   function stageConverted(
     rows: Array<{
-      kind: "LOCATION" | "UNPLACED";
+      kind: "LOCATION" | "UNPLACED" | "UNASSIGNED";
       locationId: string | null;
       quantity: number;
       releasedQuantity?: number;
@@ -784,9 +784,51 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     const [question] = await getCheckoutSourceQuestions({
       organizationId: ORG,
       bookingId: "booking-1",
+      withPlannedSummary: true,
     });
 
     expect(question.plannedSummary).toBe("Studio 8 · Unplaced 7");
+  });
+
+  it("names units on Needs a location in the plan", async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 8 },
+      { kind: "UNASSIGNED", locationId: null, quantity: 7 },
+    ]);
+
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      withPlannedSummary: true,
+    });
+
+    expect(question.plannedSummary).toBe("Studio 8 · Needs a location 7");
+    expect(db.bookingAssetSource.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          kind: { in: ["LOCATION", "UNPLACED", "UNASSIGNED"] },
+        }),
+      })
+    );
+  });
+
+  it("reads no source rows or names when the plan is not asked for", async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-back", quantity: 5 },
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 10 },
+    ]);
+    const findLocations = vi.fn(() => resolved([]));
+    Object.assign(db, { location: { findMany: findLocations } });
+
+    const [question] = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+    });
+
+    expect(question.plannedSummary).toBeUndefined();
+    expect(question.defaultLocationId).toBe(ALLOCATION_SOURCE_FORM_VALUE);
+    expect(db.bookingAssetSource.findMany).not.toHaveBeenCalled();
+    expect(findLocations).not.toHaveBeenCalled();
   });
 
   it("names a planned location the pool is no longer placed at", async () => {
@@ -802,6 +844,7 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     const [question] = await getCheckoutSourceQuestions({
       organizationId: ORG,
       bookingId: "booking-1",
+      withPlannedSummary: true,
     });
 
     expect(question.plannedSummary).toBe("Back Room 5 · Studio 10");
@@ -819,6 +862,7 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
       organizationId: ORG,
       bookingId: "booking-1",
       adoptionEnabled: true,
+      withPlannedSummary: true,
     });
 
     expect(question.plannedSummary).toBeUndefined();
@@ -879,6 +923,21 @@ describe("getCheckoutSourceQuestions for slices with planned sources", () => {
     expect(vi.mocked(dispatchUnits).mock.calls[0][1].picks).toEqual([
       { sliceId: "ba-1", units: 15 },
     ]);
+  });
+
+  it("lets an older phone default to the one LOCATION source, ignoring Needs a location", async () => {
+    stageConverted([
+      { kind: "LOCATION", locationId: "loc-studio", quantity: 8 },
+      { kind: "UNASSIGNED", locationId: null, quantity: 7 },
+    ]);
+
+    const questions = await getCheckoutSourceQuestions({
+      organizationId: ORG,
+      bookingId: "booking-1",
+      clientSupportsSources: false,
+    });
+
+    expect(questions.map((q) => q.defaultLocationId)).toEqual(["loc-studio"]);
   });
 
   it("defaults an older phone to Unplaced for a slice planned at Unplaced only", async () => {

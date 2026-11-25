@@ -366,6 +366,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const checkoutSourceQuestions = await getCheckoutSourceQuestions({
       organizationId,
       bookingId: booking.id,
+      withPlannedSummary: true,
     });
 
     /**
@@ -390,10 +391,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ).map(({ id, assetIds }) => ({ id, assetIds }));
 
     /**
-     * Pools whose standalone slice is short at its sources, so the drawer
-     * raises the `short-source` blocker instead of the check-out refusing at
-     * submit. Read only when some standalone pool slice has planned sources;
-     * a booking of LEGACY slices pays no query.
+     * Pools that cannot send any unit out because every source holding
+     * their pending units is short, so the drawer raises the `short-source`
+     * blocker instead of the check-out refusing at submit. Derived from the
+     * summaries' parts, with no further query. Read only when some
+     * standalone pool slice has planned sources; a booking of LEGACY slices
+     * pays no query.
      */
     const hasSourcedPoolSlice = booking.bookingAssets.some(
       (ba) =>

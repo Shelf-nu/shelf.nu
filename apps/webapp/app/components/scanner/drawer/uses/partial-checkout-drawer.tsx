@@ -50,6 +50,7 @@ import {
   assetLabelPresets,
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
+import { CheckoutRefusal } from "./checkout-refusal";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
@@ -1439,9 +1440,12 @@ const CustomForm = ({
     <Form
       ref={setFormElement}
       id={PARTIAL_CHECKOUT_FORM_ID}
-      className="flex max-h-full w-full"
+      className="flex max-h-full w-full flex-col"
       method="post"
     >
+      {/* A refusal only the server can make, such as units leaving from a
+          source that is short for the slice. */}
+      <CheckoutRefusal />
       <div className="flex w-full gap-2 px-3 py-2">
         {/* Hidden form fields */}
         {assetIdsForCheckout.map((assetId, index) => (

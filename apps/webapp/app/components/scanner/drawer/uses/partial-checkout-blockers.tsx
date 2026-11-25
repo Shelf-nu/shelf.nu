@@ -90,11 +90,14 @@ export type PartialCheckoutBlockerArgs = {
   /** The assets this booking took from those kits. */
   assetsInKitsBookedElsewhere: Set<string>;
   /**
-   * Quantity-tracked assets whose standalone slice on this booking is short:
-   * some of its pending units have no source with room for them, or sit on
-   * "Needs a location". The loader takes them from the booking's source
-   * summaries, the same short flags the booking page shows, and the check-out
-   * refuses such a slice until its sources are changed.
+   * Quantity-tracked assets that cannot send any unit out because of short
+   * sources: a standalone slice is short, and no standalone slice of the
+   * asset has pending units at a LOCATION or UNPLACED source that is not
+   * short (`shortPoolAssetIds`). The loader derives them from the booking's
+   * source summaries, the same short flags the booking page shows. A pool
+   * with a healthy source left is not blocked here; a check-out that reaches
+   * a short source is refused by the server and the drawer shows that
+   * message.
    */
   shortSourceAssetIds: Set<string>;
   /** Drops rows by ASSET id. */
@@ -205,9 +208,9 @@ export function buildPartialCheckoutBlockers({
     .map((a) => a.id);
   const qrIdsOfAssetsInCustody = qrIdsFor(items, "asset", assetsInCustody);
 
-  // A booked pool whose units still to go out have no source with room.
-  // Assets already reported as not booked or fully out are left to those
-  // blockers.
+  // A booked pool with no healthy source left for its units still to go
+  // out. Assets already reported as not booked or fully out are left to
+  // those blockers.
   const assetsShortAtSource = assets
     .filter(
       (asset) =>
