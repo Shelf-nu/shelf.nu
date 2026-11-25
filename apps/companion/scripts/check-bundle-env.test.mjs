@@ -14,6 +14,7 @@
 
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -52,6 +53,24 @@ describe("refsIn", () => {
     ]);
   });
 });
+
+/** Bundle paths in the form the gate builds them, with the platform separator. */
+const ANDROID_BUNDLE = join(
+  "dist",
+  "_expo",
+  "static",
+  "js",
+  "android",
+  "entry-abc.hbc"
+);
+const IOS_BUNDLE = join(
+  "dist",
+  "_expo",
+  "static",
+  "js",
+  "ios",
+  "entry-abc.hbc"
+);
 
 /** A packed asset path as Hermes stores it, with no separator after it. */
 function fontPath(folder) {
@@ -98,28 +117,19 @@ describe("embedded assets in the Android bundle", () => {
   it("checks a bundle under the Android export folder", () => {
     const unpatched = fontPath(storeFolder);
     assert.match(
-      assetProblemsFor(
-        "dist/_expo/static/js/android/entry-abc.hbc",
-        unpatched,
-        "1.8.0"
-      ).join("\n"),
+      assetProblemsFor(ANDROID_BUNDLE, unpatched, "1.8.0").join("\n"),
       /expo-asset patch missing/
     );
   });
 
   it("does not apply the Android checks to an iOS bundle", () => {
-    assert.deepEqual(
-      assetProblemsFor("dist/_expo/static/js/ios/entry-abc.hbc", "", "1.8.0"),
-      []
-    );
+    assert.deepEqual(assetProblemsFor(IOS_BUNDLE, "", "1.8.0"), []);
   });
 
   it("knows when an export holds no Android bundle", () => {
-    const ios = "dist/_expo/static/js/ios/entry-abc.hbc";
-    const android = "dist/_expo/static/js/android/entry-abc.hbc";
-    assert.equal(hasAndroidBundle([ios]), false);
+    assert.equal(hasAndroidBundle([IOS_BUNDLE]), false);
     assert.equal(hasAndroidBundle([]), false);
-    assert.equal(hasAndroidBundle([ios, android]), true);
+    assert.equal(hasAndroidBundle([IOS_BUNDLE, ANDROID_BUNDLE]), true);
   });
 
   it("records a folder for the runtime in app.json", () => {

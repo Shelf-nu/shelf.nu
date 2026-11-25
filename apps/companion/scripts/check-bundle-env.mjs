@@ -33,7 +33,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Where `expo export` writes the platform bundles. */
@@ -178,7 +178,7 @@ const ANDROID_DIR = join(DIST, "android");
  * @returns true for a file under the Android export folder
  */
 export function isAndroidBundle(path) {
-  return path.startsWith(`${ANDROID_DIR}/`);
+  return path.startsWith(`${ANDROID_DIR}${sep}`);
 }
 
 /**
