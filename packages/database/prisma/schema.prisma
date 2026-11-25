@@ -857,7 +857,8 @@ model ProblemReport {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
-  // The member who reported it. Null once their account is deleted.
+  // The member who reported it. Null only if their user row is removed; a
+  // deleted account keeps its anonymised row, as it does for notes.
   reporter   User?   @relation(fields: [reporterId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   reporterId String?
 

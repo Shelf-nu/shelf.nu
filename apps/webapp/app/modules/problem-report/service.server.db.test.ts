@@ -5,8 +5,8 @@
  * Runs `reportAssetProblem` as members of every role on real rows: the asset
  * lookup the asset page uses, the archived guard, the report row, note and
  * activity event it writes, the hourly limit and who the email goes to. It
- * also runs the statement the `ProblemReport` migration copies old report
- * notes with. The mailer is the one thing replaced, so each test reads the
+ * also runs the statement the backfill migration copies old report notes
+ * with. The mailer is the one thing replaced, so each test reads the
  * recipients from the calls it received.
  *
  * Needs a database with every migration applied, so it is skipped unless
@@ -566,7 +566,7 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     const migration = readFileSync(
       path.resolve(
         __dirname,
-        "../../../../../packages/database/prisma/migrations/20261125120000_add_problem_report/migration.sql"
+        "../../../../../packages/database/prisma/migrations/20261125120100_backfill_problem_reports/migration.sql"
       ),
       "utf8"
     );

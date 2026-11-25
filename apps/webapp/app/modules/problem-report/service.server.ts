@@ -51,11 +51,7 @@ export const PROBLEM_REPORT_WINDOW_MS = 60 * 60 * 1000;
 export const PERSONAL_WORKSPACE_REFUSAL =
   "Report a problem is for team workspaces. A Personal workspace has no one else to report to.";
 
-/**
- * Text between the reporter link and the report in every report note. The
- * migration that created `ProblemReport` recognises report notes by this
- * line's shape, so a note written by an older version is still found.
- */
+/** Text between the reporter link and the report in every report note. */
 export const PROBLEM_REPORT_PHRASE = " reported a problem: ";
 
 /**

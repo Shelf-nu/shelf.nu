@@ -7,8 +7,8 @@
  * database edges so the note content, the report row and its activity event,
  * the asset scope, the archived refusal, who is emailed and the failure
  * handling are checked on every push. It also runs the pattern the
- * `ProblemReport` migration copies old report notes with against the note
- * this service writes.
+ * backfill migration copies old report notes with against the note this
+ * service writes.
  *
  * @see {@link file://./service.server.ts}
  */
@@ -504,11 +504,13 @@ describe("reportAssetProblem", () => {
   });
 });
 
+// The migration runs once per database. If the note's shape ever changes,
+// delete this block: an applied migration is never edited to match.
 describe("the pattern the ProblemReport migration copies report notes with", () => {
   const migration = readFileSync(
     path.resolve(
       __dirname,
-      "../../../../../packages/database/prisma/migrations/20261125120000_add_problem_report/migration.sql"
+      "../../../../../packages/database/prisma/migrations/20261125120100_backfill_problem_reports/migration.sql"
     ),
     "utf8"
   );

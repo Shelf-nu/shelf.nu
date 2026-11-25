@@ -113,6 +113,19 @@ export type AssetLifecycleEventInput = BaseEventInput & {
 };
 
 /**
+ * A problem a member reported on an asset. Entity is the asset. `meta` names
+ * the `ProblemReport` row and nothing else: the report text stays in that
+ * row, out of the event log.
+ */
+export type ProblemReportEventInput = Omit<BaseEventInput, "meta"> & {
+  action: "ASSET_PROBLEM_REPORTED";
+  entityType: "ASSET";
+  entityId: string;
+  assetId: string;
+  meta: { problemReportId: string };
+};
+
+/**
  * Audit lifecycle events — require `auditSessionId`. Entity is AUDIT.
  */
 export type AuditEventAction = "AUDIT_STARTED" | "AUDIT_COMPLETED";
@@ -194,6 +207,7 @@ export type GenericEventInput = BaseEventInput & {
     | "CUSTODY_ASSIGNED"
     | "CUSTODY_RELEASED"
     | AssetLifecycleAction
+    | "ASSET_PROBLEM_REPORTED"
     | AuditEventAction
     | BookingLifecycleAction
     | "BOOKING_ASSETS_ADDED"
@@ -214,6 +228,7 @@ export type ActivityEventInput =
   | FieldChangeEventInput
   | CustodyEventInput
   | AssetLifecycleEventInput
+  | ProblemReportEventInput
   | AuditEventInput
   | BookingLifecycleEventInput
   | BookingAssetItemEventInput

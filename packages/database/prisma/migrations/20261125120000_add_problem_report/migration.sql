@@ -1,6 +1,7 @@
 -- Problem reports ("Report a problem" on an asset) get their own table. A
 -- report is one row here plus the asset history line (a "Note" of type
--- UPDATE) it has always written; the row links to that note.
+-- UPDATE) it has always written; the row links to that note. Existing
+-- report notes are copied in by the next migration.
 
 -- CreateTable
 CREATE TABLE "ProblemReport" (
@@ -46,42 +47,3 @@ ALTER TABLE "ProblemReport" ENABLE ROW LEVEL SECURITY;
 -- Records each problem report in the activity log. Nothing in this migration
 -- uses the new value.
 ALTER TYPE "ActivityAction" ADD VALUE IF NOT EXISTS 'ASSET_PROBLEM_REPORTED';
-
--- Copies the reports that exist only as history lines. A report line is an
--- UPDATE note of exactly this shape, written by `buildProblemReportNote`:
---
---   {% link to="/settings/team/users/<id>" text="<name>" /%} reported a problem: {% name text="<text>" /%}
---
--- The whole line must match, so a note that merely mentions the phrase is
--- left alone. The stored text has double quotes written as &quot; (turned
--- back here) and line breaks folded into spaces (kept: the original breaks
--- are not stored anywhere).
---
--- Safe to run again: a note that already has its row is skipped.
-INSERT INTO "ProblemReport" (
-    "id", "content", "createdAt", "updatedAt",
-    "assetId", "organizationId", "reporterId", "noteId"
-)
-SELECT
-    gen_random_uuid()::text,
-    replace(
-        substring(
-            n."content"
-            from '^\{% link to="/settings/team/users/[^"]+" text="[^"]*" /%\} reported a problem: \{% name text="(.*)" /%\}$'
-        ),
-        '&quot;',
-        '"'
-    ),
-    n."createdAt",
-    n."createdAt",
-    n."assetId",
-    a."organizationId",
-    n."userId",
-    n."id"
-FROM "Note" n
-JOIN "Asset" a ON a."id" = n."assetId"
-WHERE n."type" = 'UPDATE'
-  AND n."content" ~ '^\{% link to="/settings/team/users/[^"]+" text="[^"]*" /%\} reported a problem: \{% name text=".*" /%\}$'
-  AND NOT EXISTS (
-      SELECT 1 FROM "ProblemReport" pr WHERE pr."noteId" = n."id"
-  );
