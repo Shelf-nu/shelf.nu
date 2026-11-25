@@ -216,9 +216,11 @@ gate compares the two (`STORE_BUILD_ICON_FONT_FOLDERS` in
   changed since the store build. Publishing would bring the missing icons back
   on upgraded phones. Publish from a commit where the folder still matches, or
   ship the dependency change with the next store build.
-- **Cutting a store build:** add its runtime and folder to
-  `STORE_BUILD_ICON_FONT_FOLDERS`. Read the folder from `subdirectory` of the
-  Ionicons asset in the build's `assets/app.manifest`.
+- **Cutting a store build:** the release PR that bumps `runtimeVersion` adds the
+  new runtime and its folder to `STORE_BUILD_ICON_FONT_FOLDERS`, read from the
+  local `node_modules/.pnpm` after `pnpm install`. Once the build is cut, the
+  entry is confirmed against the build itself. Both steps are in
+  [STORE-RELEASE.md](./STORE-RELEASE.md#the-icon-font-folder-of-the-new-runtime).
 
 Verify what's live: `eas update:list --branch production` (check the **runtime
 version** column, not just the message).

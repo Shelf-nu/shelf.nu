@@ -166,6 +166,35 @@ export function embeddedAssetProblems(text, runtimeVersion) {
   return problems;
 }
 
+/** Folder of the Android bundles under {@link DIST}. */
+const ANDROID_DIR = join(DIST, "android");
+
+/**
+ * Whether a bundle path is an Android bundle, the only kind whose embedded
+ * resource names the gate checks.
+ *
+ * @param path - a bundle path as {@link bundlePaths} returns it
+ * @returns true for a file directly under the Android export folder
+ */
+export function isAndroidBundle(path) {
+  return path.startsWith(`${ANDROID_DIR}/`);
+}
+
+/**
+ * The embedded-asset problems of one exported bundle: {@link embeddedAssetProblems}
+ * for an Android bundle, none for any other platform.
+ *
+ * @param path - a bundle path as {@link bundlePaths} returns it
+ * @param text - bundle contents, read as binary-safe latin1
+ * @param runtimeVersion - the runtime the bundle is published to
+ * @returns one message per problem; empty when there is nothing to report
+ */
+export function assetProblemsFor(path, text, runtimeVersion) {
+  return isAndroidBundle(path)
+    ? embeddedAssetProblems(text, runtimeVersion)
+    : [];
+}
+
 /** Every built bundle under {@link DIST}, per platform. */
 function bundlePaths() {
   const out = [];
@@ -221,10 +250,7 @@ function main() {
     const refs = refsIn(text);
     const refOk = refs.length === 1 && refs[0] === expected;
     const fetchOk = !usesExpoFetch(text);
-    // Embedded resource names are an Android matter: see STORE_BUILD_ICON_FONT_FOLDERS.
-    const assetProblems = path.includes(`${join(DIST, "android")}`)
-      ? embeddedAssetProblems(text, runtimeVersion)
-      : [];
+    const assetProblems = assetProblemsFor(path, text, runtimeVersion);
     const ok = refOk && fetchOk && assetProblems.length === 0;
     console.log(
       `  ${ok ? "ok  " : "FAIL"} ${path}  ->  ${
@@ -234,6 +260,14 @@ function main() {
         .join("")}`
     );
     if (!ok) bad = true;
+  }
+
+  if (!paths.some(isAndroidBundle)) {
+    console.error(
+      `\n[bundle-env] FAILED: no Android bundle under ${ANDROID_DIR}, so its embedded\n` +
+        "  assets were not checked. Export with -p ios -p android and run this again."
+    );
+    process.exit(1);
   }
 
   if (bad) {

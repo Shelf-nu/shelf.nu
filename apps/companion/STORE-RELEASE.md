@@ -45,6 +45,30 @@ CI proves the six agree:
 node apps/companion/scripts/check-version-sync.mjs
 ```
 
+### The icon font folder of the new runtime
+
+The same release PR adds the new runtime to `STORE_BUILD_ICON_FONT_FOLDERS` in
+`scripts/check-bundle-env.mjs`. A companion test requires an entry for the
+`runtimeVersion` in `app.json`, so the bump fails CI without it. The export gate
+uses the entry before every over-the-air update; see
+[Embedded assets after a store upgrade](./EAS-UPDATE.md#embedded-assets-after-a-store-upgrade).
+
+1. **In the bump PR**, after `pnpm install` on the commit the build is cut
+   from, read the folder name from the lockfile's install:
+
+   ```bash
+   ls node_modules/.pnpm | grep '^@expo+vector-icons@'
+   ```
+
+   Add `"<new runtime>": "<that folder name>"`. Keep the entries of runtimes
+   that are still live in a store.
+
+2. **After the build is cut** (step 3), confirm it against the build. Download
+   the Android artifact, open `base/assets/app.manifest` inside the `.aab`, and
+   read `subdirectory` of the asset named `Ionicons`: the folder is the path
+   segment after `.pnpm/`. If it differs from the entry, correct the entry in a
+   follow-up PR before the first over-the-air update to that runtime.
+
 **Build numbers are not in this repo.** `eas.json` sets
 `cli.appVersionSource: "remote"` and `build.production.autoIncrement: true`, so
 EAS holds the iOS build number and the Android version code and increments them

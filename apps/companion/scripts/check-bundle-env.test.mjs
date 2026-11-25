@@ -18,6 +18,7 @@ import { describe, it } from "node:test";
 
 import {
   STORE_BUILD_ICON_FONT_FOLDERS,
+  assetProblemsFor,
   embeddedAssetProblems,
   hasEmbeddedAssetFallback,
   iconFontFoldersIn,
@@ -90,6 +91,25 @@ describe("embedded assets in the Android bundle", () => {
         "\n"
       ),
       /no icon font folder recorded for runtime 9\.9\.9/
+    );
+  });
+
+  it("checks a bundle under the Android export folder", () => {
+    const unpatched = fontPath(storeFolder);
+    assert.match(
+      assetProblemsFor(
+        "dist/_expo/static/js/android/entry-abc.hbc",
+        unpatched,
+        "1.8.0"
+      ).join("\n"),
+      /expo-asset patch missing/
+    );
+  });
+
+  it("does not apply the Android checks to an iOS bundle", () => {
+    assert.deepEqual(
+      assetProblemsFor("dist/_expo/static/js/ios/entry-abc.hbc", "", "1.8.0"),
+      []
     );
   });
 
