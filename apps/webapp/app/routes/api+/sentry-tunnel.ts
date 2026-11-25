@@ -8,6 +8,12 @@ import {
 import type { Route } from "./+types/sentry-tunnel";
 
 /**
+ * Response headers Sentry uses to tell the SDK how long to hold back, and for
+ * which data types. Every other upstream header is left behind.
+ */
+const SENTRY_RATE_LIMIT_HEADERS = ["X-Sentry-Rate-Limits", "Retry-After"];
+
+/**
  * Sentry tunnel endpoint.
  *
  * Proxies Sentry event envelopes through our own domain so they aren't
@@ -22,6 +28,11 @@ import type { Route } from "./+types/sentry-tunnel";
  * The body is capped at {@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES} here as well
  * as in the server middleware, so the bound holds for every method and path
  * spelling that reaches this action.
+ *
+ * Sentry's rate-limit headers are passed back with its status. The browser SDK
+ * reads `X-Sentry-Rate-Limits` to pause only the data types Sentry limited
+ * (spans when the span quota is spent, say); a 429 without it makes the SDK
+ * pause every type, errors included, for 60 seconds.
  *
  * @see https://docs.sentry.io/platforms/javascript/troubleshooting/#using-the-tunnel-option
  * @see {@link file://./../../utils/sentry-tunnel.server.ts}
@@ -80,13 +91,19 @@ export async function action({ request }: Route.ActionArgs) {
       redirect: "manual",
     });
 
+    const headers = new Headers({
+      "Content-Type":
+        sentryResponse.headers.get("Content-Type") ||
+        "application/x-sentry-envelope",
+    });
+    for (const name of SENTRY_RATE_LIMIT_HEADERS) {
+      const value = sentryResponse.headers.get(name);
+      if (value !== null) headers.set(name, value);
+    }
+
     return new Response(sentryResponse.body, {
       status: sentryResponse.status,
-      headers: {
-        "Content-Type":
-          sentryResponse.headers.get("Content-Type") ||
-          "application/x-sentry-envelope",
-      },
+      headers,
     });
   } catch {
     return new Response("Invalid envelope", { status: 400 });
