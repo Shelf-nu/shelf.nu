@@ -19,6 +19,7 @@ import {
   rehomeCustodyForPlacementChanges,
 } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { evacuateLocationsForDelete } from "~/modules/booking/sources/location-delete.server";
 import { lockAssetsForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import {
   readStockStates,
@@ -1096,14 +1097,17 @@ export async function assertLocationDeleteConfirmed({
 /**
  * Deletes a location, its legacy `Image` row, and its stored image files.
  *
- * The location and its `Image` row are deleted in one transaction. The image
- * and thumbnail files are removed after it commits, see
- * {@link safeRemoveImageFilesOfLocations}.
+ * Booking source rows at the location are moved away first, in the same
+ * transaction ({@link evacuateLocationsForDelete}): a location with source
+ * rows cannot be deleted. The location and its `Image` row are deleted in
+ * that transaction too. The image and thumbnail files are removed after it
+ * commits, see {@link safeRemoveImageFilesOfLocations}.
  *
  * @param id - ID of the location to delete
  * @param organizationId - Organization the location must belong to
  * @returns The deleted location
- * @throws {ShelfError} When the database delete fails
+ * @throws {ShelfError} 409 when bookings at the location changed mid-delete
+ *   (retry), or when the database delete fails
  */
 export async function deleteLocation({
   id,
@@ -1115,6 +1119,11 @@ export async function deleteLocation({
      * location is gone. Its URLs cannot be read back after the row is deleted.
      */
     const location = await db.$transaction(async (tx) => {
+      await evacuateLocationsForDelete(tx, {
+        organizationId,
+        locationIds: [id],
+      });
+
       const deleted = await tx.location.delete({
         where: { id, organizationId },
       });
@@ -1132,6 +1141,9 @@ export async function deleteLocation({
 
     return location;
   } catch (cause) {
+    // A mid-delete booking change (409) keeps its own message.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the location",
@@ -1483,6 +1495,16 @@ export async function bulkDeleteLocations({
     });
 
     await db.$transaction(async (tx) => {
+      /**
+       * Booking source rows at these locations move away first: a location
+       * with source rows cannot be deleted. Every row at every location is
+       * planned together, so each target is written once.
+       */
+      await evacuateLocationsForDelete(tx, {
+        organizationId,
+        locationIds: locations.map((location) => location.id),
+      });
+
       /** Deleting all locations */
       await tx.location.deleteMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause, so they are already org-proven before this delete

@@ -54,6 +54,11 @@ const dbMocks = vi.hoisted(() => ({
   custody: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  // why: the same re-home reads booking slices with units out from each
+  // source; no booking holds units in these tests.
+  bookingAsset: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   // why: the asset-move lines of the location activity log are written in
   // one batch; the rows handed over are the output under test.
   locationNote: {
@@ -76,6 +81,7 @@ const dbMocks = vi.hoisted(() => ({
       kit: dbMocks.kit,
       user: dbMocks.user,
       custody: dbMocks.custody,
+      bookingAsset: dbMocks.bookingAsset,
     };
     return cb(txClient);
   }),

@@ -17,8 +17,13 @@
  * writes with the package transitions and writes each target once, using
  * {@link aggregateEvacuationTargets}.
  *
+ * A row at a deleted location is never merged whole: its out units, history,
+ * pending and released units each have their own destination, so every
+ * target keeps its kind rules.
+ *
  * @see {@link file://../../asset/custody-source.ts} the custody planner
- * @see superpowers/2026-11-10-booking-source-locations-design.md sections 13, 13.1
+ * @see {@link file://./rehome.server.ts} the placement-change writer
+ * @see {@link file://./location-delete.server.ts} the location delete writer
  */
 
 import {
@@ -350,7 +355,7 @@ type Part = { toKey: string; units: number };
 
 /**
  * Plans the evacuation of every source row at the deleted locations of ONE
- * pool. Each part of a row goes to its own target (spec 13.1):
+ * pool. Each part of a row goes to its own target:
  * - out units: the unplaced units while `unplacedRoomForOut` really covers
  *   them (shared by every deleted row, latest dispatched first), else the
  *   slice's UNKNOWN row;
