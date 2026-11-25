@@ -10,13 +10,29 @@ import type { BookingSourcePart } from "@shelf/quantity-control";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BookingSourceCell, selectPoolSourceCell } from "./booking-source-cell";
+import {
+  BookingSourceCell,
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+} from "./booking-source-cell";
 
-// why: LocationBadge reads the member's roles from the `_layout` route loader,
-// which is not mounted here; no roles renders the plain badge without the
-// hierarchy popover and its API fetch.
-vi.mock("~/hooks/use-organization-roles", () => ({
-  useOrganizationRoles: () => undefined,
+// why: LocationBadge needs the `_layout` route loader (roles) and the location
+// tree API, neither mounted here; a double that records the location it was
+// handed proves the cell chose the badge and what it passed.
+vi.mock("../location/location-badge", () => ({
+  LocationBadge: ({
+    location,
+  }: {
+    location?: { id: string; name: string; parentId?: string | null } | null;
+  }) => (
+    <span
+      data-testid="location-badge"
+      data-location-id={location?.id}
+      data-parent-id={location?.parentId ?? ""}
+    >
+      {location?.name}
+    </span>
+  ),
 }));
 
 afterEach(() => {
@@ -65,23 +81,23 @@ describe("selectPoolSourceCell", () => {
     expect(
       selectPoolSourceCell({
         ...base,
-        summary: { parts: [WAREHOUSE], short: false, mode: "AUTO" },
+        summary: { parts: [WAREHOUSE], mode: "AUTO" },
       })
-    ).toEqual({ parts: [WAREHOUSE], short: false });
+    ).toEqual({ parts: [WAREHOUSE] });
     expect(
       selectPoolSourceCell({
         ...base,
-        summary: { parts: [WAREHOUSE, UNPLACED], short: true, mode: "MANUAL" },
+        summary: { parts: [WAREHOUSE, UNPLACED], mode: "MANUAL" },
       })
-    ).toEqual({ parts: [WAREHOUSE, UNPLACED], short: true });
+    ).toEqual({ parts: [WAREHOUSE, UNPLACED] });
   });
 
   it("keeps the ordinary cell for LEGACY and KIT slices", () => {
-    for (const mode of ["LEGACY", "KIT"]) {
+    for (const mode of ["LEGACY", "KIT"] as const) {
       expect(
         selectPoolSourceCell({
           ...base,
-          summary: { parts: [WAREHOUSE], short: false, mode },
+          summary: { parts: [WAREHOUSE], mode },
         })
       ).toBeNull();
     }
@@ -92,7 +108,7 @@ describe("selectPoolSourceCell", () => {
       selectPoolSourceCell({
         ...base,
         isStandalonePoolSlice: false,
-        summary: { parts: [WAREHOUSE], short: false, mode: "AUTO" },
+        summary: { parts: [WAREHOUSE], mode: "AUTO" },
       })
     ).toBeNull();
     expect(selectPoolSourceCell({ ...base, summary: undefined })).toBeNull();
@@ -102,7 +118,7 @@ describe("selectPoolSourceCell", () => {
     expect(
       selectPoolSourceCell({
         ...base,
-        summary: { parts: [], short: false, mode: "AUTO" },
+        summary: { parts: [], mode: "AUTO" },
       })
     ).toBeNull();
   });
@@ -112,7 +128,7 @@ describe("selectPoolSourceCell", () => {
       selectPoolSourceCell({
         ...base,
         hasManualPlacements: false,
-        summary: { parts: [UNPLACED], short: false, mode: "AUTO" },
+        summary: { parts: [UNPLACED], mode: "AUTO" },
       })
     ).toBeNull();
   });
@@ -122,37 +138,103 @@ describe("selectPoolSourceCell", () => {
       selectPoolSourceCell({
         ...base,
         hasManualPlacements: false,
-        summary: { parts: [UNASSIGNED], short: true, mode: "AUTO" },
+        summary: { parts: [UNASSIGNED], mode: "AUTO" },
       })
-    ).toEqual({ parts: [UNASSIGNED], short: true });
+    ).toEqual({ parts: [UNASSIGNED] });
+  });
+});
+
+describe("isStandalonePoolSlice", () => {
+  it("counts a quantity-tracked slice with no live kit", () => {
+    expect(
+      isStandalonePoolSlice({
+        asset: { type: "QUANTITY_TRACKED" },
+        assetKitId: null,
+      })
+    ).toBe(true);
+  });
+
+  it("counts units left behind when the asset left its kit", () => {
+    // `sourceKitId` is provenance only; the slice is AUTO and standalone.
+    expect(
+      isStandalonePoolSlice({
+        asset: { type: "QUANTITY_TRACKED" },
+        assetKitId: null,
+        sourceKitId: "kit-1",
+      } as { asset: { type: string }; assetKitId: string | null })
+    ).toBe(true);
+  });
+
+  it("rejects kit-driven slices and individual assets", () => {
+    expect(
+      isStandalonePoolSlice({
+        asset: { type: "QUANTITY_TRACKED" },
+        assetKitId: "ak-1",
+      })
+    ).toBe(false);
+    expect(
+      isStandalonePoolSlice({ asset: { type: "INDIVIDUAL" }, assetKitId: null })
+    ).toBe(false);
   });
 });
 
 describe("BookingSourceCell", () => {
   it("renders a single location source as its location badge", () => {
-    render(<BookingSourceCell cell={{ parts: [WAREHOUSE], short: false }} />);
+    render(<BookingSourceCell cell={{ parts: [WAREHOUSE] }} />);
 
-    expect(screen.getByText("Demo Warehouse")).toBeInTheDocument();
+    const badge = screen.getByTestId("location-badge");
+    expect(badge).toHaveTextContent("Demo Warehouse");
+    expect(badge).toHaveAttribute("data-location-id", "loc-a");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByText(/Short at/)).not.toBeInTheDocument();
   });
 
-  it("renders a single non-location source by its label", () => {
+  it("keeps the row location's hierarchy when the single source is that location", () => {
     render(
       <BookingSourceCell
-        cell={{ parts: [{ ...UNPLACED, out: 0 }], short: false }}
+        cell={{ parts: [WAREHOUSE] }}
+        rowLocation={{
+          id: "loc-a",
+          name: "Demo Warehouse",
+          parentId: "loc-root",
+          _count: { children: 0 },
+        }}
       />
     );
+
+    expect(screen.getByTestId("location-badge")).toHaveAttribute(
+      "data-parent-id",
+      "loc-root"
+    );
+  });
+
+  it("shows Needs a location for units left behind by a kit", () => {
+    const slice = {
+      asset: { type: "QUANTITY_TRACKED" },
+      assetKitId: null,
+      sourceKitId: "kit-1",
+    };
+    const cell = selectPoolSourceCell({
+      summary: { parts: [UNASSIGNED], mode: "AUTO" },
+      isStandalonePoolSlice: isStandalonePoolSlice(slice),
+      hasManualPlacements: true,
+    });
+    expect(cell).not.toBeNull();
+    if (!cell) return;
+
+    render(<BookingSourceCell cell={cell} />);
+
+    expect(screen.getByText("Needs a location")).toBeInTheDocument();
+  });
+
+  it("renders a single non-location source by its label", () => {
+    render(<BookingSourceCell cell={{ parts: [{ ...UNPLACED, out: 0 }] }} />);
 
     expect(screen.getByText("Unplaced")).toBeInTheDocument();
   });
 
   it("renders a split as one wrapping summary line", () => {
-    render(
-      <BookingSourceCell
-        cell={{ parts: [WAREHOUSE, UNPLACED], short: false }}
-      />
-    );
+    render(<BookingSourceCell cell={{ parts: [WAREHOUSE, UNPLACED] }} />);
 
     const trigger = screen.getByRole("button", {
       name: "Demo Warehouse 8 · Unplaced 7",
@@ -162,11 +244,7 @@ describe("BookingSourceCell", () => {
   });
 
   it("lists planned and out units per source in the split tooltip", async () => {
-    render(
-      <BookingSourceCell
-        cell={{ parts: [WAREHOUSE, UNPLACED], short: false }}
-      />
-    );
+    render(<BookingSourceCell cell={{ parts: [WAREHOUSE, UNPLACED] }} />);
 
     await userEvent.hover(
       screen.getByRole("button", { name: "Demo Warehouse 8 · Unplaced 7" })
@@ -177,11 +255,7 @@ describe("BookingSourceCell", () => {
   });
 
   it("keeps the split tooltip trigger keyboard-focusable and described while open", async () => {
-    render(
-      <BookingSourceCell
-        cell={{ parts: [WAREHOUSE, UNPLACED], short: false }}
-      />
-    );
+    render(<BookingSourceCell cell={{ parts: [WAREHOUSE, UNPLACED] }} />);
     const trigger = screen.getByRole("button", {
       name: "Demo Warehouse 8 · Unplaced 7",
     });
@@ -189,18 +263,16 @@ describe("BookingSourceCell", () => {
     await userEvent.tab();
     expect(trigger).toHaveFocus();
 
-    await userEvent.hover(trigger);
+    // Opens on focus alone, before any hover.
     const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.textContent).toMatch(/Unplaced: 7 planned, 2 out/);
     expect(trigger.getAttribute("aria-describedby")).toBe(tooltip.id);
   });
 
   it("flags a short source by name", () => {
     render(
       <BookingSourceCell
-        cell={{
-          parts: [{ ...WAREHOUSE, short: true }, UNPLACED],
-          short: true,
-        }}
+        cell={{ parts: [{ ...WAREHOUSE, short: true }, UNPLACED] }}
       />
     );
 
@@ -210,9 +282,7 @@ describe("BookingSourceCell", () => {
 
   it("flags a short single source too", () => {
     render(
-      <BookingSourceCell
-        cell={{ parts: [{ ...WAREHOUSE, short: true }], short: true }}
-      />
+      <BookingSourceCell cell={{ parts: [{ ...WAREHOUSE, short: true }] }} />
     );
 
     expect(screen.getByText("Demo Warehouse")).toBeInTheDocument();
@@ -220,7 +290,7 @@ describe("BookingSourceCell", () => {
   });
 
   it("shows Needs a location for unassigned units without a second flag", () => {
-    render(<BookingSourceCell cell={{ parts: [UNASSIGNED], short: true }} />);
+    render(<BookingSourceCell cell={{ parts: [UNASSIGNED] }} />);
 
     expect(screen.getByText("Needs a location")).toBeInTheDocument();
     expect(screen.queryByText(/Short at/)).not.toBeInTheDocument();

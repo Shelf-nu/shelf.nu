@@ -24,6 +24,7 @@ import {
   formatSourceSummary,
   type BookingSourcePart,
 } from "@shelf/quantity-control";
+import type { SourceAllocationMode } from "~/modules/booking/sources/types";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { LocationBadge } from "../location/location-badge";
 import { Tag } from "../shared/tag";
@@ -38,27 +39,41 @@ import {
 export type PoolSourceCell = {
   /** Display parts, ordered by location name, then the non-location kinds. */
   parts: BookingSourcePart[];
-  /** True when any of the slice's pending units cannot be covered. */
-  short: boolean;
 };
+
+/**
+ * Whether a booking slice is a standalone pool slice: a quantity-tracked
+ * asset with no live kit (`assetKitId` null). `sourceKitId` is provenance
+ * only, so units left behind when an asset leaves a kit count as standalone.
+ *
+ * @param slice - The booking slice with its asset's type
+ * @returns True when the slice's Location cell may show its sources
+ */
+export function isStandalonePoolSlice(slice: {
+  asset: { type: string };
+  assetKitId: string | null;
+}): boolean {
+  return slice.asset.type === "QUANTITY_TRACKED" && !slice.assetKitId;
+}
 
 /**
  * Decides whether a slice's Location cell shows its sources.
  *
- * Only standalone pool slices allocated by source (`AUTO` or `MANUAL`) with
- * something to show qualify. A pool without manual placements keeps the
+ * Only standalone pool slices (quantity-tracked and not kit-driven, which
+ * includes units left behind when an asset leaves a kit) allocated by source
+ * (`AUTO` or `MANUAL`) with something to show qualify. A pool without manual placements keeps the
  * ordinary cell while all its units come from Unplaced: every unit of such a
  * pool is unplaced, so the sources would say nothing new. Individual assets,
  * kit rows and `LEGACY` slices never reach this cell.
  *
  * @param args.summary - The slice's source summary from the loader, if any
- * @param args.isStandalonePoolSlice - Quantity-tracked slice that never came with a kit
+ * @param args.isStandalonePoolSlice - Output of {@link isStandalonePoolSlice}
  * @param args.hasManualPlacements - The pool has at least one non-kit placement
  * @returns The cell to render, or `null` to keep the ordinary Location cell
  */
 export function selectPoolSourceCell(args: {
   summary:
-    | { parts: BookingSourcePart[]; short: boolean; mode: string }
+    | { parts: BookingSourcePart[]; mode: SourceAllocationMode }
     | undefined;
   isStandalonePoolSlice: boolean;
   hasManualPlacements: boolean;
@@ -73,7 +88,7 @@ export function selectPoolSourceCell(args: {
   ) {
     return null;
   }
-  return { parts: summary.parts, short: summary.short };
+  return { parts: summary.parts };
 }
 
 /** Amber treatment for warnings; hoisted so the style keeps a stable identity. */

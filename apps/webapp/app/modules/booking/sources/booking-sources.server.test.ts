@@ -28,6 +28,10 @@ import {
   setAutoSources,
   setManualSources,
 } from "./booking-sources.server";
+import {
+  loadCompetingHoldsByPool,
+  loadSourceCapacity,
+} from "./capacity.server";
 import type { BookingSourcesTx } from "./conversion.server";
 import type * as RepositoryModule from "./repository.server";
 import type {
@@ -1117,6 +1121,72 @@ describe("getSliceSourceSummaries", () => {
       mode: "LEGACY",
     });
   });
+
+  it.each(["COMPLETE", "CANCELLED", "ARCHIVED"])(
+    "never reports a %s booking short, unassigned units included",
+    async (status) => {
+      vi.mocked(loadSourceCapacity).mockClear();
+      vi.mocked(loadCompetingHoldsByPool).mockClear();
+      // Would be short at Demo Warehouse (6 wanted, 5 there) on a live booking.
+      h.capacity = new Map([[POOL, new Map([["LOCATION:loc-a", 5]])]]);
+      h.db = {
+        booking: {
+          findFirst: vi.fn(() => ({
+            id: BOOKING,
+            from: WINDOW.from,
+            to: WINDOW.to,
+            status,
+            createdAt: new Date("2026-11-01T00:00:00Z"),
+          })),
+        },
+        bookingAsset: {
+          findMany: vi.fn(() => [
+            { id: "s1", assetId: POOL, sourceAllocation: "AUTO" },
+          ]),
+        },
+        bookingAssetSource: {
+          findMany: vi.fn(() => [
+            {
+              bookingAssetId: "s1",
+              kind: "LOCATION",
+              locationId: "loc-a",
+              quantity: 6,
+              outQuantity: 0,
+              releasedQuantity: 0,
+            },
+            {
+              bookingAssetId: "s1",
+              kind: "UNASSIGNED",
+              locationId: null,
+              quantity: 3,
+              outQuantity: 0,
+              releasedQuantity: 0,
+            },
+          ]),
+        },
+        location: {
+          findMany: vi.fn(() => [{ id: "loc-a", name: "Demo Warehouse" }]),
+        },
+      };
+
+      const summaries = await getSliceSourceSummaries({
+        organizationId: ORG,
+        bookingId: BOOKING,
+      });
+
+      expect(summaries.get("s1")).toEqual({
+        parts: [
+          expect.objectContaining({ label: "Demo Warehouse", short: false }),
+          expect.objectContaining({ label: "Needs a location", short: false }),
+        ],
+        short: false,
+        mode: "AUTO",
+      });
+      // The short sweep's reads are skipped for a finished booking.
+      expect(loadSourceCapacity).not.toHaveBeenCalled();
+      expect(loadCompetingHoldsByPool).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe("dispatchUnits", () => {

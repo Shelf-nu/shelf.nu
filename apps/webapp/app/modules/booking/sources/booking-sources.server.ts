@@ -1941,11 +1941,14 @@ export type SliceSourceSummary = {
  * Shortness comes from the short sweep over the booking window: other active
  * bookings' holds plus this booking's own rows (whatever its status), with
  * units out granted first and pending units by priority. Pending units on
- * UNASSIGNED are always short.
+ * UNASSIGNED are always short. COMPLETE, CANCELLED and ARCHIVED bookings
+ * hold nothing, so they are never short: the sweep is skipped and no part is
+ * flagged, UNASSIGNED included.
  *
  * Queries: slices with the booking (two, parallel), source rows (one), then
  * capacity (three), competing holds (two) and location names (one) in
- * parallel, whatever the number of pools.
+ * parallel, whatever the number of pools. A finished booking reads only the
+ * location names in that last step.
  *
  * @param args.organizationId - The trusted workspace id
  * @param args.bookingId - The booking
@@ -1996,14 +1999,23 @@ export async function getSliceSourceSummaries(args: {
   const locationIds = [
     ...new Set(rows.flatMap((r) => (r.locationId ? [r.locationId] : []))),
   ];
+  // A finished booking holds nothing and plans nothing, so it is never short.
+  const reportsShortness =
+    booking.status !== "COMPLETE" &&
+    booking.status !== "CANCELLED" &&
+    booking.status !== "ARCHIVED";
   const [capacity, holdsByPool, locations] = await Promise.all([
-    loadSourceCapacity(db, { organizationId, assetIds }),
-    loadCompetingHoldsByPool(db, {
-      organizationId,
-      assetIds,
-      window,
-      excludeBookingId: bookingId,
-    }),
+    reportsShortness
+      ? loadSourceCapacity(db, { organizationId, assetIds })
+      : Promise.resolve(null),
+    reportsShortness
+      ? loadCompetingHoldsByPool(db, {
+          organizationId,
+          assetIds,
+          window,
+          excludeBookingId: bookingId,
+        })
+      : Promise.resolve(null),
     locationIds.length === 0
       ? Promise.resolve([])
       : db.location.findMany({
@@ -2017,6 +2029,22 @@ export async function getSliceSourceSummaries(args: {
     const assetSlices = loose.filter((s) => s.assetId === assetId);
     const sliceIds = new Set(assetSlices.map((s) => s.id));
     const assetRows = rows.filter((r) => sliceIds.has(r.bookingAssetId));
+    if (!capacity || !holdsByPool) {
+      for (const slice of assetSlices) {
+        const parts = describeBookingSources({
+          rows: assetRows.filter((r) => r.bookingAssetId === slice.id),
+          locationNames,
+          shortSourceKeys: new Set(),
+        });
+        result.set(slice.id, {
+          // UNASSIGNED pending units flag themselves short; cleared here too.
+          parts: parts.map((part) => ({ ...part, short: false })),
+          short: false,
+          mode: slice.sourceAllocation,
+        });
+      }
+      continue;
+    }
     const own: SourceHold[] = [];
     const unassignedPendingBySlice = new Map<string, number>();
     for (const r of assetRows) {

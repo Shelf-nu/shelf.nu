@@ -1008,23 +1008,11 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/counts toward it/i);
     });
 
-    it("no longer prints a from-location line under the title", () => {
-      mockUseLoaderData.mockReturnValue(finishedBooking);
-
-      renderRow({
-        ...baseAsset,
-        sourceLocation: { id: "loc-studio", name: "Studio" },
-      } as unknown as AssetWithBooking);
-
-      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
-    });
-
     it("shows a pool slice's split sources in the Location cell", () => {
       mockUseLoaderData.mockReturnValue({
         ...finishedBooking,
         poolSourcesBySlice: {
           "ba-1": {
-            short: true,
             parts: [
               {
                 key: "LOCATION:loc-a",
@@ -1033,7 +1021,7 @@ describe("ListAssetContent", () => {
                 label: "Demo Warehouse",
                 planned: 8,
                 out: 0,
-                short: true,
+                short: false,
               },
               {
                 key: "UNPLACED",
@@ -1058,7 +1046,6 @@ describe("ListAssetContent", () => {
       expect(
         screen.getByText("Demo Warehouse 8 · Unplaced 7")
       ).toBeInTheDocument();
-      expect(screen.getByText("Short at Demo Warehouse")).toBeInTheDocument();
       expect(screen.queryByText("Primary Shelf")).not.toBeInTheDocument();
     });
 

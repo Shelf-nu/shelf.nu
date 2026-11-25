@@ -1,6 +1,5 @@
 import {
   AssetStatus,
-  AssetType,
   BookingStatus,
   TagUseFor,
   type Prisma,
@@ -15,6 +14,7 @@ import type {
 } from "react-router";
 import { z } from "zod";
 import {
+  isStandalonePoolSlice,
   selectPoolSourceCell,
   type PoolSourceCell,
 } from "~/components/booking/booking-source-cell";
@@ -421,6 +421,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
       .map((ba) => ba.assetId);
 
+    /**
+     * The Location cell's source summaries are read only when some standalone
+     * pool slice is allocated by source (`AUTO` or `MANUAL`), so a booking
+     * whose slices are all `LEGACY` or kit-driven costs no extra query.
+     */
+    const hasSourcedPoolSlice = booking.bookingAssets.some(
+      (ba) =>
+        isStandalonePoolSlice(ba) &&
+        (ba.sourceAllocation === "AUTO" || ba.sourceAllocation === "MANUAL")
+    );
+
     // Execute all necessary queries in parallel. Asset + kit enrichment now
     // covers ALL booking assets/kits (not just the current page) so the
     // clientLoader can re-shape from cache without a server round-trip.
@@ -432,6 +443,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       rawKits,
       modelShortfalls,
       nextReservations,
+      sliceSourceSummaries,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -647,6 +659,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             viewer: { userId, seesAllBookings: access.bookings.seeAll },
           })
         : NO_NEXT_RESERVATIONS,
+
+      /** Location cell sources per slice; see `hasSourcedPoolSlice`. */
+      hasSourcedPoolSlice
+        ? getSliceSourceSummaries({ organizationId, bookingId })
+        : new Map<string, SliceSourceSummary>(),
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -693,25 +710,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Location cell sources for standalone pool slices, keyed by
-     * `bookingAssetId`. Read only when some standalone pool slice is
-     * allocated by source (`AUTO` or `MANUAL`), so a booking whose slices are
-     * all `LEGACY` or kit-driven costs no extra query. Rows without an entry
-     * keep their primary location (see `selectPoolSourceCell`).
+     * `bookingAssetId` (summaries read in the batch above, only when needed).
+     * Rows without an entry keep their primary location (see
+     * `selectPoolSourceCell`).
      */
-    const isStandalonePoolSlice = (
-      ba: (typeof booking.bookingAssets)[number]
-    ) =>
-      ba.asset.type === AssetType.QUANTITY_TRACKED &&
-      !ba.assetKitId &&
-      !ba.sourceKitId;
-    const hasSourcedPoolSlice = booking.bookingAssets.some(
-      (ba) =>
-        isStandalonePoolSlice(ba) &&
-        (ba.sourceAllocation === "AUTO" || ba.sourceAllocation === "MANUAL")
-    );
-    const sliceSourceSummaries = hasSourcedPoolSlice
-      ? await getSliceSourceSummaries({ organizationId, bookingId })
-      : new Map<string, SliceSourceSummary>();
     const poolSourcesBySlice: Record<string, PoolSourceCell> = {};
     if (hasSourcedPoolSlice) {
       for (const ba of booking.bookingAssets) {
