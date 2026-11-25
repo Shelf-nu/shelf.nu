@@ -4693,7 +4693,20 @@ describe("updateKitAssets - check-in floor guard (Polish-7b)", () => {
     });
 
     expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
-      where: { assetKitId: "ak-pens" },
+      where: {
+        assetKitId: "ak-pens",
+        // Finished bookings are frozen records and never follow the kit.
+        booking: {
+          status: {
+            in: [
+              BookingStatus.DRAFT,
+              BookingStatus.RESERVED,
+              BookingStatus.ONGOING,
+              BookingStatus.OVERDUE,
+            ],
+          },
+        },
+      },
       data: { quantity: 40 },
     });
   });
@@ -8507,7 +8520,14 @@ describe("removeDestroyedUnitsFromKits", () => {
           status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
         },
       },
-      select: { id: true, bookingId: true, assetKitId: true, quantity: true },
+      select: {
+        id: true,
+        bookingId: true,
+        assetId: true,
+        assetKitId: true,
+        quantity: true,
+        sourceAllocation: true,
+      },
     });
     expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
     // The units that left the kit are recorded the way a partial move out of a

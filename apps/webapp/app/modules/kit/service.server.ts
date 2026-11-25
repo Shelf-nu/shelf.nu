@@ -127,6 +127,13 @@ import {
   recordCheckoutSourceLocations,
 } from "../booking/checkout-source-location.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
+import {
+  KIT_PROPAGATION_STATUSES,
+  detachKitSliceSources,
+  isConvertedSlice,
+  lockConvertedKitSlicePools,
+  resizeKitSourceRows,
+} from "../booking/sources/kit-sources.server";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
   createSystemBookingNote,
@@ -438,6 +445,8 @@ export async function removeKitSlicesFromPlanningBookings(
         // The row's own record of which `BookingModelRequest` it discharged.
         // Deleting a stamped row hands that unit back to the reservation.
         bookingModelRequestId: true,
+        // A converted slice is deleted under its pool's asset lock.
+        sourceAllocation: true,
         booking: {
           select: { id: true, name: true, organizationId: true, status: true },
         },
@@ -498,6 +507,10 @@ export async function removeKitSlicesFromPlanningBookings(
       };
     }
   );
+
+  // Source rows of a converted slice cascade with it and its shares are
+  // orphaned; both are written only under the pool's asset lock.
+  await lockConvertedKitSlicePools(tx, { organizationId, slices: rows });
 
   // Keyed on the exact ids read above, so a standalone row for the same
   // (booking, asset) pair is untouched.
@@ -1038,6 +1051,14 @@ function mergeCheckoutMarkers(
  * The markers are written only when some part of the merge went out, so a
  * merge on a booking that has not started writes exactly what it always has.
  *
+ * Source rows come first, for every kit slice in `assetKitIds`, colliding or
+ * not ({@link detachKitSliceSources}): a converted kit slice hands its out
+ * units and history to an UNKNOWN row, its released units to UNASSIGNED and
+ * its pending units to loose sources, on its standalone sibling when one
+ * exists, else on itself as an AUTO slice. A merge into a converted sibling
+ * always carries `checkedOutQuantity`, so the sibling's rows and counters
+ * agree. LEGACY slices with adoption off cost no query here.
+ *
  * @param tx Active transaction — must be the one deleting the `AssetKit` rows
  * @param assetKitIds `AssetKit` rows about to be deleted
  */
@@ -1059,6 +1080,7 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     checkedInAt: true,
     checkedInById: true,
     checkedOutQuantity: true,
+    sourceAllocation: true,
   };
   type CollisionRow = {
     id: string;
@@ -1071,6 +1093,7 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     checkedInAt?: Date | null;
     checkedInById?: string | null;
     checkedOutQuantity?: number;
+    sourceAllocation?: string | null;
   };
 
   const kitDrivenRows: CollisionRow[] = await tx.bookingAsset.findMany({
@@ -1078,6 +1101,15 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     select: collisionRowSelect,
   });
   if (kitDrivenRows.length === 0) return;
+
+  // Source rows first: a converted kit slice hands its out units, history,
+  // released and pending units to the slice that keeps them (its standalone
+  // sibling, or itself as AUTO) before the merge below deletes it or the
+  // `AssetKit` delete clears its kit. No query for LEGACY slices with
+  // adoption off.
+  const { convertedSliceIds } = await detachKitSliceSources(tx, {
+    kitSlices: kitDrivenRows,
+  });
 
   const standaloneMatches: CollisionRow[] = await tx.bookingAsset.findMany({
     where: {
@@ -1155,12 +1187,26 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     for (const part of mergedAway) {
       survivorIdByMergedId.set(part.id, standaloneId);
     }
+    // A converted group's rows count every dispatched unit, so the survivor's
+    // `checkedOutQuantity` always takes the merged slices' units, also when
+    // no part carries a check-out marker.
+    const convertedMerge = mergedAway.some((part) =>
+      convertedSliceIds.has(part.id)
+    );
     await tx.bookingAsset.update({
       where: { id: standaloneId },
       data: {
         quantity,
         ...(adoptedRequestId
           ? { bookingModelRequestId: adoptedRequestId }
+          : {}),
+        ...(convertedMerge
+          ? {
+              checkedOutQuantity: parts.reduce(
+                (sum, part) => sum + (part.checkedOutQuantity ?? 0),
+                0
+              ),
+            }
           : {}),
         ...mergeCheckoutMarkers(parts),
       },
@@ -1864,8 +1910,10 @@ export async function removeDestroyedUnitsFromKits(
     const planningSlices: Array<{
       id: string;
       bookingId: string;
+      assetId: string;
       assetKitId: string;
       quantity: number;
+      sourceAllocation?: string | null;
     }> = await tx.bookingAsset.findMany({
       where: {
         OR: [...remainingByAssetKitId].map(([assetKitId, { remaining }]) => ({
@@ -1874,21 +1922,49 @@ export async function removeDestroyedUnitsFromKits(
         })),
         booking: { organizationId, status: { in: PLANNING_BOOKING_STATUSES } },
       },
-      select: { id: true, bookingId: true, assetKitId: true, quantity: true },
+      select: {
+        id: true,
+        bookingId: true,
+        assetId: true,
+        assetKitId: true,
+        quantity: true,
+        sourceAllocation: true,
+      },
     });
+    // A converted slice's KIT row follows the cap. The units are already
+    // gone, so nothing is refused: a slice never drops below its units out.
+    const convertedCaps = planningSlices.flatMap((slice) => {
+      const entry = remainingByAssetKitId.get(slice.assetKitId);
+      return entry && isConvertedSlice(slice)
+        ? [
+            {
+              sliceId: slice.id,
+              assetId: slice.assetId,
+              quantity: entry.remaining,
+            },
+          ]
+        : [];
+    });
+    const { quantities: cappedQuantityBySliceId } = await resizeKitSourceRows(
+      tx,
+      { organizationId, slices: convertedCaps, belowOut: "clamp" }
+    );
     // Grouped by the quantity each slice is capped to, one write per group.
     const sliceIdsByRemaining = new Map<number, string[]>();
     for (const slice of planningSlices) {
       const entry = remainingByAssetKitId.get(slice.assetKitId);
       if (!entry) continue;
+      const remaining =
+        cappedQuantityBySliceId.get(slice.id) ?? entry.remaining;
+      if (remaining >= slice.quantity) continue;
       capped.push({
         bookingId: slice.bookingId,
         membership: entry.membership,
-        removed: slice.quantity - entry.remaining,
-        remaining: entry.remaining,
+        removed: slice.quantity - remaining,
+        remaining,
       });
-      sliceIdsByRemaining.set(entry.remaining, [
-        ...(sliceIdsByRemaining.get(entry.remaining) ?? []),
+      sliceIdsByRemaining.set(remaining, [
+        ...(sliceIdsByRemaining.get(remaining) ?? []),
         slice.id,
       ]);
     }
@@ -6855,35 +6931,54 @@ export async function updateKitAssets({
           })
         );
 
-        // Check-in floor guard (Polish-7b): the kit's slice quantity is
-        // the source of truth for its kit-driven BookingAsset rows, but it
-        // must NOT be shrunk below units already checked in against that
-        // exact slice. `ConsumptionLog` now carries `bookingAssetId`, so we
-        // can sum per-row check-ins and refuse the shrink with a clear
-        // error. (Legacy `bookingAssetId IS NULL` logs pre-date per-row
-        // attribution and aren't counted here — same as the pre-guard
-        // behaviour for those rows, so no regression.)
+        // Kit quantity guard, active bookings only: a COMPLETE, CANCELLED or
+        // ARCHIVED slice is a frozen record and never follows the kit, so it
+        // neither blocks the change nor is rewritten by it.
+        //
+        // LEGACY slices: the kit's slice quantity must not drop below the
+        // units already checked in against that exact slice
+        // (`ConsumptionLog.bookingAssetId`; untagged logs are not counted).
+        //
+        // Converted (KIT) slices: the current-state rule on their KIT row,
+        // never below the units out, taking pending first, then released.
         const akIdsWithNewQty = [...newQtyByAk.entries()]
           .filter(([, q]) => q != null)
           .map(([id]) => id);
         if (akIdsWithNewQty.length > 0) {
-          const drivenRows = await tx.bookingAsset.findMany({
-            where: { assetKitId: { in: akIdsWithNewQty } },
+          type DrivenRow = {
+            id: string;
+            assetId: string;
+            assetKitId: string | null;
+            sourceAllocation?: string | null;
+            asset: { title: string };
+            booking: { name: string };
+          };
+          const drivenRows: DrivenRow[] = await tx.bookingAsset.findMany({
+            where: {
+              assetKitId: { in: akIdsWithNewQty },
+              booking: { status: { in: KIT_PROPAGATION_STATUSES } },
+            },
             select: {
               id: true,
+              assetId: true,
               assetKitId: true,
+              sourceAllocation: true,
               asset: { select: { title: true } },
               booking: { select: { name: true } },
             },
           });
-          if (drivenRows.length > 0) {
+          const newQtyOf = (row: DrivenRow) =>
+            row.assetKitId ? newQtyByAk.get(row.assetKitId) ?? null : null;
+          const legacyRows = drivenRows.filter((row) => !isConvertedSlice(row));
+          const convertedRows = drivenRows.filter((row) =>
+            isConvertedSlice(row)
+          );
+          if (legacyRows.length > 0) {
             const checkedInByRow = new Map<string, number>();
             const logSums = await tx.consumptionLog.groupBy({
               by: ["bookingAssetId"],
               where: {
-                bookingAssetId: {
-                  in: drivenRows.map((r: { id: string }) => r.id),
-                },
+                bookingAssetId: { in: legacyRows.map((r) => r.id) },
                 // The four check-in disposition categories — units that
                 // have flowed back against this slice.
                 category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
@@ -6898,24 +6993,15 @@ export async function updateKitAssets({
                 checkedInByRow.set(g.bookingAssetId, g._sum.quantity ?? 0);
               }
             }
-            const violations = drivenRows.flatMap(
-              (row: {
-                id: string;
-                assetKitId: string | null;
-                asset: { title: string };
-                booking: { name: string };
-              }) => {
-                const newQty = row.assetKitId
-                  ? newQtyByAk.get(row.assetKitId)
-                  : null;
-                const checkedIn = checkedInByRow.get(row.id) ?? 0;
-                return newQty != null && newQty < checkedIn
-                  ? [
-                      `"${row.asset.title}" on booking "${row.booking.name}" (${checkedIn} already checked in)`,
-                    ]
-                  : [];
-              }
-            );
+            const violations = legacyRows.flatMap((row) => {
+              const newQty = newQtyOf(row);
+              const checkedIn = checkedInByRow.get(row.id) ?? 0;
+              return newQty != null && newQty < checkedIn
+                ? [
+                    `"${row.asset.title}" on booking "${row.booking.name}" (${checkedIn} already checked in)`,
+                  ]
+                : [];
+            });
             if (violations.length > 0) {
               throw new ShelfError({
                 cause: null,
@@ -6928,12 +7014,51 @@ export async function updateKitAssets({
               });
             }
           }
+          if (convertedRows.length > 0) {
+            const { refused } = await resizeKitSourceRows(tx, {
+              organizationId,
+              slices: convertedRows.flatMap((row) => {
+                const newQty = newQtyOf(row);
+                return newQty == null
+                  ? []
+                  : [
+                      {
+                        sliceId: row.id,
+                        assetId: row.assetId,
+                        quantity: newQty,
+                      },
+                    ];
+              }),
+              belowOut: "refuse",
+            });
+            if (refused.length > 0) {
+              const rowById = new Map(convertedRows.map((r) => [r.id, r]));
+              const described = refused.map(({ sliceId, out }) => {
+                const row = rowById.get(sliceId);
+                return `"${row?.asset.title ?? ""}" on booking "${
+                  row?.booking.name ?? ""
+                }" (${out} still checked out)`;
+              });
+              throw new ShelfError({
+                cause: null,
+                status: 400,
+                label,
+                message: `Cannot reduce kit quantity below units still checked out: ${described.join(
+                  "; "
+                )}. Check those units in first or choose a higher quantity.`,
+                shouldBeCaptured: false,
+              });
+            }
+          }
         }
 
         for (const [akId, newQty] of newQtyByAk) {
           if (newQty == null) continue;
           await tx.bookingAsset.updateMany({
-            where: { assetKitId: akId },
+            where: {
+              assetKitId: akId,
+              booking: { status: { in: KIT_PROPAGATION_STATUSES } },
+            },
             data: { quantity: newQty },
           });
         }
@@ -8599,6 +8724,10 @@ export async function moveAssetKitUnits(
         // below re-places the units at the DESTINATION kit's location, so they
         // don't linger at the kit they just left.
         await preserveKitDrivenPlacements(tx, [source.id]);
+        // Only finished bookings can still hold a slice of the source kit
+        // (step 6). The delete clears their kit, so their source rows and any
+        // standalone collision are settled first, as every detach path does.
+        await mergeStandaloneCollisionsForKitDetachment(tx, [source.id]);
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset+kit-scoped findFirst above, inside this same tx
         await tx.assetKit.delete({ where: { id: source.id } });
       } else {
@@ -8651,25 +8780,37 @@ export async function moveAssetKitUnits(
       }
 
       // 10. Cascade to active kit-driven BookingAsset rows on the DEST
-      //     kit — keep them in sync with the new slice quantity (mirrors
-      //     the `updateKitAssets` pattern at lines ~4127-4133). Only
-      //     active bookings need the cascade; historical (COMPLETE /
-      //     ARCHIVED / CANCELLED) slices are frozen records and stay
-      //     untouched. Source-side cascade is unreachable here because
-      //     step 6 already blocked when the source had active slices.
+      //     kit, keeping them in step with the new slice quantity (the
+      //     `updateKitAssets` live link). Only active bookings follow the
+      //     kit; COMPLETE / ARCHIVED / CANCELLED slices are frozen records.
+      //     The source side needs no cascade: step 6 refuses the move when
+      //     the source has active slices.
+      //
+      //     The destination only grows, so a converted slice's KIT row takes
+      //     the new units as pending and is never refused. One indexed probe
+      //     finds the converted slices; LEGACY ones need nothing more.
+      const convertedDestSlices: Array<{ id: string; assetId: string }> =
+        await tx.bookingAsset.findMany({
+          where: {
+            assetKitId: dest.id,
+            sourceAllocation: "KIT",
+            booking: { status: { in: KIT_PROPAGATION_STATUSES } },
+          },
+          select: { id: true, assetId: true },
+        });
+      await resizeKitSourceRows(tx, {
+        organizationId,
+        slices: convertedDestSlices.map((slice) => ({
+          sliceId: slice.id,
+          assetId: slice.assetId,
+          quantity: dest.quantity,
+        })),
+        belowOut: "refuse",
+      });
       await tx.bookingAsset.updateMany({
         where: {
           assetKitId: dest.id,
-          booking: {
-            status: {
-              in: [
-                BookingStatus.DRAFT,
-                BookingStatus.RESERVED,
-                BookingStatus.ONGOING,
-                BookingStatus.OVERDUE,
-              ],
-            },
-          },
+          booking: { status: { in: KIT_PROPAGATION_STATUSES } },
         },
         data: { quantity: dest.quantity },
       });
