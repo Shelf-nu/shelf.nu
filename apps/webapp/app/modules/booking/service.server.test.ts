@@ -18298,7 +18298,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     ]);
     expect(db.consumptionLog.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ assetId: mockQtyAssetId }),
+        where: expect.objectContaining({
+          assetId: { in: [mockQtyAssetId] },
+        }),
       })
     );
   });
@@ -18312,6 +18314,8 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       setupQtyMocks();
       const booking = makeQtyBooking();
       const [base] = booking.bookingAssets;
+      // why: the booking under test is the fixture; this gives it the two
+      // slices of one asset the split is about.
       //@ts-expect-error missing vitest type
       db.booking.findUniqueOrThrow.mockResolvedValue({
         ...booking,
@@ -18367,31 +18371,6 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
 
     it("fills around a slice-named entry of the same asset in one request", async () => {
       arrangeLooseAndKitSlices();
-      // why: the split reads the asset's logs written so far in the
-      // transaction. With `createConsumptionLog` mocked nothing reaches the
-      // database, so this answers that one read (recognised by its select)
-      // with the RETURN logs the request has written.
-      const findMany = db.consumptionLog.findMany as ReturnType<
-        typeof vitest.fn
-      >;
-      const fallback = findMany.getMockImplementation() as
-        | ((args: unknown) => Promise<unknown>)
-        | undefined;
-      findMany.mockImplementation((args: { select?: object }) => {
-        const keys = Object.keys(args?.select ?? {})
-          .sort()
-          .join(",");
-        if (keys === "bookingAssetId,quantity") {
-          return Promise.resolve(
-            returnLogs().map(([bookingAssetId, quantity]) => ({
-              bookingAssetId,
-              quantity,
-            }))
-          );
-        }
-        return fallback ? fallback(args) : Promise.resolve([]);
-      });
-
       // why: the per-slice limit is read from the booking's slices of the
       // asset. The shared mock answers that read with one generic row, so
       // this hands it the two slices this booking holds.
@@ -18525,6 +18504,8 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
   it("tags an unnamed disposition with the asset's only slice", async () => {
     setupQtyMocks();
     const booking = makeQtyBooking();
+    // why: the booking under test is the fixture; this gives its one slice a
+    // known id to find on the log.
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...booking,

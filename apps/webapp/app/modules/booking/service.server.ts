@@ -9309,8 +9309,7 @@ export async function partialCheckinBooking({
          * A disposition that names its slice, or whose asset has one slice
          * here, is a single share. One that names none on an asset with
          * several slices is split by {@link spreadUntaggedCheckin}, in the
-         * order every reader uses, against the asset's earlier logs read
-         * under the asset lock.
+         * order every reader uses, against the asset's earlier logs.
          */
         let shares: Array<
           UntaggedCheckinShare & {
@@ -9340,14 +9339,14 @@ export async function partialCheckinBooking({
           const assetSlices = lockedSlices.filter(
             (ba) => ba.assetId === disp.assetId
           );
-          const priorLogs = await tx.consumptionLog.findMany({
-            where: {
-              bookingId: id,
-              assetId: disp.assetId,
-              category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
-            },
-            select: { bookingAssetId: true, quantity: true },
-          });
+          // Everything logged for the asset so far: what was there before
+          // this session (read once under the locks) and what this session's
+          // earlier entries wrote. An asset with several slices always holds
+          // a kit slice, so both are kept for it.
+          const priorLogs = [
+            ...(priorLogsByAssetId.get(disp.assetId) ?? []),
+            ...(sessionLogsByAssetId.get(disp.assetId) ?? []),
+          ];
           shares = spreadUntaggedCheckin({
             slices: assetSlices,
             priorLogs,
@@ -9448,9 +9447,9 @@ export async function partialCheckinBooking({
           });
 
           /**
-           * Written per disposition, not once after the loop: a later
-           * untagged disposition of this asset spreads its units over the
-           * booking's logs it reads above (`priorLogs`), so it must see these.
+           * Written per disposition, with the stock read before it
+           * (`stockBefore`), so each change is recorded against the stock it
+           * started from.
            */
           await recordStockChanges(tx, {
             organizationId,
