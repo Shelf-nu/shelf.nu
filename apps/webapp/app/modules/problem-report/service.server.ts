@@ -2,9 +2,15 @@
  * Problem Report Service
  *
  * "Report a problem" on an asset: a member says what is wrong, the report is
- * written to the asset's history as a system note (type UPDATE), and the people
- * who run the workspace get an email. The web action and the mobile route both
- * call {@link reportAssetProblem}, so they accept and refuse the same requests.
+ * saved as a `ProblemReport` row, the asset's history gets a system note (type
+ * UPDATE) and an activity event, and the people who run the workspace get an
+ * email. The web action and the mobile route both call
+ * {@link reportAssetProblem}, so they accept and refuse the same requests.
+ *
+ * The row is the record of the report; the note is its line in the asset's
+ * history. Nothing here reads reports back: a member who may send a report
+ * may not be allowed to read the asset's activity, so a reader of this table
+ * needs its own permission check.
  *
  * Who receives the email is the `problemReports` audience of the role policy
  * table, read through `getOrganizationNotificationAudience`. The reporter is
@@ -23,6 +29,7 @@ import {
   problemReportEmailText,
   problemReportSubject,
 } from "~/emails/problem-report";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
@@ -44,7 +51,11 @@ export const PROBLEM_REPORT_WINDOW_MS = 60 * 60 * 1000;
 export const PERSONAL_WORKSPACE_REFUSAL =
   "Report a problem is for team workspaces. A Personal workspace has no one else to report to.";
 
-/** Text between the reporter link and the report in every report note. */
+/**
+ * Text between the reporter link and the report in every report note. The
+ * migration that created `ProblemReport` recognises report notes by this
+ * line's shape, so a note written by an older version is still found.
+ */
 export const PROBLEM_REPORT_PHRASE = " reported a problem: ";
 
 /**
@@ -76,9 +87,10 @@ export function buildProblemReportNote(
  * Refuses exactly when the asset page would refuse to open the asset (the
  * same `getAsset` lookup), and refuses an archived asset with the reason every
  * other action on an archived asset gives, and refuses in a Personal
- * workspace. The note is written before any email is sent. The emails are
+ * workspace. The report row, its history note and its activity event are
+ * written together or not at all, before any email is sent. The emails are
  * sent after this returns, so the member never waits for them; a failed
- * audience lookup or email is logged and never undoes the note or fails the
+ * audience lookup or email is logged and never undoes the report or fails the
  * request.
  *
  * @param args.assetId - The asset the report is about, from the request
@@ -89,14 +101,15 @@ export function buildProblemReportNote(
  * @param args.userOrganizations - The reporter's workspaces (web only), so an
  *   asset in another of their workspaces answers like the asset page does
  * @param args.request - The request (web only), for that same answer
- * @returns The note; `emailed`, whether anyone is being emailed (the emails
- *   are sent after this returns); and `emailsDone`, which settles once every
- *   email has been handed to the mailer or its failure logged. It never
- *   rejects. The routes ignore it; tests await it.
+ * @returns The saved report and its history note; `emailed`, whether anyone
+ *   is being emailed (the emails are sent after this returns); and
+ *   `emailsDone`, which settles once every email has been handed to the mailer
+ *   or its failure logged. It never rejects. The routes ignore it; tests
+ *   await it.
  * @throws {ShelfError} 404 when the reporter cannot open the asset; 400 when
  *   it is archived or the workspace is a Personal one; 429 when the reporter
  *   is over the hourly limit or another report from them is still being
- *   saved; or the database error when the note cannot be written
+ *   saved; or the database error when the report cannot be written
  */
 export async function reportAssetProblem({
   assetId,
@@ -147,7 +160,7 @@ export async function reportAssetProblem({
   // Admission and the write are one step under the member's report lock. A
   // second report from them while it is held is refused at once rather than
   // waiting, so one member never holds more than one pooled connection here.
-  const note = await db.$transaction(async (tx) => {
+  const { report, note } = await db.$transaction(async (tx) => {
     await lockMemberProblemReports(tx, { userId, organizationId });
     await assertUnderProblemReportLimit({ userId, organizationId }, tx);
     // Read in the transaction that writes, so an asset archived while this
@@ -156,7 +169,7 @@ export async function reportAssetProblem({
       { assetIds: [asset.id], organizationId, actorUserId: userId },
       tx
     );
-    return createNote(
+    const note = await createNote(
       {
         content: buildProblemReportNote(reporter, content),
         type: "UPDATE",
@@ -166,6 +179,38 @@ export async function reportAssetProblem({
       },
       tx
     );
+    // The text as typed: the note folds line breaks into one line, the
+    // record keeps them.
+    const report = await tx.problemReport.create({
+      data: {
+        content,
+        assetId: asset.id,
+        organizationId,
+        reporterId: userId,
+        noteId: note.id,
+      },
+    });
+    // The event names the report and never carries its text: events feed
+    // reports that have their own readers. The snapshot lists the name fields
+    // one by one so the reporter's email stays out of it.
+    await recordEvent(
+      {
+        organizationId,
+        actorUserId: userId,
+        actorSnapshot: {
+          firstName: reporter.firstName,
+          lastName: reporter.lastName,
+          displayName: reporter.displayName,
+        },
+        action: "ASSET_PROBLEM_REPORTED",
+        entityType: "ASSET",
+        entityId: asset.id,
+        assetId: asset.id,
+        meta: { problemReportId: report.id },
+      },
+      tx
+    );
+    return { report, note };
   });
 
   // From here on the report is saved: a failure only costs the email, never
@@ -204,7 +249,7 @@ export async function reportAssetProblem({
     content,
   });
 
-  return { note, emailed: recipients.length > 0, emailsDone };
+  return { report, note, emailed: recipients.length > 0, emailsDone };
 }
 
 /**
@@ -360,24 +405,22 @@ async function lockMemberProblemReports(
 /**
  * Refuses a report when the member has already sent
  * {@link PROBLEM_REPORT_LIMIT} in this workspace within the last
- * {@link PROBLEM_REPORT_WINDOW_MS}. Counted from their report notes, so the
- * limit holds across servers and covers the web form and the mobile route
- * alike. Run it inside the transaction that writes the report, after
+ * {@link PROBLEM_REPORT_WINDOW_MS}. Counted from their `ProblemReport` rows,
+ * so the limit holds across servers and covers the web form and the mobile
+ * route alike. Run it inside the transaction that writes the report, after
  * {@link lockMemberProblemReports}, or two reports can both pass.
  *
  * @throws {ShelfError} 429 when the member is over the limit
  */
 async function assertUnderProblemReportLimit(
   { userId, organizationId }: { userId: string; organizationId: string },
-  tx: Pick<typeof db, "note">
+  tx: Pick<typeof db, "problemReport">
 ) {
-  const sent = await tx.note.count({
+  const sent = await tx.problemReport.count({
     where: {
-      userId,
-      type: "UPDATE",
+      organizationId,
+      reporterId: userId,
       createdAt: { gte: new Date(Date.now() - PROBLEM_REPORT_WINDOW_MS) },
-      content: { contains: PROBLEM_REPORT_PHRASE },
-      asset: { organizationId },
     },
   });
 

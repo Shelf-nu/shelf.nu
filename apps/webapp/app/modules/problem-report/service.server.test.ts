@@ -4,11 +4,16 @@
  *
  * The real-database suite (`service.server.db.test.ts`) runs the same rules
  * on real rows but is skipped without a database. This suite replaces the
- * database edges so the note content, the asset scope, the archived refusal,
- * who is emailed and the failure handling are checked on every push.
+ * database edges so the note content, the report row and its activity event,
+ * the asset scope, the archived refusal, who is emailed and the failure
+ * handling are checked on every push. It also runs the pattern the
+ * `ProblemReport` migration copies old report notes with against the note
+ * this service writes.
  *
  * @see {@link file://./service.server.ts}
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import Markdoc from "@markdoc/markdoc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ProblemReportEmail from "~/emails/problem-report";
@@ -21,7 +26,9 @@ const mocks = vi.hoisted(() => ({
   sendEmail: vi.fn(),
   findUser: vi.fn(),
   findOrganization: vi.fn(),
-  countNotes: vi.fn(),
+  countReports: vi.fn(),
+  createReport: vi.fn(),
+  createEvent: vi.fn(),
   lock: vi.fn(),
   renderHtml: vi.fn(),
   realRenderHtml: null as unknown as (...args: unknown[]) => Promise<string>,
@@ -70,7 +77,12 @@ vi.mock("~/utils/logger", () => ({ Logger: { error: mocks.loggerError } }));
 // report is admitted and written in a transaction; the lock and the count
 // query themselves run against Postgres in the db suite
 vi.mock("~/database/db.server", () => {
-  const tx = { $queryRaw: mocks.lock, note: { count: mocks.countNotes } };
+  const tx = {
+    $queryRaw: mocks.lock,
+    problemReport: { count: mocks.countReports, create: mocks.createReport },
+    // `recordEvent` is the real one; its insert is the output under test
+    activityEvent: { create: mocks.createEvent },
+  };
   return {
     db: {
       user: { findUniqueOrThrow: mocks.findUser },
@@ -131,7 +143,7 @@ describe("buildProblemReportNote", () => {
     );
   });
 
-  it("puts the phrase the hourly limit counts between the reporter and the text", () => {
+  it("puts the report phrase between the reporter and the text", () => {
     expect(buildProblemReportNote(reporter, "Lens cracked")).toContain(
       PROBLEM_REPORT_PHRASE
     );
@@ -165,7 +177,7 @@ describe("reportAssetProblem", () => {
       title: "ZZ Camera",
       archivedAt: null,
     });
-    mocks.countNotes.mockResolvedValue(0);
+    mocks.countReports.mockResolvedValue(0);
     mocks.lock.mockResolvedValue([{ locked: true }]);
     mocks.assertAssetsAreNotArchived.mockResolvedValue(undefined);
     mocks.findUser.mockResolvedValue(reporter);
@@ -175,6 +187,8 @@ describe("reportAssetProblem", () => {
       type: "TEAM",
     });
     mocks.createNote.mockResolvedValue({ id: "note-1" });
+    mocks.createReport.mockResolvedValue({ id: "report-1" });
+    mocks.createEvent.mockResolvedValue({ id: "event-1" });
     mocks.renderHtml.mockImplementation(mocks.realRenderHtml);
     mocks.getOrganizationNotificationAudience.mockResolvedValue(audience);
   });
@@ -222,9 +236,9 @@ describe("reportAssetProblem", () => {
 
     expect(mocks.lock).toHaveBeenCalledTimes(1);
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.countNotes.mock.invocationCallOrder[0]
+      mocks.countReports.mock.invocationCallOrder[0]
     );
-    expect(mocks.countNotes.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.countReports.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createNote.mock.invocationCallOrder[0]
     );
   });
@@ -244,7 +258,7 @@ describe("reportAssetProblem", () => {
       status: 429,
       title: "Too many reports",
     });
-    expect(mocks.countNotes).not.toHaveBeenCalled();
+    expect(mocks.countReports).not.toHaveBeenCalled();
     expect(mocks.createNote).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
@@ -261,35 +275,36 @@ describe("reportAssetProblem", () => {
       vi.useRealTimers();
     });
 
-    it("counts only this member's report notes in this workspace from the last hour", async () => {
+    it("counts only this member's report rows in this workspace from the last hour", async () => {
       await report();
 
-      expect(mocks.countNotes).toHaveBeenCalledWith({
+      expect(mocks.countReports).toHaveBeenCalledWith({
         where: {
-          userId: reporter.id,
-          type: "UPDATE",
+          organizationId: "org-1",
+          reporterId: reporter.id,
           createdAt: {
             gte: new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS),
           },
-          content: { contains: PROBLEM_REPORT_PHRASE },
-          asset: { organizationId: "org-1" },
         },
       });
     });
   });
 
+  it("admits the report that reaches the hourly limit", async () => {
+    mocks.countReports.mockResolvedValue(PROBLEM_REPORT_LIMIT - 1);
+
+    await expect(report()).resolves.toMatchObject({
+      report: { id: "report-1" },
+    });
+  });
+
   it("refuses a member over the hourly report limit and writes nothing", async () => {
-    mocks.countNotes.mockResolvedValue(PROBLEM_REPORT_LIMIT);
+    mocks.countReports.mockResolvedValue(PROBLEM_REPORT_LIMIT);
 
     await expect(report()).rejects.toMatchObject({ status: 429 });
-    expect(mocks.countNotes).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        userId: reporter.id,
-        type: "UPDATE",
-        asset: { organizationId: "org-1" },
-      }),
-    });
     expect(mocks.createNote).not.toHaveBeenCalled();
+    expect(mocks.createReport).not.toHaveBeenCalled();
+    expect(mocks.createEvent).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -312,7 +327,7 @@ describe("reportAssetProblem", () => {
         organizationId: "org-1",
         actorUserId: reporter.id,
       },
-      expect.objectContaining({ note: expect.anything() })
+      expect.objectContaining({ problemReport: expect.anything() })
     );
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.assertAssetsAreNotArchived.mock.invocationCallOrder[0]
@@ -332,7 +347,7 @@ describe("reportAssetProblem", () => {
         assetId: "asset-1",
         organizationId: "org-1",
       },
-      expect.objectContaining({ note: expect.anything() })
+      expect.objectContaining({ problemReport: expect.anything() })
     );
     expect(result).toMatchObject({ note: { id: "note-1" }, emailed: true });
     await result.emailsDone;
@@ -345,6 +360,63 @@ describe("reportAssetProblem", () => {
       subject: "Problem reported: ZZ Camera",
       replyTo: "base@example.com",
     });
+  });
+
+  it("saves the report as a row with the text as typed, linked to its note", async () => {
+    const result = await report("Lens\ncracked");
+
+    expect(mocks.createReport).toHaveBeenCalledTimes(1);
+    expect(mocks.createReport).toHaveBeenCalledWith({
+      data: {
+        content: "Lens\ncracked",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        reporterId: reporter.id,
+        noteId: "note-1",
+      },
+    });
+    expect(result.report).toEqual({ id: "report-1" });
+    expect(mocks.createNote.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createReport.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("records one activity event that names the report and holds neither its text nor the reporter's email", async () => {
+    await report("The lens is cracked");
+
+    expect(mocks.createEvent).toHaveBeenCalledTimes(1);
+    const [{ data: event }] = mocks.createEvent.mock.calls[0];
+    expect(event).toMatchObject({
+      organizationId: "org-1",
+      actorUserId: reporter.id,
+      actorSnapshot: { firstName: "Bea", lastName: "Base", displayName: null },
+      action: "ASSET_PROBLEM_REPORTED",
+      entityType: "ASSET",
+      entityId: "asset-1",
+      assetId: "asset-1",
+      meta: { problemReportId: "report-1" },
+    });
+    const stored = JSON.stringify(event);
+    expect(stored).not.toContain("The lens is cracked");
+    expect(stored).not.toContain(reporter.email);
+  });
+
+  it("fails the request when the row cannot be written, and emails no one", async () => {
+    mocks.createReport.mockRejectedValue(new Error("insert failed"));
+
+    await expect(report()).rejects.toThrow("insert failed");
+    expect(mocks.createEvent).not.toHaveBeenCalled();
+    expect(mocks.getOrganizationNotificationAudience).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("fails the request when the event cannot be written, and emails no one", async () => {
+    mocks.createEvent.mockRejectedValue(new Error("insert failed"));
+
+    await expect(report()).rejects.toMatchObject({
+      message: "Failed to record activity event.",
+    });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
   it("answers without waiting for the emails to be rendered", async () => {
@@ -429,5 +501,68 @@ describe("reportAssetProblem", () => {
         message: "Could not send a problem report email",
       })
     );
+  });
+});
+
+describe("the pattern the ProblemReport migration copies report notes with", () => {
+  const migration = readFileSync(
+    path.resolve(
+      __dirname,
+      "../../../../../packages/database/prisma/migrations/20261125120000_add_problem_report/migration.sql"
+    ),
+    "utf8"
+  );
+  // The two quoted patterns in the INSERT: the one that takes the text out
+  // and the one that decides which notes are report lines.
+  const [extract, match] = [
+    ...migration.matchAll(/'(\^\\\{% link .*\$)'/g),
+  ].map(([, pattern]) => new RegExp(pattern, "s"));
+
+  /** What the migration stores for a note: the text, quotes turned back. */
+  function copied(note: string) {
+    if (!match.test(note)) return null;
+    return note.match(extract)?.[1].replaceAll("&quot;", '"') ?? null;
+  }
+
+  it("is read from the migration", () => {
+    expect(extract).toBeInstanceOf(RegExp);
+    expect(match).toBeInstanceOf(RegExp);
+  });
+
+  it.each([
+    ["plain text", "The lens is cracked", "The lens is cracked"],
+    ["quotes", 'The "zoom" ring is stuck', 'The "zoom" ring is stuck'],
+    [
+      "line breaks, folded as the note folds them",
+      "Lens\ncracked",
+      "Lens cracked",
+    ],
+    [
+      "text that repeats the phrase, with the tag ending the note strips",
+      'He reported a problem: "x" /%} again',
+      'He reported a problem: "x" / again',
+    ],
+  ])("takes the text back out of a report note: %s", (_case, typed, text) => {
+    expect(copied(buildProblemReportNote(reporter, typed))).toBe(text);
+  });
+
+  it("takes the text out when the reporter's name has quotes in it", () => {
+    const note = buildProblemReportNote(
+      { ...reporter, displayName: 'Bea "B" Base' },
+      "Strap is torn"
+    );
+
+    expect(copied(note)).toBe("Strap is torn");
+  });
+
+  it("leaves a note alone that only mentions the phrase", () => {
+    expect(
+      copied('{% name text="ZZ Camera" /%} reported a problem: yesterday')
+    ).toBeNull();
+    expect(
+      copied(
+        '{% link to="/settings/team/users/user-base" text="Bea Base" /%} reported a problem: *"Lens cap"*'
+      )
+    ).toBeNull();
   });
 });
