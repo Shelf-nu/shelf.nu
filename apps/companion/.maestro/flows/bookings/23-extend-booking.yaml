@@ -40,6 +40,13 @@ tags:
     visible: "E2E Extend Booking"
     timeout: 20000
 
+# The check-in group leads an ONGOING booking, so More actions can sit below
+# the fold: scroll to it before tapping.
+- scrollUntilVisible:
+    element:
+      text: "More booking actions"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Extend booking"

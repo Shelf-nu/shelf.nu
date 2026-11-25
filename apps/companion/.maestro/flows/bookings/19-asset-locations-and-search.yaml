@@ -53,8 +53,12 @@ env:
 - tapOn:
     text: "Booking: ${BOOKING_NAME}.*"
     optional: true
-- extendedWaitUntil:
-    visible: ".*Select assets to remove.*"
+# Select to Remove marks that the booking and its buttons rendered. The status
+# actions lead a RESERVED booking, so it can sit below the fold: scroll to it.
+- scrollUntilVisible:
+    element:
+      text: ".*Select assets to remove.*"
+    direction: DOWN
     timeout: 30000
 
 # ── Kit members and standalone assets carry their location ──

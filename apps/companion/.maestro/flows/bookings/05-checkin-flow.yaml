@@ -21,9 +21,9 @@ tags:
 - tapOn:
     text: "Bookings"
 
-# Look for a booking with "Tap to check in" hint (optional — may not exist)
+# Look for a booking with "Ready to check in" hint (optional: may not exist)
 - tapOn:
-    text: "Tap to check in"
+    text: "Ready to check in"
     optional: true
 
 # If found, verify checkin options
