@@ -185,6 +185,25 @@ test("downloadAsync rejects with the retry's error when both names are gone", as
   assert.equal(asset.downloading, false);
 });
 
+test("the stored name's error travels with the retry's error as its cause", async () => {
+  const { asset } = makeAsset(
+    (uri) => Promise.reject(new Error(`missing ${uri}`)),
+    nameInThisBuild
+  );
+  const error = await asset.downloadAsync().catch((caught) => caught);
+  assert.equal(error.message, `missing ${nameInThisBuild}`);
+  assert.equal(error.cause?.message, `missing ${storedFromOldBuild}`);
+});
+
+test("a second caller is rejected too when both names are gone", async () => {
+  const { asset } = makeAsset(missing, nameInThisBuild);
+  const first = asset.downloadAsync();
+  const second = asset.downloadAsync();
+  await assert.rejects(first);
+  await assert.rejects(second);
+  assert.equal(asset.downloading, false);
+});
+
 test("downloadAsync rethrows the original error when there is no other name", async () => {
   const { asset, asked } = makeAsset(missing, null);
   await assert.rejects(asset.downloadAsync(), {
@@ -221,4 +240,66 @@ test("a second caller settles only after the retry has finished", async () => {
   await Promise.all([first, second]);
   assert.equal(secondSettled, true);
   assert.equal(asset.localUri, "file:///cache/a.ttf");
+});
+
+/**
+ * React Native's own resource naming, read from the installed package.
+ *
+ * `@react-native/asset-utils` does not export the file and it carries Flow syntax, so the two
+ * functions are cut from its source (their annotations are comments) and evaluated.
+ */
+function loadReactNativeNaming() {
+  const reactNative = createRequire(
+    require.resolve("react-native/package.json")
+  );
+  const source = readFileSync(
+    join(
+      dirname(reactNative.resolve("@react-native/asset-utils/package.json")),
+      "src/AndroidPathUtils.js"
+    ),
+    "utf8"
+  );
+  const identifier = source.match(
+    /function getAndroidResourceIdentifier\([\s\S]*?\n}/
+  );
+  const basePath = source.match(/function getBasePath\([\s\S]*?\n}/);
+  assert.ok(
+    identifier && basePath,
+    "React Native's naming functions were not found"
+  );
+  return new Function(
+    `${basePath[0]}\n${identifier[0]}\nreturn getAndroidResourceIdentifier;`
+  )();
+}
+
+test("the fallback name is the name React Native gives the file", () => {
+  const helper = loadHelper();
+  const reactNativeIdentifier = loadReactNativeNaming();
+  const cases = [
+    metaInThisBuild,
+    {
+      name: "back-icon",
+      type: "png",
+      httpServerLocation: "/assets/../../node_modules/pkg/lib/assets",
+    },
+    {
+      name: "Logo @2x v1.2",
+      type: "png",
+      httpServerLocation: "/assets/assets/images",
+    },
+    {
+      name: "bleep",
+      type: "wav",
+      httpServerLocation: "/assets/?unstable_path=.%2Fassets%2Fsounds",
+    },
+    { name: "Ünïcode Näme", type: "ttf", httpServerLocation: "assets/fonts" },
+  ];
+  for (const meta of cases) {
+    const stored = `${BASE}raw/some_older_name.${meta.type}`;
+    assert.equal(
+      helper(stored, meta),
+      `${BASE}raw/${reactNativeIdentifier(meta)}.${meta.type}`,
+      `differs from React Native for ${meta.httpServerLocation}/${meta.name}`
+    );
+  }
 });

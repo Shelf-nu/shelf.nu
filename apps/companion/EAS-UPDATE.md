@@ -130,6 +130,10 @@ eas env:exec production "npx expo export --clear --dump-sourcemap -p ios -p andr
 #     values back out of the built bundles and exits non-zero on a mismatch, so
 #     a copy-pasted run cannot sail past it. It also fails a bundle that still
 #     installs Expo's fetch as the global fetch (metro.config.js turns it off).
+#     For the Android bundle it also checks that the expo-asset patch is in it
+#     (run `pnpm install` after pulling, or it is not) and that the icon font
+#     still sits in the store build's `node_modules/.pnpm` folder. See "Embedded
+#     assets after a store upgrade" below when that second check fails.
 #     Run under the SAME environment the export claimed, so expected and baked
 #     values arrive the same way.
 eas env:exec production "node scripts/check-bundle-env.mjs"
@@ -192,6 +196,29 @@ precisely when we are shipping blind hotfixes and most need to read them.
 Users get it on the **next app launch**: the running app launches instantly from
 its cached bundle (`fallbackToCacheTimeout: 0`) and downloads the new bundle in
 the background, applying it on the launch after that. No review, no store wait.
+
+### Embedded assets after a store upgrade
+
+On Android, expo-updates stores where each embedded asset is, by content hash.
+The location is a resource file name derived from the asset's folder in
+`node_modules/.pnpm`, and that folder's name changes when the package's peers
+change (an SDK upgrade, and many smaller bumps). A phone upgraded from an older
+store build keeps the older name for any file whose content did not change, the
+icon font among them.
+
+`patches/expo-asset@58.0.19.patch` makes the app retry such a file under the
+name the running bundle gives it. That name only exists in the installed store
+build while the bundle's folder for the file equals the store build's, so the
+gate compares the two (`STORE_BUILD_ICON_FONT_FOLDERS` in
+`scripts/check-bundle-env.mjs`).
+
+- **The gate says the folder differs:** a dependency of `@expo/vector-icons`
+  changed since the store build. Publishing would bring the missing icons back
+  on upgraded phones. Publish from a commit where the folder still matches, or
+  ship the dependency change with the next store build.
+- **Cutting a store build:** add its runtime and folder to
+  `STORE_BUILD_ICON_FONT_FOLDERS`. Read the folder from `subdirectory` of the
+  Ionicons asset in the build's `assets/app.manifest`.
 
 Verify what's live: `eas update:list --branch production` (check the **runtime
 version** column, not just the message).

@@ -1,5 +1,5 @@
 diff --git a/build/Asset.js b/build/Asset.js
-index afd8222156f5b69e509a987fefc4467db35a2e6e..51fd703ce69ae93a6accbaa388a0d91d8e1a6a34 100644
+index afd8222156f5b69e509a987fefc4467db35a2e6e..a0b235695bb15dd0c62d90e8cb8162ce0592c89a 100644
 --- a/build/Asset.js
 +++ b/build/Asset.js
 @@ -14,6 +14,34 @@ function isVirtualAsset(assetModule) {
@@ -46,7 +46,7 @@ index afd8222156f5b69e509a987fefc4467db35a2e6e..51fd703ce69ae93a6accbaa388a0d91d
          Asset.byHash[metaHash] = asset;
          return asset;
      }
-@@ -235,7 +265,18 @@ function isVirtualAsset(assetModule) {
+@@ -235,7 +265,26 @@ function isVirtualAsset(assetModule) {
                      this.name = AssetUris.getFilename(this.uri);
                  }
              }
@@ -60,7 +60,15 @@ index afd8222156f5b69e509a987fefc4467db35a2e6e..51fd703ce69ae93a6accbaa388a0d91d
 +                if (!fallbackUri) {
 +                    throw error;
 +                }
-+                this.localUri = await downloadAsync(fallbackUri, this.hash, this.type);
++                try {
++                    this.localUri = await downloadAsync(fallbackUri, this.hash, this.type);
++                } catch (retryError) {
++                    // Both names are gone: report the retry, and keep the stored name's error with it.
++                    if (retryError instanceof Error && retryError.cause === undefined) {
++                        retryError.cause = error;
++                    }
++                    throw retryError;
++                }
 +                this.uri = fallbackUri;
 +            }
              this.downloaded = true;
