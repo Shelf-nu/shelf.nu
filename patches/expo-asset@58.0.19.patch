@@ -1,0 +1,68 @@
+diff --git a/build/Asset.js b/build/Asset.js
+index afd8222156f5b69e509a987fefc4467db35a2e6e..51fd703ce69ae93a6accbaa388a0d91d8e1a6a34 100644
+--- a/build/Asset.js
++++ b/build/Asset.js
+@@ -14,6 +14,34 @@ function isVirtualAsset(assetModule) {
+  * Android resource URL prefix.
+  * @hidden
+  */ export const ANDROID_EMBEDDED_URL_BASE_RESOURCE = 'file:///android_res/';
++/**
++ * The `file:///android_res/...` URI this bundle's own asset metadata names for an embedded
++ * asset, or null when it cannot be derived or equals `storedUri`.
++ *
++ * expo-updates stores an embedded asset's location by content hash. After a store upgrade the
++ * stored location can still be the previous build's resource file name, because the name is
++ * derived from the asset's path in node_modules and that path changes between builds while the
++ * file's content does not. The name is built the way React Native builds it
++ * (`getAndroidResourceIdentifier`); the folder and extension are kept from `storedUri`.
++ */ export function embeddedResourceUriFromMetadata(storedUri, meta) {
++    if (typeof storedUri !== 'string' || !storedUri.startsWith(ANDROID_EMBEDDED_URL_BASE_RESOURCE)) {
++        return null;
++    }
++    if (!meta || typeof meta.httpServerLocation !== 'string' || typeof meta.name !== 'string') {
++        return null;
++    }
++    const match = /^file:\/\/\/android_res\/([^/]+)\/[^/]+?(\.[^./]+)?$/.exec(storedUri);
++    if (!match) {
++        return null;
++    }
++    const basePath = meta.httpServerLocation.startsWith('/') ? meta.httpServerLocation.slice(1) : meta.httpServerLocation;
++    const identifier = (basePath + '/' + meta.name).toLowerCase().replace(/\//g, '_').replace(/[^a-z0-9_]/g, '').replace(/^(?:assets|assetsunstable_path)_/, '');
++    if (!identifier) {
++        return null;
++    }
++    const uri = `${ANDROID_EMBEDDED_URL_BASE_RESOURCE}${match[1]}/${identifier}${match[2] ?? ''}`;
++    return uri === storedUri ? null : uri;
++}
+ /**
+  * The `Asset` class represents an asset in your app. It gives metadata about the asset (such as its
+  * name and type) and provides facilities to load the asset data.
+@@ -169,6 +197,8 @@ function isVirtualAsset(assetModule) {
+             width: meta.width,
+             height: meta.height
+         });
++        // Kept for `downloadAsync`, which falls back to it when the stored location is gone.
++        asset._embeddedResourceUriFromBundle = embeddedResourceUriFromMetadata(asset.uri, meta);
+         Asset.byHash[metaHash] = asset;
+         return asset;
+     }
+@@ -235,7 +265,18 @@ function isVirtualAsset(assetModule) {
+                     this.name = AssetUris.getFilename(this.uri);
+                 }
+             }
+-            this.localUri = await downloadAsync(this.uri, this.hash, this.type);
++            try {
++                this.localUri = await downloadAsync(this.uri, this.hash, this.type);
++            } catch (error) {
++                // The stored embedded location does not exist in this build (see
++                // `embeddedResourceUriFromMetadata`): load the file under this bundle's own name.
++                const fallbackUri = this._embeddedResourceUriFromBundle;
++                if (!fallbackUri) {
++                    throw error;
++                }
++                this.localUri = await downloadAsync(fallbackUri, this.hash, this.type);
++                this.uri = fallbackUri;
++            }
+             this.downloaded = true;
+             this._downloadCallbacks.forEach(({ resolve })=>resolve());
+         } catch (e) {

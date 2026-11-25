@@ -57,6 +57,9 @@ overrides:
   yaml@>=2.0.0 <2.8.3: 2.8.3
 
 patchedDependencies:
+  expo-asset@58.0.19:
+    hash: je7t5mj3xjvfzzkvoumui2nszm
+    path: patches/expo-asset@58.0.19.patch
   expo-in-app-updates@0.12.0:
     hash: ycebkup2uus24na34d2ij7zx4q
     path: patches/expo-in-app-updates@0.12.0.patch
@@ -133,7 +136,7 @@ importers:
         version: 58.0.22(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.16)(expo-router@58.0.29)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native-worklets@0.13.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
       expo-audio:
         specifier: ~58.0.11
-        version: 58.0.11(expo-asset@58.0.19(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3))(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)
+        version: 58.0.11(expo-asset@58.0.19(patch_hash=je7t5mj3xjvfzzkvoumui2nszm)(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3))(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)
       expo-build-properties:
         specifier: ~58.0.12
         version: 58.0.12(expo@58.0.22)
@@ -2288,7 +2291,6 @@ packages:
 
   '@evilmartians/lefthook@2.1.6':
     resolution: {integrity: sha512-ysZbzryf74wlISmgm0PH/n1lJ0HD7AHmI6DoJgWO9qzIETQknhGdmKbkOi0MjLYtiOHWQl8Dr2qwg0ksDpNZjA==}
-    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -17973,7 +17975,7 @@ snapshots:
     dependencies:
       expo: 58.0.22(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.16)(expo-router@58.0.29)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native-worklets@0.13.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
 
-  expo-asset@58.0.19(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3):
+  expo-asset@58.0.19(patch_hash=je7t5mj3xjvfzzkvoumui2nszm)(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3):
     dependencies:
       '@expo/image-utils': 0.12.6(typescript@6.0.3)
       expo: 58.0.22(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.16)(expo-router@58.0.29)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native-worklets@0.13.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
@@ -17984,10 +17986,10 @@ snapshots:
       - supports-color
       - typescript
 
-  expo-audio@58.0.11(expo-asset@58.0.19(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3))(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0):
+  expo-audio@58.0.11(expo-asset@58.0.19(patch_hash=je7t5mj3xjvfzzkvoumui2nszm)(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3))(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0):
     dependencies:
       expo: 58.0.22(@babel/core@7.29.7)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.16)(expo-router@58.0.29)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native-worklets@0.13.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
-      expo-asset: 58.0.19(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
+      expo-asset: 58.0.19(patch_hash=je7t5mj3xjvfzzkvoumui2nszm)(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
       react: 19.3.0
       react-native: 0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0)
 
@@ -18328,7 +18330,7 @@ snapshots:
       '@expo/metro-config': 58.0.20(expo@58.0.22)(typescript@6.0.3)
       '@ungap/structured-clone': 1.3.0
       babel-preset-expo: 58.0.23(@babel/core@7.29.7)(@babel/runtime@7.28.6)(expo@58.0.22)(react-refresh@0.14.2)
-      expo-asset: 58.0.19(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
+      expo-asset: 58.0.19(patch_hash=je7t5mj3xjvfzzkvoumui2nszm)(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)(typescript@6.0.3)
       expo-constants: 58.0.14(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(typescript@6.0.3)
       expo-file-system: 58.0.13(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))
       expo-font: 58.0.11(expo@58.0.22)(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.3.0))(react@19.3.0)
