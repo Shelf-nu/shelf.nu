@@ -6,7 +6,10 @@ import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
 import { isUnsupportedBrowser } from "~/utils/browser-support";
-import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
+import {
+  SENTRY_TRACES_SAMPLE_RATE,
+  SENTRY_TUNNEL_PATH,
+} from "~/utils/constants";
 import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
@@ -27,7 +30,7 @@ if (window.env?.SENTRY_DSN) {
     // such as a page that reloaded itself after a failed download.
     enableLogs: true,
     integrations: [Sentry.reactRouterTracingIntegration()],
-    tracesSampleRate: 0.1,
+    tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
     beforeSendTransaction(event) {
       const spans = event.spans || [];
 
