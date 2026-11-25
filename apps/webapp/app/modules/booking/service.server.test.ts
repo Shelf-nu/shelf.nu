@@ -18561,6 +18561,43 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       expect(returnLogs()).toEqual([]);
     });
 
+    it("refuses a claim naming a slice for more units than that slice sent", async () => {
+      // 1 of the 4 booked loose units left; the other 3 are on the shelf and
+      // cannot have been used up.
+      arrangeLooseAndKitSlices({ checkedOutQuantity: 1 });
+      // why: the per-slice figures are read from the booking's slices of the
+      // asset. The shared mock answers that read with one generic row, so
+      // this hands it the two slices this booking holds.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation((args: { where: { assetId?: unknown } }) =>
+        args.where.assetId
+          ? Promise.resolve([
+              { id: "ba-kit", assetId: mockQtyAssetId, quantity: 6 },
+              { id: "ba-loose", assetId: mockQtyAssetId, quantity: 4 },
+            ])
+          : genericRows?.(args)
+      );
+
+      await expect(
+        partialCheckinBooking({
+          ...baseParams,
+          checkins: [
+            {
+              assetId: mockQtyAssetId,
+              bookingAssetId: "ba-loose",
+              consumed: 4,
+            },
+          ],
+        })
+      ).rejects.toThrow("Only 1 are out on this booking");
+      expect(db.asset.update).not.toHaveBeenCalled();
+    });
+
     it("takes used-up units off the location a slice left from as read inside the transaction", async () => {
       arrangeLooseAndKitSlices();
       const placements = installStatefulPlacements([

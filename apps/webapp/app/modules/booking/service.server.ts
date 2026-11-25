@@ -9201,8 +9201,9 @@ export async function partialCheckinBooking({
          * would log a return for units that never went out. Mirrors the
          * auto-default in `checkinBooking`.
          *
-         * An entry that names its slice is held to this by the slice checks
-         * before the transaction; one that names none is held to it here.
+         * Every entry is held to this figure for the asset. One that names
+         * its slice is also held to what that slice still has out
+         * (`sliceStillOut`), so it cannot claim a sibling's units either.
          */
         const slicesOfAsset = lockedSlices.filter(
           (slice) => slice.assetId === disp.assetId
@@ -9216,6 +9217,22 @@ export async function partialCheckinBooking({
             (slicesOfAsset.reduce((sum, slice) => sum + slice.quantity, 0) -
               remaining)
         );
+
+        /**
+         * What the named slice still has out: the units it sent minus the
+         * logs tagged with it. `null` for an entry that names no slice.
+         */
+        const namedSlice = disp.bookingAssetId
+          ? slicesOfAsset.find((slice) => slice.id === disp.bookingAssetId)
+          : undefined;
+        const sliceStillOut = namedSlice
+          ? Math.max(
+              0,
+              resolveSentUnits(namedSlice) -
+                (namedSlice.quantity -
+                  (checkinRemaining.bySlice.get(namedSlice.id) ?? 0))
+            )
+          : null;
 
         // Bare scan of a QUANTITY_TRACKED asset (no explicit disposition):
         // default to the units still out: return them for a returnable
@@ -9266,12 +9283,16 @@ export async function partialCheckinBooking({
             shouldBeCaptured: false,
           });
         }
-        if (!disp.bookingAssetId && claimed > unitsStillOut) {
+        const stillOut = Math.min(
+          unitsStillOut,
+          sliceStillOut ?? unitsStillOut
+        );
+        if (claimed > stillOut) {
           throw new ShelfError({
             cause: null,
             status: 400,
             label,
-            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${unitsStillOut} are out on this booking.`,
+            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${stillOut} are out on this booking.`,
             shouldBeCaptured: false,
           });
         }
