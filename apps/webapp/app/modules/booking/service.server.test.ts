@@ -18468,7 +18468,10 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         sourceLocationId: "loc-studio",
         sourceKitId: null,
       };
-      // Only the selected fields come back, as from the database.
+      // why: the check-in reads its slices again under the asset lock, which
+      // is the only place the second departure shows. This answers that read
+      // with the slice as it now stands, and only the selected fields come
+      // back, as from the database.
       sliceRows.mockImplementation(
         (args: { select?: Record<string, boolean> }) =>
           args.select?.checkedOutQuantity
@@ -23638,6 +23641,9 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
       (q?: { where?: { bookingId?: { notIn?: string[] } } }) =>
         q?.where?.bookingId?.notIn ? Promise.resolve([]) : routed?.(q)
     );
+    // why: settling reads the booking's logs back from the database, and no
+    // log this request writes reaches the mocked one. This is the RETURN of
+    // kit A's six, so its tape slice settles and kit A becomes a candidate.
     (
       db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
     ).mockResolvedValue([
