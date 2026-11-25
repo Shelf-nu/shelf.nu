@@ -107,8 +107,9 @@ export function hasEmbeddedAssetFallback(text) {
  * trailing hash covers the package's whole peer set, so an unrelated dependency
  * bump can move it.
  *
- * Add an entry when a store build is cut: read `subdirectory` of the Ionicons
- * asset in the build's `assets/app.manifest`.
+ * The release PR that bumps `runtimeVersion` adds the new runtime's entry, and
+ * the entry is confirmed against the build once it is cut. Both steps are in
+ * STORE-RELEASE.md, "The icon font folder of the new runtime".
  */
 export const STORE_BUILD_ICON_FONT_FOLDERS = {
   "1.8.0":
@@ -174,10 +175,21 @@ const ANDROID_DIR = join(DIST, "android");
  * resource names the gate checks.
  *
  * @param path - a bundle path as {@link bundlePaths} returns it
- * @returns true for a file directly under the Android export folder
+ * @returns true for a file under the Android export folder
  */
 export function isAndroidBundle(path) {
   return path.startsWith(`${ANDROID_DIR}/`);
+}
+
+/**
+ * Whether the export holds an Android bundle at all. Without one, nothing
+ * checked the embedded assets and the gate must not report them as fine.
+ *
+ * @param paths - bundle paths as {@link bundlePaths} returns them
+ * @returns true when at least one of them is an Android bundle
+ */
+export function hasAndroidBundle(paths) {
+  return paths.some(isAndroidBundle);
 }
 
 /**
@@ -262,7 +274,7 @@ function main() {
     if (!ok) bad = true;
   }
 
-  if (!paths.some(isAndroidBundle)) {
+  if (!hasAndroidBundle(paths)) {
     console.error(
       `\n[bundle-env] FAILED: no Android bundle under ${ANDROID_DIR}, so its embedded\n` +
         "  assets were not checked. Export with -p ios -p android and run this again."

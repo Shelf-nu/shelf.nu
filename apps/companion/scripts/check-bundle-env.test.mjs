@@ -20,6 +20,7 @@ import {
   STORE_BUILD_ICON_FONT_FOLDERS,
   assetProblemsFor,
   embeddedAssetProblems,
+  hasAndroidBundle,
   hasEmbeddedAssetFallback,
   iconFontFoldersIn,
   refsIn,
@@ -111,6 +112,14 @@ describe("embedded assets in the Android bundle", () => {
       assetProblemsFor("dist/_expo/static/js/ios/entry-abc.hbc", "", "1.8.0"),
       []
     );
+  });
+
+  it("knows when an export holds no Android bundle", () => {
+    const ios = "dist/_expo/static/js/ios/entry-abc.hbc";
+    const android = "dist/_expo/static/js/android/entry-abc.hbc";
+    assert.equal(hasAndroidBundle([ios]), false);
+    assert.equal(hasAndroidBundle([]), false);
+    assert.equal(hasAndroidBundle([ios, android]), true);
   });
 
   it("records a folder for the runtime in app.json", () => {

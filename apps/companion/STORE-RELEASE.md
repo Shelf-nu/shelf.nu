@@ -45,6 +45,11 @@ CI proves the six agree:
 node apps/companion/scripts/check-version-sync.mjs
 ```
 
+**Build numbers are not in this repo.** `eas.json` sets
+`cli.appVersionSource: "remote"` and `build.production.autoIncrement: true`, so
+EAS holds the iOS build number and the Android version code and increments them
+itself. Do not edit `CFBundleVersion` or add `android.versionCode`.
+
 ### The icon font folder of the new runtime
 
 The same release PR adds the new runtime to `STORE_BUILD_ICON_FONT_FOLDERS` in
@@ -53,8 +58,8 @@ The same release PR adds the new runtime to `STORE_BUILD_ICON_FONT_FOLDERS` in
 uses the entry before every over-the-air update; see
 [Embedded assets after a store upgrade](./EAS-UPDATE.md#embedded-assets-after-a-store-upgrade).
 
-1. **In the bump PR**, after `pnpm install` on the commit the build is cut
-   from, read the folder name from the lockfile's install:
+1. **In the bump PR**, run `pnpm install` on the PR's head and, from the
+   repository root, read the name of the folder the package is installed in:
 
    ```bash
    ls node_modules/.pnpm | grep '^@expo+vector-icons@'
@@ -68,11 +73,6 @@ uses the entry before every over-the-air update; see
    read `subdirectory` of the asset named `Ionicons`: the folder is the path
    segment after `.pnpm/`. If it differs from the entry, correct the entry in a
    follow-up PR before the first over-the-air update to that runtime.
-
-**Build numbers are not in this repo.** `eas.json` sets
-`cli.appVersionSource: "remote"` and `build.production.autoIncrement: true`, so
-EAS holds the iOS build number and the Android version code and increments them
-itself. Do not edit `CFBundleVersion` or add `android.versionCode`.
 
 ## 2. Write the release notes
 

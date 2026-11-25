@@ -197,6 +197,21 @@ Users get it on the **next app launch**: the running app launches instantly from
 its cached bundle (`fallbackToCacheTimeout: 0`) and downloads the new bundle in
 the background, applying it on the launch after that. No review, no store wait.
 
+Verify what's live: `eas update:list --branch production` (check the **runtime
+version** column, not just the message).
+**Rolling back.**
+
+```bash
+# Send installs back to the bundle embedded in their build:
+eas update:roll-back-to-embedded --channel production
+
+# Or re-publish a known-good earlier update:
+eas update:republish --channel production
+```
+
+Republish from a commit carrying the **same version** as the bad update, or the
+rollback lands on a different runtime version and reaches nobody.
+
 ### Embedded assets after a store upgrade
 
 On Android, expo-updates stores where each embedded asset is, by content hash.
@@ -221,21 +236,6 @@ gate compares the two (`STORE_BUILD_ICON_FONT_FOLDERS` in
   local `node_modules/.pnpm` after `pnpm install`. Once the build is cut, the
   entry is confirmed against the build itself. Both steps are in
   [STORE-RELEASE.md](./STORE-RELEASE.md#the-icon-font-folder-of-the-new-runtime).
-
-Verify what's live: `eas update:list --branch production` (check the **runtime
-version** column, not just the message).
-**Rolling back.**
-
-```bash
-# Send installs back to the bundle embedded in their build:
-eas update:roll-back-to-embedded --channel production
-
-# Or re-publish a known-good earlier update:
-eas update:republish --channel production
-```
-
-Republish from a commit carrying the **same version** as the bad update, or the
-rollback lands on a different runtime version and reaches nobody.
 
 ## ⚠️ Activation cost — this needs ONE build first
 
