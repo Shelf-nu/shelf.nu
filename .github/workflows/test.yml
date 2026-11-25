@@ -17,6 +17,15 @@ name: 🧪 Test
 
 on:
   pull_request:
+  # Manual run from the Actions tab. `run_benchmarks` adds the opt-in booking
+  # sources benchmark to the Database tests job (see that job). Only people
+  # with write access can dispatch, and the run uses no secrets.
+  workflow_dispatch:
+    inputs:
+      run_benchmarks:
+        description: Run the booking sources benchmark in the Database tests job
+        type: boolean
+        default: false
   # Called by deploy.yml on pushes to main/dev. The secrets below are declared
   # for the E2E job that currently lives commented-out at the bottom of this
   # file; deploy.yml passes all six, so this block must not be removed.
@@ -192,10 +201,16 @@ jobs:
   # The database is a throwaway service container, so no secret is involved
   # and the job stays safe for fork PRs (see the SECURITY INVARIANT above).
   # The harness creates the `anon`/`authenticated` roles plain Postgres lacks.
+  #
+  # The booking sources benchmark is off by default. It runs when the workflow
+  # is dispatched with `run_benchmarks`, or on a PR that carries the
+  # `run-benchmarks` label (read from the event, so it applies from the next
+  # push after the label is added). It needs no secret either, so the job
+  # stays fork-safe; on a fork PR only a maintainer can add the label.
   db-tests:
     name: 🗄️ Database tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ (inputs.run_benchmarks || contains(github.event.pull_request.labels.*.name, 'run-benchmarks')) && 75 || 20 }}
     services:
       postgres:
         image: postgres:15.8
@@ -239,6 +254,19 @@ jobs:
       # Global setup migrates the service database, then the suite runs.
       - name: 🗄️ Run database tests
         run: pnpm webapp:test:db
+
+      # Builds two large fixtures and times each booking operation on LEGACY
+      # data with adoption off against converted data with adoption on, then
+      # prints EXPLAIN (ANALYZE, BUFFERS) plans. Skipped by the step above,
+      # which runs without RUN_BENCHMARKS.
+      - name: ⏱️ Run booking sources benchmark
+        if: ${{ inputs.run_benchmarks || contains(github.event.pull_request.labels.*.name, 'run-benchmarks') }}
+        env:
+          RUN_BENCHMARKS: "1"
+        run: >-
+          pnpm --filter @shelf/webapp exec vitest --run
+          --config vitest.db.config.ts
+          test/db/booking-sources-benchmark.db.test.ts
 
   # One stable check that reports the combined result of every shard, so the
   # check name does not change when the shard count does. `always()` makes it
