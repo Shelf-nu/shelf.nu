@@ -50,6 +50,7 @@ import {
   assertBulkDeleteConfirmed,
   assertDeleteConfirmedFor,
 } from "~/utils/delete-confirmation.server";
+import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isLikeShelfError,
@@ -131,7 +132,7 @@ import {
   KIT_PROPAGATION_STATUSES,
   detachKitSliceSources,
   isConvertedSlice,
-  lockConvertedKitSlicePools,
+  lockKitDetachPools,
   resizeKitSourceRows,
 } from "../booking/sources/kit-sources.server";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
@@ -402,6 +403,12 @@ export type RemovedPlanningBookingSlice = {
  *   the kit ceased to exist); `"units-not-returned"` when a check-in on another
  *   booking consumed, lost or damaged the kit's last units of the asset;
  *   `"membership-removed"` otherwise.
+ * Every detach path calls this first, so it takes the path's one asset lock
+ * ({@link lockKitDetachPools}): the assets of every membership in
+ * `assetKitIds`, when any of their slices is converted or adoption is on. The
+ * deletes below and the source detach that follows run under it, and every
+ * read here happens after it.
+ *
  * @returns One entry per deleted row, for callers that need to report further.
  */
 export async function removeKitSlicesFromPlanningBookings(
@@ -419,6 +426,8 @@ export async function removeKitSlicesFromPlanningBookings(
   }
 ): Promise<RemovedPlanningBookingSlice[]> {
   if (assetKitIds.length === 0) return [];
+
+  await lockKitDetachPools(tx, { organizationId, assetKitIds });
 
   // `BookingAsset.assetKitId` is a plain FK column with no back-relation (see
   // the schema comment), so the kit's name comes from a second query + an
@@ -445,8 +454,6 @@ export async function removeKitSlicesFromPlanningBookings(
         // The row's own record of which `BookingModelRequest` it discharged.
         // Deleting a stamped row hands that unit back to the reservation.
         bookingModelRequestId: true,
-        // A converted slice is deleted under its pool's asset lock.
-        sourceAllocation: true,
         booking: {
           select: { id: true, name: true, organizationId: true, status: true },
         },
@@ -507,10 +514,6 @@ export async function removeKitSlicesFromPlanningBookings(
       };
     }
   );
-
-  // Source rows of a converted slice cascade with it and its shares are
-  // orphaned; both are written only under the pool's asset lock.
-  await lockConvertedKitSlicePools(tx, { organizationId, slices: rows });
 
   // Keyed on the exact ids read above, so a standalone row for the same
   // (booking, asset) pair is untouched.
@@ -1059,13 +1062,22 @@ function mergeCheckoutMarkers(
  * always carries `checkedOutQuantity`, so the sibling's rows and counters
  * agree. LEGACY slices with adoption off cost no query here.
  *
- * @param tx Active transaction — must be the one deleting the `AssetKit` rows
+ * Both slice reads are scoped to `organizationId`, so a foreign `AssetKit` id
+ * reads, locks and writes nothing.
+ *
+ * @param tx Active transaction, the one deleting the `AssetKit` rows
  * @param assetKitIds `AssetKit` rows about to be deleted
+ * @param organizationId Acting org; slices of bookings outside it are ignored
+ * @param options.finishingBookingIds Bookings this transaction is finishing (a
+ *   check-in completing its own booking), treated as finished by the source
+ *   detach whatever their stored status
  */
 export async function mergeStandaloneCollisionsForKitDetachment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any,
-  assetKitIds: string[]
+  assetKitIds: string[],
+  organizationId: string,
+  options: { finishingBookingIds?: readonly string[] } = {}
 ): Promise<void> {
   if (assetKitIds.length === 0) return;
   /** Both reads carry the reservation stamp — the merge has to place it. */
@@ -1097,7 +1109,7 @@ export async function mergeStandaloneCollisionsForKitDetachment(
   };
 
   const kitDrivenRows: CollisionRow[] = await tx.bookingAsset.findMany({
-    where: { assetKitId: { in: assetKitIds } },
+    where: { assetKitId: { in: assetKitIds }, booking: { organizationId } },
     select: collisionRowSelect,
   });
   if (kitDrivenRows.length === 0) return;
@@ -1108,12 +1120,15 @@ export async function mergeStandaloneCollisionsForKitDetachment(
   // `AssetKit` delete clears its kit. No query for LEGACY slices with
   // adoption off.
   const { convertedSliceIds } = await detachKitSliceSources(tx, {
+    organizationId,
     kitSlices: kitDrivenRows,
+    finishingBookingIds: options.finishingBookingIds,
   });
 
   const standaloneMatches: CollisionRow[] = await tx.bookingAsset.findMany({
     where: {
       assetKitId: null,
+      booking: { organizationId },
       OR: kitDrivenRows.map((r) => ({
         bookingId: r.bookingId,
         assetId: r.assetId,
@@ -1660,6 +1675,9 @@ export type DestroyedKitUnitsResult = {
  * @param args.organizationId Acting org; memberships outside it are ignored
  * @param args.actorUserId User checking the booking in
  * @param args.bookingId Booking being checked in, cross-referenced on the events
+ * @param args.finishingBookingIds Bookings this transaction is finishing (the
+ *   booking being checked in, when the check-in completes it). Their kit
+ *   slices count as finished when a membership empties and they lose their kit
  * @returns What changed, for the post-transaction notes
  */
 export async function removeDestroyedUnitsFromKits(
@@ -1670,11 +1688,13 @@ export async function removeDestroyedUnitsFromKits(
     organizationId,
     actorUserId,
     bookingId,
+    finishingBookingIds = [],
   }: {
     destroyedUnitsByAssetKitId: Map<string, number>;
     organizationId: string;
     actorUserId: string;
     bookingId: string;
+    finishingBookingIds?: readonly string[];
   }
 ): Promise<DestroyedKitUnitsResult> {
   const result: DestroyedKitUnitsResult = {
@@ -2024,7 +2044,12 @@ export async function removeDestroyedUnitsFromKits(
     reason: "units-not-returned",
   });
   result.detachmentImpact = await fetchAssetKitDetachmentImpact(tx, emptiedIds);
-  await mergeStandaloneCollisionsForKitDetachment(tx, emptiedIds);
+  await mergeStandaloneCollisionsForKitDetachment(
+    tx,
+    emptiedIds,
+    organizationId,
+    { finishingBookingIds }
+  );
   await preserveKitDrivenPlacements(tx, emptiedIds);
   await tx.assetKit.deleteMany({
     where: { id: { in: emptiedIds }, organizationId },
@@ -3285,7 +3310,11 @@ async function performKitDeletion({
     // on the same booking made the `SET NULL` cascade trip
     // `BookingAsset_manual_unique`, rolling back the whole kit deletion with a
     // P2002. Same guard the membership-removal paths already run.
-    await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
+    await mergeStandaloneCollisionsForKitDetachment(
+      tx,
+      aksToDeleteIds,
+      organizationId
+    );
     await preserveKitDrivenPlacements(tx, aksToDeleteIds);
 
     await tx.kit.deleteMany({
@@ -6695,11 +6724,38 @@ export async function updateKitAssets({
     // inside the tx, consumed by the post-tx note loop.
     let locationCascadedAssetIds = new Set<string>();
 
+    /**
+     * Assets whose kit slices the removal below detaches. When one of their
+     * memberships in this kit has a converted slice, or adoption is on (a
+     * LEGACY group may then convert), they join the first lock statement, so
+     * the edit takes one sorted lock over every asset it touches and the
+     * detach's own locks re-lock rows already held. With adoption off a LEGACY
+     * slice cannot become converted, so the modes read with the kit decide.
+     */
+    const removedAssetIds = new Set(
+      (addOnly ? [] : removedAssets).map((asset) => asset.id)
+    );
+    const removedMemberships = (kitWithRelations.assetKits ?? []).filter((ak) =>
+      removedAssetIds.has(ak.asset.id)
+    );
+    const removalTouchesSources =
+      removedMemberships.length > 0 &&
+      (BOOKING_SOURCES_ENABLED ||
+        removedMemberships.some((ak) =>
+          ak.asset.bookingAssets.some(
+            (ba) => ba.assetKitId === ak.id && isConvertedSlice(ba)
+          )
+        ));
+    const firstLockAssetIds = removalTouchesSources
+      ? [...archiveGuardAssetIds, ...removedAssetIds]
+      : archiveGuardAssetIds;
+
     await db.$transaction(async (tx) => {
       // The archived check above is a read; an archive committing before this
       // write would still join the kit. Re-checked under the row lock the
-      // archive paths take, so the two serialize (issue #382).
-      await lockAssetsForArchiveGuard(tx, archiveGuardAssetIds, organizationId);
+      // archive paths take, so the two serialize (issue #382). The same
+      // statement locks the removed assets when their slices carry sources.
+      await lockAssetsForArchiveGuard(tx, firstLockAssetIds, organizationId);
       await assertAssetsAreNotArchived(
         { assetIds: archiveGuardAssetIds, organizationId, actorUserId: userId },
         tx
@@ -6726,7 +6782,11 @@ export async function updateKitAssets({
         detachmentImpact = detachmentImpact.concat(
           await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
         );
-        await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
+        await mergeStandaloneCollisionsForKitDetachment(
+          tx,
+          aksToDeleteIds,
+          organizationId
+        );
         await preserveKitDrivenPlacements(tx, aksToDeleteIds);
         await tx.assetKit.deleteMany({
           where: {
@@ -6774,7 +6834,11 @@ export async function updateKitAssets({
         detachmentImpact = detachmentImpact.concat(
           await fetchAssetKitDetachmentImpact(tx, aksToDeleteIds)
         );
-        await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
+        await mergeStandaloneCollisionsForKitDetachment(
+          tx,
+          aksToDeleteIds,
+          organizationId
+        );
         await preserveKitDrivenPlacements(tx, aksToDeleteIds);
         await tx.assetKit.deleteMany({
           where: { assetId: { in: movedFromOtherKitIds }, organizationId },
@@ -8315,7 +8379,11 @@ export async function bulkRemoveAssetsFromKits({
       // kit on the same booking made the `SET NULL` cascade trip
       // `BookingAsset_manual_unique`, rolling back the whole bulk op with a
       // P2002. Same guard the singular paths already run.
-      await mergeStandaloneCollisionsForKitDetachment(tx, aksToDeleteIds);
+      await mergeStandaloneCollisionsForKitDetachment(
+        tx,
+        aksToDeleteIds,
+        organizationId
+      );
       await preserveKitDrivenPlacements(tx, aksToDeleteIds);
       await tx.assetKit.deleteMany({
         where: {
@@ -8727,7 +8795,11 @@ export async function moveAssetKitUnits(
         // Only finished bookings can still hold a slice of the source kit
         // (step 6). The delete clears their kit, so their source rows and any
         // standalone collision are settled first, as every detach path does.
-        await mergeStandaloneCollisionsForKitDetachment(tx, [source.id]);
+        await mergeStandaloneCollisionsForKitDetachment(
+          tx,
+          [source.id],
+          organizationId
+        );
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: source.id came from the org+asset+kit-scoped findFirst above, inside this same tx
         await tx.assetKit.delete({ where: { id: source.id } });
       } else {
@@ -8787,7 +8859,7 @@ export async function moveAssetKitUnits(
       //     the source has active slices.
       //
       //     The destination only grows, so a converted slice's KIT row takes
-      //     the new units as pending and is never refused. One indexed probe
+      //     the new units as pending. One indexed probe
       //     finds the converted slices; LEGACY ones need nothing more.
       const convertedDestSlices: Array<{ id: string; assetId: string }> =
         await tx.bookingAsset.findMany({
@@ -8805,7 +8877,9 @@ export async function moveAssetKitUnits(
           assetId: slice.assetId,
           quantity: dest.quantity,
         })),
-        belowOut: "refuse",
+        // An increase never goes below the units out; `clamp` keeps that
+        // true by construction instead of leaving a refusal unread.
+        belowOut: "clamp",
       });
       await tx.bookingAsset.updateMany({
         where: {

@@ -18,23 +18,25 @@
  *   the rest on UNASSIGNED (never refused: the detach is not the booking's
  *   choice). With a standalone sibling the same parts merge into that sibling,
  *   and the caller folds the slice's quantity and `checkedOutQuantity` into it.
- * - {@link lockConvertedKitSlicePools}: the asset lock a kit path takes before
- *   deleting converted kit slices.
+ * - {@link lockKitDetachPools}: the one asset lock a kit detach path takes
+ *   before it deletes or detaches kit slices.
  *
- * Kit paths take asset locks only (one sorted statement), never booking locks:
+ * Kit paths take asset locks only (one sorted statement covering every asset
+ * the path touches), never booking locks:
  * every booking writer locks its booking and then the same assets, so the two
  * serialize on the asset rows without a lock-order inversion. Every decision is
  * made from rows read after the lock.
  *
- * Fast path: with adoption off, a call whose slices are all LEGACY sends no
- * query at all.
+ * Fast path: with adoption off and every slice LEGACY, a detach path costs
+ * the one probe statement of {@link lockKitDetachPools}; the resize and the
+ * detach themselves send no query.
  *
  * @see {@link file://./kit-quantity.ts} the KIT row resize rule
  * @see {@link file://./conversion.server.ts} the group session
  * @see {@link file://../../kit/service.server.ts} the kit paths that call in
  */
 
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, Prisma } from "@prisma/client";
 import { pendingOf, sourceKey } from "@shelf/quantity-control";
 import type { SourceRowState } from "@shelf/quantity-control";
 
@@ -248,31 +250,58 @@ export async function resizeKitSourceRows(
 }
 
 /**
- * Takes the asset lock of the converted slices among kit slices about to be
- * deleted (a planning booking following its kit). The foreign keys then
- * cascade the slices' source rows and orphan their shares, and every write to
- * those rows happens under the lock that guards them. LEGACY slices take no
- * lock and send no query.
+ * The one asset lock a kit detach path takes, before it deletes or detaches
+ * any kit slice: one sorted statement over the assets of every given
+ * membership that has a converted slice (every membership when adoption is
+ * on, since a LEGACY group may then convert). Every later lock in the path
+ * (the detach, a resize) is a re-lock of rows this statement already holds,
+ * so the path never locks assets in two batches.
+ *
+ * One probe decides it: a single statement returns the memberships' asset ids
+ * when the gate holds and nothing otherwise, so LEGACY slices with adoption
+ * off cost that statement and no lock. Memberships outside the workspace are
+ * never matched, so a foreign `AssetKit` id reads and locks nothing.
  *
  * @param tx - The caller's transaction
  * @param args.organizationId - The trusted workspace id
- * @param args.slices - The slices about to be deleted, read with `sourceAllocation`
+ * @param args.assetKitIds - The memberships whose slices the path may delete
+ *   or detach
+ * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @returns Ids of the locked assets; empty when nothing needed the lock
  */
-export async function lockConvertedKitSlicePools(
+export async function lockKitDetachPools(
   tx: BookingSourcesTx,
   args: {
     organizationId: string;
-    slices: Array<{
-      assetId: string;
-      sourceAllocation?: SourceAllocationMode | string | null;
-    }>;
+    assetKitIds: string[];
+    adoptionEnabled?: boolean;
   }
-): Promise<void> {
-  const assetIds = args.slices
-    .filter((slice) => isConvertedSlice(slice))
-    .map((slice) => slice.assetId);
-  if (assetIds.length === 0) return;
-  await lockGroupAssets(tx, args.organizationId, assetIds);
+): Promise<Set<string>> {
+  const { organizationId } = args;
+  const assetKitIds = [...new Set(args.assetKitIds)];
+  if (assetKitIds.length === 0) return new Set();
+  const adoptionEnabled = args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED;
+
+  // `BookingAsset_assetKitId_idx` serves the EXISTS probe per membership.
+  const rows = await tx.$queryRaw<Array<{ assetId: string }>>(Prisma.sql`
+    SELECT DISTINCT ak."assetId" AS "assetId"
+    FROM "AssetKit" ak
+    WHERE ak.id = ANY(${assetKitIds}::text[])
+      AND ak."organizationId" = ${organizationId}
+      AND (
+        ${adoptionEnabled}::boolean
+        OR EXISTS (
+          SELECT 1 FROM "BookingAsset" ba
+          WHERE ba."assetKitId" = ak.id
+            AND ba."sourceAllocation" <> 'LEGACY'
+        )
+      )`);
+  const assetIds = (rows ?? []).flatMap((r) =>
+    typeof r.assetId === "string" ? [r.assetId] : []
+  );
+  if (assetIds.length === 0) return new Set();
+  await lockGroupAssets(tx, organizationId, assetIds);
+  return new Set(assetIds);
 }
 
 /** A kit slice about to lose its kit, as the kit service read it. */
@@ -427,19 +456,22 @@ async function splitKitSlice(
  *   LEGACY and detaches as today.
  * - any other LEGACY group is left alone.
  *
- * Takes the asset lock of every pool involved (one sorted statement per
- * workspace) and reads every group after it. Pending units on an active
- * booking are allocated over the rest of its window (from now on);
- * allocation never refuses.
+ * Takes the asset lock of the candidate pools (one sorted statement; a
+ * re-lock of the set {@link lockKitDetachPools} already holds), then reads the
+ * bookings and every group after it. A booking in `finishingBookingIds` (a
+ * check-in completing it in this transaction) counts as finished whatever its
+ * stored status. Pending units on an active booking are allocated over the
+ * rest of its window (from now on); allocation never refuses.
  *
  * Queries: none when adoption is off and every slice is LEGACY. Otherwise the
- * bookings (one), the lock (one per workspace), then per booking the group
- * session (`loadGroupStates`, and free units for an active booking), and one
- * write for the whole call.
+ * lock, the bookings, then per booking the group session (`loadGroupStates`,
+ * and free units for an active booking), and one write for the whole call.
  *
  * @param tx - The caller's transaction
- * @param args.kitSlices - The kit slices about to lose their kit; their
- *   `AssetKit` ids are already scoped to the caller's workspace
+ * @param args.organizationId - The trusted workspace id; slices of bookings
+ *   outside it are ignored
+ * @param args.kitSlices - The kit slices about to lose their kit
+ * @param args.finishingBookingIds - Bookings this transaction is finishing
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
  * @param args.now - The current time, for the allocation window
  * @returns Ids of the detaching slices whose group ends converted: a merge
@@ -448,13 +480,17 @@ async function splitKitSlice(
 export async function detachKitSliceSources(
   tx: BookingSourcesTx,
   args: {
+    organizationId: string;
     kitSlices: DetachingKitSlice[];
+    finishingBookingIds?: readonly string[];
     adoptionEnabled?: boolean;
     now?: Date;
   }
 ): Promise<{ convertedSliceIds: Set<string> }> {
+  const { organizationId } = args;
   const adoptionEnabled = args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED;
   const now = args.now ?? new Date();
+  const finishing = new Set(args.finishingBookingIds ?? []);
   const convertedSliceIds = new Set<string>();
 
   const candidates = adoptionEnabled
@@ -462,107 +498,90 @@ export async function detachKitSliceSources(
     : args.kitSlices.filter((slice) => isConvertedSlice(slice));
   if (candidates.length === 0) return { convertedSliceIds };
 
-  // The kit slice ids come from workspace-scoped `AssetKit` ids, so each
-  // booking's own `organizationId` is the workspace every later read and
-  // write is scoped by.
+  // Lock first: the booking statuses and every group are read after it.
+  const pools = await lockGroupAssets(
+    tx,
+    organizationId,
+    candidates.map((s) => s.assetId)
+  );
   const bookings = await tx.booking.findMany({
-    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking ids come from slices of workspace-scoped AssetKit rows; the workspace is read from each booking and scopes everything after
-    where: { id: { in: [...new Set(candidates.map((s) => s.bookingId))] } },
-    select: {
-      id: true,
-      organizationId: true,
-      status: true,
-      from: true,
-      to: true,
+    where: {
+      id: { in: [...new Set(candidates.map((s) => s.bookingId))] },
+      organizationId,
     },
+    select: { id: true, status: true, from: true, to: true },
   });
   const bookingById = new Map(bookings.map((b) => [b.id, b]));
+  const isActive = (booking: { id: string; status: BookingStatus }) =>
+    !finishing.has(booking.id) &&
+    KIT_PROPAGATION_STATUSES.includes(booking.status);
 
   // LEGACY slices only matter where they may convert: an active booking.
   const relevant = candidates.filter((slice) => {
     const booking = bookingById.get(slice.bookingId);
-    if (!booking) return false;
-    return (
-      isConvertedSlice(slice) ||
-      KIT_PROPAGATION_STATUSES.includes(booking.status)
-    );
+    if (!booking || !pools.has(slice.assetId)) return false;
+    return isConvertedSlice(slice) || isActive(booking);
   });
   if (relevant.length === 0) return { convertedSliceIds };
 
-  const byOrg = new Map<string, DetachingKitSlice[]>();
+  const detachingIds = new Set(relevant.map((s) => s.id));
+  const assetsByBooking = new Map<string, Set<string>>();
   for (const slice of relevant) {
-    const orgId = bookingById.get(slice.bookingId)?.organizationId ?? "";
-    byOrg.set(orgId, [...(byOrg.get(orgId) ?? []), slice]);
+    const set = assetsByBooking.get(slice.bookingId) ?? new Set<string>();
+    set.add(slice.assetId);
+    assetsByBooking.set(slice.bookingId, set);
   }
 
-  for (const [organizationId, slices] of byOrg) {
-    const pools = await lockGroupAssets(
-      tx,
+  const plan: SourcePlanWrite = {
+    upsertRows: [],
+    deleteRowIds: [],
+    insertShares: [],
+    repointShares: [],
+    setModes: [],
+  };
+  for (const [bookingId, assetIds] of assetsByBooking) {
+    const booking = bookingById.get(bookingId);
+    if (!booking) continue;
+    const active = isActive(booking);
+    const session = await openGroupSession(tx, {
       organizationId,
-      slices.map((s) => s.assetId)
-    );
-    const detachingIds = new Set(
-      slices.filter((s) => pools.has(s.assetId)).map((s) => s.id)
-    );
-    const assetsByBooking = new Map<string, Set<string>>();
-    for (const slice of slices) {
-      if (!detachingIds.has(slice.id)) continue;
-      const set = assetsByBooking.get(slice.bookingId) ?? new Set<string>();
-      set.add(slice.assetId);
-      assetsByBooking.set(slice.bookingId, set);
-    }
+      groups: [...assetIds].map((assetId) => ({ bookingId, assetId })),
+      adoptionEnabled: adoptionEnabled && active,
+      window: settlementWindow(booking, now),
+      loadFree: active,
+    });
+    // Conversion seeds pending units on standalone slices; a detach is
+    // involuntary, so they are placed without refusing.
+    await allocateSessionPending(tx, session, "involuntary");
 
-    const plan: SourcePlanWrite = {
-      upsertRows: [],
-      deleteRowIds: [],
-      insertShares: [],
-      repointShares: [],
-      setModes: [],
-    };
-    for (const [bookingId, assetIds] of assetsByBooking) {
-      const booking = bookingById.get(bookingId);
-      if (!booking) continue;
-      const active = KIT_PROPAGATION_STATUSES.includes(booking.status);
-      const session = await openGroupSession(tx, {
-        organizationId,
-        groups: [...assetIds].map((assetId) => ({ bookingId, assetId })),
-        adoptionEnabled: adoptionEnabled && active,
-        window: settlementWindow(booking, now),
-        loadFree: active,
-      });
-      // Conversion seeds pending units on standalone slices; a detach is
-      // involuntary, so they are placed without refusing.
-      await allocateSessionPending(tx, session, "involuntary");
-
-      for (const assetId of assetIds) {
-        const group = session.groups.get(groupMapKey({ bookingId, assetId }));
-        if (!group || group.status !== "converted") continue;
-        const sibling = group.slices.find(
-          (s) => s.assetKitId === null && !detachingIds.has(s.id)
+    for (const assetId of assetIds) {
+      const group = session.groups.get(groupMapKey({ bookingId, assetId }));
+      if (!group || group.status !== "converted") continue;
+      const sibling = group.slices.find(
+        (s) => s.assetKitId === null && !detachingIds.has(s.id)
+      );
+      const detaching = group.slices.filter(
+        (s) => detachingIds.has(s.id) && s.mode === "KIT"
+      );
+      for (const kit of detaching) {
+        await splitKitSlice(
+          tx,
+          session,
+          group,
+          kit,
+          sibling ?? kit,
+          active,
+          plan.repointShares
         );
-        const detaching = group.slices.filter(
-          (s) => detachingIds.has(s.id) && s.mode === "KIT"
-        );
-        for (const kit of detaching) {
-          await splitKitSlice(
-            tx,
-            session,
-            group,
-            kit,
-            sibling ?? kit,
-            active,
-            plan.repointShares
-          );
-          convertedSliceIds.add(kit.id);
-        }
+        convertedSliceIds.add(kit.id);
       }
-
-      const sessionPlan = buildSessionPlan(session);
-      plan.upsertRows.push(...sessionPlan.upsertRows);
-      plan.insertShares.push(...sessionPlan.insertShares);
-      plan.setModes.push(...sessionPlan.setModes);
     }
-    await writeSourcePlan(tx, { organizationId, plan });
+
+    const sessionPlan = buildSessionPlan(session);
+    plan.upsertRows.push(...sessionPlan.upsertRows);
+    plan.insertShares.push(...sessionPlan.insertShares);
+    plan.setModes.push(...sessionPlan.setModes);
   }
+  await writeSourcePlan(tx, { organizationId, plan });
   return { convertedSliceIds };
 }

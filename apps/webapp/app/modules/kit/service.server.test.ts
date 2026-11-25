@@ -6770,7 +6770,11 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a", "ak-b"]);
+    await mergeStandaloneCollisionsForKitDetachment(
+      db,
+      ["ak-a", "ak-b"],
+      "org-1"
+    );
 
     expect(db.bookingAsset.update).toHaveBeenCalledTimes(1);
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
@@ -6797,7 +6801,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
       where: { id: "ba-standalone" },
@@ -6832,7 +6836,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
     // The survivor keeps its own stamp — only the quantity changes.
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
@@ -6873,7 +6877,11 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a", "ak-b"]);
+    await mergeStandaloneCollisionsForKitDetachment(
+      db,
+      ["ak-a", "ak-b"],
+      "org-1"
+    );
 
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
       where: { id: "ba-standalone" },
@@ -6924,7 +6932,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.bookingAsset.update).toHaveBeenCalledWith({
         where: { id: "ba-standalone" },
@@ -6956,7 +6964,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.bookingAsset.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -6989,7 +6997,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.consumptionLog.updateMany).toHaveBeenCalledWith({
         where: { bookingAssetId: { in: ["ba-kit"] } },
@@ -7029,7 +7037,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.partialBookingCheckout.update).toHaveBeenCalledWith({
         where: { id: "pco-legacy" },

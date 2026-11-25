@@ -22,14 +22,16 @@ import type * as AssetUtilsModule from "~/modules/asset/utils.server";
 import type * as KitSourcesModule from "~/modules/booking/sources/kit-sources.server";
 
 import {
+  deleteKit,
   mergeStandaloneCollisionsForKitDetachment,
   removeDestroyedUnitsFromKits,
   removeKitSlicesFromPlanningBookings,
   updateKitAssets,
 } from "./service.server";
+import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
 import {
   detachKitSliceSources,
-  lockConvertedKitSlicePools,
+  lockKitDetachPools,
   resizeKitSourceRows,
 } from "../booking/sources/kit-sources.server";
 
@@ -38,8 +40,8 @@ import {
 // Mock dependencies
 // why: testing kit service logic without executing actual database operations
 // why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
-// mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
-// the guard's own behaviour is what these suites assert on.
+// mocked tx cannot execute. Stub the lock itself, NOT the archived guard:
+// the guard's own behaviour runs for real. The calls record the lock set.
 vitest.mock("~/modules/asset/archive-lock.server", () => ({
   lockAssetsForArchiveGuard: vitest.fn(),
 }));
@@ -71,8 +73,8 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      // why: updateKitAssets now calls assertAssetsAreNotArchived (issue #382),
-      // which counts archived assets. Default 0 = none archived.
+      // why: updateKitAssets runs assertAssetsAreNotArchived, which counts
+      // archived assets. Default 0 = none archived.
       count: vitest.fn().mockResolvedValue(0),
     },
     assetKit: {
@@ -81,7 +83,7 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
-      // why: `moveAssetKitUnits` (Phase 4c) reads the source AssetKit
+      // why: `moveAssetKitUnits` reads the source AssetKit
       // row via `findFirst({ assetId, kitId })`, deletes-on-zero or
       // updates the source, and upserts the destination on the
       // `assetId_kitId` partial unique. Defaults to null/no-op so tests
@@ -95,7 +97,7 @@ vitest.mock("~/database/db.server", () => ({
     },
     // Location mutations go through this delegate instead of asset.updateMany,
     // since placement lives on the AssetLocation pivot. Includes
-    // `updateMany` for kit-driven qty sync — the cascade also calls
+    // `updateMany` for kit-driven qty sync; the cascade also calls
     // `findMany` to re-read the just-inserted AssetKit ids before
     // creating the kit-driven AssetLocation rows.
     assetLocation: {
@@ -105,7 +107,7 @@ vitest.mock("~/database/db.server", () => ({
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       // why: the kit-location cascade trims overflowing manual placements
       // per-row, and the detach guard converts/merges kit-driven rows
-      // one at a time — both need single-row `update` / `delete`.
+      // one at a time; both need single-row `update` / `delete`.
       update: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
       // why: `removeDestroyedUnitsFromKits` sums the hand-placed units of an
@@ -118,7 +120,7 @@ vitest.mock("~/database/db.server", () => ({
     locationNote: {
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
-    // why: createKit/updateKit now run a cross-org ownership guard that calls
+    // why: createKit/updateKit run a cross-org ownership guard that calls
     // db.location.findFirst before connecting a location.
     location: {
       update: vitest.fn().mockResolvedValue({}),
@@ -129,8 +131,8 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
     },
     teamMember: {
-      // bulkAssignKitCustody now resolves the custodian via findFirst scoped
-      // to { id, organizationId } (cross-org IDOR guard), not findUnique.
+      // bulkAssignKitCustody resolves the custodian via findFirst scoped to
+      // { id, organizationId } (cross-org IDOR guard).
       findUnique: vitest.fn().mockResolvedValue(null),
       findFirst: vitest.fn().mockResolvedValue(null),
     },
@@ -144,7 +146,7 @@ vitest.mock("~/database/db.server", () => ({
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
       // why: `moveAssetKitUnits` blocks the move when the source kit is
-      // in operator custody — it looks up the inherited Custody row via
+      // in operator custody: it looks up the inherited Custody row via
       // `findFirst({ assetId, kitCustody: { kitId: fromKitId } })`.
       findFirst: vitest.fn().mockResolvedValue(null),
     },
@@ -188,7 +190,7 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
     },
-    // why: createKit/updateKit now run cross-org ownership guards that call
+    // why: createKit/updateKit run cross-org ownership guards that call
     // db.category.findFirst before connecting a category. Mocked so the guard
     // can resolve the referenced category for valid test ids.
     category: {
@@ -203,8 +205,8 @@ vitest.mock("~/database/db.server", () => ({
         .fn()
         .mockResolvedValue({ firstName: "John", lastName: "Doe" }),
       // why: `bulkRemoveAssetsFromKits` resolves the acting user's timezone via
-      // resolveUserFormatPrefsById (→ db.user.findFirst) to truncate date
-      // filters in the user's tz on the select-all path. null → the resolver
+      // resolveUserFormatPrefsById (db.user.findFirst) to truncate date
+      // filters in the user's tz on the select-all path. null: the resolver
       // falls back to default prefs.
       findFirst: vitest.fn().mockResolvedValue(null),
     },
@@ -213,7 +215,7 @@ vitest.mock("~/database/db.server", () => ({
 
 // why: `moveAssetKitUnits` runs a raw SELECT ... FOR UPDATE via the
 // shared `lockAssetForQuantityUpdate` helper. We can't execute the raw
-// query against a mocked tx — stub the helper so each test can return
+// query against a mocked tx, so the helper is stubbed and each test returns
 // a controlled asset snapshot.
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
@@ -289,7 +291,7 @@ vitest.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vitest.fn().mockResolvedValue(undefined),
 }));
 
-// why: the kit→booking detach helpers write booking system notes. Stubbing the
+// why: the kit-to-booking detach helpers write booking system notes. Stubbing the
 // note module keeps the tests off the real pipeline (booking ownership check +
 // bookingNote.createMany) while still letting us assert the rendered content,
 // which is where the Markdoc sanitisation lives.
@@ -330,7 +332,7 @@ vitest.mock(
     detachKitSliceSources: vitest.fn(() =>
       Promise.resolve({ convertedSliceIds: new Set<string>() })
     ),
-    lockConvertedKitSlicePools: vitest.fn(() => Promise.resolve()),
+    lockKitDetachPools: vitest.fn(() => Promise.resolve(new Set<string>())),
   })
 );
 
@@ -556,9 +558,10 @@ describe("mergeStandaloneCollisionsForKitDetachment: source rows", () => {
       convertedSliceIds: new Set(["ba-kit"]),
     });
 
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1"], "org-1");
 
     expect(detachKitSliceSources).toHaveBeenCalledWith(db, {
+      organizationId: "org-1",
       kitSlices: kitRows,
     });
     // A converted merge carries `checkedOutQuantity` even with no markers.
@@ -591,9 +594,10 @@ describe("mergeStandaloneCollisionsForKitDetachment: source rows", () => {
       .mockResolvedValueOnce(kitRows)
       .mockResolvedValueOnce([]);
 
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1"], "org-1");
 
     expect(detachKitSliceSources).toHaveBeenCalledWith(db, {
+      organizationId: "org-1",
       kitSlices: kitRows,
     });
     expect(db.bookingAsset.update).not.toHaveBeenCalled();
@@ -620,10 +624,15 @@ describe("mergeStandaloneCollisionsForKitDetachment: source rows", () => {
       .mockResolvedValueOnce(kitRows)
       .mockResolvedValueOnce([]);
 
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1", "ak-2"]);
+    await mergeStandaloneCollisionsForKitDetachment(
+      db,
+      ["ak-1", "ak-2"],
+      "org-1"
+    );
 
     expect(detachKitSliceSources).toHaveBeenCalledTimes(1);
     expect(detachKitSliceSources).toHaveBeenCalledWith(db, {
+      organizationId: "org-1",
       kitSlices: kitRows,
     });
   });
@@ -649,7 +658,7 @@ describe("mergeStandaloneCollisionsForKitDetachment: source rows", () => {
         },
       ]);
 
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-1"], "org-1");
 
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
       where: { id: "ba-standalone" },
@@ -659,7 +668,7 @@ describe("mergeStandaloneCollisionsForKitDetachment: source rows", () => {
 });
 
 describe("removeKitSlicesFromPlanningBookings: converted slices", () => {
-  it("locks the pools of the slices it deletes before the delete", async () => {
+  it("takes the one detach lock before it reads or deletes any slice", async () => {
     const rows = [
       {
         id: "ba-kit",
@@ -693,13 +702,15 @@ describe("removeKitSlicesFromPlanningBookings: converted slices", () => {
       organizationId: "org-1",
     });
 
-    expect(lockConvertedKitSlicePools).toHaveBeenCalledWith(db, {
+    expect(lockKitDetachPools).toHaveBeenCalledWith(db, {
       organizationId: "org-1",
-      slices: rows,
+      assetKitIds: ["ak-1"],
     });
-    expect(
-      mocked(lockConvertedKitSlicePools).mock.invocationCallOrder[0]
-    ).toBeLessThan(
+    const lockOrder = mocked(lockKitDetachPools).mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(
+      mocked(db.bookingAsset.findMany).mock.invocationCallOrder[0]
+    );
+    expect(lockOrder).toBeLessThan(
       mocked(db.bookingAsset.deleteMany).mock.invocationCallOrder[0]
     );
   });
@@ -756,6 +767,232 @@ describe("removeDestroyedUnitsFromKits: converted planning slices", () => {
     expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["ba-converted"] } },
       data: { quantity: 3 },
+    });
+  });
+});
+
+describe("kit detach paths: one asset lock, workspace-scoped", () => {
+  /** Pens in kit-1 through membership `ak-pens`, with one kit slice. */
+  function arrangeRemoval(sourceAllocation: string) {
+    mocked(db.kit.findUniqueOrThrow).mockResolvedValue({
+      id: "kit-1",
+      name: "Kit",
+      location: null,
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-pens",
+          kitId: "kit-1",
+          quantity: 5,
+          asset: {
+            id: "pens",
+            title: "Pens",
+            type: AssetType.QUANTITY_TRACKED,
+            unitOfMeasure: null,
+            archivedAt: null,
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [
+              {
+                id: "ba-kit",
+                assetKitId: "ak-pens",
+                sourceAllocation,
+                // A finished booking: the edit propagates nothing to it.
+                booking: { id: "b-1", status: BookingStatus.COMPLETE },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    mocked(db.asset.findMany).mockResolvedValue([]);
+    mocked(db.assetKit.findMany).mockResolvedValue([{ id: "ak-pens" }]);
+    mocked(db.bookingAsset.findMany).mockImplementation(() =>
+      Promise.resolve([])
+    );
+  }
+
+  /** Removes every member of kit-1. */
+  function removeEveryMember() {
+    return updateKitAssets({
+      kitId: "kit-1",
+      assetIds: [],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+  }
+
+  it("updateKitAssets removing a converted asset locks it in the first statement, before the detach lock", async () => {
+    arrangeRemoval("KIT");
+
+    await removeEveryMember();
+
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      ["pens"],
+      "org-1"
+    );
+    expect(lockKitDetachPools).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      assetKitIds: ["ak-pens"],
+    });
+    expect(
+      mocked(lockAssetsForArchiveGuard).mock.invocationCallOrder[0]
+    ).toBeLessThan(mocked(lockKitDetachPools).mock.invocationCallOrder[0]);
+  });
+
+  it("updateKitAssets removing a LEGACY asset with adoption off leaves the first lock as it was", async () => {
+    arrangeRemoval("LEGACY");
+
+    await removeEveryMember();
+
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      [],
+      "org-1"
+    );
+  });
+
+  it("kit delete takes the detach lock over its memberships before any slice read or detach", async () => {
+    mocked(db.kit.findUniqueOrThrow).mockResolvedValue({
+      id: "kit-1",
+      name: "Kit",
+      organizationId: "org-1",
+      custody: null,
+      assetKits: [
+        {
+          quantity: 5,
+          asset: {
+            id: "pens",
+            title: "Pens",
+            type: AssetType.QUANTITY_TRACKED,
+            unitOfMeasure: null,
+          },
+        },
+      ],
+    });
+    mocked(db.assetKit.findMany).mockResolvedValue([
+      { id: "ak-pens", kitId: "kit-1", kit: { name: "Kit" } },
+    ]);
+    const kitSlice = {
+      id: "ba-kit",
+      bookingId: "b-1",
+      assetId: "pens",
+      quantity: 5,
+      bookingModelRequestId: null,
+      sourceAllocation: "KIT",
+    };
+    // The merge's kit-slice read is the only one with no status filter; no
+    // standalone sibling exists.
+    mocked(db.bookingAsset.findMany).mockImplementation(
+      (args?: {
+        where?: { assetKitId?: unknown; booking?: { status?: unknown } };
+      }) =>
+        Promise.resolve(
+          args?.where?.assetKitId === null || args?.where?.booking?.status
+            ? []
+            : [kitSlice]
+        )
+    );
+    mocked(db.custody.findMany).mockResolvedValue([]);
+
+    await deleteKit({
+      id: "kit-1",
+      organizationId: "org-1",
+      actorUserId: "user-1",
+    });
+
+    expect(lockKitDetachPools).toHaveBeenCalledTimes(1);
+    expect(lockKitDetachPools).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      assetKitIds: ["ak-pens"],
+    });
+    const lockOrder = mocked(lockKitDetachPools).mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(
+      mocked(db.bookingAsset.findMany).mock.invocationCallOrder[0]
+    );
+    expect(lockOrder).toBeLessThan(
+      mocked(detachKitSliceSources).mock.invocationCallOrder[0]
+    );
+    expect(detachKitSliceSources).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      kitSlices: [kitSlice],
+    });
+  });
+
+  it("the merge reads only slices of bookings in the acting workspace", async () => {
+    mocked(db.bookingAsset.findMany).mockResolvedValueOnce([]);
+
+    await mergeStandaloneCollisionsForKitDetachment(
+      db,
+      ["ak-foreign"],
+      "org-1"
+    );
+
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetKitId: { in: ["ak-foreign"] },
+          booking: { organizationId: "org-1" },
+        },
+      })
+    );
+    // A foreign membership has no slice here: nothing is detached or written.
+    expect(detachKitSliceSources).not.toHaveBeenCalled();
+    expect(db.bookingAsset.update).not.toHaveBeenCalled();
+    expect(db.bookingAsset.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("a check-in completing its booking hands it to the detach as finishing", async () => {
+    mocked(db.assetKit.findMany).mockResolvedValueOnce([
+      {
+        id: "ak-1",
+        assetId: "asset-pool",
+        kitId: "kit-1",
+        quantity: 3,
+        kit: { name: "Kit" },
+        asset: {
+          title: "Cables",
+          type: AssetType.QUANTITY_TRACKED,
+          unitOfMeasure: null,
+          quantity: 20,
+        },
+      },
+    ]);
+    mocked(db.assetKit.groupBy).mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 3 } },
+    ]);
+    const kitSlice = {
+      id: "ba-own",
+      bookingId: "booking-1",
+      assetId: "asset-pool",
+      quantity: 3,
+      bookingModelRequestId: null,
+      sourceAllocation: "KIT",
+    };
+    mocked(db.bookingAsset.findMany).mockImplementation(
+      (args?: {
+        where?: { assetKitId?: unknown; booking?: { status?: unknown } };
+      }) =>
+        Promise.resolve(
+          args?.where?.assetKitId === null || args?.where?.booking?.status
+            ? []
+            : [kitSlice]
+        )
+    );
+
+    await removeDestroyedUnitsFromKits(db, {
+      destroyedUnitsByAssetKitId: new Map([["ak-1", 3]]),
+      organizationId: "org-1",
+      actorUserId: "user-1",
+      bookingId: "booking-1",
+      finishingBookingIds: ["booking-1"],
+    });
+
+    expect(detachKitSliceSources).toHaveBeenCalledWith(db, {
+      organizationId: "org-1",
+      kitSlices: [kitSlice],
+      finishingBookingIds: ["booking-1"],
     });
   });
 });

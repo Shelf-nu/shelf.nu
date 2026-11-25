@@ -385,7 +385,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const { kit, detachmentImpact, slice } = await db.$transaction(
           async (tx) => {
             const assetKitRows = await tx.assetKit.findMany({
-              where: { kitId, assetId },
+              // `kitId` comes from the URL: scoped to the workspace, so a
+              // foreign kit id reads nothing and the helpers below touch
+              // nothing.
+              where: { kitId, assetId, organizationId },
               // type + unitOfMeasure label the qty-tracked unit count in
               // the membership-remove note ("removed 50 units from …");
               // quantity is the per-row AssetKit.quantity actually being
@@ -410,7 +413,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               organizationId,
             });
             const impact = await fetchAssetKitDetachmentImpact(tx, assetKitIds);
-            await mergeStandaloneCollisionsForKitDetachment(tx, assetKitIds);
+            await mergeStandaloneCollisionsForKitDetachment(
+              tx,
+              assetKitIds,
+              organizationId
+            );
             // `AssetLocation.assetKit` is `onDelete: Cascade`, so the
             // `assetKits: { deleteMany }` below would take the kit-driven
             // placement with it and silently unplace the asset. Every sibling

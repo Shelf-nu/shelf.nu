@@ -7911,6 +7911,8 @@ export async function checkinBooking({
             organizationId,
             actorUserId: userId,
             bookingId: bookingFound.id,
+            // A full check-in always completes the booking.
+            finishingBookingIds: [bookingFound.id],
           });
         }
 
@@ -10026,6 +10028,7 @@ export async function partialCheckinBooking({
               organizationId,
               actorUserId: userId,
               bookingId: id,
+              finishingBookingIds: bookingIsComplete ? [id] : [],
             })
           : null;
 

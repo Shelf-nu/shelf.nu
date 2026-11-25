@@ -22593,6 +22593,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       organizationId: "org-1",
       actorUserId: "user-1",
       bookingId: BOOKING_ID,
+      finishingBookingIds: [BOOKING_ID],
     });
   });
 
@@ -23170,6 +23171,7 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       organizationId: ORG,
       actorUserId: "user-1",
       bookingId: "booking-1",
+      finishingBookingIds: [],
     });
   });
 

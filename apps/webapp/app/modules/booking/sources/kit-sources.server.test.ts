@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BookingSourcesTx } from "./conversion.server";
 import {
   detachKitSliceSources,
+  lockKitDetachPools,
   resizeKitSourceRows,
 } from "./kit-sources.server";
 import type * as RepositoryModule from "./repository.server";
@@ -26,6 +27,7 @@ import type {
 } from "./repository.server";
 
 const h = vi.hoisted(() => ({
+  order: [] as string[],
   states: new Map<string, unknown>(),
   writes: [] as unknown[],
   freeCalls: 0,
@@ -82,23 +84,35 @@ function fakeTx(
   args: {
     status?: string;
     kitRows?: Array<Partial<SourceRowRecord> & { bookingAssetId: string }>;
+    /** Asset ids the detach-lock probe returns. */
+    probeAssetIds?: string[];
   } = {}
 ) {
   return {
-    $queryRaw: vi.fn(() => [
-      { id: POOL, type: "QUANTITY_TRACKED", quantity: 20 },
-      { id: "pool-2", type: "QUANTITY_TRACKED", quantity: 20 },
-    ]),
+    $queryRaw: vi.fn((query: unknown) => {
+      if (sqlText(query).includes('FROM "AssetKit"')) {
+        h.order.push("probe");
+        return args.probeAssetIds?.map((assetId) => ({ assetId })) ?? [];
+      }
+      h.order.push("lock");
+      return [
+        { id: POOL, type: "QUANTITY_TRACKED", quantity: 20 },
+        { id: "pool-2", type: "QUANTITY_TRACKED", quantity: 20 },
+      ];
+    }),
     booking: {
-      findMany: vi.fn(() => [
-        {
-          id: BOOKING,
-          organizationId: ORG,
-          status: args.status ?? "ONGOING",
-          from: new Date("2026-11-30T09:00:00Z"),
-          to: new Date("2026-12-05T09:00:00Z"),
-        },
-      ]),
+      findMany: vi.fn(() => {
+        h.order.push("bookings");
+        return [
+          {
+            id: BOOKING,
+            organizationId: ORG,
+            status: args.status ?? "ONGOING",
+            from: new Date("2026-11-30T09:00:00Z"),
+            to: new Date("2026-12-05T09:00:00Z"),
+          },
+        ];
+      }),
     },
     bookingAssetSource: {
       findMany: vi.fn(() =>
@@ -119,6 +133,12 @@ function fakeTx(
     $queryRaw: ReturnType<typeof vi.fn>;
     booking: { findMany: ReturnType<typeof vi.fn> };
   };
+}
+
+/** The text of a raw statement, tagged template or `Prisma.sql`. */
+function sqlText(query: unknown): string {
+  if (Array.isArray(query)) return query.join("?");
+  return (query as { sql: string }).sql;
 }
 
 /** A persisted source row. */
@@ -210,6 +230,7 @@ function kitSlice(
 }
 
 beforeEach(() => {
+  h.order = [];
   h.states = new Map();
   h.writes = [];
   h.freeCalls = 0;
@@ -344,6 +365,7 @@ describe("detachKitSliceSources", () => {
     const tx = fakeTx();
 
     const result = await detachKitSliceSources(tx, {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -384,6 +406,7 @@ describe("detachKitSliceSources", () => {
     const tx = fakeTx();
 
     const result = await detachKitSliceSources(tx, {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -436,6 +459,7 @@ describe("detachKitSliceSources", () => {
     ]);
 
     await detachKitSliceSources(fakeTx(), {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -474,6 +498,7 @@ describe("detachKitSliceSources", () => {
     ]);
 
     await detachKitSliceSources(fakeTx(), {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -525,6 +550,7 @@ describe("detachKitSliceSources", () => {
     ]);
 
     const result = await detachKitSliceSources(fakeTx(), {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -577,6 +603,7 @@ describe("detachKitSliceSources", () => {
     ]);
 
     await detachKitSliceSources(fakeTx({ status: "CANCELLED" }), {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -605,6 +632,7 @@ describe("detachKitSliceSources", () => {
     ]);
 
     const result = await detachKitSliceSources(fakeTx(), {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -629,6 +657,7 @@ describe("detachKitSliceSources", () => {
     const tx = fakeTx({ status: "COMPLETE" });
 
     const result = await detachKitSliceSources(tx, {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit",
@@ -642,8 +671,99 @@ describe("detachKitSliceSources", () => {
     });
 
     expect(result.convertedSliceIds.size).toBe(0);
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(h.writes).toHaveLength(0);
+  });
+
+  it("locks the pools before it reads the booking statuses, and reads only the acting workspace", async () => {
+    seedGroups([
+      {
+        converted: true,
+        slices: [kitSlice("ba-kit", {}, 2)],
+      },
+    ]);
+    const tx = fakeTx();
+
+    await detachKitSliceSources(tx, {
+      organizationId: ORG,
+      kitSlices: [
+        {
+          id: "ba-kit",
+          bookingId: BOOKING,
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+      ],
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    expect(h.order.slice(0, 2)).toEqual(["lock", "bookings"]);
+    expect(tx.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: [BOOKING] }, organizationId: ORG },
+      })
+    );
+  });
+
+  it("a slice whose booking is outside the workspace is left alone", async () => {
+    seedGroups([
+      {
+        converted: true,
+        slices: [kitSlice("ba-kit", {}, 2)],
+      },
+    ]);
+    const tx = fakeTx();
+    // The workspace-scoped read finds no such booking.
+    tx.booking.findMany.mockImplementationOnce(() => []);
+
+    const result = await detachKitSliceSources(tx, {
+      organizationId: ORG,
+      kitSlices: [
+        {
+          id: "ba-kit",
+          bookingId: "booking-foreign",
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+      ],
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    expect(result.convertedSliceIds.size).toBe(0);
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("a booking this transaction is finishing counts as finished: pending to UNASSIGNED", async () => {
+    seedGroups([
+      {
+        converted: true,
+        slices: [kitSlice("ba-kit", { outQuantity: 1, dispatchedTotal: 1 }, 3)],
+      },
+    ]);
+
+    await detachKitSliceSources(fakeTx({ status: "ONGOING" }), {
+      organizationId: ORG,
+      kitSlices: [
+        {
+          id: "ba-kit",
+          bookingId: BOOKING,
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+      ],
+      finishingBookingIds: [BOOKING],
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    expect(h.freeCalls).toBe(0);
+    const plan = writtenPlan();
+    expect(upsert(plan, "ba-kit", "UNASSIGNED")).toMatchObject({
+      quantity: 2,
+      releasedQuantity: 0,
+    });
+    expect(upsert(plan, "ba-kit", "UNPLACED")).toBeUndefined();
   });
 
   it("kit delete: every slice of the kit is split, in one write", async () => {
@@ -663,6 +783,7 @@ describe("detachKitSliceSources", () => {
     ]);
 
     const result = await detachKitSliceSources(fakeTx(), {
+      organizationId: ORG,
       kitSlices: [
         {
           id: "ba-kit-1",
@@ -693,5 +814,68 @@ describe("detachKitSliceSources", () => {
       dispatchedTotal: 1,
     });
     expect(upsert(plan, "ba-kit-2", "UNPLACED")).toMatchObject({ quantity: 3 });
+  });
+});
+
+describe("lockKitDetachPools", () => {
+  it("with adoption off and no converted slice, sends the one probe and takes no lock", async () => {
+    const tx = fakeTx({ probeAssetIds: [] });
+
+    const locked = await lockKitDetachPools(tx, {
+      organizationId: ORG,
+      assetKitIds: ["ak-1"],
+      adoptionEnabled: false,
+    });
+
+    expect(locked.size).toBe(0);
+    expect(h.order).toEqual(["probe"]);
+    const probe = tx.$queryRaw.mock.calls[0][0] as {
+      sql: string;
+      values: unknown[];
+    };
+    // Scoped to the workspace, gated on a converted slice per membership.
+    expect(probe.sql).toContain('ak."organizationId" =');
+    expect(probe.sql).toContain(`ba."sourceAllocation" <> 'LEGACY'`);
+    expect(probe.values).toContain(ORG);
+  });
+
+  it("locks every asset the probe returns in one statement after it", async () => {
+    const tx = fakeTx({ probeAssetIds: [POOL, "pool-2"] });
+
+    const locked = await lockKitDetachPools(tx, {
+      organizationId: ORG,
+      assetKitIds: ["ak-1", "ak-2"],
+      adoptionEnabled: false,
+    });
+
+    expect(locked).toEqual(new Set([POOL, "pool-2"]));
+    expect(h.order).toEqual(["probe", "lock"]);
+  });
+
+  it("a foreign membership id matches nothing, so nothing is locked", async () => {
+    // The probe filters `AssetKit` by the acting workspace; a foreign id
+    // returns no row.
+    const tx = fakeTx({ probeAssetIds: [] });
+
+    const locked = await lockKitDetachPools(tx, {
+      organizationId: ORG,
+      assetKitIds: ["ak-foreign"],
+      adoptionEnabled: true,
+    });
+
+    expect(locked.size).toBe(0);
+    expect(h.order).toEqual(["probe"]);
+  });
+
+  it("sends no query for no memberships", async () => {
+    const tx = fakeTx();
+
+    await lockKitDetachPools(tx, {
+      organizationId: ORG,
+      assetKitIds: [],
+      adoptionEnabled: true,
+    });
+
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 });

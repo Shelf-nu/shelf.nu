@@ -331,5 +331,33 @@ describe("kits/$kitId removeAsset action", () => {
     expect(order(vi.mocked(preserveKitDrivenPlacements))).toBeLessThan(
       dbMocks.kit.update.mock.invocationCallOrder[0]
     );
+    expect(mergeStandaloneCollisionsForKitDetachment).toHaveBeenCalledWith(
+      expect.anything(),
+      ["ak-1"],
+      "org-1"
+    );
+  });
+
+  it("reads the kit membership inside the acting workspace only", async () => {
+    // `kitId` comes from the URL. A foreign kit id must match no membership,
+    // so the detach helpers get nothing to read, lock or write.
+    dbMocks.kit.update.mockResolvedValue({
+      name: "Available Kit",
+      custody: null,
+    });
+    dbMocks.assetKit.findMany.mockResolvedValue([]);
+
+    await action(createActionArgs(buildRemoveAssetRequest("asset-free")));
+
+    expect(dbMocks.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: "org-1" }),
+      })
+    );
+    expect(removeKitSlicesFromPlanningBookings).toHaveBeenCalledWith(
+      expect.anything(),
+      [],
+      expect.anything()
+    );
   });
 });
