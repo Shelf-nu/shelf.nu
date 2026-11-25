@@ -97,7 +97,14 @@ tags:
     timeout: 20000
 - takeScreenshot: booking-reserved
 
+# The status actions lead the booking screen, so the management buttons can sit
+# below the fold: scroll to them before tapping.
 # ── Edit the name (RESERVED: name editable; dates/custodian locked) ──
+- scrollUntilVisible:
+    element:
+      text: "Edit booking"
+    direction: DOWN
+    timeout: 20000
 - tapOn: "Edit booking"
 - extendedWaitUntil:
     visible: "Booking name, required"
@@ -112,8 +119,10 @@ tags:
 - takeScreenshot: booking-edited
 
 # ── Remove the asset ──
-- extendedWaitUntil:
-    visible: "Select assets to remove"
+- scrollUntilVisible:
+    element:
+      text: "Select assets to remove"
+    direction: DOWN
     timeout: 15000
 - tapOn: "Select assets to remove"
 - tapOn: ".*3B Scientific.*"

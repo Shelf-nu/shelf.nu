@@ -2342,7 +2342,7 @@ function BookingDetailScreen({ id }: { id: string }) {
                   </TouchableOpacity>
                 )}
 
-                {/* The check-in twin of the line above "Scan to Check Out". */}
+                {/* The check-in twin of the explicit check-out hint above. */}
                 {canCheckin && !canQuickCheckin && (
                   <Text style={styles.explicitRequirementHint}>
                     {EXPLICIT_REQUIREMENT_LABELS.CHECKIN.PHONE_HINT}
