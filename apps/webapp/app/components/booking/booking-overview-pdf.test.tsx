@@ -89,6 +89,7 @@ function pdfMetaWith({
     mainImage: string | null;
     thumbnailImage: string | null;
     assetModel: { image: string | null; thumbnailImage: string | null } | null;
+    sourceLine: { text: string; warnings: string[] } | null;
   }>;
 }): PdfDbResult {
   return {
@@ -563,5 +564,32 @@ describe("booking checklist PDF: layout", () => {
     expect(table).toHaveClass("table-fixed");
     expect(widths).toHaveLength(headers.length);
     expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
+  });
+});
+
+describe("booking checklist PDF: Location column", () => {
+  it("prints the asset's location for an ordinary row", () => {
+    renderPreview({ displayCode: CODE128_CODE });
+
+    const row = screen.getByText("Tripod").closest("tr")!;
+    expect(row).toHaveTextContent("Studio");
+  });
+
+  it("prints where a pool slice's units come from, with a note per short source", () => {
+    renderPreview({
+      displayCode: CODE128_CODE,
+      asset: {
+        sourceLine: {
+          text: "Demo Warehouse 8 · Unplaced 7",
+          warnings: ["Short at Demo Warehouse"],
+        },
+      },
+    });
+
+    const row = screen.getByText("Tripod").closest("tr")!;
+    expect(row).toHaveTextContent("Demo Warehouse 8 · Unplaced 7");
+    expect(row).toHaveTextContent("Short at Demo Warehouse");
+    // The sources take the asset location's place in the cell.
+    expect(row).not.toHaveTextContent("Studio");
   });
 });

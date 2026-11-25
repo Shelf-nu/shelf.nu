@@ -6,6 +6,7 @@ import type {
 import type { AuditPhotoCaptureSource } from "@shelf/labels";
 import type { FieldLinkTitles } from "@shelf/links";
 import type {
+  BookingSourcePart,
   CustodySourceEntry,
   CustodySourceOption,
 } from "@shelf/quantity-control";
@@ -923,7 +924,28 @@ export type BookingAssetSlice = {
    * once it is out; null otherwise. Absent on older servers.
    */
   sourceLocation?: { id: string; name: string } | null;
+  /**
+   * Where this slice's units come from, one part per source ("Demo
+   * Warehouse 8", "Unplaced 7"), the same parts the web booking row shows.
+   * Set only for a standalone pool slice planned by source; empty otherwise.
+   * Absent on older servers.
+   */
+  sources?: BookingSourcePart[];
+  /**
+   * How the slice plans its sources. `MANUAL` is a split set by hand, which
+   * the adjust-quantity request can hand back to Shelf with
+   * {@link AdjustBookingSourcesInput}. Absent on older servers.
+   */
+  sourceAllocation?: "LEGACY" | "KIT" | "AUTO" | "MANUAL";
 };
+
+/**
+ * The `sources` value the app sends on an adjust-quantity request: `AUTO`
+ * hands a slice's split back to Shelf, so the allocation rule picks the
+ * sources again. The app never sets a split by hand (it has no per-source
+ * free units to check one against).
+ */
+export type AdjustBookingSourcesInput = { mode: "AUTO" };
 
 /** One manual placement of a pool, as a check-out source question lists it. */
 export type CheckoutSourcePlacement = {
@@ -955,8 +977,23 @@ export type CheckoutSourceQuestion = {
   placements: CheckoutSourcePlacement[];
   /** Units of the pool that sit at no location. */
   unplaced: number;
-  /** The option to pre-select: the server's own answer when nothing is picked. */
+  /**
+   * The option to pre-select: the server's own answer when nothing is
+   * picked. A location id, null for Unplaced, or `AS_PLANNED_SOURCE` for a
+   * slice whose units leave by their planned sources.
+   */
   defaultLocationId: string | null;
+  /**
+   * True when the slice already has sources planned: picking nothing sends
+   * its units out by that plan. Absent on older servers.
+   */
+  fromAllocation?: boolean;
+  /**
+   * The plan "As planned" sends out, as one line ("Demo Warehouse 8 ·
+   * Unplaced 7"). Sent only to an app that announces the `booking-sources`
+   * capability, and only once sources are planned.
+   */
+  plannedSummary?: string;
 };
 
 export type BookingAsset = {

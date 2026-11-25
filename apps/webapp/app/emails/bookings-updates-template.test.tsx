@@ -104,3 +104,32 @@ describe("BookingUpdatesEmailTemplate actor line", () => {
     expect(doc.body.textContent).not.toContain("Jo Display");
   });
 });
+
+describe("BookingUpdatesEmailTemplate booked items", () => {
+  it("lists a pool slice with planned sources by title and quantity only", async () => {
+    // why: the email names each booked item and its quantity, never where
+    // its units come from. A pool slice whose units are planned at two
+    // sources prints the same line as any other quantity-tracked item.
+    const html = await bookingUpdatesTemplateString({
+      booking,
+      heading: 'Your booking is reserved: "Field kit"',
+      assetCount: 1,
+      recipientReason: "custodian",
+      recipientEmail: "custodian@example.com",
+      prefs: berlinPrefs,
+      assets: [
+        {
+          id: "ba-pool",
+          quantity: 15,
+          sourceAllocation: "MANUAL",
+          asset: { title: "Sandbags", category: null },
+        },
+      ] as never,
+    });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+
+    expect(doc.body.textContent).toContain("Sandbags × 15");
+    expect(doc.body.textContent).not.toContain("Unplaced");
+    expect(doc.body.textContent).not.toContain("As planned");
+  });
+});

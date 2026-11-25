@@ -7,6 +7,7 @@ import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
 import { CLIENT_USER_AGENT } from "./user-agent";
+import { clientCapabilityHeaders } from "./client-capabilities";
 import { chainAbort } from "../latest-request";
 import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
 
@@ -280,6 +281,9 @@ export async function apiFetch<T>(
         // ("Shelf app on iPhone") instead of an unparseable default UA.
         // Null on web builds, where User-Agent is browser-controlled.
         ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
+        // why: tells the server which newer response and question shapes
+        // this build understands; a build without it keeps the older ones.
+        ...clientCapabilityHeaders(),
         ...options.headers,
       },
     });
@@ -405,6 +409,7 @@ export async function apiUpload<T>(
         Authorization: `Bearer ${accessToken}`,
         // Do NOT set Content-Type — fetch auto-sets it with the multipart boundary
         ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
+        ...clientCapabilityHeaders(),
       },
       body: formData,
     });

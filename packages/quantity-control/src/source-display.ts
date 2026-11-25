@@ -7,6 +7,10 @@
  * planned and nothing out are hidden, so a history-only UNKNOWN carrier shows
  * nothing. Rows of the same source are summed.
  *
+ * Also holds the row line the PDF and the companion print
+ * ({@link describeSourceLine}) and the check-out question's "As planned"
+ * choice ({@link AS_PLANNED_SOURCE}), so both apps use the same words.
+ *
  * @see {@link file://./booking-sources.ts} for the row model and source keys.
  */
 
@@ -129,4 +133,58 @@ export function describeBookingSources(args: {
  */
 export function formatSourceSummary(parts: BookingSourcePart[]): string {
   return parts.map((p) => `${p.label} ${p.planned}`).join(" · ");
+}
+
+/** A slice's sources as one printed or spoken line. */
+export type BookingSourceLine = {
+  /**
+   * The sources: the label alone for one source ("Demo Warehouse"), the
+   * summary for several ("Demo Warehouse 8 · Unplaced 7").
+   */
+  text: string;
+  /**
+   * One "Short at {source}" per source that cannot cover its pending units.
+   * "Needs a location" gets none: its label already says what is wrong.
+   */
+  warnings: string[];
+};
+
+/**
+ * The line a booking row shows for a slice's sources, in the words the web
+ * booking page uses: one source by name, several as the summary, and a
+ * "Short at" note per short source. Shared by the PDF and the companion.
+ *
+ * @param parts - Output of {@link describeBookingSources}
+ * @returns The line, or `null` when there are no parts
+ */
+export function describeSourceLine(
+  parts: BookingSourcePart[]
+): BookingSourceLine | null {
+  if (parts.length === 0) return null;
+  return {
+    text: parts.length === 1 ? parts[0].label : formatSourceSummary(parts),
+    warnings: parts
+      .filter((p) => p.short && p.kind !== "UNASSIGNED")
+      .map((p) => `Short at ${p.label}`),
+  };
+}
+
+/**
+ * Picker value of the check-out source question's "As planned" choice: the
+ * slice's units leave by its planned sources, exactly as when nothing is
+ * picked. The server sets it as the question's default for a slice whose
+ * sources are planned, and drops it when it comes back, so sending it equals
+ * not answering. Location ids are cuids, so the value cannot collide.
+ */
+export const AS_PLANNED_SOURCE = "__allocation__";
+
+/**
+ * The words of the "As planned" choice: the plan itself when it is known
+ * ("As planned: Demo Warehouse 8 · Unplaced 7"), else just "As planned".
+ *
+ * @param plannedSummary - The question's planned sources as one line
+ * @returns The choice label
+ */
+export function asPlannedSourceLabel(plannedSummary?: string | null): string {
+  return plannedSummary ? `As planned: ${plannedSummary}` : "As planned";
 }

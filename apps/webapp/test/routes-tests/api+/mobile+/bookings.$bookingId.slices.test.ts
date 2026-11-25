@@ -289,6 +289,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
         assetKitId: null,
         kit: null,
         sourceLocation: null,
+        sources: [],
       },
       {
         bookingAssetId: "ba1",
@@ -296,6 +297,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
         assetKitId: "ak1",
         kit: K1,
         sourceLocation: null,
+        sources: [],
       },
       {
         bookingAssetId: "ba2",
@@ -303,6 +305,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
         assetKitId: "ak2",
         kit: K2,
         sourceLocation: null,
+        sources: [],
       },
     ]);
 
@@ -319,6 +322,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
         assetKitId: null,
         kit: null,
         sourceLocation: null,
+        sources: [],
       },
     ]);
 
@@ -338,6 +342,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
         assetKitId: "ak3",
         kit: K3,
         sourceLocation: null,
+        sources: [],
       },
     ]);
   });

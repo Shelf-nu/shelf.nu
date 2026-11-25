@@ -11,6 +11,7 @@ import { test } from "node:test";
 
 import {
   ALL_SOURCES,
+  AS_PLANNED_SOURCE,
   UNPLACED_SOURCE,
   UNRECORDED_SOURCE,
   assignSourceOptions,
@@ -295,6 +296,51 @@ test("check-out answers carry only the rows the operator changed, Unplaced as nu
     { "slice-1": "stu", "slice-2": null }
   );
   assert.deepEqual(checkoutSourceAnswers({ "slice-1": "stu" }, []), {});
+});
+
+test("a question that defaults to the plan lists As planned first, naming the plan", () => {
+  const planned = question({
+    defaultLocationId: AS_PLANNED_SOURCE,
+    plannedSummary: "Camera Room 6 · Studio 4",
+    fromAllocation: true,
+  });
+  const rows = checkoutSourceOptions(planned);
+  assert.deepEqual(rows[0], {
+    value: AS_PLANNED_SOURCE,
+    label: "As planned",
+    hint: "Camera Room 6 · Studio 4",
+  });
+  assert.deepEqual(
+    rows.map((row) => row.value),
+    [AS_PLANNED_SOURCE, "cam", "stu"]
+  );
+  // The sheet opens on it.
+  assert.equal(defaultCheckoutSource(planned), AS_PLANNED_SOURCE);
+});
+
+test("As planned with nothing planned yet has no hint", () => {
+  const [first] = checkoutSourceOptions(
+    question({ defaultLocationId: AS_PLANNED_SOURCE })
+  );
+  assert.deepEqual(first, { value: AS_PLANNED_SOURCE, label: "As planned" });
+});
+
+test("a question that defaults to a location gets no As planned row", () => {
+  assert.ok(
+    !checkoutSourceOptions(question()).some(
+      (row) => row.value === AS_PLANNED_SOURCE
+    )
+  );
+});
+
+test("picking As planned again sends nothing for that slice", () => {
+  assert.deepEqual(
+    checkoutSourceAnswers({ "slice-1": AS_PLANNED_SOURCE, "slice-2": "stu" }, [
+      "slice-1",
+      "slice-2",
+    ]),
+    { "slice-2": "stu" }
+  );
 });
 
 test("questionsForCheckouts asks only about pools in the check-out", () => {

@@ -35,7 +35,9 @@ import {
   api,
   type BookingDetail,
   type BookingDetailResponse,
+  type AdjustBookingSourcesInput,
   type BookingAsset,
+  type BookingAssetSlice,
   type CheckoutDisposition,
   type CheckoutSourceQuestion,
   type CheckinDisposition,
@@ -83,6 +85,13 @@ import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { ExtendBookingSheet } from "@/components/bookings/extend-booking-sheet";
 import { questionsForCheckouts } from "@/lib/custody-source-options";
+import {
+  AUTO_SOURCES,
+  adjustSheetSources,
+  describeSourcesForA11y,
+  sliceSourceLine,
+  standaloneSlice,
+} from "@/lib/booking-sources";
 import {
   hasAssetsLeftToCheckOut,
   unassignedCheckoutConfirm,
@@ -231,6 +240,8 @@ function BookingDetailScreen({ id }: { id: string }) {
    * The quantity-tracked row whose booked quantity is being changed (null =
    * sheet closed). `max` is what the booking's window still has free with this
    * booking excluded — the same cap the web "Adjust quantity" dialog uses.
+   * `sources` is the standalone slice's current split and whether it may be
+   * handed back to Shelf.
    */
   const [qtyEdit, setQtyEdit] = useState<{
     assetId: string;
@@ -238,6 +249,7 @@ function BookingDetailScreen({ id }: { id: string }) {
     current: number;
     max: number;
     unitOfMeasure: string | null;
+    sources: ReturnType<typeof adjustSheetSources>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1160,22 +1172,31 @@ function BookingDetailScreen({ id }: { id: string }) {
           })
         ),
         unitOfMeasure: item.unitOfMeasure ?? null,
+        sources: adjustSheetSources(standaloneSlice(item)),
       });
     },
     [booking, currentOrg]
   );
 
-  const handleQtyEditSubmit = async (quantity: number) => {
+  /**
+   * Save the booked quantity. `sources` set to Auto also hands the slice's
+   * hand-set split back to Shelf; left out, the split is not touched.
+   */
+  const handleQtyEditSubmit = async (
+    quantity: number,
+    sources?: AdjustBookingSourcesInput
+  ) => {
     if (!qtyEdit || !booking || !currentOrg) return;
     const target = qtyEdit;
     setQtyEdit(null);
-    if (quantity === target.current) return;
+    if (quantity === target.current && !sources) return;
     setIsActioning(true);
     const { error: err } = await api.adjustBookingAssetQuantity(
       currentOrg.id,
       booking.id,
       target.assetId,
-      quantity
+      quantity,
+      sources
     );
     setIsActioning(false);
     if (err) {
@@ -1389,7 +1410,9 @@ function BookingDetailScreen({ id }: { id: string }) {
           }}
           accessibilityLabel={`${item.title}${
             item.location ? `, at ${item.location.name}` : ""
-          }${describeSliceSourcesForA11y(item)}, ${stateLabel}${
+          }${describeSliceSourcesForA11y(item)}${describeSourcesForA11y(
+            item
+          )}, ${stateLabel}${
             item.type === "QUANTITY_TRACKED" && item.quantity != null
               ? `, ${item.quantity} ${item.unitOfMeasure || "units"} booked`
               : ""
@@ -1455,22 +1478,34 @@ function BookingDetailScreen({ id }: { id: string }) {
             item.slices &&
             item.slices.length > 1 ? (
               <View style={styles.sliceList}>
-                {item.slices.map((slice) => (
-                  <View key={slice.bookingAssetId} style={styles.sliceRow}>
-                    <QuantityBadge
-                      value={slice.quantity}
-                      unitOfMeasure={item.unitOfMeasure}
-                      label="booked"
-                    />
-                    <Text style={styles.assetKit} numberOfLines={1}>
-                      {slice.kit
-                        ? `Kit: ${slice.kit.name}`
-                        : slice.sourceLocation
-                        ? `Standalone · from ${slice.sourceLocation.name}`
-                        : "Standalone"}
-                    </Text>
-                  </View>
-                ))}
+                {item.slices.map((slice) => {
+                  const sourceLine = sliceSourceLine(slice);
+                  return (
+                    <View key={slice.bookingAssetId}>
+                      <View style={styles.sliceRow}>
+                        <QuantityBadge
+                          value={slice.quantity}
+                          unitOfMeasure={item.unitOfMeasure}
+                          label="booked"
+                        />
+                        <Text style={styles.assetKit} numberOfLines={1}>
+                          {slice.kit
+                            ? `Kit: ${slice.kit.name}`
+                            : sourceLine
+                            ? `Standalone · ${sourceLine.text}`
+                            : slice.sourceLocation
+                            ? `Standalone · from ${slice.sourceLocation.name}`
+                            : "Standalone"}
+                        </Text>
+                      </View>
+                      {sourceLine?.warnings.map((warning) => (
+                        <Text key={warning} style={styles.sourceWarning}>
+                          {warning}
+                        </Text>
+                      ))}
+                    </View>
+                  );
+                })}
               </View>
             ) : (
               <>
@@ -1500,15 +1535,14 @@ function BookingDetailScreen({ id }: { id: string }) {
                     ) : null}
                   </View>
                 )}
-                {/* Where a checked-out pool's units left from, as the web
-                    booking row shows it. Only a pool kept at two or more
-                    locations has it. */}
+                {/* Where the pool's units come from, as the web booking row
+                    shows it: the planned sources of a slice planned by
+                    source, else the location a checked-out pool's units
+                    left from (only a pool kept at two or more locations has
+                    one). */}
                 {item.type === "QUANTITY_TRACKED" &&
-                item.slices?.length === 1 &&
-                item.slices[0].sourceLocation ? (
-                  <Text style={styles.assetKit} numberOfLines={1}>
-                    From {item.slices[0].sourceLocation.name}
-                  </Text>
+                item.slices?.length === 1 ? (
+                  <SliceSourceLines slice={item.slices[0]} />
                 ) : null}
                 {/* Under a kit header the name is already on screen; naming
                     it again on every member is noise. */}
@@ -2775,6 +2809,24 @@ function BookingDetailScreen({ id }: { id: string }) {
           max={qtyEdit.max}
           defaultValue={qtyEdit.current}
           unitOfMeasure={qtyEdit.unitOfMeasure}
+          info={
+            qtyEdit.sources.line
+              ? [
+                  `From ${qtyEdit.sources.line.text}`,
+                  ...qtyEdit.sources.line.warnings,
+                ]
+              : undefined
+          }
+          secondaryAction={
+            qtyEdit.sources.canUseAuto
+              ? {
+                  label: "Save and let Shelf choose the sources",
+                  hint: "Replaces the split set by hand. Change a split by hand on the web.",
+                  onPress: (quantity) =>
+                    void handleQtyEditSubmit(quantity, AUTO_SOURCES),
+                }
+              : undefined
+          }
           confirmLabel="Save"
           onSubmit={(quantity) => void handleQtyEditSubmit(quantity)}
           onClose={() => setQtyEdit(null)}
@@ -3404,6 +3456,10 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
     gap: 6,
   },
+  sourceWarning: {
+    fontSize: fontSize.xs,
+    color: colors.warningText,
+  },
   assetCategory: {
     fontSize: fontSize.xs,
     color: colors.muted,
@@ -3485,6 +3541,40 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
   },
 }));
+
+/**
+ * Where one standalone pool slice's units come from, under the row's
+ * quantity: its planned sources ("From Demo Warehouse 8 · Unplaced 7", with a
+ * "Short at" line per short source) when the slice is planned by source,
+ * else the location its units left from at check-out. Nothing for a slice
+ * with neither.
+ *
+ * @param props.slice - The row's only slice
+ */
+function SliceSourceLines({ slice }: { slice: BookingAssetSlice }) {
+  const styles = useStyles();
+  const line = sliceSourceLine(slice);
+  if (line) {
+    return (
+      <>
+        <Text style={styles.assetKit} numberOfLines={2}>
+          From {line.text}
+        </Text>
+        {line.warnings.map((warning) => (
+          <Text key={warning} style={styles.sourceWarning}>
+            {warning}
+          </Text>
+        ))}
+      </>
+    );
+  }
+  if (!slice.sourceLocation) return null;
+  return (
+    <Text style={styles.assetKit} numberOfLines={1}>
+      From {slice.sourceLocation.name}
+    </Text>
+  );
+}
 
 /**
  * Where a pool's booked units left from, for the asset card's screen-reader
