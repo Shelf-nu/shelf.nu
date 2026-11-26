@@ -1,6 +1,7 @@
 -- Problem reports ("Report a problem" on an asset) get their own table. A
 -- report is one row here plus the asset history line (a "Note" of type
--- UPDATE) it has always written; the row links to that note. Existing
+-- UPDATE) it has always written; the row links to that note and is deleted
+-- with it. Existing
 -- report notes are copied in by the next migration.
 
 -- CreateTable
@@ -39,7 +40,7 @@ ALTER TABLE "ProblemReport" ADD CONSTRAINT "ProblemReport_organizationId_fkey" F
 ALTER TABLE "ProblemReport" ADD CONSTRAINT "ProblemReport_reporterId_fkey" FOREIGN KEY ("reporterId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProblemReport" ADD CONSTRAINT "ProblemReport_noteId_fkey" FOREIGN KEY ("noteId") REFERENCES "Note"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ProblemReport" ADD CONSTRAINT "ProblemReport_noteId_fkey" FOREIGN KEY ("noteId") REFERENCES "Note"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Enable RLS like every public table; the app connects as a role that bypasses it.
 ALTER TABLE "ProblemReport" ENABLE ROW LEVEL SECURITY;

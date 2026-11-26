@@ -316,16 +316,16 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     expect(await counts()).toEqual({ rows: 0, notes: 0, events: 0 });
   });
 
-  it("keeps the report when its history note is deleted", async () => {
+  it("deletes the report with its history note", async () => {
     const { report: saved, note } = await report("ADMIN", assets.quantity);
 
     await db.note.delete({ where: { id: note.id } });
 
     expect(
-      await db.problemReport.findFirstOrThrow({
+      await db.problemReport.count({
         where: { id: saved.id, organizationId },
       })
-    ).toMatchObject({ noteId: null, content: "The lens is cracked" });
+    ).toBe(0);
   });
 
   it("writes who reported it, linked, and the text as one history line", async () => {
@@ -492,9 +492,12 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("counts report rows, not history notes: lines without a row do not use up the limit", async () => {
+  it("counts report notes that have no row: ten of them in the last hour refuse the next report", async () => {
     const owner = await db.user.findUniqueOrThrow({
       where: { id: userIds.OWNER },
+    });
+    await db.problemReport.deleteMany({
+      where: { organizationId, reporterId: owner.id },
     });
     await db.note.createMany({
       data: Array.from({ length: service.PROBLEM_REPORT_LIMIT }, () => ({
@@ -504,11 +507,61 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
         assetId: assets.bookable,
       })),
     });
+    expect(await reportsBy("OWNER")).toBe(0);
 
-    await expect(report("OWNER", assets.bookable)).resolves.toMatchObject({
-      report: expect.objectContaining({ reporterId: userIds.OWNER }),
+    await expect(report("OWNER", assets.bookable)).rejects.toMatchObject({
+      status: 429,
     });
+    expect(await reportsBy("OWNER")).toBe(0);
   });
+
+  it("does not count a note twice once it has its row, and ignores old notes without one", async () => {
+    const admin = await db.user.findUniqueOrThrow({
+      where: { id: userIds.ADMIN },
+    });
+    await db.problemReport.deleteMany({
+      where: { organizationId, reporterId: admin.id },
+    });
+    await db.note.deleteMany({
+      where: {
+        userId: admin.id,
+        content: { contains: service.PROBLEM_REPORT_PHRASE },
+      },
+    });
+    // Nine reports saved the usual way: nine notes, each with its row.
+    for (let sent = 0; sent < service.PROBLEM_REPORT_LIMIT - 1; sent++) {
+      await report("ADMIN", assets.bookable, `Report ${sent + 1}`);
+    }
+    // A report line older than the window, with no row.
+    await db.note.create({
+      data: {
+        content: service.buildProblemReportNote(admin, "Old line"),
+        type: "UPDATE",
+        userId: admin.id,
+        assetId: assets.bookable,
+        createdAt: new Date(
+          Date.now() - service.PROBLEM_REPORT_WINDOW_MS - 60_000
+        ),
+      },
+    });
+
+    // Counted once each, the nine leave one place: the tenth is admitted.
+    await expect(report("ADMIN", assets.bookable)).resolves.toMatchObject({
+      report: expect.objectContaining({ reporterId: admin.id }),
+    });
+    await expect(report("ADMIN", assets.bookable)).rejects.toMatchObject({
+      status: 429,
+    });
+
+    // Leave the administrator under the limit for the tests that follow.
+    await db.note.deleteMany({
+      where: {
+        userId: admin.id,
+        content: { contains: service.PROBLEM_REPORT_PHRASE },
+      },
+    });
+    expect(await reportsBy("ADMIN")).toBe(0);
+  }, 60_000);
 
   it("does not count reports older than an hour or sent in another workspace", async () => {
     await db.problemReport.createMany({

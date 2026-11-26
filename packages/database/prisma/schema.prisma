@@ -841,6 +841,8 @@ model ReportFound {
 
 // A problem a workspace member reported on an asset ("Report a problem").
 // The record of the report; the asset's history line is the linked note.
+// The report lives and dies with that line: deleting the note deletes the
+// report, so the text is never kept where its history line is gone.
 model ProblemReport {
   id      String @id @default(cuid())
   // The text as the member typed it, line breaks included
@@ -862,8 +864,9 @@ model ProblemReport {
   reporter   User?   @relation(fields: [reporterId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   reporterId String?
 
-  // The asset history line written with the report. Null once it is deleted.
-  note   Note?   @relation(fields: [noteId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  // The asset history line written with the report. Deleting it deletes
+  // the report.
+  note   Note?   @relation(fields: [noteId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   noteId String? @unique
 
   // Indexes for foreign keys

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   findUser: vi.fn(),
   findOrganization: vi.fn(),
   countReports: vi.fn(),
+  countNotes: vi.fn(),
   createReport: vi.fn(),
   createEvent: vi.fn(),
   lock: vi.fn(),
@@ -80,6 +81,7 @@ vi.mock("~/database/db.server", () => {
   const tx = {
     $queryRaw: mocks.lock,
     problemReport: { count: mocks.countReports, create: mocks.createReport },
+    note: { count: mocks.countNotes },
     // `recordEvent` is the real one; its insert is the output under test
     activityEvent: { create: mocks.createEvent },
   };
@@ -178,6 +180,7 @@ describe("reportAssetProblem", () => {
       archivedAt: null,
     });
     mocks.countReports.mockResolvedValue(0);
+    mocks.countNotes.mockResolvedValue(0);
     mocks.lock.mockResolvedValue([{ locked: true }]);
     mocks.assertAssetsAreNotArchived.mockResolvedValue(undefined);
     mocks.findUser.mockResolvedValue(reporter);
@@ -288,6 +291,23 @@ describe("reportAssetProblem", () => {
         },
       });
     });
+
+    it("also counts this member's report notes from the last hour that have no row", async () => {
+      await report();
+
+      expect(mocks.countNotes).toHaveBeenCalledWith({
+        where: {
+          userId: reporter.id,
+          type: "UPDATE",
+          createdAt: {
+            gte: new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS),
+          },
+          content: { contains: PROBLEM_REPORT_PHRASE },
+          asset: { organizationId: "org-1" },
+          problemReport: { is: null },
+        },
+      });
+    });
   });
 
   it("admits the report that reaches the hourly limit", async () => {
@@ -296,6 +316,15 @@ describe("reportAssetProblem", () => {
     await expect(report()).resolves.toMatchObject({
       report: { id: "report-1" },
     });
+  });
+
+  it("adds rows and notes without a row: refuses when together they reach the limit", async () => {
+    mocks.countReports.mockResolvedValue(PROBLEM_REPORT_LIMIT - 4);
+    mocks.countNotes.mockResolvedValue(4);
+
+    await expect(report()).rejects.toMatchObject({ status: 429 });
+    expect(mocks.createNote).not.toHaveBeenCalled();
+    expect(mocks.createReport).not.toHaveBeenCalled();
   });
 
   it("refuses a member over the hourly report limit and writes nothing", async () => {

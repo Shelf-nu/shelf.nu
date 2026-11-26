@@ -8,7 +8,9 @@
  * {@link reportAssetProblem}, so they accept and refuse the same requests.
  *
  * The row is the record of the report; the note is its line in the asset's
- * history. Nothing here reads reports back: a member who may send a report
+ * history. Deleting that line deletes the row with it (the database cascades),
+ * so the report text is never kept without its history line. Nothing here
+ * reads reports back: a member who may send a report
  * may not be allowed to read the asset's activity, so a reader of this table
  * needs its own permission check.
  *
@@ -402,23 +404,35 @@ async function lockMemberProblemReports(
  * Refuses a report when the member has already sent
  * {@link PROBLEM_REPORT_LIMIT} in this workspace within the last
  * {@link PROBLEM_REPORT_WINDOW_MS}. Counted from their `ProblemReport` rows,
- * so the limit holds across servers and covers the web form and the mobile
- * route alike. Run it inside the transaction that writes the report, after
+ * plus their report notes that have no row, so the limit holds across
+ * servers, covers the web form and the mobile route alike, and still sees a
+ * report saved as a note only (by a version of the app that did not write
+ * rows) until the backfill gives it its row. Run it inside the transaction that writes the report, after
  * {@link lockMemberProblemReports}, or two reports can both pass.
  *
  * @throws {ShelfError} 429 when the member is over the limit
  */
 async function assertUnderProblemReportLimit(
   { userId, organizationId }: { userId: string; organizationId: string },
-  tx: Pick<typeof db, "problemReport">
+  tx: Pick<typeof db, "problemReport" | "note">
 ) {
-  const sent = await tx.problemReport.count({
+  const since = new Date(Date.now() - PROBLEM_REPORT_WINDOW_MS);
+  // One after the other: both run on the transaction's single connection.
+  const rows = await tx.problemReport.count({
+    where: { organizationId, reporterId: userId, createdAt: { gte: since } },
+  });
+  // A note that has its row is counted above, never twice.
+  const notesWithoutRow = await tx.note.count({
     where: {
-      organizationId,
-      reporterId: userId,
-      createdAt: { gte: new Date(Date.now() - PROBLEM_REPORT_WINDOW_MS) },
+      userId,
+      type: "UPDATE",
+      createdAt: { gte: since },
+      content: { contains: PROBLEM_REPORT_PHRASE },
+      asset: { organizationId },
+      problemReport: { is: null },
     },
   });
+  const sent = rows + notesWithoutRow;
 
   if (sent >= PROBLEM_REPORT_LIMIT) {
     throw new ShelfError({
