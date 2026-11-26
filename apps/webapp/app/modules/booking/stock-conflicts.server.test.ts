@@ -488,6 +488,129 @@ describe("flagBookingStockConflicts", () => {
     expect(smallClient.assetKit.groupBy.mock.calls.length).toBe(1);
   });
 
+  it("does not let a return on a booking's kit slice free its standalone slice", async () => {
+    const client = createMockClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    // b1 holds the pool loose (6, out) and through a kit (6, out). b2 wants 6
+    // over the same days.
+    client.bookingAsset.findMany.mockResolvedValue([
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-01-10T00:00:00Z",
+          status: "ONGOING",
+        }),
+        id: "ba-loose",
+        assetKitId: null,
+        checkedOutQuantity: 6,
+      },
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-01-10T00:00:00Z",
+          status: "ONGOING",
+        }),
+        id: "ba-kit",
+        assetKitId: "ak-1",
+        checkedOutQuantity: 6,
+      },
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b2",
+        quantity: 6,
+        from: "2026-01-05T00:00:00Z",
+        to: "2026-01-15T00:00:00Z",
+      }),
+    ]);
+    // The kit came back: 6 units logged on the kit slice. The loose 6 are
+    // still out, so 6 (b1) + 6 (b2) = 12 over a pool of 10.
+    client.consumptionLog.groupBy.mockResolvedValue([
+      {
+        bookingAssetId: "ba-kit",
+        bookingId: "b1",
+        assetId: "a1",
+        _sum: { quantity: 6 },
+      },
+    ]);
+
+    const result = await flagBookingStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings: [
+        booking({
+          id: "b1",
+          status: "ONGOING",
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-10T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+        booking({
+          id: "b2",
+          from: new Date("2026-01-05T00:00:00Z"),
+          to: new Date("2026-01-15T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+      ],
+    });
+
+    expect(result).toEqual(new Set(["b1", "b2"]));
+  });
+
+  it("keeps a kit-driven row that is still out away from the sweep", async () => {
+    const client = createMockClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    client.assetKit.groupBy.mockResolvedValue([
+      { assetId: "a1", _sum: { quantity: 4 } },
+    ]);
+    // b1 holds 4 units through a kit, still out, and nothing loose. b2 wants
+    // 6 loose over the same days. The kit's 4 are already counted through
+    // `inKits`: 10 - 4 leaves exactly the 6 that b2 asks for.
+    client.bookingAsset.findMany.mockResolvedValue([
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 4,
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-01-10T00:00:00Z",
+          status: "ONGOING",
+        }),
+        id: "ba-kit",
+        assetKitId: "ak-1",
+        checkedOutQuantity: 4,
+      },
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b2",
+        quantity: 6,
+        from: "2026-01-05T00:00:00Z",
+        to: "2026-01-15T00:00:00Z",
+      }),
+    ]);
+
+    const result = await flagBookingStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings: [
+        booking({
+          id: "b2",
+          from: new Date("2026-01-05T00:00:00Z"),
+          to: new Date("2026-01-15T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+      ],
+    });
+
+    // Summing the kit row too would read 4 + 6 against the 6 left: a conflict.
+    expect(result).toEqual(new Set());
+  });
+
   it("subtracts logged dispositions before sweeping, same as the availability primitives", async () => {
     const client = createMockClient();
     client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
@@ -499,13 +622,17 @@ describe("flagBookingStockConflicts", () => {
         from: "2026-01-01T00:00:00Z",
         to: "2026-01-10T00:00:00Z",
       }),
-      reservedRow({
-        assetId: "a1",
-        bookingId: "b2",
-        quantity: 6,
-        from: "2026-01-05T00:00:00Z",
-        to: "2026-01-15T00:00:00Z",
-      }),
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b2",
+          quantity: 6,
+          from: "2026-01-05T00:00:00Z",
+          to: "2026-01-15T00:00:00Z",
+        }),
+        // Sent out, so the units it gave back have a slice to count on.
+        checkedOutQuantity: 6,
+      },
     ]);
     // b2 already returned 4 of its 6 units — remaining 2, so the genuine
     // concurrent demand in [Jan5,Jan10) is 6(b1) + 2(b2) = 8 ≤ 10 → no
