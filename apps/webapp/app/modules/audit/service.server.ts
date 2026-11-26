@@ -742,8 +742,13 @@ export async function updateAuditSession({
       // Serialise concurrent edits of the same audit: a second editor waits
       // here and then reads the list the first one committed, so a person
       // both admins added is inserted, noted and emailed exactly once instead
-      // of the second insert failing on the unique assignment.
-      await tx.$queryRaw`SELECT id FROM "AuditSession" WHERE id = ${id} FOR UPDATE`;
+      // of the second insert failing on the unique assignment. Scoped to the
+      // workspace so an audit id from another one locks nothing before its 404.
+      await tx.$queryRaw`
+        SELECT id FROM "AuditSession"
+        WHERE id = ${id} AND "organizationId" = ${organizationId}
+        FOR UPDATE
+      `;
 
       // Fetch the current audit to track changes
       const currentAudit = await tx.auditSession.findUnique({

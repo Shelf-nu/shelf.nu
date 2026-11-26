@@ -3870,6 +3870,31 @@ describe("updateAuditSession", () => {
     });
     expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
   });
+
+  it("locks the audit row, scoped to the workspace, before reading it", async () => {
+    await updateAuditSession({
+      id: "audit-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      data: { assigneeUserIds: ["user-2", "user-3"] },
+    });
+
+    expect(mockDb.$queryRaw).toHaveBeenCalledTimes(1);
+    const [sqlParts, ...values] = mockDb.$queryRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    const sql = sqlParts.join("?").replace(/\s+/g, " ").trim();
+    expect(sql).toBe(
+      'SELECT id FROM "AuditSession" WHERE id = ? AND "organizationId" = ? FOR UPDATE'
+    );
+    expect(values).toEqual(["audit-1", "org-1"]);
+    // The lock comes first: a second editor must wait before it reads the
+    // assignee list, or both would diff against the same stale set.
+    expect(mockDb.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDb.auditSession.findUnique.mock.invocationCallOrder[0]
+    );
+  });
 });
 
 describe("audit unit counts on quantity-tracked assets", () => {
