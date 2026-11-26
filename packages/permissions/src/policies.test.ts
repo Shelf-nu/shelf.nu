@@ -128,6 +128,7 @@ describe("ROLE_POLICIES", () => {
       manageBookingRecipients: true,
       inventoryAlerts: false,
       selectableAsRecipient: true,
+      problemReports: true,
     });
     assert.deepEqual(manager.ui, {
       landing: "/bookings",

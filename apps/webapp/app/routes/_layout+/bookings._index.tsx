@@ -37,6 +37,7 @@ import {
   getBookingsFilterData,
   getBookingsListWhereParams,
 } from "~/modules/booking/service.server";
+import { redirectFromStalePendingApprovalFilter } from "~/modules/booking/stale-pending-filter.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -121,6 +122,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       const cookieParams = new URLSearchParams(filters);
       return redirect(`/bookings?${cookieParams.toString()}`);
     }
+
+    // A "Pending approval" filter left over from before approval was turned
+    // off lands on the unfiltered list instead of an empty one.
+    const stalePendingRedirect = await redirectFromStalePendingApprovalFilter({
+      request,
+      organizationId,
+      searchParams,
+      rewriteBookingsFilterCookie: true,
+    });
+    if (stalePendingRedirect) return stalePendingRedirect;
 
     const [
       { bookings, bookingCount },

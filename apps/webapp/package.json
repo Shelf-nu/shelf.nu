@@ -201,7 +201,7 @@
     "tailwind-scrollbar": "^3.1.0",
     "tailwindcss": "^3.4.19",
     "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.2",
     "vite": "^7.3.7",
     "vite-plugin-cjs-interop": "^2.4.4",
@@ -209,6 +209,6 @@
     "vitest": "^5.0.5"
   },
   "engines": {
-    "node": ">=24.22.1"
+    "node": ">=24.22.3"
   }
 }

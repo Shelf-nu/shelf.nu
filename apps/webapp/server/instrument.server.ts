@@ -13,6 +13,7 @@
 import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
 
+import { SENTRY_TRACES_SAMPLE_RATE } from "~/utils/constants";
 import { SENTRY_DSN } from "~/utils/env";
 import {
   isAbortError,
@@ -21,6 +22,7 @@ import {
 } from "~/utils/error";
 import { redactSensitive } from "~/utils/redact";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
+import { withoutUnloggedHeaders } from "~/utils/unlogged-headers";
 
 /**
  * Resolve the release identifier for this server process. Read from the
@@ -50,9 +52,8 @@ if (SENTRY_DSN) {
       // imports this file first, so that ordering is preserved.
       Sentry.prismaIntegration(),
     ],
-    // Performance Monitoring — 10% sampling matches the client. Tune via
-    // a tracesSampler later if specific routes need higher fidelity.
-    tracesSampleRate: 0.1,
+    // Shared with the client, so a sampled browser trace keeps its server half.
+    tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
     beforeBreadcrumb(breadcrumb) {
       // Remove some noisy breadcrumbs
       if (
@@ -74,13 +75,12 @@ if (SENTRY_DSN) {
       return breadcrumb;
     },
     /**
-     * Performance transactions are kept, with email addresses masked. They
+     * Performance transactions are kept, with credentials scrubbed from the
+     * request (see {@link scrubEventRequest}) and email addresses masked. They
      * must NOT go through the error-event filter: a transaction carries no
      * exception, and that filter drops every event without one.
      */
-    beforeSendTransaction(event) {
-      return maskEmailsInSentryPayload(event);
-    },
+    beforeSendTransaction: handleBeforeSendTransaction,
     beforeSend(event, hint) {
       const kept = handleBeforeSendError(event, hint);
       return kept && maskEmailsInSentryPayload(kept);
@@ -97,12 +97,115 @@ if (SENTRY_DSN) {
 }
 
 /**
+ * Hook for performance transactions: drops Prisma's bookkeeping spans (see
+ * {@link dropPrismaBookkeepingSpans}), scrubs credentials from the request
+ * (see {@link scrubEventRequest}) and masks email addresses.
+ *
+ * @param event - The transaction about to be sent
+ * @returns The transaction to send
+ */
+export function handleBeforeSendTransaction<E extends Event>(event: E): E {
+  dropPrismaBookkeepingSpans(event);
+  scrubEventRequest(event);
+  return maskEmailsInSentryPayload(event);
+}
+
+/** A span as it sits on a transaction event. */
+type TransactionSpan = NonNullable<Event["spans"]>[number];
+
+/**
+ * `db` spans Prisma emits around every query that carry no query of ours: the
+ * pooled connection checkout, and the `BEGIN` / `DEALLOCATE ALL` / `COMMIT`
+ * wrapper it sends through PgBouncer. Matched exactly, so a real query that
+ * merely contains one of these words is kept.
+ */
+const PRISMA_WRAPPER_DB_SPANS = new Set([
+  "prisma:engine:connection",
+  "BEGIN",
+  "DEALLOCATE ALL",
+  "COMMIT",
+]);
+
+/**
+ * Whether a span is Prisma bookkeeping rather than a query worth seeing: its
+ * client and engine phases (`prisma:client:*`, `prisma:engine:*`, op
+ * `default`) and the wrapper statements in {@link PRISMA_WRAPPER_DB_SPANS}.
+ * The `db` span holding the SQL that ran is never matched.
+ *
+ * @param span - A span from a transaction event
+ */
+function isPrismaBookkeepingSpan(span: TransactionSpan): boolean {
+  const description = span.description ?? "";
+  if (span.op === "default") return description.startsWith("prisma:");
+  if (span.op === "db") return PRISMA_WRAPPER_DB_SPANS.has(description);
+  return false;
+}
+
+/**
+ * Removes Prisma's bookkeeping spans from a transaction, in place.
+ *
+ * `Sentry.prismaIntegration()` reports about ten spans per query, and only the
+ * one carrying the SQL is useful. The rest outnumber every other span we
+ * send, and they are what spends the monthly span quota.
+ *
+ * A kept span whose parent is dropped is re-attached to its nearest kept
+ * ancestor, so the trace never points at a span that was not sent.
+ *
+ * @param event - The transaction about to be sent
+ */
+export function dropPrismaBookkeepingSpans(event: Event): void {
+  if (!event.spans?.length) return;
+
+  // span id -> parent id, for every span being dropped
+  const droppedParents = new Map<string, string | undefined>();
+  for (const span of event.spans) {
+    if (isPrismaBookkeepingSpan(span)) {
+      droppedParents.set(span.span_id, span.parent_span_id);
+    }
+  }
+  if (droppedParents.size === 0) return;
+
+  const kept: TransactionSpan[] = [];
+  for (const span of event.spans) {
+    if (droppedParents.has(span.span_id)) continue;
+
+    // Bounded by the number of dropped spans, so a malformed parent loop
+    // cannot spin forever.
+    let parent = span.parent_span_id;
+    for (let hops = 0; hops < droppedParents.size; hops++) {
+      if (parent === undefined || !droppedParents.has(parent)) break;
+      parent = droppedParents.get(parent);
+    }
+    kept.push({ ...span, parent_span_id: parent });
+  }
+  event.spans = kept;
+}
+
+/**
+ * Removes credentials from the request Sentry attached to an event, in place:
+ * every parsed cookie (the session and the SSO verifier and challenge among
+ * them), and every `UNLOGGED_HEADERS` header (raw `cookie`, `authorization`,
+ * the Cloudflare proxy secret). Sentry's SDK copies the incoming request's
+ * headers and cookies onto errors and transactions alike.
+ *
+ * @param event - The event about to be sent
+ */
+export function scrubEventRequest(event: Event): void {
+  if (event.request?.cookies) {
+    delete event.request.cookies;
+  }
+  if (event.request?.headers) {
+    event.request.headers = withoutUnloggedHeaders(event.request.headers);
+  }
+}
+
+/**
  * Filter for ERROR events (not transactions). Drops:
  *  - non-Error exceptions
  *  - ShelfError instances flagged `shouldBeCaptured: false`
  *  - client-disconnect / abort errors that bypass `makeShelfError`
  *
- * Also redacts the auth-session cookie and attaches our ShelfError
+ * Also scrubs credentials from the request (see {@link scrubEventRequest}) and attaches our ShelfError
  * metadata as Sentry tags / extras. Email masking runs on the result, in the
  * `beforeSend` hook.
  */
@@ -130,10 +233,7 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
     return null;
   }
 
-  /** Hide the __authSession cookie */
-  if (event.request?.cookies) {
-    event.request.cookies["__authSession"] = "hidden";
-  }
+  scrubEventRequest(event);
 
   const context = makeSentryContext(exception);
   if (!context) {

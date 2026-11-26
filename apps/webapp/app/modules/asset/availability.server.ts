@@ -90,8 +90,10 @@ import {
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
   computeCustodyAvailability,
+  loggedUnitsByReservationRow,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 } from "./availability-primitives.server";
 import type {
@@ -112,8 +114,10 @@ export {
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
   computeCustodyAvailability,
+  loggedUnitsByReservationRow,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 };
 export type {
@@ -175,14 +179,26 @@ export type PrismaClientOrTx = {
     findMany: (args: {
       where: Prisma.BookingAssetWhereInput;
       select: {
+        // `id` and `assetKitId` place each logged unit on the slice it was
+        // logged on; see `loggedUnitsByReservationRow`.
+        id: true;
         bookingId: true;
         quantity: true;
+        assetKitId: true;
+        checkedOutAt: true;
+        // Sizes a slice that came back and went out again; see
+        // `reservedUnitsStillHeld`.
+        checkedOutQuantity: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
       Array<{
+        id?: string;
         bookingId: string;
         quantity: number;
+        assetKitId?: string | null;
+        checkedOutAt?: Date | null;
+        checkedOutQuantity?: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
@@ -204,11 +220,15 @@ export type PrismaClientOrTx = {
       }>
     >;
     groupBy: (args: {
-      by: ["bookingId"];
+      by: ["bookingAssetId", "bookingId"];
       where: Prisma.ConsumptionLogWhereInput;
       _sum: { quantity: true };
     }) => Promise<
-      Array<{ bookingId: string | null; _sum: { quantity: number | null } }>
+      Array<{
+        bookingAssetId?: string | null;
+        bookingId: string | null;
+        _sum: { quantity: number | null };
+      }>
     >;
   };
 };
@@ -312,13 +332,14 @@ type GetAssetAvailabilityArgs = {
  * "Reserved (bookings)" figure — UPCOMING (RESERVED) bookings only, disjoint
  * from `checkedOut`.
  *
- * Reserved rows are restricted to standalone reservations
- * (`assetKitId IS NULL`) — kit-driven slices are already accounted for via
- * `inKits` and must never be summed twice. Per-booking remaining quantity
- * subtracts already-logged RETURN/CONSUME/LOSS/DAMAGE dispositions exactly as
- * `computeBookingAvailableQuantity` does (partial check-in writes
- * `ConsumptionLog` rows without decrementing `BookingAsset.quantity`), and is
- * clamped at 0 per row as defence-in-depth.
+ * Only standalone reservations (`assetKitId IS NULL`) are summed: kit-driven
+ * slices are already accounted for via `inKits` and must never be summed
+ * twice. They are still read, so each already-logged RETURN/CONSUME/LOSS/DAMAGE
+ * unit is taken off the slice it was logged on and never off a sibling
+ * ({@link loggedUnitsByReservationRow}). Partial check-in writes
+ * `ConsumptionLog` rows without decrementing `BookingAsset.quantity`, so each
+ * row's remaining is its quantity minus its own logged units, clamped at 0 as
+ * defence-in-depth.
  *
  * @param args.assetId - The asset to compute availability for.
  * @param args.organizationId - Caller's organization (scopes every query).
@@ -371,12 +392,14 @@ export async function getAssetAvailability({
     const checkedOut = checkedOutBreakdown.total;
     const standaloneCheckedOut = checkedOutBreakdown.standalone;
 
-    /** Where clause for the standalone (non-kit-driven) reservations. */
+    /**
+     * Where clause for the asset's reservation rows. Kit-driven slices are
+     * fetched too, for attribution only: a unit logged on one must not be
+     * taken off the standalone slice. They are skipped when summing, because
+     * `inKits` already counts their units.
+     */
     const bookingAssetWhere: Prisma.BookingAssetWhereInput = {
       assetId,
-      // Kit-driven slices are already counted via `inKits` — summing them
-      // here too would double-count the same units.
-      assetKitId: null,
       booking: buildActiveBookingWhere(organizationId, window),
     };
     if (excludeBookingId) {
@@ -386,8 +409,12 @@ export async function getAssetAvailability({
     const reservedRows = await client.bookingAsset.findMany({
       where: bookingAssetWhere,
       select: {
+        id: true,
         bookingId: true,
         quantity: true,
+        assetKitId: true,
+        checkedOutAt: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     });
@@ -401,14 +428,12 @@ export async function getAssetAvailability({
       const bookingIds = reservedRows.map((r) => r.bookingId);
 
       /**
-       * Sum already-logged disposition quantities per booking for this
-       * asset — mirrors `computeBookingAvailableQuantity`'s reserved-row
-       * math exactly (RETURN/CONSUME/LOSS/DAMAGE reduce the reservation
-       * footprint; CHECKOUT does not, it's a custody handoff, not a
-       * reduction).
+       * Already-logged disposition quantities for this asset, per slice
+       * (RETURN/CONSUME/LOSS/DAMAGE reduce the reservation footprint;
+       * CHECKOUT does not, it's a custody handoff, not a reduction).
        */
       const loggedGroups = await client.consumptionLog.groupBy({
-        by: ["bookingId"],
+        by: ["bookingAssetId", "bookingId"],
         where: {
           assetId,
           bookingId: { in: bookingIds },
@@ -417,18 +442,25 @@ export async function getAssetAvailability({
         _sum: { quantity: true },
       });
 
-      const loggedByBookingId = new Map<string, number>();
-      for (const group of loggedGroups) {
-        if (group.bookingId) {
-          loggedByBookingId.set(group.bookingId, group._sum.quantity ?? 0);
-        }
-      }
+      const loggedByRow = loggedUnitsByReservationRow(
+        reservedRows,
+        loggedGroups
+      );
 
       for (const row of reservedRows) {
-        const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-        // Clamp at 0 per row so an over-logged booking (should not happen,
-        // but defence-in-depth) can't push `reserved` negative.
-        const remaining = Math.max(0, row.quantity - logged);
+        // Counted via `inKits`; fetched for attribution only.
+        if (row.assetKitId) continue;
+        const logged = loggedByRow.get(row) ?? 0;
+        // Never negative, and never below the units the row has out right
+        // now: a slice returned in full and checked out again still holds
+        // the units of its second trip.
+        const remaining = reservedUnitsStillHeld(
+          {
+            quantity: row.quantity,
+            checkedOutQuantity: row.checkedOutQuantity ?? null,
+          },
+          logged
+        );
         if (remaining === 0) continue;
 
         // Every active booking occupies its window for the peak-concurrency
@@ -636,11 +668,12 @@ export type AvailabilityBatchClient = {
       }>
     >;
     groupBy: (args: {
-      by: ["bookingId", "assetId"];
+      by: ["bookingAssetId", "bookingId", "assetId"];
       where: Prisma.ConsumptionLogWhereInput;
       _sum: { quantity: true };
     }) => Promise<
       Array<{
+        bookingAssetId?: string | null;
         bookingId: string | null;
         assetId: string;
         _sum: { quantity: number | null };
@@ -679,13 +712,14 @@ type GetAssetAvailabilityBatchCommonArgs = {
  * Per-asset semantics are byte-for-byte identical to
  * {@link getAssetAvailability} — see that function's doc and the module doc's
  * "windowed-occupancy model" note for the full rationale:
- * - Reserved rows are restricted to standalone (`assetKitId: null`) slices —
+ * - Only standalone (`assetKitId: null`) slices are summed into reserved:
  *   kit-driven slices are already counted via `inKits`, so summing them here
- *   too would double-count the same units (the bug this primitive exists to
- *   fix in the booking picker, which previously had no such filter).
- * - Logged RETURN/CONSUME/LOSS/DAMAGE dispositions reduce each booking's
- *   remaining reserved quantity before the peak-concurrent sweep, clamped at
- *   0 per (booking, asset) row.
+ *   too would double-count the same units. Kit-driven rows are still read,
+ *   to place each logged unit on the slice it was logged on (see
+ *   {@link loggedUnitsByReservationRow}).
+ * - Logged RETURN/CONSUME/LOSS/DAMAGE dispositions reduce the remaining
+ *   reserved quantity of the slice they were logged on before the
+ *   peak-concurrent sweep, clamped at 0 per row.
  * - `checkedOut` is window-independent and feeds ONLY `physicalAvailable`;
  *   `bookable` subtracts `reserved` only — ONGOING bookings are windowed by
  *   their real `[from, to]`, OVERDUE bookings get a sentinel `to`
@@ -762,11 +796,11 @@ export async function getAssetAvailabilityBatch(
       inKitsGroups.map((k) => [k.assetId, k._sum.quantity ?? 0])
     );
 
+    // Kit-driven slices are fetched too, for attribution only (see the
+    // singular primitive). They are skipped when summing: `inKits` already
+    // counts their units.
     const bookingAssetWhere: Prisma.BookingAssetWhereInput = {
       assetId: { in: uniqueAssetIds },
-      // Kit-driven slices are already counted via `inKits` — summing them
-      // here too would double-count the same units.
-      assetKitId: null,
       booking: buildActiveBookingWhere(organizationId, window),
     };
     if (excludeBookingId) {
@@ -776,9 +810,13 @@ export async function getAssetAvailabilityBatch(
     const reservedRows = await client.bookingAsset.findMany({
       where: bookingAssetWhere,
       select: {
+        id: true,
         assetId: true,
         bookingId: true,
         quantity: true,
+        assetKitId: true,
+        checkedOutAt: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     });
@@ -793,12 +831,10 @@ export async function getAssetAvailabilityBatch(
         ...new Set(reservedRows.map((r) => r.bookingId)),
       ];
 
-      // Grouped by (bookingId, assetId) — unlike the singular primitive
-      // (which groups by bookingId alone because it's already scoped to one
-      // asset), this read spans many assets, so the key must disambiguate
-      // both.
+      // Grouped by slice, booking and asset: this read spans many assets,
+      // and a booking can hold one asset on several slices.
       const loggedGroups = await client.consumptionLog.groupBy({
-        by: ["bookingId", "assetId"],
+        by: ["bookingAssetId", "bookingId", "assetId"],
         where: {
           assetId: { in: uniqueAssetIds },
           bookingId: { in: reservedBookingIds },
@@ -807,21 +843,24 @@ export async function getAssetAvailabilityBatch(
         _sum: { quantity: true },
       });
 
-      const loggedByKey = new Map<string, number>();
-      for (const group of loggedGroups) {
-        if (group.bookingId) {
-          loggedByKey.set(
-            `${group.bookingId}:${group.assetId}`,
-            group._sum.quantity ?? 0
-          );
-        }
-      }
+      const loggedByRow = loggedUnitsByReservationRow(
+        reservedRows,
+        loggedGroups
+      );
 
       for (const row of reservedRows) {
-        const logged = loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0;
-        // Clamp at 0 per row so an over-logged booking can't push a single
-        // asset's reserved total negative — mirrors the singular primitive.
-        const remaining = Math.max(0, row.quantity - logged);
+        // Counted via `inKits`; fetched for attribution only.
+        if (row.assetKitId) continue;
+        const logged = loggedByRow.get(row) ?? 0;
+        // Never negative, and never below the units the row has out right
+        // now. Mirrors the singular primitive.
+        const remaining = reservedUnitsStillHeld(
+          {
+            quantity: row.quantity,
+            checkedOutQuantity: row.checkedOutQuantity ?? null,
+          },
+          logged
+        );
         if (remaining === 0) continue;
 
         // Every active booking occupies its window (peak-concurrency sweep +

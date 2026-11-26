@@ -6,7 +6,7 @@ import {
   type QrIdDisplayPreference,
 } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useLocation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -17,6 +17,7 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { GENERAL_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -29,7 +30,7 @@ import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
-import { Card } from "../shared/card";
+import { Card, CardTitle } from "../shared/card";
 import { DateS } from "../shared/date";
 import {
   AlertDialog,
@@ -136,12 +137,16 @@ const WorkspaceGeneralEditForms = ({
   const { organization, isPersonalWorkspace, canHideShelfBranding } =
     useLoaderData<typeof loader>();
 
-  // Focus the Name input on mount, but skip it when the field is disabled
-  // (personal workspaces don't allow renaming). Arriving via a section anchor
-  // (e.g. /settings/general#transfer-ownership) no longer needs a guard here:
-  // useAutoFocus focuses with `preventScroll`, so the anchor scroll survives.
+  // Focus the Name input on mount, except when the field is disabled
+  // (personal workspaces cannot be renamed) or the page opened at a linked
+  // card (/settings/general#permissions): keyboard focus belongs on that card
+  // (`useSectionHashSync` moves it there, and so does the browser on a
+  // native fragment load), and focusing the name would send Tab back to the
+  // top. React Router's `location.hash` is the hash the page opened with;
+  // the scroll-synced hash is written past the router, so it never flips this.
+  const { hash } = useLocation();
   const nameInputRef = useAutoFocus<HTMLInputElement>({
-    when: !isPersonalWorkspace,
+    when: !isPersonalWorkspace && !hash,
   });
 
   const schema = EditGeneralWorkspaceSettingsFormSchema(isPersonalWorkspace);
@@ -174,9 +179,12 @@ const WorkspaceGeneralEditForms = ({
       className="flex  flex-col gap-2"
       encType="multipart/form-data"
     >
-      <Card className={tw("my-0", className)}>
+      <Card
+        id={GENERAL_SETTINGS_ANCHORS.general}
+        className={tw("my-0", className)}
+      >
         <div className="mb-6">
-          <h3 className="text-text-lg font-semibold">General</h3>
+          <CardTitle>General</CardTitle>
           <p className="text-sm text-gray-600">
             Manage general workspace settings.
           </p>
@@ -413,9 +421,12 @@ const WorkspacePermissionsEditForm = ({
   const disabled = useDisabled(fetcher);
 
   return organization.type === OrganizationType.TEAM ? (
-    <Card className={tw("my-0 w-full", className)}>
+    <Card
+      id={GENERAL_SETTINGS_ANCHORS.permissions}
+      className={tw("my-0 w-full", className)}
+    >
       <div className="border-b pb-5">
-        <h3 className="text-text-lg font-semibold">Permissions</h3>
+        <CardTitle>Permissions</CardTitle>
         <p className="text-sm text-gray-600">
           {showManagersSwitch ? (
             <>
@@ -652,9 +663,9 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
 
   return isOwner && organization.enabledSso && organization.ssoDetails ? (
     <fetcher.Form ref={zo.ref} method="post" className="flex flex-col gap-2">
-      <Card className={tw("my-0 ", className)}>
+      <Card id={GENERAL_SETTINGS_ANCHORS.sso} className={tw("my-0", className)}>
         <div className=" border-b pb-5">
-          <h2 className=" text-[18px] font-semibold">SSO details</h2>
+          <CardTitle as="h2">SSO details</CardTitle>
           <p>
             This workspace has SSO enabled so you can see your SSO settings.
           </p>
@@ -867,9 +878,12 @@ const WorkspaceScimTokensSection = ({
 
   return (
     <>
-      <Card className={tw("my-0", className)}>
+      <Card
+        id={GENERAL_SETTINGS_ANCHORS.scim}
+        className={tw("my-0", className)}
+      >
         <div className="border-b pb-5">
-          <h2 className="text-[18px] font-semibold">SCIM provisioning</h2>
+          <CardTitle as="h2">SCIM provisioning</CardTitle>
           <p className="text-sm text-gray-600">
             Manage bearer tokens for SCIM user provisioning (e.g. Microsoft
             Entra ID).

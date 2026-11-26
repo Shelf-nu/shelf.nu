@@ -211,7 +211,7 @@ describe("the tunnel path is named once", () => {
     expect(src).toContain('server.use("*", sentryTunnelGuard())');
   });
 
-  it("mounts the mobile and calendar-feed guards on every path, before the session", () => {
+  it("mounts the path guards on every path, before the session", () => {
     const src = collapsed(SERVER_ENTRY);
     const sessionAt = src.indexOf("session({");
 
@@ -219,6 +219,7 @@ describe("the tunnel path is named once", () => {
       'server.use("*", mobileApiGuard())',
       'server.use("*", calendarFeedGuard())',
       'server.use("*", sentryTunnelGuard())',
+      'server.use("*", contactOwnerGuard())',
     ]) {
       expect(src).toContain(mount);
       expect(src.indexOf(mount)).toBeLessThan(sessionAt);

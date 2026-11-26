@@ -24,6 +24,9 @@
  * - kits holding only archived assets (assign custody, add to booking):
  *   `kitsOnlyArchivedBlocker` in
  *   `apps/webapp/app/components/scanner/drawer/uses/scan-blocker-helpers.tsx`.
+ * - update location: `buildUpdateLocationBlockers` in
+ *   `apps/webapp/app/components/scanner/drawer/uses/location-scan-blockers.tsx`.
+ *   The bulk endpoint refuses a list holding a quantity-tracked asset.
  * Extraction target: a pure `packages/*` scanner module (none yet).
  *
  * Rules by action:
@@ -39,7 +42,9 @@
  * - release custody: quantity rows held only through a kit, held by nobody,
  *   or held by more than one person; INDIVIDUAL assets not in custody or part
  *   of a kit; kits not in custody.
- * - update location: archived assets only.
+ * - update location: archived assets, and quantity-tracked assets. A quantity
+ *   row is placed per location with a unit count, which the scan list does not
+ *   collect and the bulk endpoint does not take.
  * - add to booking / fulfil: assets already in this booking, part of a kit
  *   (add only: fulfil matches concrete units, so kit membership is no blocker
  *   there), not available to book, or checked out (only when the booking is
@@ -142,6 +147,7 @@ type BlockerKey =
   | "qty-held-via-kit"
   | "qty-nothing-held"
   | "qty-several-holders"
+  | "qty-needs-placement"
   | "asset-in-custody"
   | "asset-checked-out"
   | "asset-part-of-kit"
@@ -467,8 +473,19 @@ function candidatesFor(
     return candidates;
   }
 
-  // update_location: any item still in service can move.
-  return [archivedCandidate(" and can't be moved.")];
+  // update_location: any whole item still in service can move. A quantity row
+  // cannot: the server refuses the list over it.
+  return [
+    archivedCandidate(" and can't be moved."),
+    {
+      key: "qty-needs-placement",
+      affected: quantityRows,
+      message: (n) =>
+        `${countNoun(n, "asset")} quantity-tracked and ${
+          n === 1 ? "needs" : "need"
+        } a unit count per location.`,
+    },
+  ];
 }
 
 /**

@@ -82,7 +82,7 @@
     "eslint-config-expo": "~58.0.4",
     "react-doctor": "0.0.39",
     "react-test-renderer": "19.3.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "expo": {

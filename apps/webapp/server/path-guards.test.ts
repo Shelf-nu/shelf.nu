@@ -17,10 +17,16 @@ import {
 } from "~/utils/constants";
 import {
   calendarFeedGuard,
+  contactOwnerGuard,
   mobileApiGuard,
   sentryTunnelGuard,
 } from "./path-guards";
-import { normalizeRequestPath, normalizeRoutePath } from "./request-path";
+import { CONTACT_OWNER_LIMITED_KEY } from "./rate-limit";
+import {
+  getContactOwnerQrId,
+  normalizeRequestPath,
+  normalizeRoutePath,
+} from "./request-path";
 
 // @vitest-environment node
 
@@ -44,16 +50,28 @@ const CALENDAR_LIMIT = 60;
 /** Low tunnel ceiling so the rate tests stay short. */
 const TUNNEL_LIMIT = 5;
 
+/** Low contact-owner ceilings: per (address, QR), and per address. */
+const CONTACT_PER_QR_LIMIT = 2;
+const CONTACT_PER_IP_LIMIT = 4;
+
 /**
- * An app with the three guards mounted on `*`, as in `server/index.ts`, and a
- * handler that answers 200 for anything that gets past them.
+ * An app with the four guards mounted on `*`, as in `server/index.ts`, and a
+ * handler that answers 200 for anything that gets past them (429 for a
+ * contact-owner submission the guard marked, as the route's action does).
  */
 function buildApp() {
   const app = new Hono();
   app.use("*", mobileApiGuard());
   app.use("*", calendarFeedGuard());
   app.use("*", sentryTunnelGuard(TUNNEL_LIMIT));
-  app.all("*", (c) => c.text("ok"));
+  app.use("*", contactOwnerGuard(CONTACT_PER_QR_LIMIT, CONTACT_PER_IP_LIMIT));
+  // Stands in for the contact-owner action, which refuses a submission the
+  // guard marked as over its limit.
+  app.all("*", (c) =>
+    c.get(CONTACT_OWNER_LIMITED_KEY) === true
+      ? c.text("limited", 429)
+      : c.text("ok")
+  );
   return app;
 }
 
@@ -251,5 +269,163 @@ describe("sentryTunnelGuard", () => {
       body: "{}",
     });
     expect(envelope.status).toBe(200);
+  });
+});
+
+describe("getContactOwnerQrId", () => {
+  it.each([
+    ["/qr/abc123/contact-owner", "abc123"],
+    ["/qr/abc123", null],
+    ["/qr/abc123/contact-owner/extra", null],
+    ["/qr//contact-owner", null],
+    ["/api/qr/abc123/contact-owner", null],
+  ])("reads %s as %s", (path, expected) => {
+    expect(getContactOwnerQrId(path)).toBe(expected);
+  });
+});
+
+describe("contactOwnerGuard", () => {
+  /** A form submission to a QR's contact-owner action. */
+  function submit(app: Hono, path: string, ip: string, method = "POST") {
+    return send(app, path, ip, {
+      method,
+      body: new URLSearchParams({ email: "a@example.com", content: "found" }),
+    });
+  }
+
+  it("counts every spelling of one QR's action in one bucket", async () => {
+    const app = buildApp();
+    const spellings = [
+      "/qr/qr-a/contact-owner",
+      "/QR/qr-a/Contact-Owner/",
+      "/qr/qr-a/contact-owner.data",
+    ];
+
+    for (const path of spellings.slice(0, CONTACT_PER_QR_LIMIT)) {
+      expect((await submit(app, path, "4.4.4.1")).status).toBe(200);
+    }
+
+    expect((await submit(app, spellings[2], "4.4.4.1")).status).toBe(429);
+    // Another visitor reporting the same QR keeps their own budget.
+    expect((await submit(app, spellings[0], "4.4.4.2")).status).toBe(200);
+  });
+
+  it("caps one address across QR ids, so rotating QRs keeps no fresh budget", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      const res = await submit(app, `/qr/qr-${i}/contact-owner`, "4.4.4.3");
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await submit(app, "/qr/qr-new/contact-owner", "4.4.4.3");
+    expect(blocked.status).toBe(429);
+  });
+
+  it("opens again once the per-QR window has passed", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4");
+    }
+    expect(
+      (await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4")).status
+    ).toBe(429);
+
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+
+    expect(
+      (await submit(app, "/qr/qr-b/contact-owner", "4.4.4.4")).status
+    ).toBe(200);
+  });
+
+  it("does not spend the budget on opening the form", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT * 3; i++) {
+      const res = await send(app, "/qr/qr-c/contact-owner", "4.4.4.5");
+      expect(res.status).toBe(200);
+    }
+
+    expect(
+      (await submit(app, "/qr/qr-c/contact-owner", "4.4.4.5")).status
+    ).toBe(200);
+  });
+
+  it("reopens the per-address budget after an hour, and a refused request creates no per-QR count", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      await submit(app, `/qr/qr-h${i}/contact-owner`, "4.4.4.7");
+    }
+    // Refused by the per-address bucket; the per-QR bucket must not count it.
+    expect(
+      (await submit(app, "/qr/qr-fresh/contact-owner", "4.4.4.7")).status
+    ).toBe(429);
+
+    vi.advanceTimersByTime(60 * 60_000 + 1);
+
+    // A full per-QR budget remains for the QR the refused request named.
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      const res = await submit(app, "/qr/qr-fresh/contact-owner", "4.4.4.7");
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("caps the QR id kept in a bucket key, so a long id is still one bucket", async () => {
+    const app = buildApp();
+    const longId = "a".repeat(5_000);
+
+    for (let i = 0; i < CONTACT_PER_QR_LIMIT; i++) {
+      await submit(app, `/qr/${longId}${i}/contact-owner`, "4.4.4.8");
+    }
+
+    // Ids differing only past the cap share one per-QR bucket.
+    expect(
+      (await submit(app, `/qr/${longId}x/contact-owner`, "4.4.4.8")).status
+    ).toBe(429);
+  });
+
+  it("reports only the per-address budget in the RateLimit headers", async () => {
+    const app = buildApp();
+
+    const res = await submit(app, "/qr/qr-hdr/contact-owner", "4.4.4.9");
+
+    expect(res.headers.get("RateLimit-Policy")).toBe(
+      `${CONTACT_PER_IP_LIMIT};w=3600`
+    );
+  });
+
+  it("off Fly without trusted proxies, a rotated X-Forwarded-For buys no fresh budget", async () => {
+    // why: self-hosted with no TRUSTED_PROXY_HOPS. X-Forwarded-For is written
+    // by the caller there, so the contact-owner buckets must not key on it.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT; i++) {
+      const res = await app.request(`/qr/qr-x${i}/contact-owner`, {
+        method: "POST",
+        headers: { "X-Forwarded-For": `7.7.7.${i}` },
+        body: "content=found",
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const blocked = await app.request("/qr/qr-x9/contact-owner", {
+      method: "POST",
+      headers: { "X-Forwarded-For": "7.7.7.99" },
+      body: "content=found",
+    });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("leaves the QR's other public pages alone", async () => {
+    const app = buildApp();
+
+    for (let i = 0; i < CONTACT_PER_IP_LIMIT * 3; i++) {
+      const res = await submit(app, "/qr/qr-d", "4.4.4.6");
+      expect(res.status).toBe(200);
+    }
   });
 });

@@ -32,8 +32,9 @@
  * next page that does hydrate sends it ({@link markHydrated}). A load whose
  * automatic reload worked at once is sent as an info log, since the user only
  * saw a reload; anything that showed the recovery screen is a warning issue,
- * except a timeout that fired before its clock ran out, which is an info issue
- * of its own ({@link timedOutEarly}).
+ * except a timeout that fired before its clock ran out, which only a client
+ * running timers early produces and which is logged as well
+ * ({@link timedOutEarly}).
  *
  * @see {@link file://./browser-support.ts} - the same inline gate pattern for unsupported browsers
  * @see {@link file://./../root.tsx} - renders the screen and calls markHydrated
@@ -90,6 +91,15 @@ export const MAX_MISSING_BUNDLE_FILES = 10;
  * The timings in such a report do not describe a user waiting.
  */
 export const HYDRATION_CLOCK_GAP_MS = 5_000;
+
+/**
+ * User agents of search crawlers and link previewers. They report
+ * `navigator.webdriver` as false but load pages the way a bot does, so a
+ * failure they hit says nothing about users. Matched case-insensitively.
+ * Keep it free of backslashes: it is interpolated into the inline script.
+ */
+export const CRAWLER_USER_AGENT_PATTERN =
+  "googlebot|bingbot|yandexbot|duckduckbot|baiduspider|applebot|petalbot|slurp|facebookexternalhit|crawler|spider|lighthouse";
 
 /** Global the inline script exposes so the bundle can stand it down. */
 const WATCHDOG_GLOBAL = "__shelfHydrationWatchdog";
@@ -150,7 +160,10 @@ export type HydrationFailureReport = {
   wallClockMs?: number | null;
   /** `navigator.connection.effectiveType`, where the browser exposes it. */
   connection?: string | null;
-  /** The browser is driven by automation (`navigator.webdriver`). */
+  /**
+   * The page was loaded by automation (`navigator.webdriver`) or by a crawler
+   * whose user agent matches {@link CRAWLER_USER_AGENT_PATTERN}.
+   */
   automated?: boolean;
 };
 
@@ -312,7 +325,9 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       // Monotonic time stops while the device sleeps; wall-clock time does not.
       wallClockMs: perf && perf.timeOrigin ? Math.round(Date.now() - perf.timeOrigin) : null,
       connection: connection || null,
-      automated: navigator.webdriver === true
+      automated:
+        navigator.webdriver === true ||
+        new RegExp("${CRAWLER_USER_AGENT_PATTERN}", "i").test(navigator.userAgent || "")
     };
   }
 
@@ -528,8 +543,9 @@ export function timedOutEarly(report: HydrationFailureReport): boolean {
  * automatic reload, after a manual one, or late, past the timeout. A
  * recovered reload ({@link isRecoveredReload}) goes to Sentry Logs, which keep
  * its rate visible without raising an issue for each flaky download. A timeout
- * that fired early ({@link timedOutEarly}) is an info issue of its own, so the
- * warning issues, one per reason, count only pages someone waited on.
+ * that fired early ({@link timedOutEarly}), before its 20 seconds had passed on
+ * the page clock, goes to Sentry Logs too and never counts toward the warning
+ * issues, one per reason.
  */
 export function markHydrated(): void {
   window[WATCHDOG_GLOBAL]?.done();
@@ -556,22 +572,22 @@ export function markHydrated(): void {
     return;
   }
 
+  if (timedOutEarly(report)) {
+    Sentry.logger.info("Hydration timeout fired before its clock ran out", {
+      label: "Hydration",
+      path: report.path,
+      failedAfterMs: report.failedAfterMs,
+      hydratedAfterMs,
+    });
+    return;
+  }
+
   const tags = {
     hydration_failure: report.reason,
     hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
     hydration_tab_hidden: report.hidden ? "yes" : "no",
     hydration_clock_gap: hasClockGap(report) ? "yes" : "no",
   };
-
-  if (timedOutEarly(report)) {
-    Sentry.captureMessage("Hydration timeout fired before its clock ran out", {
-      level: "info",
-      fingerprint: ["hydration-failure", "timeout-early"],
-      tags,
-      extra: { ...report, hydratedAfterMs },
-    });
-    return;
-  }
 
   Sentry.captureMessage("App bundle failed to load before hydration", {
     level: "warning",

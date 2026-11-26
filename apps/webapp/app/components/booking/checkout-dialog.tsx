@@ -90,6 +90,13 @@ export function proposedExpiredCheckoutEndDate(
 }
 
 type CheckoutDialogProps = {
+  /**
+   * Shown above the dialog's buttons. A scanner passes its save-not-confirmed
+   * notice here, because the scanner's own copy sits behind this dialog's
+   * overlay and the operator would otherwise confirm again without seeing it.
+   */
+  notice?: ReactNode;
+
   disabled?: ButtonProps["disabled"];
   booking: CheckoutDialogBooking;
   /** A container to render the AlertContent inside */
@@ -267,6 +274,7 @@ export default function CheckoutDialog({
   open: controlledOpen,
   onOpenChange: onControlledOpenChange,
   returnFocusTo,
+  notice,
 }: CheckoutDialogProps) {
   const isNavigating = useDisabled();
   const { prefs } = useDateFormatter();
@@ -553,6 +561,8 @@ export default function CheckoutDialog({
             ))}
           </div>
         ) : null}
+
+        {notice}
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>

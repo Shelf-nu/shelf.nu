@@ -8,6 +8,7 @@ import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { redirectFromStalePendingApprovalFilter } from "~/modules/booking/stale-pending-filter.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -59,6 +60,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
+
+    // A "Pending approval" filter left over from before approval was turned
+    // off lands on the unfiltered list instead of an empty one.
+    const stalePendingRedirect = await redirectFromStalePendingApprovalFilter({
+      request,
+      organizationId,
+      searchParams,
+    });
+    if (stalePendingRedirect) return stalePendingRedirect;
     const {
       page,
       perPageParam,

@@ -18,6 +18,9 @@ export enum PermissionAction {
   delete = "delete",
   checkout = "checkout",
   checkin = "checkin",
+  // Approving a booking reservation request. MANAGER holds it through the
+  // matrix; ADMIN/OWNER through the resolver short-circuit.
+  approve = "approve",
   export = "export",
   import = "import",
   archive = "archive",
@@ -68,4 +71,6 @@ export enum PermissionEntity {
   userData = "user-data", // This is for the user to load their own data.
   update = "update",
   commandPaletteSearch = "command-palette-search",
+  /** "Report a problem" on an asset: a history line plus an email to the people who run the workspace. */
+  problemReport = "problemReport",
 }

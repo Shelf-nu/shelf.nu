@@ -11,7 +11,7 @@
  * @see {@link file://./../../../app/modules/auth/sso-enforcement.server.ts}
  */
 import type { ActionFunctionArgs } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   INVALID_CREDENTIALS_MESSAGE,
@@ -63,12 +63,15 @@ vi.mock("~/utils/env", async (importOriginal) => {
 
 import { db } from "~/database/db.server";
 
-/** POSTs the login form for `email`. */
-function login(email: string) {
+/** POSTs the login form for `email`, with any extra request headers. */
+function login(email: string, headers: Record<string, string> = {}) {
   return action({
     request: new Request("https://app.shelf.nu/login", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
       body: new URLSearchParams({ email, password: "wrong-password" }),
     }),
     context: { isAuthenticated: false, setSession: vi.fn() },
@@ -119,6 +122,26 @@ describe("login action: SSO domain hint", () => {
     vi.clearAllMocks();
     givenWrongPassword();
     givenDomainIsSso(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes the visitor's address to Supabase with the sign-in", async () => {
+    // why: a self-hosted instance with one proxy in front, so the proxy's
+    // X-Forwarded-For entry names the visitor.
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
+
+    await login("someone@example.com", { "X-Forwarded-For": "203.0.113.7" });
+
+    // Supabase counts its per-IP limits against the visitor, not this server.
+    expect(signInWithEmail).toHaveBeenCalledWith(
+      "someone@example.com",
+      "wrong-password",
+      { clientIp: "203.0.113.7" }
+    );
   });
 
   it("adds the hint to a wrong password on an SSO domain", async () => {

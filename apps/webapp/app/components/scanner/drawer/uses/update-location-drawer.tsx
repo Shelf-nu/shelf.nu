@@ -26,6 +26,8 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
+import type { BulkPartStatuses } from "~/hooks/use-bulk-save-settle";
+import { useBulkSaveSettle } from "~/hooks/use-bulk-save-settle";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
@@ -34,6 +36,10 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
+import {
+  BULK_SAVE_NO_ANSWER_MESSAGE,
+  readBulkSaveAnswer,
+} from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -47,11 +53,8 @@ import {
   TextLoader,
 } from "../generic-item-row";
 import { buildUpdateLocationBlockers } from "./location-scan-blockers";
-
-type LocationState = {
-  status: "processing" | "success" | "error";
-  errorMessage?: string;
-};
+import type { LocationState } from "./update-location-result";
+import { sendLocationParts } from "./update-location-result";
 
 /**
  * Drawer component for managing scanned assets to be added to a location
@@ -123,13 +126,22 @@ export default function UpdateLocationDrawer({
   );
 }
 
+/** The result the dialog shows, and where each part of the save stands. */
+type LocationSave = { result: LocationState; parts: BulkPartStatuses };
+
+/** Before a save, and after its dialog is closed. */
+const PENDING_LOCATION_SAVE: LocationSave = {
+  result: { status: "processing" },
+  parts: { assets: "processing", kits: "processing" },
+};
+
 function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
   const { assetIds, idsTotalCount, kitIds } = useAtomValue(scannedItemIdsAtom);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [locationState, setLocationState] = useState<LocationState>({
-    status: "processing",
-  });
+  const [save, setSave] = useState<LocationSave>(PENDING_LOCATION_SAVE);
   const disabled = useDisabled();
+  // What the list keeps once the save answers, and the draft's mark.
+  const bulkSave = useBulkSaveSettle({ statuses: save.parts, dialogOpen });
 
   const zo = useZorm("AddToLocation", BulkLocationUpdateSchema, {
     onValidSubmit: async (e) => {
@@ -139,73 +151,95 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
 
       // Skip if no assets or no kitIds to process
       if (assetIds.length === 0 && kitIds.length === 0) {
-        setLocationState({
-          status: "error",
-          errorMessage: "No assets or kits selected to update location",
+        setSave({
+          ...PENDING_LOCATION_SAVE,
+          result: {
+            status: "error",
+            errorMessage: "No assets or kits selected to update location",
+          },
         });
         return;
       }
 
+      const attempt = bulkSave.begin({ assetIds, kitIds });
+      const show = (next: LocationSave) => {
+        if (attempt.isCurrent()) {
+          setSave(next);
+        }
+      };
+      // The result is shown once every part has answered. Each part's status
+      // is shown as soon as it answers, so Done pressed while the kits are
+      // still waiting takes the saved assets out of the list.
+      let latest: LocationSave = PENDING_LOCATION_SAVE;
+      const onProgress = (progress: LocationSave) => {
+        latest = progress;
+        show(progress);
+      };
+      const sendPart = async (path: string, body: FormData) =>
+        readBulkSaveAnswer<{ error?: { message: string } }>(
+          await fetch(path, { method: "POST", body })
+        );
+
       try {
-        let locationState: LocationState = { status: "processing" };
-
-        if (assetIds.length) {
-          const formData = objectToFormData({
-            assetIds,
-            newLocationId,
-          });
-          const assetsResponse = await fetch(
-            "/api/assets/bulk-update-location",
-            {
-              method: "POST",
-              body: formData,
-            }
-          );
-          const assetsData = await assetsResponse.json();
-          locationState = {
-            status: assetsData.error ? "error" : "success",
-            ...(assetsData.error && { errorMessage: assetsData.error.message }),
-          };
+        const saved = await sendLocationParts({
+          sendAssets: assetIds.length
+            ? () =>
+                sendPart(
+                  "/api/assets/bulk-update-location",
+                  // `refuse`: the blocker list already keeps quantity-tracked
+                  // assets out, and the server holds the same line, so a list
+                  // that slips one through fails rather than saving the rest
+                  // under a success message.
+                  objectToFormData({
+                    assetIds,
+                    newLocationId,
+                    quantityTracked: "refuse",
+                  })
+                )
+            : null,
+          sendKits: kitIds.length
+            ? () =>
+                sendPart(
+                  "/api/kits/bulk-actions",
+                  objectToFormData({
+                    kitIds,
+                    newLocationId,
+                    intent: "bulk-update-location",
+                  })
+                )
+            : null,
+          isCurrent: attempt.isCurrent,
+          onProgress,
+        });
+        if (saved) {
+          show(saved);
         }
-
-        if (kitIds.length) {
-          const kitFormData = objectToFormData({
-            kitIds,
-            newLocationId,
-            intent: "bulk-update-location",
-          });
-
-          const kitsResponse = await fetch("/api/kits/bulk-actions", {
-            method: "POST",
-            body: kitFormData,
-          });
-          const kitsData = await kitsResponse.json();
-          locationState = {
-            status: kitsData.error ? "error" : "success",
-            ...(kitsData.error && { errorMessage: kitsData.error.message }),
-          };
-        }
-
-        setLocationState(locationState);
       } catch (error) {
-        setLocationState({
-          status: "error",
-          errorMessage:
-            error instanceof ShelfError
-              ? error.message
-              : "Something went wrong while adding assets/kit to location. Please try again.",
+        // No answer: the server may have saved it anyway, so the mark stays.
+        // A part that was never sent is not saved either.
+        attempt.markUnanswered();
+        const { parts } = latest;
+        show({
+          result: {
+            status: "error",
+            errorMessage:
+              error instanceof ShelfError
+                ? error.message
+                : BULK_SAVE_NO_ANSWER_MESSAGE,
+          },
+          parts: {
+            assets: parts.assets === "processing" ? "error" : parts.assets,
+            kits: parts.kits === "processing" ? "error" : parts.kits,
+          },
         });
       }
     },
   });
 
-  const clearItems = useSetAtom(clearScannedItemsAtom);
-
   function cleanupState() {
-    setLocationState({
-      status: "processing",
-    });
-    clearItems();
+    // Empties the list only when the whole of it saved; see `dismissBulkSave`.
+    bulkSave.dismiss();
+    setSave(PENDING_LOCATION_SAVE);
   }
 
   return (
@@ -213,7 +247,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
       <SubmittingDialog
         open={dialogOpen}
         setOpen={setDialogOpen}
-        locationState={locationState}
+        locationState={save.result}
         cleanupState={cleanupState}
       />
       <Form ref={zo.ref}>

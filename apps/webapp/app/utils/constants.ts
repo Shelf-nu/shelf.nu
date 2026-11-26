@@ -62,6 +62,14 @@ export const ASSET_DESCRIPTION_MAX_LENGTH = 5000;
 export const SENTRY_TUNNEL_PATH = "/api/sentry-tunnel";
 
 /**
+ * Share of requests traced by Sentry, on the server and in the browser alike.
+ * One value for both, because a server request inherits the browser's decision:
+ * different rates would leave sampled browser traces without their server half.
+ * Every traced request spends span quota, which is billed per month.
+ */
+export const SENTRY_TRACES_SAMPLE_RATE = 0.05;
+
+/**
  * Largest envelope the tunnel will read, in bytes.
  *
  * The route buffers the whole body before forwarding it, and the path is

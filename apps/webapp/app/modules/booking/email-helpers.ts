@@ -164,6 +164,41 @@ export const assetReservedEmailContent = ({
 };
 
 /**
+ * Sent instead of the reserved confirmation when the org requires approval
+ * and the reservation was made by a BASE / SELF_SERVICE user: the booking is
+ * RESERVED (it holds its assets) but cannot be checked out until an admin
+ * approves it, so the copy must not read as a confirmation.
+ */
+export const bookingRequestReceivedEmailContent = ({
+  modelRequests,
+  ...args
+}: BasicEmailContentArgs & {
+  modelRequests?: { quantity: number; modelName: string }[];
+}) => {
+  const modelRequestsBlock =
+    modelRequests && modelRequests.length > 0
+      ? `\n\nRequested models:\n${modelRequests
+          .map((req) => `- ${req.quantity} × ${req.modelName}`)
+          .join("\n")}`
+      : "";
+
+  return baseBookingTextEmailContent({
+    ...args,
+    emailContent: `Booking request for ${args.custodian}, waiting for approval. The requested items are held for the booking period, and an administrator or manager will review the request before check-out.${modelRequestsBlock}`,
+  });
+};
+
+/**
+ * Sent to the custodian (and other recipients) when an approver approves a
+ * pending reservation request.
+ */
+export const bookingApprovedEmailContent = (args: BasicEmailContentArgs) =>
+  baseBookingTextEmailContent({
+    ...args,
+    emailContent: `The booking request for ${args.custodian} has been approved: "${args.bookingName}". The equipment can now be checked out for the booking period.`,
+  });
+
+/**
  * This is the content of the email sent to the custodian when a booking is checked out.
  */
 export const checkoutReminderEmailContent = (args: BasicEmailContentArgs) =>
@@ -331,10 +366,20 @@ export const cancelledBookingEmailContent = (
  * request back for changes). The booking still exists — the recipient can
  * open it, adjust it and reserve it again.
  */
-export const revertedToDraftEmailContent = (args: BasicEmailContentArgs) =>
+export const revertedToDraftEmailContent = ({
+  reason,
+  ...args
+}: BasicEmailContentArgs & {
+  /** Why it was sent back, when the actor gave one. */
+  reason?: string;
+}) =>
   baseBookingTextEmailContent({
     ...args,
-    emailContent: `Your booking reservation has been reverted to draft: "${args.bookingName}". You can review the booking, make changes and submit it again.`,
+    emailContent: `Your booking reservation has been reverted to draft: "${
+      args.bookingName
+    }". You can review the booking, make changes and submit it again.${
+      reason ? `\n\nWhat to change: ${reason}` : ""
+    }`,
   });
 
 /**

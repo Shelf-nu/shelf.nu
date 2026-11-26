@@ -23,6 +23,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
 } from "@shelf/labels";
 import { onTestFinished } from "vitest";
+import { createBookingSettings } from "@factories";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { accessFor } from "@helpers/role-access";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -66,6 +67,7 @@ import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
+import { hashRequest } from "./request-version.server";
 import {
   createBooking,
   partialCheckinBooking,
@@ -92,6 +94,10 @@ import {
   duplicateBooking,
   computeBookingKitDrift,
   revertBookingToDraft,
+  approveBooking,
+  assertRequestMayBeCheckedOut,
+  getBookingsForCalendar,
+  getPendingApprovalCount,
   extendBooking,
   removeAssets,
   addScannedAssetsToBooking,
@@ -107,7 +113,7 @@ import {
   bulkDeleteBookings,
   // Phase 3c helpers
   computeBookingAssetRemaining,
-  computeBookingAssetSliceRemaining,
+  computeBookingCheckinRemaining,
   attributeDispositionsByBookingAsset,
   attributeCategorizedDispositionsByBookingAsset,
   spreadSessionDispositionsOverSlices,
@@ -328,6 +334,9 @@ vitest.mock("~/database/db.server", () => ({
     // tests that exercise the foreign-user rejection override with null.
     userOrganization: {
       findFirst: vitest.fn().mockResolvedValue({ id: "user-org-1" }),
+      // why: the draft check-out gate reads the actor's roles. Default: an
+      // administrator, whose reservations are never requests.
+      findUnique: vitest.fn().mockResolvedValue({ roles: ["ADMIN"] }),
     },
     bookingAsset: {
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -488,18 +497,46 @@ vitest.mock("~/modules/user/service.server", () => ({
   }),
 }));
 
+// why: the service asks permissions such as extend; approve stays denied by
+// default, and no check-out reads it (a pending request is refused for
+// everyone). Every other permission stays granted.
+vitest.mock("~/utils/permissions/permission.validator.server", () => ({
+  hasPermission: vitest
+    .fn()
+    .mockImplementation(({ action }: { action: string }) =>
+      Promise.resolve(action !== "approve")
+    ),
+}));
+
 // why: quantity-lock relies on $queryRaw (FOR UPDATE) which the db mock
 // can't express cleanly. The single-asset lock resolves a minimal asset stub
 // (tests override the return per-asset as needed); the batch lock returns
-// nothing, so it resolves once every asset is locked.
-vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
-  lockAssetForQuantityUpdate: vitest.fn().mockResolvedValue({
+// nothing, so it resolves once every asset is locked. The batch lock that
+// returns rows builds each row from the single-asset stub, so a test sets up
+// a locked asset the same way whichever lock the code under test takes.
+vitest.mock("~/modules/consumption-log/quantity-lock.server", () => {
+  const lockAssetForQuantityUpdate = vitest.fn().mockResolvedValue({
     id: "asset-qty-default",
     title: "Default Asset",
     quantity: 0,
-  }),
-  lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
-}));
+  });
+  return {
+    lockAssetForQuantityUpdate,
+    lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
+    lockAssetRowsForQuantityUpdate: vitest.fn(
+      async (tx: unknown, assetIds: string[], organizationId: string) => {
+        const rows = new Map<string, unknown>();
+        for (const assetId of [...new Set(assetIds)].sort()) {
+          rows.set(
+            assetId,
+            await lockAssetForQuantityUpdate(tx, assetId, organizationId)
+          );
+        }
+        return rows;
+      }
+    ),
+  };
+});
 
 // why: partial-mock so real helpers (computeBookingAvailableQuantity and
 // friends) keep their behavior, but ConsumptionLog writes are stubbed so
@@ -769,6 +806,20 @@ function restoreTeamMemberFindFirst() {
     ({ where }: { where: { id: string } }) => ({ id: where.id })
   );
 }
+
+/**
+ * A pending request as `readBookingRequestVersion` reads it. Its digest is the
+ * version an approver's page carries; any other string is a changed request.
+ */
+const PENDING_REQUEST_ROW = {
+  status: BookingStatus.RESERVED,
+  approvedAt: null,
+  updatedAt: new Date("2026-11-01T10:00:00Z"),
+  bookingAssets: [
+    { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+  ],
+  modelRequests: [],
+};
 
 describe("createBooking", () => {
   afterEach(restoreTeamMemberFindFirst);
@@ -2375,7 +2426,11 @@ describe("getKitIdsToAcquire", () => {
 });
 
 describe("updateBasicBooking", () => {
-  afterEach(restoreTeamMemberFindFirst);
+  afterEach(() => {
+    restoreTeamMemberFindFirst();
+    // Back to the file-wide default lock status.
+    vitest.mocked(db.$queryRaw).mockResolvedValue([{ status: "ONGOING" }]);
+  });
 
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -2383,6 +2438,31 @@ describe("updateBasicBooking", () => {
       "team-member-1": "user-1",
       "team-member-2": "user-2",
     });
+    // The row lock reads the booking as the tests' snapshot has it: a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValue([{ status: BookingStatus.DRAFT }]);
+  });
+
+  it("refuses a draft-only edit when the booking left DRAFT before the write", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status: BookingStatus.DRAFT,
+      custodianUserId: "user-1",
+      name: "Old Name",
+      tags: [],
+    });
+    // Reserved (and maybe approved) between the read and the write.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValue([{ status: BookingStatus.RESERVED }]);
+
+    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
+      /changed while you were editing/
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 
   const mockUpdateBookingParams = {
@@ -4205,6 +4285,9 @@ describe("reserveBooking", () => {
     db.bookingAsset.findFirst.mockResolvedValue(null);
     //@ts-expect-error missing vitest type
     db.bookingModelRequest.count.mockResolvedValue(1);
+    // The row lock reads the booking still DRAFT: nothing reserved it since.
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: "DRAFT" }]);
     stubCustodianTeamMembers({ "team-1": "user-1" });
   });
 
@@ -4213,6 +4296,8 @@ describe("reserveBooking", () => {
     // `mockResolvedValue` survive `clearAllMocks`, so without this the
     // reserve-friendly values above leak into every later describe.
     restoreTeamMemberFindFirst();
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: "ONGOING" }]);
     //@ts-expect-error missing vitest type
     db.bookingAsset.count.mockResolvedValue(0);
     //@ts-expect-error missing vitest type
@@ -4275,6 +4360,7 @@ describe("reserveBooking", () => {
     description: "Reserved booking description",
     hints: mockClientHints,
     alertsOrgOnReservation: false,
+    actorApprovalSetting: "none" as const,
     tags: [],
   };
 
@@ -4357,6 +4443,180 @@ describe("reserveBooking", () => {
       });
 
       await expect(reserveBooking(mockReserveParams)).resolves.toBeDefined();
+    });
+
+    describe("approval requirement", () => {
+      /** The reserved row as the post-commit read returns it for the emails. */
+      const reservedRead = {
+        ...healthyOuterRead,
+        status: BookingStatus.RESERVED,
+        custodianUser: null,
+        custodianTeamMember: { name: "Team member" },
+        creator: null,
+        tags: [],
+        _count: { bookingAssets: 1 },
+        organization: {
+          name: "Org",
+          customEmailFooter: null,
+          owner: { email: "owner@example.com" },
+        },
+      };
+
+      beforeEach(() => {
+        // The pre-check reads the draft; the post-commit read for the emails
+        // sees the reserved row.
+        (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+          .mockResolvedValueOnce({
+            ...reservedRead,
+            status: BookingStatus.DRAFT,
+          })
+          .mockResolvedValue(reservedRead);
+        //@ts-expect-error missing vitest type
+        db.booking.update.mockResolvedValue(reservedRead);
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue({
+          requireApprovalForBase: true,
+          requireApprovalForSelfService: true,
+        });
+        installTxEligibility({
+          sliceCount: 1,
+          unavailableSlice: null,
+          modelRequestCount: 0,
+        });
+        vitest.mocked(getBookingNotificationRecipients).mockResolvedValue([
+          {
+            email: "custodian@example.com",
+            firstName: "Casey",
+            lastName: "Custodian",
+            userId: "user-2",
+            dateFormat: null,
+            timeFormat: null,
+            weekStart: null,
+            timeZone: null,
+            reason: "custodian",
+          },
+        ]);
+      });
+
+      afterEach(() => {
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue(null);
+        // Back to the suite's default (nobody to email), not a bare reset
+        // that would strip the module mock's answer from every later test.
+        vitest.mocked(getBookingNotificationRecipients).mockResolvedValue([]);
+      });
+
+      it("lands a Base reservation as a pending request", async () => {
+        // why: the actor's role picks the switch; Base is gated here.
+        await reserveBooking({
+          ...mockReserveParams,
+          alertsOrgOnReservation: true,
+          actorApprovalSetting: "base",
+          userId: "user-2",
+        });
+
+        expect(db.booking.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ approvedAt: null }),
+          })
+        );
+        expect(sendEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            to: "custodian@example.com",
+            subject: expect.stringContaining("Booking request received"),
+          })
+        );
+        // The requester holds no reservation yet, so the note names the
+        // request and its "Pending approval" state, not RESERVED.
+        expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: expect.stringMatching(
+              /requested a reservation\. Status changed from \{% booking_status status="DRAFT"[^%]*\/%\} to \{% booking_status status="PENDING_APPROVAL" \/%\}$/
+            ),
+          })
+        );
+      });
+
+      it("approves a Base reservation on write in a fresh workspace: both switches start off", async () => {
+        // A new workspace's settings row carries the schema defaults, which
+        // the factory mirrors: approval is opt-in, so nothing is a request.
+        const fresh = createBookingSettings();
+        expect(fresh.requireApprovalForBase).toBe(false);
+        expect(fresh.requireApprovalForSelfService).toBe(false);
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue({
+          requireApprovalForBase: fresh.requireApprovalForBase,
+          requireApprovalForSelfService: fresh.requireApprovalForSelfService,
+        });
+
+        await reserveBooking({
+          ...mockReserveParams,
+          alertsOrgOnReservation: true,
+          actorApprovalSetting: "base",
+          userId: "user-2",
+        });
+
+        expect(db.booking.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ approvedAt: expect.any(Date) }),
+          })
+        );
+        expect(sendEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            subject: expect.stringContaining("Booking reserved"),
+          })
+        );
+      });
+
+      it("approves an administrator's own reservation in the same write", async () => {
+        await reserveBooking({
+          ...mockReserveParams,
+          alertsOrgOnReservation: false,
+          actorApprovalSetting: "none" as const,
+          userId: "admin-1",
+        });
+
+        expect(db.booking.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ approvedAt: expect.any(Date) }),
+          })
+        );
+        expect(sendEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            subject: expect.stringContaining("Booking reserved"),
+          })
+        );
+        expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: expect.stringMatching(
+              /reserved the booking\. Status changed from \{% booking_status status="DRAFT"[^%]*\/%\} to \{% booking_status status="RESERVED"[^%]*\/%\}$/
+            ),
+          })
+        );
+      });
+
+      it("approves a Self service reservation while only the Base switch is on", async () => {
+        // why: each role has its own switch; with only Base's on, Self
+        // service reserves approved.
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue({
+          requireApprovalForBase: true,
+          requireApprovalForSelfService: false,
+        });
+
+        await reserveBooking({
+          ...mockReserveParams,
+          alertsOrgOnReservation: true,
+          actorApprovalSetting: "selfService",
+          userId: "user-2",
+        });
+
+        expect(db.booking.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ approvedAt: expect.any(Date) }),
+          })
+        );
+      });
     });
 
     it("refuses when an asset was marked unavailable after the caller checked", async () => {
@@ -4475,6 +4735,69 @@ describe("reserveBooking", () => {
       })
     );
     expect(result).toEqual(reservedBooking);
+  });
+
+  it("refuses when the locked row is no longer a draft", async () => {
+    // why: a reservation or check-out that committed after the read before
+    // the transaction must not be overwritten by this one.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      bookingAssets: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: "ONGOING" }]);
+
+    await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
+      /already ongoing/
+    );
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.RESERVED }),
+      })
+    );
+  });
+
+  it("locks the booking row before anything else in its transaction", async () => {
+    // why: item and amount changes take the booking row before their asset
+    // locks; reserving must take the same order, or the two can deadlock.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: mockReserveParams.from,
+      to: mockReserveParams.to,
+      bookingAssets: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.RESERVED,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockClear();
+
+    await reserveBooking(mockReserveParams);
+
+    const lockCall = vitest
+      .mocked(db.$queryRaw)
+      .mock.calls.findIndex(([sql]) =>
+        (sql as unknown as string[]).join("").includes('FROM "Booking"')
+      );
+    expect(lockCall).toBeGreaterThanOrEqual(0);
+    const lockOrder = vitest.mocked(db.$queryRaw).mock.invocationCallOrder[
+      lockCall
+    ];
+    // The slice read must have happened, or the order below proves nothing.
+    expect(db.bookingAsset.count).toHaveBeenCalled();
+    const firstSliceRead =
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(firstSliceRead);
   });
 
   it("links the custodian user from the team member row", async () => {
@@ -5179,6 +5502,23 @@ describe("checkoutBooking", () => {
     );
   });
 
+  // why: the approval tests grant `approve`, switch approval on and change the
+  // actor's roles; put the suite defaults back even when one of them fails.
+  afterEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest
+      .mocked(hasPermission)
+      .mockImplementation(({ action }: { action: string }) =>
+        Promise.resolve(action !== "approve")
+      );
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({ roles: ["ADMIN"] });
+  });
+
   const mockCheckoutParams = {
     id: "booking-1",
     organizationId: "org-1",
@@ -5223,6 +5563,243 @@ describe("checkoutBooking", () => {
     // fail-safe: no status transition, no booking write
     expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a pending reservation request before any write", async () => {
+    // why: the gate lives in the service so a stale tab, a direct POST and
+    // the mobile routes are all refused; dropping it would let a request
+    // go ONGOING with nobody having decided it.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValueOnce({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-pending",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    });
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+      /not been approved yet/
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses an approver's check-out of a pending request too: approving comes first", async () => {
+    // why: approving and checking out are two steps. Only Approve approves a
+    // request (with the version the approver saw); a check-out never does,
+    // whoever makes it.
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce({
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+
+    try {
+      await expect(
+        checkoutBooking({ ...mockCheckoutParams, userId: "user-1" })
+      ).rejects.toThrow(/Approve the request first/);
+      expect(db.booking.update).not.toHaveBeenCalled();
+      expect(activityEventService.recordEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "BOOKING_APPROVED" }),
+        expect.anything()
+      );
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+    }
+  });
+
+  it("refuses a straight check-out of a draft by a member whose reservation is a request", async () => {
+    // why: checking a draft out skips the reservation, so without this a
+    // Self service member could take gear without ever sending the request.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: ["SELF_SERVICE"],
+    });
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-draft",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+
+    await expect(
+      checkoutBooking({ ...mockCheckoutParams, userId: "user-1" })
+    ).rejects.toThrow(/Reserve this booking first/);
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
+  it("judges a multi-role membership by its effective role at draft check-out", async () => {
+    // why: Self service + Base resolves to Self service, as access.policy and
+    // reserveBooking do; with only Base approval on, that member's reservation
+    // is final, so a straight draft check-out is not refused.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: ["BASE", "SELF_SERVICE"],
+    });
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-draft-multi",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await checkoutBooking({ ...mockCheckoutParams, userId: "user-1" });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
+  it("lets a member check a draft out when their own role's switch is off", async () => {
+    // why: the draft gate reads the actor's switch, not "any switch on"; a
+    // Base member in a workspace that only gates Self service is not refused.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({ roles: ["BASE"] });
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-draft-ok",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.DRAFT,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await checkoutBooking({ ...mockCheckoutParams, userId: "user-1" });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
   });
 
   it("should checkout booking successfully with no conflicts", async () => {
@@ -5427,6 +6004,74 @@ describe("checkoutBooking", () => {
         })
       );
     });
+
+    it.each([
+      [OrganizationRoles.SELF_SERVICE, true],
+      [OrganizationRoles.ADMIN, false],
+    ])(
+      "a %s member re-dating their approved expired reservation later is refused: %s",
+      async (role, refused) => {
+        // A new end later than the approved one asks for more time than was
+        // approved, and at check-out no later approval can follow. Someone
+        // who may approve is not held to that.
+        const booking = expiredBooking();
+        const reads = (
+          db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+        ).mockResolvedValueOnce(booking);
+        // The hydrating read only when the check-out commits: a queued value
+        // nothing consumes would leak into the next case.
+        if (!refused) {
+          reads.mockResolvedValueOnce({
+            ...booking,
+            status: BookingStatus.ONGOING,
+          });
+        }
+        //@ts-expect-error missing vitest type
+        db.booking.update.mockResolvedValue({ id: "booking-1" });
+        lockReadsReserved();
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue({
+          requireApprovalForBase: true,
+          requireApprovalForSelfService: true,
+        });
+        // The growth rule's read of the locked request: approved. Once: the
+        // reschedule reads the booking again later through its own default.
+        //@ts-expect-error missing vitest type
+        db.booking.findFirst.mockResolvedValueOnce({
+          status: BookingStatus.RESERVED,
+          approvedAt: new Date("2026-11-01T09:00:00Z"),
+        });
+        //@ts-expect-error missing vitest type
+        db.userOrganization.findUnique.mockResolvedValue({ roles: [role] });
+
+        try {
+          const checkout = checkoutBooking({
+            ...mockCheckoutParams,
+            userId: "user-1",
+            from: expiredFrom,
+            to: expiredTo,
+            intentChoice: CheckoutIntentEnum["with-new-end-date"],
+            newEndDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+          });
+          if (refused) {
+            await expect(checkout).rejects.toThrow(
+              /can't ask for more than was approved/
+            );
+            expect(statusWrite()).toBeUndefined();
+          } else {
+            await checkout;
+            expect(statusWrite()?.data?.status).toBe(BookingStatus.ONGOING);
+          }
+        } finally {
+          //@ts-expect-error missing vitest type
+          db.bookingSettings.findUnique.mockResolvedValue(null);
+          //@ts-expect-error missing vitest type
+          db.booking.findFirst.mockResolvedValue(null);
+          //@ts-expect-error missing vitest type
+          db.userOrganization.findUnique.mockResolvedValue(null);
+        }
+      }
+    );
 
     it("refuses the early-check-out value on an expired reservation", async () => {
       expect.assertions(2);
@@ -6833,6 +7478,222 @@ describe("fulfilModelRequestsAndCheckout", () => {
     };
   }
 
+  it("refuses a pending reservation request for a caller who may not approve", async () => {
+    // why: this path reaches ONGOING without `checkoutBooking`, so only the
+    // gate inside `checkoutBookingWritesWithinTx` stops a request nobody
+    // approved from going out with its model reservations.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    const pending = {
+      ...buildPreTxBooking({
+        bookingAssets: [
+          {
+            asset: {
+              id: "hp-1",
+              assetKits: [],
+              title: "HP LaserJet 2020",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            },
+            assetId: "hp-1",
+            quantity: 1,
+            id: "ba-hp",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      }),
+      approvedAt: null,
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(pending);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    // Refused under the lock before the scan reads anything, so no scan reads
+    // are queued: a queued value nothing consumes would leak into the next case.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    try {
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+        })
+      ).rejects.toThrow(/not been approved yet/);
+      expect(hasStatusUpdate()).toBe(false);
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(null);
+    }
+  });
+
+  /**
+   * Stages an approved (or pending) request whose scan adds `dell-1`, a unit
+   * that answers no model reservation: an extra on top of what was asked for.
+   */
+  function stageExtraScanOnRequest({
+    approvedAt,
+    reachesScan = true,
+  }: {
+    approvedAt: Date | null;
+    /** False when the case is refused before the scan reads anything. */
+    reachesScan?: boolean;
+  }) {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce({ ...buildPreTxBooking(), approvedAt });
+    // The locked row the approval gate and the growth rule read.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      ...PENDING_REQUEST_ROW,
+      approvedAt,
+    });
+    if (!reachesScan) return;
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: null,
+      },
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+  }
+
+  /** Puts the settings and booking reads back to the suite's defaults. */
+  function resetRequestReads() {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue(null);
+  }
+
+  it("refuses a requester's scanned extra on their approved request at check-out", async () => {
+    // A unit that answers no reservation asks for more than was approved, and
+    // at check-out no later approval can follow.
+    stageExtraScanOnRequest({ approvedAt: new Date("2026-11-10T09:00:00Z") });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: [OrganizationRoles.SELF_SERVICE],
+    });
+
+    try {
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+        })
+      ).rejects.toThrow(/can't ask for more than was approved/);
+      expect(hasStatusUpdate()).toBe(false);
+    } finally {
+      resetRequestReads();
+    }
+  });
+
+  it("lets an approver add a scanned extra to an approved request at check-out", async () => {
+    stageExtraScanOnRequest({ approvedAt: new Date("2026-11-10T09:00:00Z") });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    // The post-scan snapshot inside the transaction, the hydrating read after
+    // it, and the asset the activity note names: the check-out commits. Every
+    // later asset read (org guard, note) answers with the full row.
+    const assetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+    const defaultAssetFindMany = assetFindMany.getMockImplementation();
+    assetFindMany.mockImplementation(() =>
+      Promise.resolve([
+        {
+          id: "dell-1",
+          title: "Dell #1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: null,
+        },
+      ])
+    );
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce({
+      ...buildPreTxBooking(),
+      status: BookingStatus.ONGOING,
+    });
+
+    try {
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+      });
+      expect(hasStatusUpdate()).toBe(true);
+      // The approval stays: an approver's change is not held to the rule.
+      expect(db.booking.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { approvedAt: null, approvedById: null },
+        })
+      );
+    } finally {
+      resetRequestReads();
+      assetFindMany.mockImplementation(defaultAssetFindMany!);
+    }
+  });
+
+  it("refuses an approver's fulfil check-out of a pending request, before the scan adds anything", async () => {
+    // Approving and checking out are two steps, for approvers too.
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    stageExtraScanOnRequest({ approvedAt: null, reachesScan: false });
+
+    try {
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+        })
+      ).rejects.toThrow(/Approve the request first/);
+      expect(db.booking.update).not.toHaveBeenCalled();
+    } finally {
+      resetRequestReads();
+    }
+  });
+
   it("should create BookingAssets + drain all requests + transition to ONGOING on happy path", async () => {
     expect.assertions(3);
 
@@ -7526,6 +8387,100 @@ describe("fulfilModelRequestsAndCheckout", () => {
     });
     // Reservations are not a check-out input at all: nothing reads them.
     expect(db.bookingModelRequest.findMany).not.toHaveBeenCalled();
+  });
+
+  it("lets a requester check out their approved request early, keeping the approval", async () => {
+    // An earlier start is not held to the request-growth rule: picking up a
+    // little before the start is everyday use. Whether it should be is an
+    // open product decision (see the PR's "Decisions a reviewer may flip").
+    const approvedAt = new Date("2026-11-01T09:00:00Z");
+    const mockBooking = {
+      ...buildPreTxBooking({
+        bookingAssets: [
+          {
+            asset: {
+              id: "hp-1",
+              assetKits: [],
+              title: "HP",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            },
+            assetId: "hp-1",
+            quantity: 1,
+            id: "ba-hp",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      }),
+      approvedAt,
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      []
+    );
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValue({
+      roles: [OrganizationRoles.SELF_SERVICE],
+    });
+    // The growth rule's read, were it asked: an approved reservation.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt,
+      from: null,
+      to: null,
+    });
+
+    try {
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: [],
+        checkoutIntentChoice: "with-adjusted-date" as never,
+      });
+
+      const updateCall = findStatusUpdateCall();
+      expect(updateCall?.data?.status).toBe(BookingStatus.ONGOING);
+      expect((updateCall?.data?.from as Date).getTime()).toBeLessThan(
+        futureFromDate.getTime()
+      );
+      expect(db.booking.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { approvedAt: null, approvedById: null },
+        })
+      );
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.userOrganization.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue(null);
+    }
   });
 
   it("should rewrite booking.from and set originalFrom when checkoutIntentChoice = with-adjusted-date", async () => {
@@ -8515,7 +9470,7 @@ describe("checkinBooking", () => {
   });
 
   it("emits an ASSET_QUANTITY_CHANGED event for a QUANTITY_TRACKED pool decrement on check-in", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     // Single QT asset (Pens) booked 10 units on a pool of 100. An explicit
     // LOSS of 4 units decrements the pool 100 → 96 — the audit event must
@@ -8575,10 +9530,6 @@ describe("checkinBooking", () => {
         ? Promise.resolve([{ quantity: 10 }])
         : Promise.resolve([])
     );
-    // computeBookingAssetSliceRemaining reads findUnique → booked 10.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 10 });
     // No logs yet → full 10 remaining; no custody held.
     (
       db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
@@ -8586,6 +9537,9 @@ describe("checkinBooking", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
       _sum: { quantity: 0 },
     });
+    // why: the batched check-in read takes the one slice, nothing logged.
+    mockCheckinSlices(mockBooking.bookingAssets);
+    mockCheckinLogged([]);
 
     await checkinBooking({
       ...mockCheckinParams,
@@ -8606,6 +9560,12 @@ describe("checkinBooking", () => {
       )
     );
     expect(emittedQuantityChange).toBe(true);
+    // No other booking holds the pens, so reconciliation brings them back
+    // AVAILABLE (the INDIVIDUAL-only reset carries a `type` filter).
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-pens"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.AVAILABLE },
+    });
   });
 });
 
@@ -10759,10 +11719,79 @@ describe("revertBookingToDraft", () => {
     // the write match nothing.
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1", status: BookingStatus.RESERVED },
-      data: { status: BookingStatus.DRAFT },
+      // Reverting also clears any earlier approval: a re-reserved request
+      // must be approved again.
+      data: {
+        status: BookingStatus.DRAFT,
+        approvedAt: null,
+        approvedById: null,
+      },
       include: expect.any(Object),
     });
     expect(result).toEqual(draftBooking);
+  });
+
+  describe("activity note for a request sent back", () => {
+    afterEach(() => {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+    });
+
+    /**
+     * Reverts booking-1, read as RESERVED with the given approval, in a
+     * workspace with the Base approval switch on.
+     *
+     * @returns The content of the status note the revert wrote
+     */
+    async function revertAndReadNote(approvedAt: Date | null) {
+      const reserved = {
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        approvedAt,
+        bookingAssets: [],
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...reserved,
+        status: BookingStatus.DRAFT,
+        approvedAt: null,
+      });
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: false,
+      });
+
+      await revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      });
+
+      const call = vitest
+        .mocked(bookingNoteService.createSystemBookingNote)
+        .mock.calls.find(([args]) =>
+          String(args.content).includes("reverted booking to draft")
+        );
+      return String(call?.[0].content);
+    }
+
+    it("starts from Pending approval for a request not yet approved", async () => {
+      expect(await revertAndReadNote(null)).toMatch(
+        /Status changed from \{% booking_status status="PENDING_APPROVAL" \/%\} to \{% booking_status status="DRAFT"/
+      );
+    });
+
+    it("starts from Reserved for an approved reservation", async () => {
+      expect(
+        await revertAndReadNote(new Date("2026-11-16T10:00:00.000Z"))
+      ).toMatch(
+        /Status changed from \{% booking_status status="RESERVED"[^%]*\/%\} to \{% booking_status status="DRAFT"/
+      );
+    });
   });
 
   it("refuses the revert when the booking left RESERVED before the write", async () => {
@@ -10820,9 +11849,8 @@ describe("revertBookingToDraft", () => {
     expect(err.shouldBeCaptured).toBe(false);
   });
 
-  // why: regression — reverting a reservation used to be silent. The custodian
-  // submitted a request, an admin sent it back, and no email went out (every
-  // other lifecycle transition emails). This pins the notification in place.
+  // why: a custodian whose request is sent back must hear about it, like
+  // every other lifecycle transition. This pins the notification.
   it("emails the resolved recipients when a reservation is reverted", async () => {
     const custodianUser = {
       id: "user-2",
@@ -10893,6 +11921,84 @@ describe("revertBookingToDraft", () => {
       })
     );
   });
+
+  it("tells the custodian what to change when the actor gives a reason", async () => {
+    const custodianUser = {
+      id: "user-2",
+      email: "custodian@example.com",
+      firstName: "Custodian",
+      lastName: "User",
+      displayName: null,
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [],
+    };
+    const draftBooking = {
+      ...mockBooking,
+      status: BookingStatus.DRAFT,
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: 0 },
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(draftBooking);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+      reason: "Pick a shorter slot, the camera is booked after 15:00",
+    });
+
+    // The plain-text body carries the reason, so a reader without HTML
+    // still learns what to change before resubmitting.
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        text: expect.stringContaining(
+          "What to change: Pick a shorter slot, the camera is booked after 15:00"
+        ),
+      })
+    );
+    // And the HTML body, which most readers see.
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        html: expect.stringContaining(
+          "Pick a shorter slot, the camera is booked after 15:00"
+        ),
+      })
+    );
+  });
 });
 
 /**
@@ -10914,6 +12020,325 @@ function cancelledJobIds(): unknown[] {
   //@ts-expect-error missing vitest type
   return scheduler.cancel.mock.calls.map((call: unknown[]) => call[0]);
 }
+
+describe("approveBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // `mockApprovalContext` installs a persistent settings answer; hand the
+    // suite's default (no settings row) back so later tests do not reserve
+    // into a workspace that requires approval.
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+  });
+
+  const custodianUser = {
+    id: "user-2",
+    email: "custodian@example.com",
+    firstName: "Custodian",
+    lastName: "User",
+    displayName: null,
+    dateFormat: null,
+    timeFormat: null,
+    weekStart: null,
+    timeZone: null,
+  };
+
+  function mockApprovalContext({
+    requireBookingApproval = true,
+    status = BookingStatus.RESERVED,
+    approvedAt = null,
+    to = new Date("2099-01-01T00:00:00.000Z"),
+  }: {
+    requireBookingApproval?: boolean;
+    status?: BookingStatus;
+    approvedAt?: Date | null;
+    to?: Date;
+  }) {
+    // The request as the approver's page showed it, read again under the
+    // lock; every call below sends its version.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(PENDING_REQUEST_ROW);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: requireBookingApproval,
+      requireApprovalForSelfService: requireBookingApproval,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status,
+      approvedAt,
+      to,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBookingData,
+      status,
+      approvedAt: new Date("2026-08-31T12:00:00.000Z"),
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: 1 },
+    });
+  }
+
+  it("refuses a request that changed since the approver opened it", async () => {
+    // why: a request sent back, edited and resubmitted is RESERVED and
+    // unapproved again; only its version (which folds in `updatedAt`) tells
+    // it from the one reviewed.
+    mockApprovalContext({});
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce({
+      ...PENDING_REQUEST_ROW,
+      updatedAt: new Date("2026-11-16T10:05:00.000Z"),
+    });
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/changed since you opened it/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses when what the request holds changed since it was reviewed", async () => {
+    // why: a kit edit adds a slice without touching the booking row; the
+    // request version covers the slices, so the approval is still refused.
+    mockApprovalContext({});
+    const updatedAt = new Date("2026-11-16T10:00:00.000Z");
+    const reviewedVersion = hashRequest({
+      updatedAt,
+      bookingAssets: [
+        { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+      ],
+      modelRequests: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce({
+      updatedAt,
+      bookingAssets: [
+        { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+        { id: "ba-2", assetId: "asset-2", assetKitId: "ak-1", quantity: 1 },
+      ],
+      modelRequests: [],
+    });
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: mockClientHints,
+        reviewedVersion,
+      })
+    ).rejects.toThrow(/changed since you opened it/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("approves when the request still holds what was reviewed", async () => {
+    mockApprovalContext({});
+    const request = {
+      updatedAt: new Date("2026-11-16T10:00:00.000Z"),
+      bookingAssets: [
+        { id: "ba-1", assetId: "asset-1", assetKitId: null, quantity: 1 },
+      ],
+      modelRequests: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce(request);
+
+    await approveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      hints: mockClientHints,
+      reviewedVersion: hashRequest(request),
+    });
+
+    expect(db.booking.update).toHaveBeenCalled();
+  });
+
+  it("refuses a request whose end date has passed", async () => {
+    mockApprovalContext({ to: new Date("2020-01-01T00:00:00.000Z") });
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/ended before it was approved/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("stamps approvedAt/approvedBy and emails the resolved recipients", async () => {
+    mockApprovalContext({});
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await approveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+      reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+    });
+
+    // The write is guarded on the state it expects to find, so a second
+    // approver racing the first matches no row instead of sending the custodian
+    // a duplicate email.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          status: BookingStatus.RESERVED,
+          approvedAt: null,
+        },
+        data: expect.objectContaining({
+          approvedAt: expect.any(Date),
+          approvedBy: { connect: { id: "admin-1" } },
+        }),
+      })
+    );
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "APPROVED",
+        editorUserId: "admin-1",
+      })
+    );
+    // For the requester the request becomes a reservation, so the note reads
+    // as that status change; the stored status never moved.
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringMatching(
+          /approved the booking request\. Status changed from \{% booking_status status="PENDING_APPROVAL" \/%\} to \{% booking_status status="RESERVED" \/%\}$/
+        ),
+      }),
+      expect.anything()
+    );
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        subject: expect.stringContaining("Booking approved"),
+      })
+    );
+  });
+
+  it("refuses a second approver instead of approving twice", async () => {
+    mockApprovalContext({});
+    // Both approvers read an unapproved reservation, so the pre-checks pass for
+    // each. The first commits; the guarded write then matches no row for the
+    // second, which is what Prisma reports as a failed update.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Record to update not found."), { code: "P2025" })
+    );
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-2",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/approved by someone else/i);
+
+    // The custodian must not be told twice that their booking was approved.
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not disguise a real write failure as a lost race", async () => {
+    mockApprovalContext({});
+    // Not P2025: the row is there, the write itself failed. Reporting this as
+    // "someone else approved it" would tell an admin to refresh and would hide
+    // the outage.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Connection terminated"), { code: "P1001" })
+    );
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/something went wrong while approving/i);
+  });
+
+  it("refuses when the workspace does not require approval", async () => {
+    mockApprovalContext({ requireBookingApproval: false });
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/does not require booking approval/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-RESERVED booking", async () => {
+    mockApprovalContext({ status: BookingStatus.ONGOING });
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/Only reserved bookings/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an already-approved booking", async () => {
+    mockApprovalContext({
+      approvedAt: new Date("2026-08-30T09:00:00.000Z"),
+    });
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+        reviewedVersion: hashRequest(PENDING_REQUEST_ROW),
+      })
+    ).rejects.toThrow(/already been approved/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+});
 
 describe("extendBooking", () => {
   beforeEach(() => {
@@ -10982,6 +12407,59 @@ describe("extendBooking", () => {
     );
     // Nothing past the lock ran: no clash read, no write.
     expect(db.booking.findMany).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a later end from a Self service member whose reservations need approval", async () => {
+    // why: a started booking cannot become a request again, so a requester
+    // asking for more time is refused rather than taking it unapproved.
+    const started = {
+      ...extendableBookingData,
+      status: BookingStatus.ONGOING,
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-ss-extend",
+          checkedOutAt: new Date("2025-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(started);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValueOnce({
+      status: BookingStatus.ONGOING,
+      approvedAt: new Date("2025-01-01T08:00:00.000Z"),
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValueOnce({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.userOrganization.findUnique.mockResolvedValueOnce({
+      roles: ["SELF_SERVICE"],
+    });
+
+    const error = await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate: new Date("2025-01-03T17:00:00Z"),
+      hints: mockClientHints,
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
+      roles: [OrganizationRoles.SELF_SERVICE],
+    }).catch((e: ShelfError) => e);
+
+    expect((error as ShelfError).message).toContain(
+      "make a new booking request for the extra items"
+    );
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
@@ -13202,7 +14680,7 @@ describe("removeAssets", () => {
     // A quantity-tracked asset can hold a free-pool row alongside kit-driven
     // ones on the same booking. A caller that can see which row the operator
     // acted on says so, and only that row goes: the kit still holds its units.
-    expect.assertions(1);
+    expect.assertions(2);
 
     const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
 
@@ -13231,6 +14709,12 @@ describe("removeAssets", () => {
         assetId: { in: ["asset-1"] },
         assetKitId: null,
       },
+    });
+    // Removing items moves the booking's version, so a pending request
+    // cannot be approved from a page that showed the old items.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: "booking-1", organizationId: "org-1" },
+      data: { updatedAt: expect.any(Date) },
     });
   });
 
@@ -14393,18 +15877,21 @@ describe("computeBookingAssetRemaining", () => {
     vitest.clearAllMocks();
   });
 
-  it("returns booked minus logged sum across disposition categories", async () => {
-    expect.assertions(1);
+  it("answers one asset's units still to check in from the batched read", async () => {
+    expect.assertions(2);
 
-    // why: pivot row exists for this (booking, asset) pair with 10 booked.
-    // why: `computeBookingAssetRemaining` switched from `findUnique` to
-    // `findMany` once BookingAsset gained multi-row support — the helper
-    // sums quantities across all rows for the (booking, asset) pair.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
-    // why: aggregate of RETURN+CONSUME+LOSS+DAMAGE logs totals 3 units.
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+    // why: two slices book 10 pens between them and 3 units are logged.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      { id: "ba-1", assetId: "asset-1", quantity: 6 },
+      { id: "ba-2", assetId: "asset-1", quantity: 4 },
+    ]);
+    (
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      { assetId: "asset-1", bookingAssetId: null, _sum: { quantity: 3 } },
+    ]);
 
     const remaining = await computeBookingAssetRemaining(
       db,
@@ -14413,54 +15900,18 @@ describe("computeBookingAssetRemaining", () => {
     );
 
     expect(remaining).toBe(7);
+    expect(db.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
   });
 
-  it("clamps to zero when logs exceed booked quantity", async () => {
+  it("returns zero for an asset that is not on the booking", async () => {
     expect.assertions(1);
 
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 5 }]);
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 8 } });
-
-    const remaining = await computeBookingAssetRemaining(
-      db,
-      "booking-1",
-      "asset-1"
-    );
-
-    expect(remaining).toBe(0);
-  });
-
-  it("returns booked quantity when no disposition logs exist", async () => {
-    expect.assertions(1);
-
-    // why: `computeBookingAssetRemaining` switched from `findUnique` to
-    // `findMany` once BookingAsset gained multi-row support — the helper
-    // sums quantities across all rows for the (booking, asset) pair.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
-    // why: Prisma _sum returns null when the aggregated set is empty.
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: null } });
-
-    const remaining = await computeBookingAssetRemaining(
-      db,
-      "booking-1",
-      "asset-1"
-    );
-
-    expect(remaining).toBe(10);
-  });
-
-  it("returns zero when the bookingAsset pivot row is missing", async () => {
-    expect.assertions(1);
-
-    // why: defends against asset removed from booking between read+write.
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([]);
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+    (
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
 
     const remaining = await computeBookingAssetRemaining(
       db,
@@ -14472,49 +15923,96 @@ describe("computeBookingAssetRemaining", () => {
   });
 });
 
-describe("computeBookingAssetSliceRemaining", () => {
+describe("computeBookingCheckinRemaining", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
-      .mockReset()
-      .mockResolvedValue(null);
-    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
-      .mockReset()
-      .mockResolvedValue({ _sum: { quantity: 0 } });
   });
 
-  it("returns slice.quantity minus only the logs tagged to that slice", async () => {
-    expect.assertions(1);
-
-    // why: the slice was booked at 50; 12 units already disposed against
-    // THIS slice (tagged). Remaining = 50 − 12 = 38.
+  /**
+   * Wires the two reads: the booking's slices and its logged units grouped
+   * by asset and slice.
+   */
+  function arrangeRemaining(
+    slices: Array<{ id: string; assetId: string; quantity: number }>,
+    logged: Array<{
+      assetId: string;
+      bookingAssetId: string | null;
+      quantity: number | null;
+    }>
+  ) {
     (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 50 });
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(slices);
     (
-      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ _sum: { quantity: 12 } });
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(
+      logged.map(({ assetId, bookingAssetId, quantity }) => ({
+        assetId,
+        bookingAssetId,
+        _sum: { quantity },
+      }))
+    );
+  }
 
-    const remaining = await computeBookingAssetSliceRemaining(
-      db,
-      "booking-1",
-      "ba-slice-1"
+  it("counts every log against the asset, and only tagged logs against a slice", async () => {
+    expect.assertions(4);
+
+    // Pens: a standalone slice of 10 and a kit slice of 20. 3 units were
+    // logged on the standalone slice, 4 on the kit slice and 5 untagged.
+    arrangeRemaining(
+      [
+        { id: "ba-loose", assetId: "asset-pens", quantity: 10 },
+        { id: "ba-kit", assetId: "asset-pens", quantity: 20 },
+      ],
+      [
+        { assetId: "asset-pens", bookingAssetId: "ba-loose", quantity: 3 },
+        { assetId: "asset-pens", bookingAssetId: "ba-kit", quantity: 4 },
+        { assetId: "asset-pens", bookingAssetId: null, quantity: 5 },
+      ]
     );
 
-    expect(remaining).toBe(38);
+    const { byAsset, bySlice } = await computeBookingCheckinRemaining(
+      db,
+      "booking-1",
+      ["asset-pens"]
+    );
+
+    expect(byAsset.get("asset-pens")).toBe(30 - 12);
+    expect(bySlice.get("ba-loose")).toBe(7);
+    expect(bySlice.get("ba-kit")).toBe(16);
+    expect(db.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
   });
 
-  it("clamps at zero and treats a missing slice as 0 booked", async () => {
-    expect.assertions(1);
+  it("floors at zero and reads an asset that is not on the booking as zero", async () => {
+    expect.assertions(3);
 
-    // why: findUnique → null (slice not found) → booked 0 → remaining 0.
-    const remaining = await computeBookingAssetSliceRemaining(
-      db,
-      "booking-1",
-      "ba-missing"
+    arrangeRemaining(
+      [{ id: "ba-loose", assetId: "asset-pens", quantity: 2 }],
+      [{ assetId: "asset-pens", bookingAssetId: "ba-loose", quantity: 5 }]
     );
 
-    expect(remaining).toBe(0);
+    const { byAsset, bySlice } = await computeBookingCheckinRemaining(
+      db,
+      "booking-1",
+      ["asset-pens", "asset-elsewhere"]
+    );
+
+    expect(byAsset.get("asset-pens")).toBe(0);
+    expect(bySlice.get("ba-loose")).toBe(0);
+    expect(byAsset.get("asset-elsewhere")).toBe(0);
+  });
+
+  it("issues no query for an empty batch", async () => {
+    expect.assertions(2);
+
+    const { byAsset } = await computeBookingCheckinRemaining(
+      db,
+      "booking-1",
+      []
+    );
+
+    expect(byAsset.size).toBe(0);
+    expect(db.consumptionLog.groupBy).not.toHaveBeenCalled();
   });
 });
 
@@ -15280,6 +16778,68 @@ describe("isBookingFullyCheckedIn", () => {
   });
 });
 
+/**
+ * Gives the batched check-in read (`computeBookingCheckinRemaining`) the
+ * booking's slices, for tests whose slices carry their own ids. Every other
+ * `bookingAsset.findMany` read keeps the answer the test already wired.
+ *
+ * @param slices - The booking's slices: id, asset and booked units
+ */
+function mockCheckinSlices(
+  slices: Array<{ id: string; assetId: string; quantity: number }>
+) {
+  const findMany = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
+  // The other `bookingAsset.findMany` reads keep the answers they had.
+  const fallback = findMany.getMockImplementation() as
+    | ((args: unknown) => Promise<unknown>)
+    | undefined;
+  findMany.mockImplementation(
+    (args: {
+      where?: {
+        assetId?: string | { in?: string[] };
+        bookingId?: string | { notIn?: string[] };
+      };
+    }) => {
+      const assetFilter = args?.where?.assetId;
+      // The batched read names one booking; the status reconciliation names
+      // the bookings to exclude (`bookingId.notIn`) and keeps its own answer.
+      if (
+        assetFilter &&
+        typeof assetFilter === "object" &&
+        typeof args?.where?.bookingId === "string"
+      ) {
+        const ids = assetFilter.in ?? [];
+        return Promise.resolve(
+          slices.filter((slice) => ids.includes(slice.assetId))
+        );
+      }
+      return fallback ? fallback(args) : Promise.resolve([]);
+    }
+  );
+}
+
+/**
+ * Gives the batched check-in read the units already logged on the booking,
+ * per asset and slice (`null` for an untagged log).
+ *
+ * @param logs - Units logged so far
+ */
+function mockCheckinLogged(
+  logs: Array<{
+    assetId: string;
+    bookingAssetId: string | null;
+    quantity: number;
+  }>
+) {
+  (db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>).mockResolvedValue(
+    logs.map(({ assetId, bookingAssetId, quantity }) => ({
+      assetId,
+      bookingAssetId,
+      _sum: { quantity },
+    }))
+  );
+}
+
 describe("partialCheckinBooking — qty-tracked dispositions", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -15310,6 +16870,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
     (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
@@ -15322,6 +16885,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.custody.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.custody.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
     (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
@@ -15416,24 +16982,69 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     //     list and walk it can override with `mockResolvedValueOnce`.
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
-      .mockImplementation((args: { where: { assetId?: string } }) => {
-        if (args.where?.assetId) {
-          return Promise.resolve([{ quantity: 10 }]);
+      .mockImplementation(
+        (args: {
+          where: {
+            assetId?: string | { in?: string[] };
+            bookingId?: string | { notIn?: string[] };
+          };
+        }) => {
+          const assetFilter = args.where?.assetId;
+          // The batched check-in read names one booking and asks for several
+          // assets at once; it needs each slice's id and asset back.
+          if (
+            assetFilter &&
+            typeof assetFilter === "object" &&
+            typeof args.where?.bookingId === "string"
+          ) {
+            return Promise.resolve(
+              (assetFilter.in ?? []).map((assetId) => ({
+                id: `ba-${assetId}`,
+                assetId,
+                quantity: 10,
+              }))
+            );
+          }
+          if (assetFilter) {
+            return Promise.resolve([{ quantity: 10 }]);
+          }
+          return Promise.resolve([]);
         }
-        return Promise.resolve([]);
-      });
+      );
 
     // why: logged-so-far aggregate controls `remaining = 10 − logged`.
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({
       _sum: { quantity: logged },
     });
+    // why: the batched check-in read groups the logged units by asset and
+    // slice; the units logged so far are untagged, like a legacy log.
+    (db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((args: { where?: { assetId?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.assetId?.in ?? []).map((assetId) => ({
+            assetId,
+            bookingAssetId: null,
+            _sum: { quantity: logged },
+          }))
+        )
+      );
 
-    // why: pool-drain guard reads custody aggregate sum.
-    //@ts-expect-error missing vitest type
-    db.custody.aggregate.mockResolvedValue({
-      _sum: { quantity: custodySum },
-    });
+    // why: pool-drain guard reads the units in custody, grouped by asset.
+    // Like the real groupBy, an asset with nothing in custody has no group.
+    (db.custody.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((args: { where?: { assetId?: { in?: string[] } } }) =>
+        Promise.resolve(
+          custodySum > 0
+            ? (args?.where?.assetId?.in ?? []).map((assetId) => ({
+                assetId,
+                _sum: { quantity: custodySum },
+              }))
+            : []
+        )
+      );
   }
 
   it("locks the session's assets in sorted id order before handling any of them", async () => {
@@ -15480,6 +17091,48 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  it("locks and reads a batch in a fixed number of queries, however many assets it checks in", async () => {
+    // why: every query runs in turn on the transaction's one connection, so a
+    // per-asset read multiplies the transaction's time by the batch size and
+    // a large return outruns the 5s interactive-transaction limit.
+    expect.assertions(7);
+
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    const assetIds = ["asset-a", "asset-b", "asset-c", "asset-d", "asset-e"];
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: assetIds.map((assetId) => ({
+        ...booking.bookingAssets[0],
+        assetId,
+        asset: { ...booking.bookingAssets[0].asset, id: assetId },
+      })),
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: assetIds.map((assetId) => ({ assetId, lost: 1, returned: 3 })),
+    });
+
+    // Every asset locked in one statement, in sorted id order.
+    expect(quantityLock.lockAssetRowsForQuantityUpdate).toHaveBeenCalledTimes(
+      1
+    );
+    expect(
+      vitest.mocked(quantityLock.lockAssetRowsForQuantityUpdate).mock
+        .calls[0][1]
+    ).toEqual(assetIds);
+    // Remaining units: one grouped read of the logs, none per asset or slice.
+    expect(db.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
+    expect(db.consumptionLog.aggregate).not.toHaveBeenCalled();
+    expect(db.bookingAsset.findUnique).not.toHaveBeenCalled();
+    // Custody, for the pool-drain guard and for freeing the assets: grouped,
+    // never read or counted per asset.
+    expect(db.custody.aggregate).not.toHaveBeenCalled();
+    expect(db.bookingAsset.count).not.toHaveBeenCalled();
+  });
+
   it("writes a single RETURN log for TWO_WAY when returned equals remaining", async () => {
     expect.assertions(3);
 
@@ -15522,9 +17175,10 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     setupQtyMocks();
     // why: the per-slice cap reads each slice's booked units by id; both
     // slices book 10.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 10 });
+    mockCheckinSlices([
+      { id: "ba-pens", assetId: mockQtyAssetId, quantity: 10 },
+      { id: "ba-pens-kit", assetId: mockQtyAssetId, quantity: 10 },
+    ]);
     // why: the activity line links the booking by the name the status update
     // returns.
     (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
@@ -16258,11 +17912,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     ).toBeLessThan(vitest.mocked(db.asset.update).mock.invocationCallOrder[0]);
   });
 
-  it("writes a disposition's used-up rows before the next disposition of the asset is capped", async () => {
-    // The asset-level cap sums this booking's CONSUME/LOSS/DAMAGE rows. Two
+  it("caps each disposition of an asset by what the ones before it already used up", async () => {
+    // The asset-level cap counts this booking's CONSUME/LOSS/DAMAGE units. Two
     // slices of one asset checked in together must each see what the other
     // already used up, or both pass the same remaining and the pool loses
     // more units than are out on the booking.
+    expect.assertions(2);
     setupQtyMocks();
     const booking = makeQtyBooking();
     const slice = booking.bookingAssets[0];
@@ -16274,28 +17929,147 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         { ...slice, id: "ba-b" },
       ],
     });
-    // why: each slice's own cap reads its booked quantity by id.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 10 });
-    onTestFinished(() => {
-      (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
-    });
+    // Both slices book 10, and 17 of the asset's 20 units are already
+    // accounted for, untagged: 3 remain for the asset as a whole.
+    mockCheckinSlices([
+      { id: "ba-a", assetId: mockQtyAssetId, quantity: 10 },
+      { id: "ba-b", assetId: mockQtyAssetId, quantity: 10 },
+    ]);
+    mockCheckinLogged([
+      { assetId: mockQtyAssetId, bookingAssetId: null, quantity: 17 },
+    ]);
+
+    // The first slice uses up 2 of the 3, so the second may only take 1.
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [
+          { assetId: mockQtyAssetId, bookingAssetId: "ba-a", consumed: 2 },
+          { assetId: mockQtyAssetId, bookingAssetId: "ba-b", consumed: 2 },
+        ],
+      })
+    ).rejects.toThrow("Only 1 remaining on this booking");
+    expect(vitest.mocked(recordStockChanges)).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts each disposition of an asset from the pool the one before it left", async () => {
+    // why: the asset is locked once, up front, and its row is kept. Each pool
+    // decrement must update that kept row, or the next disposition of the
+    // same asset audits and guards against a pool that no longer exists.
+    expect.assertions(2);
+
+    setupTwoPensSlices();
 
     await partialCheckinBooking({
       ...baseParams,
       checkins: [
-        { assetId: mockQtyAssetId, bookingAssetId: "ba-a", consumed: 2 },
-        { assetId: mockQtyAssetId, bookingAssetId: "ba-b", consumed: 2 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens", consumed: 2 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens-kit", lost: 3 },
       ],
     });
 
-    const ledgerWrites = vitest.mocked(recordStockChanges).mock;
-    const capReads = vitest.mocked(db.consumptionLog.aggregate).mock;
-    expect(ledgerWrites.calls).toHaveLength(2);
-    expect(ledgerWrites.invocationCallOrder[0]).toBeLessThan(
-      capReads.invocationCallOrder[capReads.invocationCallOrder.length - 1]
+    const quantityChanges = vitest
+      .mocked(activityEventService.recordEvents)
+      .mock.calls.flatMap(
+        ([events]) => events as Array<Record<string, unknown>>
+      )
+      .filter((event) => event.action === "ASSET_QUANTITY_CHANGED")
+      .map((event) => [event.fromValue, event.toValue]);
+    // Pool 100: the first slice uses up 2, the second loses 3 of what is left.
+    expect(quantityChanges).toEqual([
+      [100, 98],
+      [98, 95],
+    ]);
+    expect(quantityLock.lockAssetRowsForQuantityUpdate).toHaveBeenCalledTimes(
+      1
     );
+  });
+
+  describe("freeing the assets once they are back", () => {
+    /** Three pools out on this booking, each returning some of its units. */
+    const pools = ["asset-free", "asset-on-booking", "asset-in-custody"];
+
+    /**
+     * Arranges the three pools on the booking and says which are still held
+     * elsewhere: `asset-on-booking` by another active booking and
+     * `asset-in-custody` by a team member, unless `allFree`.
+     */
+    function arrangePools({ allFree = false } = {}) {
+      setupQtyMocks();
+      const booking = makeQtyBooking();
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: pools.map((assetId) => ({
+          ...booking.bookingAssets[0],
+          assetId,
+          asset: { ...booking.bookingAssets[0].asset, id: assetId },
+        })),
+      });
+      // why: the reset asks, in one grouped read each, which of the pools
+      // another active booking or a custody record still holds.
+      (db.bookingAsset.groupBy as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue(allFree ? [] : [{ assetId: "asset-on-booking" }]);
+      (db.custody.groupBy as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockImplementation((args: { _sum?: unknown }) =>
+          Promise.resolve(
+            args?._sum || allFree ? [] : [{ assetId: "asset-in-custody" }]
+          )
+        );
+    }
+
+    /** The status writes that freed pools, as `[ids, organizationId]`. */
+    function freedPoolWrites() {
+      return vitest
+        .mocked(db.asset.updateMany)
+        .mock.calls.map(([args]) => args as Record<string, any>)
+        .filter((args) => args?.data?.status === AssetStatus.AVAILABLE)
+        .map((args) => [args.where.id.in, args.where.organizationId]);
+    }
+
+    it("frees only the pools nothing else holds, inside the caller's workspace", async () => {
+      expect.assertions(1);
+
+      arrangePools();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: pools.map((assetId) => ({ assetId, returned: 4 })),
+      });
+
+      expect(freedPoolWrites()).toEqual([[["asset-free"], "org-1"]]);
+    });
+
+    it("frees every pool in one write when none is held elsewhere", async () => {
+      expect.assertions(1);
+
+      arrangePools({ allFree: true });
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: pools.map((assetId) => ({ assetId, returned: 4 })),
+      });
+
+      expect(freedPoolWrites()).toEqual([[pools, "org-1"]]);
+    });
+
+    it("writes no status when every pool is still held elsewhere", async () => {
+      expect.assertions(1);
+
+      arrangePools();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: ["asset-on-booking", "asset-in-custody"].map((assetId) => ({
+          assetId,
+          returned: 4,
+        })),
+      });
+
+      expect(freedPoolWrites()).toEqual([]);
+    });
   });
 
   it("emits an ASSET_QUANTITY_CHANGED event for the pool decrement (from pool → pool − decrement)", async () => {
@@ -16524,7 +18298,435 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     ]);
     expect(db.consumptionLog.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ assetId: mockQtyAssetId }),
+        where: expect.objectContaining({
+          assetId: { in: [mockQtyAssetId] },
+        }),
+      })
+    );
+  });
+
+  describe("a disposition that names no slice, on an asset with two slices", () => {
+    /**
+     * The booking holds the pool twice: a standalone slice of 4 that left from
+     * Studio, and a kit slice of 6. Both went out.
+     *
+     * @param loose - Fields to override on the standalone slice
+     */
+    function arrangeLooseAndKitSlices(
+      loose: {
+        checkedInAt?: Date;
+        checkedOutAt?: Date | null;
+        checkedOutQuantity?: number;
+      } = {}
+    ) {
+      setupQtyMocks();
+      const booking = makeQtyBooking();
+      const [base] = booking.bookingAssets;
+      // why: the booking under test is the fixture; this gives it the two
+      // slices of one asset the split is about.
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          {
+            ...base,
+            id: "ba-kit",
+            quantity: 6,
+            checkedOutQuantity: 6,
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            sourceLocationId: "loc-kit-shelf",
+          },
+          {
+            ...base,
+            id: "ba-loose",
+            quantity: 4,
+            checkedOutQuantity: 4,
+            assetKitId: null,
+            sourceKitId: null,
+            sourceLocationId: "loc-studio",
+            ...loose,
+          },
+        ],
+      });
+      installStatefulPlacements([
+        { id: "al-store", locationId: "loc-store", quantity: 60 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+    }
+
+    /** The slice and units of every RETURN log the check-in wrote. */
+    const returnLogs = () =>
+      vitest
+        .mocked(consumptionLogService.createConsumptionLog)
+        .mock.calls.map(([log]) => log)
+        .filter((log) => log.category === "RETURN")
+        .map((log) => [log.bookingAssetId, log.quantity]);
+
+    it("tags each RETURN with the slice it is split onto, loose slice first", async () => {
+      arrangeLooseAndKitSlices();
+
+      // 6 back with no slice named: 4 fill the loose slice, 2 go to the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 6 }],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 4],
+        ["ba-kit", 2],
+      ]);
+    });
+
+    it("fills around a slice-named entry of the same asset in one request", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the per-slice limit is read from the booking's slices of the
+      // asset. The shared mock answers that read with one generic row, so
+      // this hands it the two slices this booking holds.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation((args: { where: { assetId?: unknown } }) =>
+        args.where.assetId
+          ? Promise.resolve([
+              { id: "ba-kit", assetId: mockQtyAssetId, quantity: 6 },
+              { id: "ba-loose", assetId: mockQtyAssetId, quantity: 4 },
+            ])
+          : genericRows?.(args)
+      );
+
+      // 4 unnamed and 4 named to the loose slice. The loose slice only sent
+      // 4, so the unnamed 4 have to land on the kit slice, whatever order the
+      // entries arrive in.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [
+          { assetId: mockQtyAssetId, returned: 4 },
+          { assetId: mockQtyAssetId, bookingAssetId: "ba-loose", returned: 4 },
+        ],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 4],
+        ["ba-kit", 4],
+      ]);
+    });
+
+    it("sizes each slice by what it sent as read inside the transaction", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the booking is loaded before the asset lock, so a check-out that
+      // commits in between is only visible to the read made under the lock.
+      // This answers that read with the loose slice having sent 4 more units.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation(
+        (args: { select?: { checkedOutQuantity?: boolean } }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                {
+                  id: "ba-loose",
+                  quantity: 8,
+                  checkedOutQuantity: 8,
+                  checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
+                  sourceLocationId: "loc-studio",
+                  sourceKitId: null,
+                },
+              ])
+            : genericRows?.(args)
+      );
+
+      // The loaded booking says the loose slice sent 4; under the lock it has
+      // sent 8, so all 6 unnamed units are its own.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 6 }],
+      });
+
+      expect(returnLogs()).toEqual([["ba-loose", 6]]);
+    });
+
+    it("settles a slice the loaded booking calls returned when it has gone out again", async () => {
+      // The loaded booking shows the loose slice as already returned. A
+      // check-out committed since then sent it out again, which only the
+      // read under the lock can see.
+      arrangeLooseAndKitSlices({
+        checkedInAt: new Date("2026-01-06T09:00:00.000Z"),
+      });
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      const looseNow: Record<string, unknown> = {
+        id: "ba-loose",
+        quantity: 4,
+        checkedOutQuantity: 4,
+        checkedOutAt: new Date("2026-01-07T09:00:00.000Z"),
+        checkedInAt: null,
+        sourceLocationId: "loc-studio",
+        sourceKitId: null,
+      };
+      // why: the check-in reads its slices again under the asset lock, which
+      // is the only place the second departure shows. This answers that read
+      // with the slice as it now stands, and only the selected fields come
+      // back, as from the database.
+      sliceRows.mockImplementation(
+        (args: { select?: Record<string, boolean> }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                Object.fromEntries(
+                  Object.keys(args.select).map((key) => [key, looseNow[key]])
+                ),
+              ])
+            : genericRows?.(args)
+      );
+
+      // why: settling reads the booking's logs back after writing them. With
+      // `createConsumptionLog` mocked nothing reaches the database, so this
+      // answers the log reads with the RETURN logs written so far.
+      (
+        db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() =>
+        Promise.resolve(
+          returnLogs().map(([bookingAssetId, quantity]) => ({
+            assetId: mockQtyAssetId,
+            bookingAssetId,
+            quantity,
+          }))
+        )
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 4 }],
+      });
+
+      expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ["ba-loose"] } }),
+        })
+      );
+    });
+
+    it("fills around the logs the booking already has, read once for the request", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the logs stored before this request live in the database. This
+      // answers the log reads with 3 units already back on the loose slice.
+      const logReads = db.consumptionLog.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const priorLogReads = logReads.getMockImplementation();
+      onTestFinished(() => {
+        if (priorLogReads) logReads.mockImplementation(priorLogReads);
+        else logReads.mockReset();
+      });
+      logReads.mockClear();
+      logReads.mockResolvedValue([
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-loose", quantity: 3 },
+      ]);
+
+      // The loose slice has room for 1 more; the other 2 are the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 3 }],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 1],
+        ["ba-kit", 2],
+      ]);
+      // One read before the entries and one to settle, whatever the entries.
+      expect(logReads).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses an unnamed claim for more units than are out", async () => {
+      // The loose slice is booked but still on the shelf: only the kit's 6
+      // are out, so 8 cannot have come back.
+      arrangeLooseAndKitSlices({ checkedOutAt: null, checkedOutQuantity: 0 });
+
+      await expect(
+        partialCheckinBooking({
+          ...baseParams,
+          checkins: [{ assetId: mockQtyAssetId, returned: 8 }],
+        })
+      ).rejects.toThrow("Only 6 are out on this booking");
+      expect(returnLogs()).toEqual([]);
+    });
+
+    it("refuses a claim naming a slice for more units than that slice sent", async () => {
+      // 1 of the 4 booked loose units left; the other 3 are on the shelf and
+      // cannot have been used up.
+      arrangeLooseAndKitSlices({ checkedOutQuantity: 1 });
+      // why: the per-slice figures are read from the booking's slices of the
+      // asset. The shared mock answers that read with one generic row, so
+      // this hands it the two slices this booking holds.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation((args: { where: { assetId?: unknown } }) =>
+        args.where.assetId
+          ? Promise.resolve([
+              { id: "ba-kit", assetId: mockQtyAssetId, quantity: 6 },
+              { id: "ba-loose", assetId: mockQtyAssetId, quantity: 4 },
+            ])
+          : genericRows?.(args)
+      );
+
+      await expect(
+        partialCheckinBooking({
+          ...baseParams,
+          checkins: [
+            {
+              assetId: mockQtyAssetId,
+              bookingAssetId: "ba-loose",
+              consumed: 4,
+            },
+          ],
+        })
+      ).rejects.toThrow("Only 1 are out on this booking");
+      expect(db.asset.update).not.toHaveBeenCalled();
+    });
+
+    it("takes used-up units off the location a slice left from as read inside the transaction", async () => {
+      arrangeLooseAndKitSlices();
+      const placements = installStatefulPlacements([
+        { id: "al-store", locationId: "loc-store", quantity: 60 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+      // why: the loaded booking says the loose slice left from Studio. The
+      // read under the asset lock is the only place a later check-out from
+      // Store shows, so this answers that read with the slice as it stands.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation(
+        (args: { select?: { checkedOutQuantity?: boolean } }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                {
+                  id: "ba-loose",
+                  quantity: 4,
+                  checkedOutQuantity: 4,
+                  checkedOutAt: new Date("2026-01-07T09:00:00.000Z"),
+                  checkedInAt: null,
+                  sourceLocationId: "loc-store",
+                  sourceKitId: null,
+                },
+              ])
+            : genericRows?.(args)
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, consumed: 4 }],
+      });
+
+      expect(placements).toEqual([
+        { id: "al-store", locationId: "loc-store", quantity: 56 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+    });
+
+    it("settles only the loose slice when the units that came back fit on it", async () => {
+      arrangeLooseAndKitSlices();
+
+      // 4 back with no slice named: all 4 are the loose slice's. The kit's 6
+      // are still out, so its slice stays open and the kit stays checked out.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 4 }],
+      });
+
+      expect(returnLogs()).toEqual([["ba-loose", 4]]);
+      expect(db.kit.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("tags the ledger rows of lost and damaged units the same way", async () => {
+      arrangeLooseAndKitSlices();
+
+      // Lost fills before damaged: 4 lost on the loose slice, 1 on the kit's,
+      // and both damaged units on the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, lost: 5, damaged: 2 }],
+      });
+
+      expect(
+        recordedStockEvents().map((event) => [
+          event.category,
+          event.bookingAssetId,
+          event.change,
+        ])
+      ).toEqual([
+        ["LOSS", "ba-loose", -4],
+        ["LOSS", "ba-kit", -1],
+        ["DAMAGE", "ba-kit", -2],
+      ]);
+    });
+
+    it("tags the ledger rows of used-up units the same way", async () => {
+      arrangeLooseAndKitSlices();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, consumed: 6 }],
+      });
+
+      expect(
+        recordedStockEvents().map((event) => [
+          event.category,
+          event.bookingAssetId,
+          event.change,
+        ])
+      ).toEqual([
+        ["CONSUME", "ba-loose", -4],
+        ["CONSUME", "ba-kit", -2],
+      ]);
+    });
+  });
+
+  it("tags an unnamed disposition with the asset's only slice", async () => {
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    // why: the booking under test is the fixture; this gives its one slice a
+    // known id to find on the log.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        {
+          ...booking.bookingAssets[0],
+          id: "ba-pens",
+          assetKitId: null,
+          sourceLocationId: "loc-studio",
+        },
+      ],
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        bookingAssetId: "ba-pens",
+        quantity: 10,
       })
     );
   });
@@ -16667,11 +18869,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     expect.assertions(2);
 
     setupQtyMocks();
-    // why: the per-slice cap reads `bookingAsset.findUnique` — give each
+    // why: the per-slice cap reads each slice's booked units; give each
     // slice ample headroom so both claims pass the cap.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 50 });
+    mockCheckinSlices([
+      { id: "ba-A", assetId: mockQtyAssetId, quantity: 50 },
+      { id: "ba-B", assetId: mockQtyAssetId, quantity: 50 },
+    ]);
     // why: eligibility is judged per slice, so the booking has to actually
     // hold the two slices these dispositions name. Both are out.
     (
@@ -16725,12 +18928,12 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     // units — so units that never left could be returned, consumed, lost or
     // damaged, permanently decrementing the pool.
     setupQtyMocks();
-    // why: `computeBookingAssetSliceRemaining` reads the slice's booked
-    // quantity for the per-slice cap. Giving it ample headroom proves the
-    // rejection comes from the eligibility guard and not from the cap.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ quantity: 50 });
+    // why: the slice gets ample headroom, so the rejection can only come from
+    // the eligibility guard and not from the per-slice cap.
+    mockCheckinSlices([
+      { id: "ba-out", assetId: mockQtyAssetId, quantity: 50 },
+      { id: "ba-never-out", assetId: mockQtyAssetId, quantity: 50 },
+    ]);
     // why: eligibility is judged per slice, so the booking must actually hold
     // the slice the disposition names.
     (
@@ -16959,14 +19162,12 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     // sums quantities across all rows for the (booking, asset) pair.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([{ quantity: 10 }]);
-    // why: the per-slice loop reads `computeBookingAssetSliceRemaining`,
-    // which queries `bookingAsset.findUnique({ select: { quantity } })`
-    // for the slice being dispositioned. The single slice here is booked
-    // for 10 units (matches the `bookingAssets[0].quantity` shell above).
-    //@ts-expect-error missing vitest type
-    db.bookingAsset.findUnique.mockResolvedValue({ quantity: 10 });
     //@ts-expect-error missing vitest type
     db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // why: the batched check-in read takes the booking's slices and finds
+    // nothing logged yet.
+    mockCheckinSlices(booking.bookingAssets);
+    mockCheckinLogged([]);
 
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
@@ -17236,6 +19437,10 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       { quantity: 10 },
       { quantity: 10 },
     ]);
+    mockCheckinSlices([
+      { id: "ba-pens-loose", assetId: mockQtyAssetId, quantity: 10 },
+      { id: "ba-pens-kit", assetId: mockQtyAssetId, quantity: 10 },
+    ]);
 
     await checkinBooking({
       ...baseParams,
@@ -17431,22 +19636,10 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       { quantity: 33 },
       { quantity: 22 },
     ]);
-    // why: per-slice remaining reads `findUnique({ where: { id } })` — return
-    // each slice's booked quantity so both slices have work to do.
-    (
-      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
-    ).mockImplementation(({ where }: { where: { id: string } }) =>
-      Promise.resolve(
-        where.id === standaloneSliceId
-          ? { quantity: 33 }
-          : where.id === kitSliceId
-          ? { quantity: 22 }
-          : null
-      )
-    );
-    // why: no logs written yet on either slice or the asset.
-    //@ts-expect-error missing vitest type
-    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // why: the batched check-in read takes both slices' booked units, so
+    // both have work to do, and finds no logs yet on either.
+    mockCheckinSlices(booking.bookingAssets);
+    mockCheckinLogged([]);
 
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
@@ -18515,6 +20708,135 @@ describe("addScannedAssetsToBooking", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [true, "refuses it and rolls the add back"],
+    [false, "clears the approval so the request waits again"],
+  ])(
+    "a requester's scanned extra on their approved request, at check-out %s: %s",
+    async (atCheckout) => {
+      // why: the row lock reads the booking RESERVED; once, so later tests
+      // keep the default.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      });
+      // One row for both booking reads: the window (no dates, so the
+      // windowed guards skip) and the growth rule's read (approved).
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue({
+        from: null,
+        to: null,
+        status: BookingStatus.RESERVED,
+        approvedAt: new Date("2026-11-01T09:00:00Z"),
+      });
+      //@ts-expect-error missing vitest type
+      db.userOrganization.findUnique.mockResolvedValue({
+        roles: [OrganizationRoles.SELF_SERVICE],
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        id: "booking-1",
+        name: "Shoot",
+        status: BookingStatus.RESERVED,
+      });
+      // The scanned asset as every asset read sees it, so the activity notes
+      // after a committed add can name it.
+      const assetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+      const defaultAssetFindMany = assetFindMany.getMockImplementation();
+      assetFindMany.mockImplementation(() =>
+        Promise.resolve([
+          {
+            id: "asset-1",
+            title: "Camera",
+            type: AssetType.INDIVIDUAL,
+            assetModelId: null,
+          },
+        ])
+      );
+
+      try {
+        const add = addScannedAssetsToBooking({
+          assetIds: ["asset-1"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          // The fulfil flow authorizes under the check-out rule.
+          access: null,
+          atCheckout,
+        });
+        if (atCheckout) {
+          await expect(add).rejects.toThrow(
+            /can't ask for more than was approved/
+          );
+        } else {
+          await add;
+        }
+        expect(db.booking.updateMany).toHaveBeenCalledWith({
+          where: { id: "booking-1", organizationId: "org-1" },
+          data: { approvedAt: null, approvedById: null },
+        });
+      } finally {
+        //@ts-expect-error missing vitest type
+        db.bookingSettings.findUnique.mockResolvedValue(null);
+        //@ts-expect-error missing vitest type
+        db.userOrganization.findUnique.mockResolvedValue(null);
+        //@ts-expect-error missing vitest type
+        db.booking.findFirst.mockResolvedValue(null);
+        assetFindMany.mockImplementation(defaultAssetFindMany!);
+      }
+    }
+  );
+
+  it("refuses the check-out's add, under its lock, when the request is pending again", async () => {
+    // The fulfil preflight passed, then a requester's change cleared the
+    // approval. The add re-checks under the booking lock and rolls back.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      { status: BookingStatus.RESERVED },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      status: BookingStatus.RESERVED,
+    });
+
+    try {
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: ["asset-1"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          access: null,
+          atCheckout: true,
+        })
+      ).rejects.toThrow(/Approve the request first/);
+      // Refused before the notes, which run only after a committed add.
+      expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+    } finally {
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue(null);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue(null);
+    }
+  });
+
   describe("QUANTITY_TRACKED pool", () => {
     const QT_ID = "asset-qty-scan";
     const from = new Date("2026-07-01T09:00:00Z");
@@ -19374,6 +21696,120 @@ describe("addScannedAssetsToBooking", () => {
       bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
     ).mock.calls.map(([note]) => String(note.content));
     expect(noteContents.join("\n")).not.toContain("Existing Kit");
+  });
+
+  /**
+   * A save whose response never arrives (a gateway timeout) may still have
+   * committed, and the operator, left holding the same list, can confirm it
+   * again. The second submission has to be a no-op, not a second copy.
+   */
+  it("changes nothing when a save that already landed is submitted again", async () => {
+    expect.assertions(5);
+
+    // why: `clearAllMocks` keeps implementations, so the overrides below
+    // would answer every later test in the file. Each goes back when this
+    // test finishes.
+    for (const mock of [
+      db.booking.findFirst,
+      db.asset.findMany,
+      db.bookingAsset.findMany,
+      db.booking.update,
+      db.kit.findMany,
+    ]) {
+      restoreMockImplementationAfterTest(mock);
+    }
+
+    // why: skips the overlap-conflict guard so the test can focus on the
+    // resubmission, matching the kit-slice rescan test above.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    // why: serves both the org-scope guard (only needs the returned count to
+    // match) and the scanned-asset metadata read (needs title/type).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: null,
+            unitOfMeasure: null,
+          }))
+        )
+    );
+
+    // why: the first submission wrote every row. The standalone read
+    // (`assetKitId: null`) finds the loose asset, the kit-driven read
+    // (`assetKitId: { in }`) finds the kit membership.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockImplementation(
+      (args?: { where?: { assetKitId?: { in?: string[] } | null } }) => {
+        const assetKitId = args?.where?.assetKitId;
+        return Promise.resolve(
+          assetKitId && typeof assetKitId === "object" && "in" in assetKitId
+            ? [{ assetKitId: "ak-saved" }]
+            : [{ assetId: "asset-saved", assetKitId: null, quantity: 1 }]
+        );
+      }
+    );
+
+    // why: the write is asserted below with an empty create list; the row it
+    // returns stands in for the booking the service reads back afterwards.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.RESERVED,
+    });
+
+    // why: the scanned kit, already on the booking through the slice the
+    // read above returns, so it is not added again.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-saved",
+        name: "Saved Kit",
+        assetKits: [{ assetId: "asset-kit-member" }],
+      },
+    ]);
+
+    const result = await addScannedAssetsToBooking({
+      assetIds: ["asset-saved"],
+      kitIds: ["kit-saved"],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      kitSlices: [
+        {
+          assetId: "asset-kit-member",
+          assetKitId: "ak-saved",
+          kitId: "kit-saved",
+        },
+      ],
+    });
+
+    // Nothing is reported as added, so the route answers "Nothing to add".
+    expect(result.addedAssetIds).toEqual([]);
+
+    // No booking row is written a second time.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { bookingAssets: { create: [] } },
+      })
+    );
+
+    // And the activity trail does not narrate an add that did not happen.
+    // The per-asset notes go through `createNotesPerAsset`, which may be
+    // called with nothing to write but must never be handed a note.
+    expect(activityEventService.recordEvents).not.toHaveBeenCalled();
+    expect(noteService.createNotes).not.toHaveBeenCalled();
+    const perAssetNotes = (
+      noteService.createNotesPerAsset as ReturnType<typeof vitest.fn>
+    ).mock.calls.flatMap(([args]) => (args as { notes: unknown[] }).notes);
+    expect(perAssetNotes).toEqual([]);
   });
 });
 
@@ -21284,6 +23720,78 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 
+  it("holds a kit back for a slice the loaded booking calls returned that has gone out again", async () => {
+    expect.assertions(1);
+
+    // Kit A's ladder came back on an earlier trip, so the loaded booking
+    // marks its slice returned. Another session sent it out again while this
+    // request ran: only the read made inside the transaction sees it as out.
+    const ladderSlice = {
+      id: "ba-kit-a-ladder",
+      assetId: "asset-ladder",
+      quantity: 1,
+      assetKitId: null,
+      sourceKitId: "kit-a",
+      checkedOutAt: OUT,
+      checkedInAt: OUT,
+      asset: {
+        id: "asset-ladder",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [{ kitId: "kit-a" }],
+      },
+    };
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      ladderSlice,
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({
+      slices,
+      stillOutNow: [
+        {
+          id: "ba-kit-a-ladder",
+          assetKitId: null,
+          sourceKitId: "kit-a",
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: [{ kitId: "kit-a" }],
+          },
+        },
+      ],
+    });
+    // why: `mockSliceReads` answers every still-out read alike. The release
+    // helper's own "held by another booking" read is one of them, told apart
+    // by its `bookingId.notIn`; no other booking holds kit A here, so the
+    // decision under test is the gate's, not that helper's.
+    const sliceReads = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
+    const routed = sliceReads.getMockImplementation() as
+      | ((q: unknown) => Promise<unknown>)
+      | undefined;
+    sliceReads.mockImplementation(
+      (q?: { where?: { bookingId?: { notIn?: string[] } } }) =>
+        q?.where?.bookingId?.notIn ? Promise.resolve([]) : routed?.(q)
+    );
+    // why: settling reads the booking's logs back from the database, and no
+    // log this request writes reaches the mocked one. This is the RETURN of
+    // kit A's six, so its tape slice settles and kit A becomes a candidate.
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 6 },
+        ],
+      })
+    );
+
+    expect(releasedKitIds()).toEqual([]);
+  });
+
   it("still releases a kit whose member was detached mid-booking", async () => {
     expect.assertions(1);
 
@@ -22046,6 +24554,7 @@ describe("model reservation guard — write paths", () => {
       description: "Reserved booking description",
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
     };
 
@@ -22099,6 +24608,10 @@ describe("model reservation guard — write paths", () => {
     it("re-validates every INDIVIDUAL row on the draft in the reserve transaction", async () => {
       expect.assertions(3);
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking(reserveParams);
 
       // The kit-driven unit counts too: it is off the model's pool for these
@@ -22124,6 +24637,10 @@ describe("model reservation guard — write paths", () => {
     it("formats a pool refusal for the caller and keeps other bookings unnamed by default", async () => {
       expect.assertions(2);
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking({ ...reserveParams, userId: "user-2" });
 
       const expected = expect.objectContaining({
@@ -22138,6 +24655,10 @@ describe("model reservation guard — write paths", () => {
     it("names other bookings in a pool refusal for a caller who sees every booking", async () => {
       expect.assertions(2);
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking({
         ...reserveParams,
         userId: "user-2",
@@ -22157,6 +24678,10 @@ describe("model reservation guard — write paths", () => {
       expect.assertions(2);
       guard.mockRejectedValueOnce(refusal());
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await expect(reserveBooking(reserveParams)).rejects.toThrow(
         /reserved by model/
       );
@@ -22378,6 +24903,10 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       ...booking,
       status: BookingStatus.COMPLETE,
     });
+    // why: the batched check-in read takes the booking's slices and finds
+    // nothing logged yet.
+    mockCheckinSlices(booking.bookingAssets);
+    mockCheckinLogged([]);
   }
 
   const params = {
@@ -22713,13 +25242,8 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([{ quantity: 5 }, { quantity: 3 }]);
-    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
-      .mockReset()
-      .mockImplementation((q?: any) =>
-        Promise.resolve(
-          booking.bookingAssets.find((ba) => ba.id === q?.where?.id) ?? null
-        )
-      );
+    // why: the batched check-in read takes both slices in the order above.
+    mockCheckinSlices(booking.bookingAssets);
 
     await checkinBooking({
       ...params,
@@ -22887,6 +25411,10 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
    * slice-grained kit release suite for each one).
    */
   function arrange(slices: any[]) {
+    // why: nothing logged on the booking yet unless a test says otherwise.
+    (db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
@@ -23069,10 +25597,12 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       poolSlice("ba-kit", "kit-a", 5, null),
       fillerSlice,
     ]);
-    // why: 3 units already dispositioned on this booking.
+    // why: 3 units already dispositioned on this booking, untagged.
     (
-      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ _sum: { quantity: 3 } });
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-pool", bookingAssetId: null, _sum: { quantity: 3 } },
+    ]);
 
     await expect(
       partialCheckinBooking({
@@ -23128,10 +25658,12 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       poolSlice("ba-kit", "kit-a", 5, null),
       fillerSlice,
     ]);
-    // why: 3 units already dispositioned on this booking.
+    // why: 3 units already dispositioned on this booking, untagged.
     (
-      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
-    ).mockResolvedValue({ _sum: { quantity: 3 } });
+      db.consumptionLog.groupBy as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-pool", bookingAssetId: null, _sum: { quantity: 3 } },
+    ]);
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
@@ -24728,6 +27260,10 @@ describe("booking emails name who acted", () => {
     db.bookingAsset.count.mockResolvedValueOnce(1);
     mockBerlinRecipient();
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -24737,6 +27273,7 @@ describe("booking emails name who acted", () => {
       to: futureToDate,
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-1",
     });
@@ -25101,6 +27638,10 @@ describe("booking emails name who acted", () => {
       },
     ]);
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -25110,6 +27651,7 @@ describe("booking emails name who acted", () => {
       to: futureToDate,
       hints: mockClientHints,
       alertsOrgOnReservation: true,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-1",
     });
@@ -25196,6 +27738,10 @@ describe("booking emails name who acted", () => {
       },
     ]);
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -25205,6 +27751,7 @@ describe("booking emails name who acted", () => {
       to: new Date("2027-03-06T15:00:00.000Z"),
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-3",
     });
@@ -25275,6 +27822,10 @@ describe("booking emails name who acted", () => {
     db.bookingAsset.count.mockResolvedValueOnce(1);
     mockBerlinRecipient();
 
+    // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+    vitest
+      .mocked(db.$queryRaw)
+      .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
     const result = await reserveBooking({
       id: "booking-1",
       name: "Test Booking",
@@ -25284,6 +27835,7 @@ describe("booking emails name who acted", () => {
       to: futureToDate,
       hints: mockClientHints,
       alertsOrgOnReservation: false,
+      actorApprovalSetting: "none" as const,
       tags: [],
       userId: "user-1",
     });
@@ -25339,6 +27891,10 @@ describe("booking emails name who acted", () => {
       db.bookingAsset.count.mockResolvedValueOnce(1);
       mockBerlinRecipient();
 
+      // why: the reserve transaction re-reads the booking under its row lock; still a draft.
+      vitest
+        .mocked(db.$queryRaw)
+        .mockResolvedValueOnce([{ status: "DRAFT" }] as never);
       await reserveBooking({
         id: "booking-1",
         name: "Test Booking",
@@ -25348,6 +27904,7 @@ describe("booking emails name who acted", () => {
         to: futureToDate,
         hints: mockClientHints,
         alertsOrgOnReservation: false,
+        actorApprovalSetting: "none" as const,
         tags: [],
         userId: "user-2",
       });
@@ -25642,5 +28199,246 @@ describe("resolveExpiredCheckoutState", () => {
         allowReschedule: false,
       })
     ).toThrow(/Use Check out on the booking page/);
+  });
+});
+
+describe("getPendingApprovalCount", () => {
+  const SWITCHES_ON = {
+    requireApprovalForBase: true,
+    requireApprovalForSelfService: false,
+  };
+  const args = (settings: typeof SWITCHES_ON | null) => ({
+    organizationId: "org-1",
+    userId: "user-1",
+    roles: [OrganizationRoles.ADMIN],
+    settings,
+  });
+
+  beforeEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    //@ts-expect-error missing vitest type
+    db.booking.count.mockResolvedValue(3);
+  });
+
+  afterEach(async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest
+      .mocked(hasPermission)
+      .mockImplementation(({ action }: { action: string }) =>
+        Promise.resolve(action !== "approve")
+      );
+    //@ts-expect-error missing vitest type
+    db.booking.count.mockResolvedValue(0);
+  });
+
+  it("counts open requests for an approver", async () => {
+    vitest.useFakeTimers();
+    vitest.setSystemTime(new Date("2026-11-10T12:00:00Z"));
+    try {
+      await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(3);
+    } finally {
+      vitest.useRealTimers();
+    }
+    expect(db.booking.count).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        to: { gte: new Date("2026-11-10T12:00:00Z") },
+      },
+    });
+  });
+
+  it("asks for the approve permission without workspace switches", async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    await getPendingApprovalCount(args(SWITCHES_ON));
+    expect(hasPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: "booking",
+        action: "approve",
+        workspace: null,
+      })
+    );
+  });
+
+  it("is zero for a viewer who may not approve", async () => {
+    const { hasPermission } = await import(
+      "~/utils/permissions/permission.validator.server"
+    );
+    vitest.mocked(hasPermission).mockResolvedValue(false);
+    await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(0);
+    expect(db.booking.count).not.toHaveBeenCalled();
+  });
+
+  it("is zero, and logs, when the count fails", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.count.mockRejectedValueOnce(new Error("pool timeout"));
+    const logged = vitest.spyOn(Logger, "error").mockImplementation(() => {});
+
+    await expect(getPendingApprovalCount(args(SWITCHES_ON))).resolves.toBe(0);
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
+  });
+
+  it("is zero while approval is off in the workspace", async () => {
+    await expect(
+      getPendingApprovalCount(
+        args({
+          requireApprovalForBase: false,
+          requireApprovalForSelfService: false,
+        })
+      )
+    ).resolves.toBe(0);
+    await expect(getPendingApprovalCount(args(null))).resolves.toBe(0);
+    expect(db.booking.count).not.toHaveBeenCalled();
+  });
+});
+
+describe("getBookingsForCalendar approval styling", () => {
+  /** A RESERVED booking in the visible window. */
+  function reservation(id: string, approvedAt: Date | null) {
+    return {
+      ...mockBookingData,
+      id,
+      name: `Booking ${id}`,
+      status: BookingStatus.RESERVED,
+      from: new Date("2026-11-12T09:00:00.000Z"),
+      to: new Date("2026-11-13T17:00:00.000Z"),
+      approvedAt,
+      custodianUser: null,
+      custodianTeamMember: { id: "tm-1", name: "Custodian" },
+      creator: null,
+      tags: [],
+    };
+  }
+
+  async function loadCalendar() {
+    return getBookingsForCalendar({
+      request: new Request(
+        "https://app.shelf.nu/calendar?start=2026-11-01&end=2026-11-30"
+      ),
+      organizationId: "org-1",
+      userId: "user-1",
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+    });
+  }
+
+  beforeEach(() => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      reservation("pending", null),
+      reservation("approved", new Date("2026-11-01T08:00:00.000Z")),
+    ]);
+  });
+
+  afterEach(() => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+  });
+
+  it("marks only the undecided request while approval is on", async () => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: false,
+    });
+
+    const events = await loadCalendar();
+    const byId = Object.fromEntries(
+      events.map((event) => [event.extendedProps.id, event])
+    );
+
+    expect(byId.pending.extendedProps.isPendingApproval).toBe(true);
+    expect(byId.pending.classNames.join(" ")).toContain("border-dashed");
+    expect(byId.approved.extendedProps.isPendingApproval).toBe(false);
+    expect(byId.approved.classNames.join(" ")).not.toContain("border-dashed");
+  });
+
+  it("marks nothing while both switches are off", async () => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    });
+
+    const events = await loadCalendar();
+
+    expect(events.some((event) => event.extendedProps.isPendingApproval)).toBe(
+      false
+    );
+  });
+});
+
+describe("assertRequestMayBeCheckedOut", () => {
+  const args = { bookingId: "booking-1", organizationId: "org-1" };
+
+  afterEach(() => {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue(null);
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue(null);
+  });
+
+  it.each([true, false])(
+    "refuses a pending request whoever asks (caller may approve: %s)",
+    async (mayApprove) => {
+      // Approving and checking out are two steps: the preflight asks no one's
+      // permission, so an approver is refused like anyone else.
+      const { hasPermission } = await import(
+        "~/utils/permissions/permission.validator.server"
+      );
+      vitest.mocked(hasPermission).mockResolvedValue(mayApprove);
+      //@ts-expect-error missing vitest type
+      db.booking.findUnique.mockResolvedValue({
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+      });
+      //@ts-expect-error missing vitest type
+      db.bookingSettings.findUnique.mockResolvedValue({
+        requireApprovalForBase: false,
+        requireApprovalForSelfService: true,
+      });
+
+      await expect(assertRequestMayBeCheckedOut(args)).rejects.toThrow(
+        /Approve the request first/
+      );
+    }
+  );
+
+  it("lets an approved request through, and anything while approval is off", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: new Date(),
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    await expect(assertRequestMayBeCheckedOut(args)).resolves.toBeUndefined();
+
+    // Both switches off: nothing is pending, whatever the stamp says.
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    });
+    await expect(assertRequestMayBeCheckedOut(args)).resolves.toBeUndefined();
   });
 });

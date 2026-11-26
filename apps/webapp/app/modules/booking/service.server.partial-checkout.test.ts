@@ -23,6 +23,7 @@ import {
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import {
   buildOverriddenReservationNotes,
   computeBookingAssetRemainingToCheckOut,
@@ -89,8 +90,17 @@ vitest.mock("~/database/db.server", () => {
       // `SELECT … FOR UPDATE`, which the model-shaped mocks below cannot
       // express. ONGOING is the one status that satisfies both the open and
       // the in-flight assertion, so a single default serves every path this
-      // suite exercises. String literal — this factory is hoisted.
+      // suite exercises. String literal: this factory is hoisted.
       $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
+      // why: the first-scan approval gate reads the org's
+      // approval switches through the tx. Default off: the approval
+      // feature's own tests cover the pending branch.
+      bookingSettings: {
+        findUnique: vitest.fn().mockResolvedValue({
+          requireApprovalForBase: false,
+          requireApprovalForSelfService: false,
+        }),
+      },
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
         // why: computeBookingAssetRemainingToCheckOut's legacy-ONGOING
@@ -175,7 +185,7 @@ vitest.mock("~/database/db.server", () => {
       },
       bookingAsset: {
         findMany: vitest.fn().mockResolvedValue([{ quantity: 1 }]),
-        // why: `computeBookingAssetSliceRemaining` reads a single slice's
+        // why: `computeBookingCheckinRemaining` reads a single slice's
         // quantity via `findUnique({ where: { id: bookingAssetId } })`. The
         // default 1-unit slice keeps the legacy INDIVIDUAL slice cap healthy;
         // qty tests override.
@@ -216,7 +226,7 @@ vitest.mock("~/database/db.server", () => {
           .fn()
           .mockImplementation(() => Promise.resolve(_pbcSessions)),
       },
-      // why: `computeBookingAssetSliceRemaining` (called per qty-tracked
+      // why: `computeBookingCheckinRemaining` (called per qty-tracked
       // slice by `partialCheckoutBooking`) runs `tx.consumptionLog.aggregate`
       // to subtract already-logged check-in units from the slice cap.
       // Default to zero so the slice cap = full booked quantity and tests
@@ -333,6 +343,12 @@ vitest.mock("~/modules/user/service.server", () => ({
     lastName: "User",
     displayName: "Test User",
   }),
+}));
+
+// why: permission reads stay out of these cases; a pending request is refused
+// for everyone, approvers included. Default: may not.
+vitest.mock("~/utils/permissions/permission.validator.server", () => ({
+  hasPermission: vitest.fn().mockResolvedValue(false),
 }));
 
 // why: testing the service without writing real asset notes.
@@ -498,6 +514,24 @@ describe("partialCheckoutBooking", () => {
     pbcHooks.__resetPbcState?.();
     pbcHooks.__installStatefulPbcMocks?.(db);
 
+    // why: the first-scan gate reads the approval switch, the locked status
+    // and the fresh row through `tx`; the approval tests override all three
+    // persistently, so put the defaults back (switch off, lock ONGOING).
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      requireApprovalForBase: false,
+      requireApprovalForSelfService: false,
+    });
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { status: BookingStatus.ONGOING },
+    ]);
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+    });
+    // An approver test grants `approve`; take it back even when it failed.
+    vitest.mocked(hasPermission).mockResolvedValue(false);
+
     // why: clearAllMocks resets call history but not mockResolvedValue overrides
     // set by a prior test. Restore the default "echo requested ids, no conflicts"
     // implementation so each test starts from a clean happy-path baseline.
@@ -595,6 +629,104 @@ describe("partialCheckoutBooking", () => {
       },
       select: { id: true },
     });
+  });
+
+  it("refuses the first partial scan of a pending-approval reservation", async () => {
+    expect.assertions(2);
+
+    // The row lock still reads the booking RESERVED: this is its first scan.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { status: BookingStatus.RESERVED },
+    ]);
+
+    // Org requires approval and this reservation was never approved, so the
+    // scanner is the mobile entry point into ONGOING, so the guard must fire
+    // here, not just in the web checkout dialog.
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow(/not been approved yet/);
+
+    // The transition write must not have happened.
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
+  it("refuses an approver's first scan of a pending request too: approving comes first", async () => {
+    // The row lock still reads the booking RESERVED: this is its first scan.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { status: BookingStatus.RESERVED },
+    ]);
+    vitest.mocked(hasPermission).mockResolvedValue(true);
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+
+    await expect(
+      partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] })
+    ).rejects.toThrow(/Approve the request first/);
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
+  });
+
+  it("uses the locked row's approval, not the pre-transaction snapshot", async () => {
+    expect.assertions(1);
+
+    // The row lock still reads the booking RESERVED: this is its first scan.
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { status: BookingStatus.RESERVED },
+    ]);
+
+    // Snapshot says approved; the row read under the lock says the approval
+    // was cleared (revert + re-reserve) while the scan was in flight.
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      requireApprovalForBase: true,
+      requireApprovalForSelfService: true,
+    });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, approvedAt: new Date() });
+    (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+      approvedAt: null,
+    });
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow(/not been approved yet/);
   });
 
   it("flips a RESERVED booking to ONGOING and scanned assets to CHECKED_OUT on the first partial scan", async () => {
@@ -1795,7 +1927,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         assetKitId: null,
       },
     ]);
-    // why: legacy per-slice cap read shape (`computeBookingAssetSliceRemaining`,
+    // why: legacy per-slice cap read shape (`computeBookingCheckinRemaining`,
     // the check-IN helper) still uses findUnique elsewhere; keep the default so
     // any check-in-adjacent path in these fixtures stays healthy.
     (
@@ -2457,7 +2589,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
           },
         ])
       );
-      // Per-slice cap reads (`computeBookingAssetSliceRemaining`) resolve each
+      // Per-slice cap reads (`computeBookingCheckinRemaining`) resolve each
       // slice's booked quantity by id; no prior consumption → full cap.
       (
         db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
@@ -4194,7 +4326,7 @@ describe("computeBookingAssetSliceRemainingToCheckOut", () => {
 
     // Single-slice QT asset booked for 50 units; prior session checked out 5.
     // The slice itself has never been checked IN — the previous helper choice
-    // (`computeBookingAssetSliceRemaining`, IN-side) would have returned 50
+    // (`computeBookingCheckinRemaining`, IN-side) would have returned 50
     // here and then `partialCheckoutBooking` would have rejected the batch.
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
@@ -4500,7 +4632,7 @@ describe("getRemainingCheckoutPayload", () => {
     // Repro for the "Check out remaining" regression on partially-checked-out
     // QT assets: Pencils booked for 50, a prior PartialBookingCheckout already
     // claimed 5 units. The previous helper choice
-    // (`computeBookingAssetSliceRemaining`, IN-side) returned the full 50 here
+    // (`computeBookingCheckinRemaining`, IN-side) returned the full 50 here
     // (the slice had never been checked in), so the action pushed
     // `{ quantity: 50 }` into the batch and `partialCheckoutBooking` then
     // rejected the claim with "Only 45 units left to check out for Pencils".

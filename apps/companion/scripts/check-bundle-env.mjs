@@ -3,6 +3,12 @@
  * expected Supabase project, and React Native's fetch as the global fetch
  * (see metro.config.js for why the app needs it).
  *
+ * It also asserts two things the Android bundle needs to load its embedded
+ * fonts on a phone that was upgraded from an older store build: the patched
+ * expo-asset is in the bundle, and the icon font sits in the same
+ * `node_modules/.pnpm` folder as in the store build the bundle is published
+ * to. See {@link hasEmbeddedAssetFallback} and {@link iconFontFoldersIn}.
+ *
  * `EXPO_PUBLIC_*` values are inlined by Metro at export time, and Metro's
  * transform cache is keyed on file content rather than on the environment. A
  * cached module therefore keeps whatever was inlined when it was cached, so an
@@ -27,7 +33,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Where `expo export` writes the platform bundles. */
@@ -70,6 +76,135 @@ const EXPO_FETCH_MARKER = "ExpoFetchModule";
  */
 export function usesExpoFetch(text) {
   return text.includes(EXPO_FETCH_MARKER);
+}
+
+/**
+ * Property the patched expo-asset sets on an asset
+ * (`patches/expo-asset@58.0.19.patch`). A bundle exported from a tree where the
+ * patch is not installed does not contain it.
+ */
+const EMBEDDED_ASSET_FALLBACK_MARKER = "_embeddedResourceUriFromBundle";
+
+/**
+ * Whether a bundle carries the expo-asset patch that retries an embedded asset
+ * under this bundle's own resource name.
+ *
+ * @param text - bundle contents, read as binary-safe latin1
+ * @returns true when the patched `Asset` is in the bundle
+ */
+export function hasEmbeddedAssetFallback(text) {
+  return text.includes(EMBEDDED_ASSET_FALLBACK_MARKER);
+}
+
+/**
+ * The `node_modules/.pnpm` folder of `@expo/vector-icons` inside each live
+ * store build, by runtime version.
+ *
+ * An Android store build packages the icon font as a resource whose file name
+ * is derived from this folder. The expo-asset patch finds the font on an
+ * upgraded phone by building that same name from the bundle's metadata, so an
+ * update only works there while its folder equals the store build's. The
+ * trailing hash covers the package's whole peer set, so an unrelated dependency
+ * bump can move it.
+ *
+ * The release PR that bumps `runtimeVersion` adds the new runtime's entry, and
+ * the entry is confirmed against the build once it is cut. Both steps are in
+ * STORE-RELEASE.md, "The icon font folder of the new runtime".
+ */
+export const STORE_BUILD_ICON_FONT_FOLDERS = {
+  "1.8.0":
+    "@expo+vector-icons@15.1.1_expo-font@58.0.11_expo@58.0.22_react-native@0.88.1_@babel+core@7.29_yxvw2n2zge5t45o6qgogiuuuqu",
+};
+
+/**
+ * A `node_modules/.pnpm` folder of `@expo/vector-icons` as it appears in an
+ * asset path. Anchored on the fixed path that follows the folder, because
+ * Hermes packs strings with no separators.
+ */
+const ICON_FONT_FOLDER_RE =
+  /@expo\+vector-icons@[A-Za-z0-9@._+=-]+(?=\/node_modules\/@expo\/vector-icons\/)/g;
+
+/**
+ * Every distinct `node_modules/.pnpm` folder the bundle loads
+ * `@expo/vector-icons` assets from.
+ *
+ * @param text - bundle contents, read as binary-safe latin1
+ * @returns the distinct folder names found, sorted
+ */
+export function iconFontFoldersIn(text) {
+  const folders = new Set();
+  for (const match of text.matchAll(ICON_FONT_FOLDER_RE)) folders.add(match[0]);
+  return [...folders].sort();
+}
+
+/**
+ * What is wrong with an Android bundle's embedded-asset handling, if anything.
+ *
+ * @param text - bundle contents, read as binary-safe latin1
+ * @param runtimeVersion - the runtime the bundle is published to
+ * @returns one message per problem; empty when the bundle is fine
+ */
+export function embeddedAssetProblems(text, runtimeVersion) {
+  const problems = [];
+  if (!hasEmbeddedAssetFallback(text)) {
+    problems.push("expo-asset patch missing (run pnpm install, export again)");
+  }
+  const expected = STORE_BUILD_ICON_FONT_FOLDERS[runtimeVersion];
+  if (!expected) {
+    problems.push(
+      `no icon font folder recorded for runtime ${runtimeVersion} (STORE_BUILD_ICON_FONT_FOLDERS)`
+    );
+    return problems;
+  }
+  const folders = iconFontFoldersIn(text);
+  if (folders.length !== 1 || folders[0] !== expected) {
+    problems.push(
+      `icon font folder differs from the ${runtimeVersion} store build: ${
+        folders.join(" ") || "(none found)"
+      }`
+    );
+  }
+  return problems;
+}
+
+/** Folder of the Android bundles under {@link DIST}. */
+const ANDROID_DIR = join(DIST, "android");
+
+/**
+ * Whether a bundle path is an Android bundle, the only kind whose embedded
+ * resource names the gate checks.
+ *
+ * @param path - a bundle path as {@link bundlePaths} returns it
+ * @returns true for a file under the Android export folder
+ */
+export function isAndroidBundle(path) {
+  return path.startsWith(`${ANDROID_DIR}${sep}`);
+}
+
+/**
+ * Whether the export holds an Android bundle at all. Without one, nothing
+ * checked the embedded assets and the gate must not report them as fine.
+ *
+ * @param paths - bundle paths as {@link bundlePaths} returns them
+ * @returns true when at least one of them is an Android bundle
+ */
+export function hasAndroidBundle(paths) {
+  return paths.some(isAndroidBundle);
+}
+
+/**
+ * The embedded-asset problems of one exported bundle: {@link embeddedAssetProblems}
+ * for an Android bundle, none for any other platform.
+ *
+ * @param path - a bundle path as {@link bundlePaths} returns it
+ * @param text - bundle contents, read as binary-safe latin1
+ * @param runtimeVersion - the runtime the bundle is published to
+ * @returns one message per problem; empty when there is nothing to report
+ */
+export function assetProblemsFor(path, text, runtimeVersion) {
+  return isAndroidBundle(path)
+    ? embeddedAssetProblems(text, runtimeVersion)
+    : [];
 }
 
 /** Every built bundle under {@link DIST}, per platform. */
@@ -119,30 +254,47 @@ function main() {
     process.exit(1);
   }
 
+  const runtimeVersion = JSON.parse(readFileSync("app.json", "utf8")).expo
+    .runtimeVersion;
   let bad = false;
   for (const path of paths) {
     const text = readFileSync(path, "latin1");
     const refs = refsIn(text);
     const refOk = refs.length === 1 && refs[0] === expected;
     const fetchOk = !usesExpoFetch(text);
+    const assetProblems = assetProblemsFor(path, text, runtimeVersion);
+    const ok = refOk && fetchOk && assetProblems.length === 0;
     console.log(
-      `  ${refOk && fetchOk ? "ok  " : "FAIL"} ${path}  ->  ${
+      `  ${ok ? "ok  " : "FAIL"} ${path}  ->  ${
         refs.join(" ") || "(no Supabase ref found)"
-      }${fetchOk ? "" : "  + Expo fetch is the global fetch"}`
+      }${fetchOk ? "" : "  + Expo fetch is the global fetch"}${assetProblems
+        .map((problem) => `\n         ${problem}`)
+        .join("")}`
     );
-    if (!refOk || !fetchOk) bad = true;
+    if (!ok) bad = true;
+  }
+
+  if (!hasAndroidBundle(paths)) {
+    console.error(
+      `\n[bundle-env] FAILED: no Android bundle under ${ANDROID_DIR}, so its embedded\n` +
+        "  assets were not checked. Export with -p ios -p android and run this again."
+    );
+    process.exit(1);
   }
 
   if (bad) {
     console.error(
-      `\n[bundle-env] FAILED: expected exactly ${expected} and React Native's fetch.\n` +
-        "  Do NOT publish. Re-export with --clear from apps/companion (so metro.config.js\n" +
-        "  sets EXPO_PUBLIC_USE_RN_FETCH) and run this again."
+      `\n[bundle-env] FAILED: expected exactly ${expected}, React Native's fetch, the\n` +
+        "  expo-asset patch and the store build's icon font folder in the Android bundle.\n" +
+        "  Do NOT publish. Run pnpm install, re-export with --clear from apps/companion (so\n" +
+        "  metro.config.js sets EXPO_PUBLIC_USE_RN_FETCH) and run this again. If the icon font\n" +
+        "  folder moved, a dependency changed since the store build: see EAS-UPDATE.md."
     );
     process.exit(1);
   }
   console.log(
-    `\n[bundle-env] OK: every bundle points at ${expected} and uses React Native's fetch`
+    `\n[bundle-env] OK: every bundle points at ${expected} and uses React Native's fetch;\n` +
+      "  the Android bundle has the expo-asset patch and the store build's icon font folder"
   );
 }
 

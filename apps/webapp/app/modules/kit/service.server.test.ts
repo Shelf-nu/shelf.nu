@@ -38,6 +38,7 @@ import {
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
+import { releaseUnattachedBarcodes } from "../barcode/service.server";
 import {
   createSystemBookingNote,
   createSystemBookingNotes,
@@ -249,6 +250,7 @@ vitest.mock("~/modules/qr/service.server", () => ({
 
 // why: testing kit barcode operations without triggering barcode validation and updates
 vitest.mock("~/modules/barcode/service.server", () => ({
+  releaseUnattachedBarcodes: vitest.fn(),
   updateBarcodes: vitest.fn(),
   validateBarcodeUniqueness: vitest.fn(),
 }));
@@ -414,6 +416,36 @@ describe("createKit", () => {
         category: undefined,
       },
     });
+  });
+
+  it("frees unattached barcodes holding the submitted values before creating the kit", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.kit.create.mockResolvedValue(mockKitData);
+    const release = vitest.mocked(releaseUnattachedBarcodes);
+
+    const barcodes = [{ type: BarcodeType.Code128, value: "TEST123" }];
+    await createKit({ ...mockCreateParams, barcodes, locationId: null });
+
+    // `db` doubles as the transaction client in this suite.
+    expect(release).toHaveBeenCalledWith(db, {
+      barcodes,
+      organizationId: "org-1",
+    });
+    expect(release.mock.invocationCallOrder[0]).toBeLessThan(
+      //@ts-expect-error missing vitest type
+      db.kit.create.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("frees nothing when the kit is created without barcodes", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.kit.create.mockResolvedValue(mockKitData);
+
+    await createKit({ ...mockCreateParams, locationId: null });
+
+    expect(releaseUnattachedBarcodes).not.toHaveBeenCalled();
   });
 
   it("should create a kit with barcodes", async () => {
@@ -1511,10 +1543,9 @@ describe("bulkRemoveAssetsFromKits", () => {
   it("should emit ASSET_KIT_CHANGED for each asset that left a kit", async () => {
     expect.assertions(2);
 
-    // Translated from main's PR #2535 to our pivot schema + Custody[] shape:
-    //   - `kit` is now sourced via `assetKits: { select: { kit: {...} } }`
-    //     and flattened in-memory.
-    //   - `custody` is an array (Phase 2 made Custody 1:N on Asset).
+    // Fixture shape:
+    //   - each `assetKits` row is one kit membership of the asset.
+    //   - `custody` is an array: an asset can hold several Custody rows.
     const assets = [
       {
         id: "asset-1",
@@ -1631,6 +1662,181 @@ describe("bulkRemoveAssetsFromKits", () => {
       ],
       expect.anything()
     );
+  });
+
+  describe("a quantity-tracked asset in two kits that are both in custody", () => {
+    const custodian = (id: string, userId: string) => ({
+      id,
+      name: `Custodian ${id}`,
+      user: { id: userId, firstName: "C", lastName: id, displayName: null },
+    });
+
+    /** A 10-unit pool: 4 units in kit A, 3 in kit B, each kit in custody. */
+    const pool = {
+      id: "pool-1",
+      title: "ZZ Test Cables",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: "pcs",
+      assetKits: [
+        {
+          quantity: 4,
+          kit: { id: "kit-a", name: "Kit A", custody: { id: "kc-a" } },
+        },
+        {
+          quantity: 3,
+          kit: { id: "kit-b", name: "Kit B", custody: { id: "kc-b" } },
+        },
+      ],
+      custody: [
+        {
+          id: "custody-a",
+          teamMemberId: "tm-a",
+          kitCustodyId: "kc-a",
+          quantity: 4,
+          custodian: custodian("tm-a", "user-a"),
+        },
+        {
+          id: "custody-b",
+          teamMemberId: "tm-b",
+          kitCustodyId: "kc-b",
+          quantity: 3,
+          custodian: custodian("tm-b", "user-b"),
+        },
+        {
+          // Operator-assigned custody, not allocated through any kit.
+          id: "custody-direct",
+          teamMemberId: "tm-c",
+          kitCustodyId: null,
+          quantity: 1,
+          custodian: custodian("tm-c", "user-c"),
+        },
+      ],
+    };
+
+    /** Every event of one action recorded across all `recordEvents` calls. */
+    const recordedEvents = (action: string) =>
+      (recordEvents as ReturnType<typeof vitest.fn>).mock.calls
+        .flatMap(([events]) => events as Array<Record<string, unknown>>)
+        .filter((event) => event.action === action);
+
+    /** The content of every note written across all `note.createMany` calls. */
+    const writtenNotes = () =>
+      (db.note.createMany as ReturnType<typeof vitest.fn>).mock.calls.flatMap(
+        ([args]) =>
+          (args as { data: Array<{ content: string }> }).data.map(
+            (note) => note.content
+          )
+      );
+
+    const removePool = async () => {
+      //@ts-expect-error missing vitest type
+      db.asset.findMany.mockResolvedValue([pool]);
+
+      return bulkRemoveAssetsFromKits({
+        lastAuditDateAccess: "hidden",
+        bookableScope: null,
+        assetIds: ["pool-1"],
+        organizationId: "org-1",
+        userId: "user-1",
+        request: new Request("http://test.com"),
+        currentSearchParams: null,
+        // @ts-expect-error settings shape not relevant
+        settings: {},
+      });
+    };
+
+    it("releases the custody of every kit and leaves direct custody alone", async () => {
+      await removePool();
+
+      expect(db.custody.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["custody-a", "custody-b"] } },
+      });
+    });
+
+    it("records one CUSTODY_RELEASED per kit, naming that kit and its custodian", async () => {
+      await removePool();
+
+      expect(recordedEvents("CUSTODY_RELEASED")).toEqual([
+        expect.objectContaining({
+          assetId: "pool-1",
+          kitId: "kit-a",
+          teamMemberId: "tm-a",
+          targetUserId: "user-a",
+        }),
+        expect.objectContaining({
+          assetId: "pool-1",
+          kitId: "kit-b",
+          teamMemberId: "tm-b",
+          targetUserId: "user-b",
+        }),
+      ]);
+    });
+
+    it("records one ASSET_KIT_CHANGED and one note per kit", async () => {
+      const result = await removePool();
+
+      expect(recordedEvents("ASSET_KIT_CHANGED")).toEqual([
+        expect.objectContaining({ assetId: "pool-1", fromValue: "kit-a" }),
+        expect.objectContaining({ assetId: "pool-1", fromValue: "kit-b" }),
+      ]);
+
+      const notes = writtenNotes();
+      expect(notes.filter((note) => note.includes("/kits/kit-a"))).toHaveLength(
+        1
+      );
+      expect(notes.filter((note) => note.includes("/kits/kit-b"))).toHaveLength(
+        1
+      );
+
+      // Each release note names the custodian whose custody ended, and the
+      // units that custody row held (Custody.quantity).
+      const releaseNotes = notes.filter((note) => note.includes("released"));
+      expect(releaseNotes).toEqual([
+        expect.stringMatching(/\/users\/user-a".*custody of 4 pcs\.$/),
+        expect.stringMatching(/\/users\/user-b".*custody of 3 pcs\.$/),
+      ]);
+
+      // The pool left two kits but is one asset.
+      expect(result).toEqual({ removedFromKitCount: 1 });
+    });
+  });
+
+  it("records a single CUSTODY_RELEASED for an asset leaving one kit in custody", async () => {
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Asset 1",
+        assetKits: [
+          { kit: { id: "kit-1", name: "Kit 1", custody: { id: "kc-1" } } },
+        ],
+        custody: [
+          {
+            id: "custody-1",
+            teamMemberId: "tm-1",
+            kitCustodyId: "kc-1",
+            custodian: { id: "tm-1", name: "Custodian", user: null },
+          },
+        ],
+      },
+    ]);
+
+    await bulkRemoveAssetsFromKits({
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+      request: new Request("http://test.com"),
+      currentSearchParams: null,
+      // @ts-expect-error settings shape not relevant
+      settings: {},
+    });
+
+    const released = (recordEvents as ReturnType<typeof vitest.fn>).mock.calls
+      .flatMap(([events]) => events as Array<{ action: string }>)
+      .filter((event) => event.action === "CUSTODY_RELEASED");
+    expect(released).toHaveLength(1);
   });
 });
 

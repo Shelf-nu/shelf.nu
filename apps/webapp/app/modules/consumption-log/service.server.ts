@@ -34,7 +34,11 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 // the cycle `consumption-log → availability.server → booking/service.server →
 // consumption-log`, which corrupts Vitest partial-mock bindings on
 // `createConsumptionLog` in the booking suite. See the leaf's header doc.
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertAssetQuantityNotBelowReservations,
+  loggedUnitsByReservationRow,
+  reservedUnitsStillHeld,
+} from "~/modules/asset/availability-primitives.server";
 import {
   bookedOutFromSource,
   custodyFromSource,
@@ -341,13 +345,15 @@ export async function computeAvailableQuantity(
  * Available = Total - InCustody - Reserved
  *
  * Where Reserved = sum, across bookings with status RESERVED, ONGOING, or
- * OVERDUE, of each booking's *remaining* reserved quantity for this asset.
+ * OVERDUE, of each reservation row's *remaining* quantity for this asset.
+ * Logged units are attributed per row ({@link loggedUnitsByReservationRow}),
+ * so a return on one slice of a booking does not free its other slices.
  * Remaining is computed as `BookingAsset.quantity` minus any already-logged
  * disposition quantities (RETURN, CONSUME, LOSS, DAMAGE) from partial
  * check-ins — since Phase 3c partial check-in writes ConsumptionLog rows
  * without decrementing `BookingAsset.quantity`, the pivot stays at the
  * booked qty by design and we must subtract logged dispositions here.
- * Per-booking remaining is clamped at 0 as defence-in-depth.
+ * Per-row remaining is clamped at 0 as defence-in-depth.
  *
  * This is the booking-aware counterpart of {@link computeAvailableQuantity},
  * which only considers custody. Use this function when you need to know how
@@ -389,12 +395,20 @@ export async function computeBookingAvailableQuantity(
 
     /**
      * Fetch the reserved pivot rows for this asset across active bookings.
-     * We need individual rows (not an aggregate) so we can subtract the
-     * per-booking logged disposition quantities before summing.
+     * We need individual rows (not an aggregate) so we can subtract each
+     * row's own logged disposition quantities before summing.
      */
     const reservedRows = await db.bookingAsset.findMany({
       where: bookingAssetWhere,
-      select: { bookingId: true, assetId: true, quantity: true },
+      select: {
+        id: true,
+        bookingId: true,
+        assetId: true,
+        quantity: true,
+        assetKitId: true,
+        checkedOutAt: true,
+        checkedOutQuantity: true,
+      },
     });
 
     let reserved = 0;
@@ -403,7 +417,7 @@ export async function computeBookingAvailableQuantity(
       const bookingIds = reservedRows.map((r) => r.bookingId);
 
       /**
-       * Sum already-logged disposition quantities per booking for this
+       * Sum already-logged disposition quantities per slice for this
        * asset. Dispositions are terminal for reserved units:
        *   - RETURN   — unit came back to stock
        *   - CONSUME  — unit consumed (permanently out)
@@ -413,7 +427,7 @@ export async function computeBookingAvailableQuantity(
        * custody, not a reduction of the booking's reservation footprint.
        */
       const loggedGroups = await db.consumptionLog.groupBy({
-        by: ["bookingId"],
+        by: ["bookingAssetId", "bookingId", "assetId"],
         where: {
           assetId,
           bookingId: { in: bookingIds },
@@ -429,23 +443,24 @@ export async function computeBookingAvailableQuantity(
         _sum: { quantity: true },
       });
 
-      /** bookingId → total logged disposition quantity for this asset */
-      const loggedByBookingId = new Map<string, number>();
-      for (const group of loggedGroups) {
-        if (group.bookingId) {
-          loggedByBookingId.set(group.bookingId, group._sum.quantity ?? 0);
-        }
-      }
+      /**
+       * Per reservation row, so a unit logged on one slice of a booking is
+       * not also taken off the booking's other slices of this asset.
+       */
+      const loggedByRow = loggedUnitsByReservationRow(
+        reservedRows,
+        loggedGroups
+      );
 
       /**
        * For each active reservation, subtract the logged dispositions from
-       * the booked quantity. Clamp at 0 per row so an over-logged booking
-       * (should not happen, but defence-in-depth) can't push `reserved`
-       * negative and silently inflate availability elsewhere.
+       * the booked quantity. The result is never negative, and never below
+       * the units the row has out right now: a slice returned in full and
+       * checked out again still holds the units of its second trip.
        */
       for (const row of reservedRows) {
-        const logged = loggedByBookingId.get(row.bookingId) ?? 0;
-        const remaining = Math.max(0, row.quantity - logged);
+        const logged = loggedByRow.get(row) ?? 0;
+        const remaining = reservedUnitsStillHeld(row, logged);
         reserved += remaining;
       }
     }

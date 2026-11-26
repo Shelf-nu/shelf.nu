@@ -695,16 +695,12 @@ describe.skipIf(!DATABASE_URL)("stock ledger replay (real database)", () => {
             bookings: [{ ...bookingRow, qtyAssetIds: [pool.id] }],
           })),
         ],
-        remaining: await booking.computeBookingAssetRemaining(
-          db,
-          bookingId,
-          pool.id
-        ),
-        sliceRemaining: await booking.computeBookingAssetSliceRemaining(
-          db,
-          bookingId,
-          sliceId
-        ),
+        remaining: (
+          await booking.computeBookingCheckinRemaining(db, bookingId, [pool.id])
+        ).byAsset.get(pool.id),
+        sliceRemaining: (
+          await booking.computeBookingCheckinRemaining(db, bookingId, [pool.id])
+        ).bySlice.get(sliceId),
         bookedOutBySource: [
           ...(
             await bookedOut.loadBookedOutBySource(db, {

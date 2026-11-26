@@ -153,3 +153,153 @@ describe("GenericItemRow rejectItemType", () => {
     expect(await screen.findByText("rendered item")).toBeInTheDocument();
   });
 });
+
+/**
+ * A scan draft puts a parked list back as bare codes, and each row looks its
+ * code up again. Those lookups must not be recorded as scans: nobody scanned
+ * the codes just now. A restored row therefore marks its lookup, and a fresh
+ * scan does not.
+ *
+ * @see {@link file://../../../utils/restored-scan-lookup.ts}
+ */
+describe("GenericItemRow lookups for rows restored from a scan draft", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(mockFetch);
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          qr: { type: "asset", asset: { id: "asset-1", title: "Camera" } },
+        }),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The URL of the one lookup the row made. */
+  async function requestedUrl() {
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    return new URL(String(mockFetch.mock.calls[0][0]), "http://localhost");
+  }
+
+  it("marks the lookup of a restored QR row", async () => {
+    const store = createStore();
+    store.set(scannedItemsAtom, {
+      "qr-1": { codeType: "qr", pendingLookup: true },
+    });
+    renderRow(store);
+
+    const url = await requestedUrl();
+    expect(url.pathname).toBe("/api/get-scanned-item/qr-1");
+    expect(url.searchParams.get("restored")).toBe("1");
+  });
+
+  it("marks the lookup of a restored barcode row", async () => {
+    const store = createStore();
+    store.set(scannedItemsAtom, {
+      "qr-1": { codeType: "barcode", pendingLookup: true },
+    });
+    renderRow(store);
+
+    const url = await requestedUrl();
+    expect(url.pathname).toBe("/api/get-scanned-barcode/qr-1");
+    expect(url.searchParams.get("restored")).toBe("1");
+  });
+
+  it("leaves a freshly scanned code's lookup unmarked, so it is recorded", async () => {
+    const store = createStore();
+    store.set(scannedItemsAtom, { "qr-1": { codeType: "qr" } });
+    renderRow(store);
+
+    const url = await requestedUrl();
+    expect(url.searchParams.has("restored")).toBe(false);
+  });
+
+  it("keeps the drawer's own params next to the mark", async () => {
+    const store = createStore();
+    store.set(scannedItemsAtom, {
+      "qr-1": { codeType: "qr", pendingLookup: true },
+    });
+    renderRow(store, { searchParams: { auditSessionId: "audit-1" } });
+
+    const url = await requestedUrl();
+    expect(url.searchParams.get("auditSessionId")).toBe("audit-1");
+    expect(url.searchParams.get("restored")).toBe("1");
+  });
+});
+
+/**
+ * What a failed lookup leaves on the row decides whether a scan draft keeps
+ * the code. A refusal of the code (4xx) is final. A server failure (5xx) or no
+ * answer at all says nothing about the code, so it stays owed a lookup.
+ */
+describe("GenericItemRow failed lookups", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(mockFetch);
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function seed(store: ReturnType<typeof createStore>) {
+    store.set(scannedItemsAtom, {
+      "qr-1": { codeType: "barcode", pendingLookup: true },
+    });
+  }
+
+  it("lets go of a code the server refuses", async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 404,
+      json: () =>
+        Promise.resolve({ error: { message: "This barcode doesn't exist" } }),
+    });
+    const store = createStore();
+    seed(store);
+    renderRow(store);
+
+    await waitFor(() => {
+      expect(store.get(scannedItemsAtom)["qr-1"]).toEqual({
+        error: "This barcode doesn't exist",
+      });
+    });
+  });
+
+  it("keeps a code whose lookup hit a server failure, to look it up later", async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 500,
+      json: () =>
+        Promise.resolve({ error: { message: "Something went wrong" } }),
+    });
+    const store = createStore();
+    seed(store);
+    renderRow(store);
+
+    await waitFor(() => {
+      expect(store.get(scannedItemsAtom)["qr-1"]).toEqual({
+        error: "Something went wrong",
+        pendingLookup: true,
+        codeType: "barcode",
+      });
+    });
+  });
+
+  it("keeps a code, and how it was scanned, when the lookup got no answer", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const store = createStore();
+    seed(store);
+    renderRow(store);
+
+    await waitFor(() => {
+      expect(store.get(scannedItemsAtom)["qr-1"]).toEqual({
+        error: "Failed to fetch item",
+        pendingLookup: true,
+        codeType: "barcode",
+      });
+    });
+  });
+});

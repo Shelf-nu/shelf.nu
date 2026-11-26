@@ -297,6 +297,7 @@ export async function action({ request }: ActionFunctionArgs) {
       hints,
       alertsOrgOnReservation:
         access.policy.notifications.reservationAlertsAdmins,
+      actorApprovalSetting: access.policy.bookings.approvalSetting,
       userId: user.id,
       seesAllBookings: access.bookings.seeAll,
     });
@@ -307,6 +308,10 @@ export async function action({ request }: ActionFunctionArgs) {
         name: reserved.name,
         status: reserved.status,
       },
+      // What the reservation became, from the write itself: the app words its
+      // success message from this rather than from a prediction made when the
+      // booking loaded, which the workspace switches may have outdated.
+      isPendingApproval: reserved.approvedAt === null,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

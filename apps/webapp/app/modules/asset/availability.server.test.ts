@@ -63,6 +63,7 @@ import {
   buildInsufficientStockMessage,
   getAssetAvailability,
   getAssetAvailabilityBatch,
+  loggedUnitsByReservationRow,
   overCommittedWindows,
   peakConcurrent,
 } from "./availability.server";
@@ -351,21 +352,33 @@ describe("getAssetAvailability", () => {
 
   it("excludes kit-driven rows from reserved (no double count)", async () => {
     resetMocks();
-    // inKits 3 (one AssetKit membership of qty 3). The findMany mock stands
-    // in for what a real query already filtered via `assetKitId: null` — only
-    // the standalone row (qty 2) comes back; the kit-driven row never reaches
-    // the reserved sum because it isn't part of this result set.
+    // inKits 3 (one AssetKit membership of qty 3). The read returns the
+    // booking's kit-driven slice next to its standalone one: it is needed to
+    // place logged units, and must not be summed again on top of `inKits`.
     // @ts-expect-error mocked
     db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+    const booking = {
+      from: new Date("2026-06-01T00:00:00Z"),
+      to: new Date("2026-06-05T00:00:00Z"),
+      status: "RESERVED",
+    };
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
+      { id: "ba-loose", bookingId: "b1", quantity: 2, booking },
       {
+        id: "ba-kit",
         bookingId: "b1",
-        quantity: 2,
-        booking: {
-          from: new Date("2026-01-01T00:00:00Z"),
-          to: new Date("2026-01-05T00:00:00Z"),
-        },
+        quantity: 3,
+        assetKitId: "ak-1",
+        booking,
+      },
+      // An upcoming booking that holds the asset only through a kit.
+      {
+        id: "ba-kit-only",
+        bookingId: "b2",
+        quantity: 4,
+        assetKitId: "ak-2",
+        booking,
       },
     ]);
 
@@ -380,16 +393,105 @@ describe("getAssetAvailability", () => {
 
     expect(a.inKits).toBe(3);
     expect(a.reserved).toBe(2); // kit-driven row NOT summed again
+    // The informational figures count upcoming standalone reservations only.
+    expect(a.reservedTotal).toBe(2);
+    expect(a.reservingBookingCount).toBe(1);
+  });
 
-    // The query itself must ask Prisma to exclude kit-driven rows —
-    // verifying the where-clause is what actually protects us in
-    // production (the mock return value alone doesn't prove the filter).
-    const call = (
-      db.bookingAsset.findMany as unknown as {
-        mock: { calls: Array<[{ where?: { assetKitId?: unknown } }]> };
-      }
-    ).mock.calls[0];
-    expect(call?.[0]?.where?.assetKitId).toBeNull();
+  it("does not take a return logged on the kit slice off the standalone slice", async () => {
+    resetMocks();
+    // Booking b1 holds the asset loose (6, out) and through a kit (6, out).
+    // The kit came back: 6 RETURN units tagged to the kit slice. The loose
+    // 6 are still out, so they stay reserved.
+    // @ts-expect-error mocked
+    db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 6 } });
+    const booking = {
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-05T00:00:00Z"),
+      status: "ONGOING",
+    };
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-loose",
+        bookingId: "b1",
+        quantity: 6,
+        assetKitId: null,
+        checkedOutQuantity: 6,
+        booking,
+      },
+      {
+        id: "ba-kit",
+        bookingId: "b1",
+        quantity: 6,
+        assetKitId: "ak-1",
+        checkedOutQuantity: 6,
+        booking,
+      },
+    ]);
+    // @ts-expect-error mocked
+    db.consumptionLog.groupBy.mockResolvedValue([
+      { bookingAssetId: "ba-kit", bookingId: "b1", _sum: { quantity: 6 } },
+    ]);
+
+    const a = await getAssetAvailability({
+      assetId: ASSET_ID,
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+    });
+
+    expect(a.reserved).toBe(6);
+  });
+
+  it("places a return that names no slice on the standalone slice first", async () => {
+    resetMocks();
+    // Same booking, but the 6 returned units name no slice (an older phone
+    // app). Every reader gives them to the standalone slice first, so it is
+    // the loose reservation that is freed.
+    // @ts-expect-error mocked
+    db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 6 } });
+    const booking = {
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-05T00:00:00Z"),
+      status: "ONGOING",
+    };
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-loose",
+        bookingId: "b1",
+        quantity: 6,
+        assetKitId: null,
+        checkedOutQuantity: 6,
+        booking,
+      },
+      {
+        id: "ba-kit",
+        bookingId: "b1",
+        quantity: 6,
+        assetKitId: "ak-1",
+        checkedOutQuantity: 6,
+        booking,
+      },
+    ]);
+    // @ts-expect-error mocked
+    db.consumptionLog.groupBy.mockResolvedValue([
+      { bookingAssetId: null, bookingId: "b1", _sum: { quantity: 6 } },
+    ]);
+
+    const a = await getAssetAvailability({
+      assetId: ASSET_ID,
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+    });
+
+    expect(a.reserved).toBe(0);
   });
 
   it("subtracts checked-out regardless of window (OVERDUE trap)", async () => {
@@ -490,12 +592,14 @@ describe("getAssetAvailability", () => {
 
   it("subtracts logged dispositions (RETURN/CONSUME/LOSS/DAMAGE) per booking", async () => {
     resetMocks();
-    // Booked 5, but 2 already returned via partial check-in — remaining 3.
+    // Booked 5 and sent out, 2 already returned via partial check-in:
+    // remaining 3.
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
       {
         bookingId: "b1",
         quantity: 5,
+        checkedOutQuantity: 5,
         booking: {
           from: new Date("2026-01-01T00:00:00Z"),
           to: new Date("2026-01-05T00:00:00Z"),
@@ -521,6 +625,41 @@ describe("getAssetAvailability", () => {
     expect(a.reservedTotal).toBe(3);
   });
 
+  it("keeps the units of a slice that came back in full and went out again", async () => {
+    resetMocks();
+    // Booked 6: 6 out, 6 back, 6 out again. `checkedOutQuantity` is
+    // cumulative (12), so 6 units are out and another booking over the same
+    // window must not be offered them.
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        bookingId: "b1",
+        quantity: 6,
+        checkedOutQuantity: 12,
+        booking: {
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-05T00:00:00Z"),
+          status: "ONGOING",
+        },
+      },
+    ]);
+    // @ts-expect-error mocked
+    db.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b1", _sum: { quantity: 6 } },
+    ]);
+
+    const a = await getAssetAvailability({
+      assetId: ASSET_ID,
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+    });
+
+    expect(a.reserved).toBe(6);
+  });
+
   it("clamps a row at 0 when logged dispositions exceed the booked quantity", async () => {
     resetMocks();
     // Defence-in-depth: an over-logged booking (should not happen) must not
@@ -528,6 +667,7 @@ describe("getAssetAvailability", () => {
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
       {
+        id: "ba-b1",
         bookingId: "b1",
         quantity: 2,
         booking: {
@@ -536,9 +676,10 @@ describe("getAssetAvailability", () => {
         },
       },
     ]);
+    // The logs name the row, so all 5 count for it.
     // @ts-expect-error mocked
     db.consumptionLog.groupBy.mockResolvedValue([
-      { bookingId: "b1", _sum: { quantity: 5 } },
+      { bookingAssetId: "ba-b1", bookingId: "b1", _sum: { quantity: 5 } },
     ]);
 
     const a = await getAssetAvailability({
@@ -887,21 +1028,56 @@ describe("getAssetAvailabilityBatch", () => {
     expect(client.bookingAsset.findMany).not.toHaveBeenCalled();
   });
 
-  it("requests standalone-only reserved rows (assetKitId: null) — the double-count fix", async () => {
+  it("leaves kit-driven rows out of reserved and keeps a kit return off the standalone slice", async () => {
     const client = createMockBatchClient();
-    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 20 }]);
+    const booking = {
+      from: new Date("2026-01-02T00:00:00Z"),
+      to: new Date("2026-01-05T00:00:00Z"),
+      status: "ONGOING",
+    };
+    // First call is the checked-out read, second the reservation rows: the
+    // booking's standalone slice and its kit-driven one, both out.
+    client.bookingAsset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "ba-loose",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          assetKitId: null,
+          checkedOutQuantity: 6,
+          booking,
+        },
+        {
+          id: "ba-kit",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          assetKitId: "ak-1",
+          checkedOutQuantity: 6,
+          booking,
+        },
+      ]);
+    // The kit came back: its 6 units are logged on the kit slice.
+    client.consumptionLog.groupBy.mockResolvedValue([
+      {
+        bookingAssetId: "ba-kit",
+        bookingId: "b1",
+        assetId: "a1",
+        _sum: { quantity: 6 },
+      },
+    ]);
 
-    await getAssetAvailabilityBatch(["a1"], {
+    const result = await getAssetAvailabilityBatch(["a1"], {
       organizationId: ORG_ID,
       window: { from: new Date("2026-01-01"), to: new Date("2026-01-31") },
       db: client,
     });
 
-    // The reserved-rows call is the second `bookingAsset.findMany` call (the
-    // first, inside `computeCheckedOutBatch`, has no such filter — checkedOut
-    // is asset-on-active-booking, kit-driven or not).
-    const reservedCall = client.bookingAsset.findMany.mock.calls[1];
-    expect(reservedCall?.[0]?.where?.assetKitId).toBeNull();
+    // The loose 6 are still out and stay reserved; the kit row is not summed.
+    expect(result.get("a1")?.reserved).toBe(6);
   });
 
   it("leaves an expired reservation out of the informational reserved total", async () => {
@@ -942,6 +1118,42 @@ describe("getAssetAvailabilityBatch", () => {
     expect(client.bookingAsset.findMany).toHaveBeenCalledTimes(2);
     expect(result.get("a1")?.reservedTotal).toBe(2);
     expect(result.get("a1")?.reservingBookingCount).toBe(1);
+  });
+
+  it("keeps the units of a slice that came back in full and went out again", async () => {
+    const client = createMockBatchClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    // First call is the checked-out read, second the reserved rows. Booked 6:
+    // 6 out, 6 back, 6 out again, so the cumulative counter reads 12.
+    client.bookingAsset.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          checkedOutQuantity: 12,
+          booking: {
+            from: new Date("2026-01-01T00:00:00Z"),
+            to: new Date("2026-01-05T00:00:00Z"),
+            status: "ONGOING",
+          },
+        },
+      ]);
+    client.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b1", assetId: "a1", _sum: { quantity: 6 } },
+    ]);
+
+    const result = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-10T00:00:00Z"),
+      },
+      db: client,
+    });
+
+    expect(result.get("a1")?.reserved).toBe(6);
   });
 
   it("scopes the total (asset.findMany) and inCustody (custody.groupBy) queries to the caller's organization", async () => {
@@ -1839,6 +2051,136 @@ describe("assertAssetQuantitiesAvailable", () => {
 /*                 assertAssetQuantityNotBelowReservations                    */
 /* -------------------------------------------------------------------------- */
 
+describe("loggedUnitsByReservationRow", () => {
+  const OUT = new Date("2026-01-02T09:00:00Z");
+  const loose = {
+    id: "ba-loose",
+    bookingId: "b1",
+    assetId: "a1",
+    assetKitId: null,
+    quantity: 6,
+    checkedOutQuantity: 6,
+  };
+  const kit = {
+    id: "ba-kit",
+    bookingId: "b1",
+    assetId: "a1",
+    assetKitId: "ak-1",
+    quantity: 6,
+    checkedOutQuantity: 6,
+  };
+  const group = (bookingAssetId: string | null, quantity: number) => ({
+    bookingAssetId,
+    bookingId: "b1",
+    assetId: "a1",
+    _sum: { quantity },
+  });
+
+  it("gives a booking's only row the units logged for the pair", () => {
+    const logged = loggedUnitsByReservationRow(
+      [loose],
+      [group(null, 2), group("ba-loose", 3)]
+    );
+    expect(logged.get(loose)).toBe(5);
+  });
+
+  it("keeps units logged on the kit slice off the standalone slice", () => {
+    const logged = loggedUnitsByReservationRow(
+      [loose, kit],
+      [group("ba-kit", 6)]
+    );
+    expect(logged.get(loose)).toBe(0);
+    expect(logged.get(kit)).toBe(6);
+  });
+
+  it("places units that name no slice on the standalone slice first, up to what it sent", () => {
+    // 4 of the 6 loose units went out; 7 came back with no slice named.
+    const partly = { ...loose, checkedOutQuantity: 4 };
+    const logged = loggedUnitsByReservationRow([kit, partly], [group(null, 7)]);
+    expect(logged.get(partly)).toBe(4);
+    expect(logged.get(kit)).toBe(3);
+  });
+
+  it("gives nothing to a slice that never went out", () => {
+    const onShelf = { ...loose, checkedOutQuantity: 0, checkedOutAt: null };
+    const logged = loggedUnitsByReservationRow(
+      [onShelf, kit],
+      [group(null, 5)]
+    );
+    expect(logged.get(onShelf)).toBe(0);
+    expect(logged.get(kit)).toBe(5);
+  });
+
+  it("sizes a slice marked out with no counter by its booked quantity", () => {
+    const stamped = { ...loose, checkedOutQuantity: 0, checkedOutAt: OUT };
+    const logged = loggedUnitsByReservationRow(
+      [stamped, kit],
+      [group(null, 8)]
+    );
+    expect(logged.get(stamped)).toBe(6);
+    expect(logged.get(kit)).toBe(2);
+  });
+
+  it("caps a booking's only row at what it sent, for logs that name no slice", () => {
+    // A kit slice was returned and then removed from the booking, so its 6
+    // logged units name no slice. The loose slice never left: none are its.
+    const onShelf = { ...loose, checkedOutQuantity: 0, checkedOutAt: null };
+    const logged = loggedUnitsByReservationRow([onShelf], [group(null, 6)]);
+    expect(logged.get(onShelf)).toBe(0);
+  });
+
+  it("fills kit slices in slice id order, whatever order the rows arrive in", () => {
+    const sentTwo = { ...loose, checkedOutQuantity: 2 };
+    const kitA = { ...kit, id: "ba-kit-1", checkedOutQuantity: 4 };
+    const kitB = { ...kit, id: "ba-kit-2", checkedOutQuantity: 4 };
+    // 2 fill the loose slice; the other 3 go to the first kit slice by id.
+    const logged = loggedUnitsByReservationRow(
+      [sentTwo, kitB, kitA],
+      [group(null, 5)]
+    );
+    expect(logged.get(sentTwo)).toBe(2);
+    expect(logged.get(kitA)).toBe(3);
+    expect(logged.get(kitB)).toBe(0);
+  });
+
+  it("attributes rows read without an id or an asset id", () => {
+    // The single-asset read selects neither on some clients.
+    const bareLoose = { bookingId: "b1", quantity: 6, checkedOutQuantity: 6 };
+    const bareKit = { ...bareLoose, assetKitId: "ak-1" };
+    const logged = loggedUnitsByReservationRow(
+      [bareKit, bareLoose],
+      [{ bookingAssetId: null, bookingId: "b1", _sum: { quantity: 8 } }]
+    );
+    expect(logged.get(bareLoose)).toBe(6);
+    expect(logged.get(bareKit)).toBe(2);
+  });
+
+  it("gives no row a log that names a slice outside the pair", () => {
+    const logged = loggedUnitsByReservationRow(
+      [loose, kit],
+      [group("ba-gone", 4)]
+    );
+    expect(logged.get(loose)).toBe(0);
+    expect(logged.get(kit)).toBe(0);
+  });
+
+  it("leaves units beyond what every slice sent with no row", () => {
+    const logged = loggedUnitsByReservationRow([loose, kit], [group(null, 20)]);
+    expect(logged.get(loose)).toBe(6);
+    expect(logged.get(kit)).toBe(6);
+  });
+
+  it("keeps bookings and assets apart", () => {
+    const other = { ...loose, id: "ba-other", bookingId: "b2" };
+    const logged = loggedUnitsByReservationRow(
+      [loose, other],
+      [{ ...group(null, 4), bookingId: "b2" }]
+    );
+    expect(logged.get(loose)).toBe(0);
+    expect(logged.get(other)).toBe(4);
+  });
+});
+
 describe("assertAssetQuantityNotBelowReservations", () => {
   const ASSET_ID = "asset1";
   const ORG_ID = "org1";
@@ -1871,12 +2213,144 @@ describe("assertAssetQuantityNotBelowReservations", () => {
     status = "RESERVED"
   ) {
     return {
+      id: `ba-${bookingId}`,
       assetId: ASSET_ID,
       bookingId,
       quantity,
+      assetKitId: null,
+      checkedOutQuantity: 0,
       booking: { from: new Date(from), to: new Date(to), status },
     };
   }
+
+  describe("a slice sent out again after a full return", () => {
+    /**
+     * A standalone slice of 6 on an ONGOING booking that went out, came back
+     * in full (one RETURN of 6) and went out again. `checkedOutQuantity` is
+     * cumulative, so `secondTrip` units are out.
+     *
+     * why: the guard's arithmetic is under test, not Prisma. The rows mirror
+     * the select of the peak read the guard takes its booking term from.
+     */
+    function txWithRedispatch(secondTrip: number) {
+      const tx = createMockTx();
+      tx.bookingAsset.findMany.mockResolvedValue([
+        {
+          ...reservedRow("b1", 6, "2026-01-01", "2026-01-31", "ONGOING"),
+          checkedOutQuantity: 6 + secondTrip,
+        },
+      ]);
+      tx.consumptionLog.groupBy.mockResolvedValue([
+        { bookingId: "b1", assetId: ASSET_ID, _sum: { quantity: 6 } },
+      ]);
+      return tx;
+    }
+
+    it("refuses a total below the units that are out again", async () => {
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx: txWithRedispatch(6),
+          newTotal: 5,
+          assetTitle: "Widget",
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("allows a total equal to the units that are out again", async () => {
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx: txWithRedispatch(6),
+          newTotal: 6,
+          assetTitle: "Widget",
+        })
+      ).resolves.toBeUndefined();
+    });
+
+    it("still counts them when the booking also returned a kit slice of the asset", async () => {
+      // Booking b1 holds 6 loose units and a 4-unit kit slice. The kit slice
+      // returned 4, tagged to its own row. The loose slice returned 6 and went
+      // out again, so 6 loose units are out. The kit slice's return must not
+      // be netted against them.
+      const tx = createMockTx();
+      tx.bookingAsset.findMany.mockResolvedValue([
+        {
+          ...reservedRow("b1", 6, "2026-01-01", "2026-01-31", "ONGOING"),
+          checkedOutQuantity: 12,
+        },
+        {
+          ...reservedRow("b1", 4, "2026-01-01", "2026-01-31", "ONGOING"),
+          id: "ba-b1-kit",
+          assetKitId: "asset-kit-1",
+          checkedOutQuantity: 4,
+        },
+      ]);
+      tx.consumptionLog.groupBy.mockResolvedValue([
+        {
+          bookingAssetId: "ba-b1",
+          bookingId: "b1",
+          assetId: ASSET_ID,
+          _sum: { quantity: 6 },
+        },
+        {
+          bookingAssetId: "ba-b1-kit",
+          bookingId: "b1",
+          assetId: ASSET_ID,
+          _sum: { quantity: 4 },
+        },
+      ]);
+
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx,
+          newTotal: 5,
+          assetTitle: "Widget",
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("never commits more than the slice booked", async () => {
+      // Three full trips: 18 sent out in total, 6 back. 12 "out" by the
+      // counter, but the slice only ever holds 6 units.
+      const tx = txWithRedispatch(12);
+
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx,
+          newTotal: 6,
+          assetTitle: "Widget",
+        })
+      ).resolves.toBeUndefined();
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx,
+          newTotal: 5,
+          assetTitle: "Widget",
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("allows any total once the slice is back and stays back", async () => {
+      await expect(
+        assertAssetQuantityNotBelowReservations({
+          assetId: ASSET_ID,
+          organizationId: ORG_ID,
+          tx: txWithRedispatch(0),
+          newTotal: 0,
+          assetTitle: "Widget",
+        })
+      ).resolves.toBeUndefined();
+    });
+  });
 
   it("allows any newTotal >= 0 when there are no commitments (custody, kits, or bookings)", async () => {
     const tx = createMockTx();
@@ -1996,9 +2470,19 @@ describe("assertAssetQuantityNotBelowReservations", () => {
 
   it("nets already-logged dispositions (RETURN/CONSUME/LOSS/DAMAGE) out of a booking's remaining commitment", async () => {
     const tx = createMockTx();
-    // Booked 5, but 3 already returned via partial check-in — remaining 2.
+    // Booked 5 and all 5 went out; 3 came back via partial check-in, so 2
+    // remain.
     tx.bookingAsset.findMany.mockResolvedValue([
-      reservedRow("b1", 5, "2026-01-01T00:00:00Z", "2026-01-05T00:00:00Z"),
+      {
+        ...reservedRow(
+          "b1",
+          5,
+          "2026-01-01T00:00:00Z",
+          "2026-01-05T00:00:00Z",
+          "ONGOING"
+        ),
+        checkedOutQuantity: 5,
+      },
     ]);
     tx.consumptionLog.groupBy.mockResolvedValue([
       { bookingId: "b1", assetId: ASSET_ID, _sum: { quantity: 3 } },

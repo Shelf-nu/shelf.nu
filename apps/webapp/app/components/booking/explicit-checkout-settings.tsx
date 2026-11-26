@@ -22,6 +22,7 @@ import {
   explicitRequirementSwitchDescription,
 } from "@shelf/labels";
 import z from "zod";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { ExplicitRequirementSettingsCard } from "./explicit-requirement-settings-card";
 
 /**
@@ -59,6 +60,7 @@ export function ExplicitCheckoutSettings({
 }) {
   return (
     <ExplicitRequirementSettingsCard
+      id={BOOKING_SETTINGS_ANCHORS.explicitCheckout}
       header={header}
       exemption={EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.EXEMPTION}
       intent="updateExplicitCheckout"
