@@ -579,7 +579,9 @@ describe("audit service", () => {
   });
 
   it("rejects an assignee who is not a member of the workspace with a 400", async () => {
-    mockDb.userOrganization.findMany.mockResolvedValue([{ userId: "user-2" }]);
+    mockDb.userOrganization.findMany.mockResolvedValueOnce([
+      { userId: "user-2" },
+    ]);
 
     await expect(
       createAuditSession({
@@ -717,7 +719,7 @@ describe("audit service", () => {
     });
 
     it("refuses a newcomer who is not a workspace member", async () => {
-      mockDb.userOrganization.findMany.mockResolvedValue([]);
+      mockDb.userOrganization.findMany.mockResolvedValueOnce([]);
 
       await expect(
         updateAuditSession({
@@ -2082,8 +2084,10 @@ describe("audit service", () => {
                 }
           )
       );
-      // user-gone is no longer a member of org-1.
-      mockDb.userOrganization.findMany.mockResolvedValue([
+      // user-gone is not a member of org-1. Once: the carry-over lookup gets
+      // this answer, the membership guard inside createAuditSession gets the
+      // default.
+      mockDb.userOrganization.findMany.mockResolvedValueOnce([
         { userId: "user-2" },
       ]);
 
@@ -3842,6 +3846,11 @@ describe("getAuditSessionDetails photo re-sign", () => {
 describe("updateAuditSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Every requested assignee is a workspace member unless a test says otherwise.
+    mockDb.userOrganization.findMany.mockImplementation(
+      ({ where }: { where: { userId: { in: string[] } } }) =>
+        Promise.resolve(where.userId.in.map((userId) => ({ userId })))
+    );
     mockDb.auditSession.findUnique.mockResolvedValue({
       name: "Warehouse audit",
       description: null,
