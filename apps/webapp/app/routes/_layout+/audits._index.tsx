@@ -21,6 +21,7 @@ import { CountLink } from "~/components/list/count-link";
 import { Filters } from "~/components/list/filters";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { SortBy } from "~/components/list/filters/sort-by";
+import ItemsWithViewMore from "~/components/list/items-with-view-more";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
@@ -308,26 +309,16 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
   const creatorImg =
     createdBy?.profilePicture || "/static/images/default_pfp.jpg";
 
-  // Get the first assignee to display
-  const firstAssignment = item.assignments[0];
-  const assigneeName = firstAssignment?.user
-    ? resolveUserDisplayName(firstAssignment.user) ||
-      firstAssignment.user.email ||
-      "Unknown"
-    : null;
-  const assigneeImg =
-    firstAssignment?.user?.profilePicture || "/static/images/default_pfp.jpg";
-  const hasMultipleAssignees = item.assignments.length > 1;
-  // The rest of the team, for the "+N" badge's tooltip
-  const otherAssigneeNames = item.assignments
-    .slice(1)
-    .map(
-      (assignment) =>
-        resolveUserDisplayName(assignment.user) ||
-        assignment.user?.email ||
-        "Unknown"
-    )
-    .join(", ");
+  // One badge per assignee. The column shows the first; the rest fold behind
+  // a "+N" chip that opens on hover, click, tap and Enter.
+  const assignees = item.assignments.map((assignment) => ({
+    id: assignment.id,
+    name:
+      resolveUserDisplayName(assignment.user) ||
+      assignment.user?.email ||
+      "Unknown",
+    img: assignment.user?.profilePicture || "/static/images/default_pfp.jpg",
+  }));
 
   return (
     <>
@@ -359,21 +350,22 @@ const ListItemContent = ({ item }: { item: AuditListItem }) => {
       </Td>
 
       <Td>
-        {assigneeName ? (
-          <div className="flex items-center gap-1">
-            <UserBadge name={assigneeName} img={assigneeImg} />
-            {hasMultipleAssignees && (
-              <span
-                className="text-xs text-gray-500"
-                title={otherAssigneeNames}
-              >
-                +{item.assignments.length - 1}
-              </span>
-            )}
-          </div>
-        ) : (
-          <EmptyTableValue />
-        )}
+        <ItemsWithViewMore
+          items={assignees}
+          showCount={1}
+          className="justify-start gap-1 text-left"
+          // why: the popover, not the tooltip. A tooltip opens on hover only,
+          // which leaves touch and keyboard users with a count and no names.
+          interactive
+          renderItem={(assignee) => (
+            <UserBadge
+              key={assignee.id}
+              name={assignee.name}
+              img={assignee.img}
+            />
+          )}
+          emptyMessage={<EmptyTableValue />}
+        />
       </Td>
 
       <Td>
