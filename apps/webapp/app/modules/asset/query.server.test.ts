@@ -1772,12 +1772,31 @@ describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
     );
   });
 
-  it("nets the ledger against what a booking still owes", () => {
+  it("nets the ledger against what each slice still owes, per slice", () => {
     expect(sql).toContain(
       `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
     );
+    // The units taken off a slice are the ones attributed to that slice. A
+    // booking-wide total would let a return on a kit slice free the
+    // standalone slice of the same booking.
     expect(sql).toContain(
-      `GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining`
+      `GREATEST(act.quantity - COALESCE(logged.units, 0), 0) AS remaining`
+    );
+    expect(sql).toContain(`LEFT JOIN logged ON logged.slice_id = act.slice_id`);
+    expect(sql).not.toContain("booked_logs");
+  });
+
+  it("places untagged logged units standalone first, each slice up to what it sent", () => {
+    // The capacity is the slice's sent units, as `resolveSentUnits` reads
+    // them, and the order is the one `compareSlicesForGreedyFill` defines.
+    expect(sql).toMatch(
+      /WHEN COALESCE\(act\.counter, 0\) > 0 THEN act\.counter\s+WHEN act\.checked_out_at IS NOT NULL THEN act\.quantity\s+ELSE 0\s+END AS sent/
+    );
+    expect(sql).toContain(
+      `GREATEST(lb.disp_pool - COALESCE(SUM(GREATEST(lb.sent - lb.disp_tagged, 0)) OVER fill, 0), 0)`
+    );
+    expect(sql).toContain(
+      `ORDER BY NOT lb.standalone, lb.slice_id COLLATE "C"`
     );
   });
 

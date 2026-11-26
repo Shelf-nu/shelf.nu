@@ -2606,10 +2606,15 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
  *   `_all` variants exist for the status badge's LABEL ("In custody" is still
  *   the right word for a member of a kit in custody); they never feed
  *   arithmetic.
- * - **What a booking still owes is booked minus logged.** `ConsumptionLog`
- *   rows in the RETURN / CONSUME / LOSS / DAMAGE categories record units that
- *   came back or were used up against a booking; `remaining` subtracts the
- *   booking's total from each slice, as `getAssetAvailability` does.
+ * - **What a slice still owes is booked minus logged, per slice.**
+ *   `ConsumptionLog` rows in the RETURN / CONSUME / LOSS / DAMAGE categories
+ *   record units that came back or were used up; `remaining` takes off each
+ *   slice only the units attributed to it, as `loggedUnitsByReservationRow`
+ *   (`modules/asset/availability-primitives.server.ts`) does. A log naming its
+ *   slice counts for that slice. One naming none fills standalone slices
+ *   first, then by id in byte order, each up to the units it sent out. A
+ *   booking-wide total would let a return on a kit slice free the standalone
+ *   slice of the same booking while its units are out.
  * - **What is still out is what left minus what came back**, per slice, as
  *   `computeUnitsStillOutBySlice` (`modules/booking/checkout-attribution.ts`)
  *   computes it. What left: the larger of one trip's reading (the slice's
@@ -2747,16 +2752,48 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
       )
     ),
+    -- Logged units per slice, for what each slice still owes. sent is what
+    -- the slice sent out: its cumulative counter, or its whole booked quantity
+    -- when it is marked out with no counter, else nothing.
+    logged_base AS (
+      SELECT
+        act.slice_id,
+        act."bookingId",
+        act.standalone,
+        CASE
+          WHEN COALESCE(act.counter, 0) > 0 THEN act.counter
+          WHEN act.checked_out_at IS NOT NULL THEN act.quantity
+          ELSE 0
+        END AS sent,
+        COALESCE((SELECT l.q FROM logs l WHERE l."bookingId" = act."bookingId" AND l.tag = act.slice_id), 0) AS disp_tagged,
+        COALESCE((SELECT l.q FROM logs l WHERE l."bookingId" = act."bookingId" AND l.tag IS NULL), 0) AS disp_pool
+      FROM active act
+    ),
+    -- A log naming its slice counts for that slice. Untagged ones fill
+    -- standalone slices first, then by id in byte order, each up to what it
+    -- sent less its tagged logs.
+    logged AS (
+      SELECT
+        lb.slice_id,
+        lb.disp_tagged + LEAST(
+          GREATEST(lb.sent - lb.disp_tagged, 0),
+          GREATEST(lb.disp_pool - COALESCE(SUM(GREATEST(lb.sent - lb.disp_tagged, 0)) OVER fill, 0), 0)
+        ) AS units
+      FROM logged_base lb
+      WINDOW fill AS (
+        PARTITION BY lb."bookingId"
+        ORDER BY NOT lb.standalone, lb.slice_id COLLATE "C"
+        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+      )
+    ),
     slices AS (
       SELECT
         act.*,
-        GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining,
+        GREATEST(act.quantity - COALESCE(logged.units, 0), 0) AS remaining,
         COALESCE(out_now.units, 0) AS out_now,
         COALESCE(act.end_at, 'infinity'::timestamptz) > now() AS ahead
       FROM active act
-      LEFT JOIN (
-        SELECT "bookingId", SUM(q)::int AS q FROM logs GROUP BY "bookingId"
-      ) booked_logs ON booked_logs."bookingId" = act."bookingId"
+      LEFT JOIN logged ON logged.slice_id = act.slice_id
       LEFT JOIN out_now ON out_now.slice_id = act.slice_id
     )
     SELECT
