@@ -52,8 +52,9 @@ import { lockBookingWithWindow } from "./utils.server";
  *   as the value before the change.
  * - The booking row is locked first, then the asset row, and the slice is
  *   re-read under those locks, so two concurrent edits cannot both pass the
- *   guard. Source writes measure the booking window read in that same locked
- *   statement, never a window the caller read before the lock.
+ *   guard. The availability guard and every source write measure the booking
+ *   window read in that same locked statement, never a window the caller read
+ *   before the lock (an extension committed in between would be missed).
  * - A set of changes lands together: in a transaction of its own, or inside
  *   the caller's when it must commit with other writes (the mobile re-add).
  *
@@ -85,16 +86,13 @@ export type BookedQuantityChange = {
   unitOfMeasure: string | null;
 };
 
-/** Where a change applies: one booking and its window. */
+/**
+ * Where a change applies: one booking. Its window is read under the booking
+ * lock, so callers do not pass one.
+ */
 type BookingScope = {
   bookingId: string;
   organizationId: string;
-  /**
-   * The booking's own window as the caller read it, or null for a dateless
-   * booking. It windows the availability guard only; source writes use the
-   * window read under the booking lock.
-   */
-  window: { from: Date; to: Date } | null;
 };
 
 /** What a change did, for the activity notes. */
@@ -270,7 +268,7 @@ async function readChangeableSlice(
  * the combined result (new quantity and new split) once.
  *
  * @param args.lockedWindow - The booking window read under the booking lock;
- *   the source rows are resized over it
+ *   the availability guard measures it and the source rows are resized over it
  * @param args.sourcesInPlay - The caller's `bookingSourcesInPlay` answer for
  *   this transaction; the facade probes when omitted
  */
@@ -279,7 +277,6 @@ async function applyChangesUnderBookingLock(
   {
     bookingId,
     organizationId,
-    window,
     lockedWindow,
     changes,
     bookingStatus,
@@ -308,7 +305,7 @@ async function applyChangesUnderBookingLock(
       assetId: change.assetId,
       organizationId,
       tx,
-      window,
+      window: lockedWindow,
       excludeBookingId: bookingId,
       currentQuantity: slice.quantity,
       requestedQuantity: change.quantity,
@@ -634,7 +631,6 @@ async function applySourcesUnderBookingLock(
 export async function setStandaloneBookedQuantity({
   bookingId,
   organizationId,
-  window,
   sources,
   access,
   ...change
@@ -647,8 +643,9 @@ export async function setStandaloneBookedQuantity({
   sourcesChanged: boolean;
 }> {
   return db.$transaction(async (tx) => {
-    // The window is read in the same locked statement: every source write
-    // below measures it, and no extension can move it meanwhile.
+    // The window is read in the same locked statement: the availability guard
+    // and every source write below measure it, and no extension can move it
+    // meanwhile.
     const locked = await lockBookingWithWindow(tx, bookingId, organizationId);
     const bookingStatus = locked.status;
     const lockedWindow = { from: locked.from, to: locked.to };
@@ -666,7 +663,6 @@ export async function setStandaloneBookedQuantity({
     const [applied] = await applyChangesUnderBookingLock(tx, {
       bookingId,
       organizationId,
-      window,
       lockedWindow,
       changes: [change],
       bookingStatus,

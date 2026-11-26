@@ -387,10 +387,6 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     });
 
-    const window =
-      booking.from && booking.to
-        ? { from: booking.from, to: booking.to }
-        : null;
     const resizes: BookedQuantityChange[] = slicesToResize.map((slice) => ({
       bookingAssetId: slice.id,
       assetId: slice.assetId,
@@ -422,7 +418,6 @@ export async function action({ request }: ActionFunctionArgs) {
         appliedResizes = await setStandaloneBookedQuantitiesWithinTx(tx, {
           bookingId,
           organizationId,
-          window,
           changes: resizes,
           // The add's answer when it asked, so the probe is not sent twice.
           sourcesInPlay,

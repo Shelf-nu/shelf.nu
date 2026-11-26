@@ -47,6 +47,7 @@ import {
   defaultSourceLocationId,
   NO_SOURCE_SUBMISSION,
   poolAsksForSource,
+  questionNeedsBookingPage,
   resolveSliceSource,
   submittedSourceForSlice,
 } from "./checkout-source-location";
@@ -556,8 +557,10 @@ export async function getCheckoutSourceQuestions({
  * pool is no longer placed at (its placement was removed while units stay
  * held there) is looked up, scoped to the workspace.
  *
- * @param client - The client the caller reads through (its transaction, or
- *   the root client), so the names come from the same snapshot as the rows
+ * @param client - The client to read through: a transaction client or the
+ *   root client. Outside a transaction the lookup is a separate read, which
+ *   is fine for display names: a location renamed in between only changes
+ *   the label shown
  * @param args.organizationId - Scopes the lookup
  * @param args.rows - The planned rows
  * @param args.snapshots - The pools' placements, keyed by asset id
@@ -716,8 +719,10 @@ export const CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE =
 
 /**
  * Refuses a check-out made from a surface that cannot ask the "From location"
- * question when the booking has one to ask for a LEGACY slice. A slice whose
- * sources are already planned dispatches by that plan, so it never refuses.
+ * question when the booking has one whose unanswered default is a location
+ * nobody chose. A slice that dispatches by allocation (sources already
+ * planned, or a LEGACY slice that converts at this check-out while adoption
+ * is on) defaults to "as planned" and never refuses.
  *
  * The booking page's dialog renders one select per question, so a check-out
  * from there has always had the chance to answer. A row on the bookings list
@@ -727,21 +732,27 @@ export const CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE =
  *
  * @param args.organizationId - Scopes the read
  * @param args.bookingId - The booking being checked out
- * @throws {ShelfError} 400 when at least one LEGACY pool slice still to go out
- *   sits at two or more placements
+ * @param args.adoptionEnabled - Whether a LEGACY group converts at check-out;
+ *   defaults to `BOOKING_SOURCES_ENABLED`, the same default the check-out uses
+ * @throws {ShelfError} 400 when at least one pool slice still to go out sits
+ *   at two or more placements and would leave from a shelf default
  */
 export async function assertNoCheckoutSourceQuestions({
   organizationId,
   bookingId,
+  adoptionEnabled,
 }: {
   organizationId: string;
   bookingId: string;
+  adoptionEnabled?: boolean;
 }): Promise<void> {
-  // A slice with planned sources dispatches by that plan when nobody picks,
-  // so only LEGACY questions need the booking page.
   const questions = (
-    await getCheckoutSourceQuestions({ organizationId, bookingId })
-  ).filter((question) => !question.fromAllocation);
+    await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId,
+      ...(adoptionEnabled === undefined ? {} : { adoptionEnabled }),
+    })
+  ).filter(questionNeedsBookingPage);
   if (questions.length === 0) return;
 
   throw new ShelfError({

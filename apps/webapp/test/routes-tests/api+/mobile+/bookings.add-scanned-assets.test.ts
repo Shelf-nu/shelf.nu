@@ -749,10 +749,6 @@ describe("POST /api/mobile/bookings/add-scanned-assets: quantities", () => {
     expect(setQuantitiesMock).toHaveBeenCalledWith(ADD_TX, {
       bookingId: BOOKING_ID,
       organizationId: "org-1",
-      window: {
-        from: new Date("2026-01-01T00:00:00.000Z"),
-        to: new Date("2026-01-02T00:00:00.000Z"),
-      },
       changes: [
         {
           bookingAssetId: "slice-asset-9",

@@ -101,10 +101,12 @@ const ADMIN_ACCESS = accessFor([OrganizationRoles.ADMIN]);
 const SCOPE = {
   bookingId: "booking-1",
   organizationId: "org-1",
-  window: {
-    from: new Date("2026-09-10T09:00:00.000Z"),
-    to: new Date("2026-09-12T17:00:00.000Z"),
-  },
+};
+
+/** The booking's window as the booking lock reads it, unless a case moves it. */
+const WINDOW = {
+  from: new Date("2026-09-10T09:00:00.000Z"),
+  to: new Date("2026-09-12T17:00:00.000Z"),
 };
 
 /** A requested change of one standalone slice. */
@@ -149,9 +151,9 @@ function slicesHold(rows: Record<string, HeldSlice | null>) {
 
 /**
  * The status the booking lock reads, with the window it reads in the same
- * statement (the caller's window unless a case moves it).
+ * statement ({@link WINDOW} unless a case moves it).
  */
-function bookingIs(status: string, window = SCOPE.window) {
+function bookingIs(status: string, window = WINDOW) {
   tx.$queryRaw.mockResolvedValue([{ status, ...window }]);
 }
 
@@ -217,7 +219,7 @@ describe("setStandaloneBookedQuantities", () => {
       expect.objectContaining({
         assetId: "a",
         tx,
-        window: SCOPE.window,
+        window: WINDOW,
         excludeBookingId: "booking-1",
         currentQuantity: 2,
         requestedQuantity: 6,
@@ -364,7 +366,7 @@ describe("pool source rows", () => {
       organizationId: "org-1",
       bookingId: "booking-1",
       changes: [{ sliceId: "slice-a", quantity: 5 }],
-      window: SCOPE.window,
+      window: WINDOW,
       admit: true,
     });
     expect(vi.mocked(resizeSlices).mock.invocationCallOrder[0]).toBeLessThan(
@@ -375,9 +377,38 @@ describe("pool source rows", () => {
   describe("when the stored end moved after the caller read the booking", () => {
     /** The window the booking lock reads: extended by a day since. */
     const LOCKED_WINDOW = {
-      from: SCOPE.window.from,
+      from: WINDOW.from,
       to: new Date("2026-09-13T17:00:00.000Z"),
     };
+
+    it("measures availability over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 2 } });
+
+      await setStandaloneBookedQuantities({
+        ...SCOPE,
+        changes: [change("a", 5)],
+      });
+
+      expect(assertAssetQuantityAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+
+    it("measures the adjust action's availability over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 2 } });
+
+      await setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 5),
+      });
+
+      expect(assertAssetQuantityAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
 
     it("resizes the source rows over the window read under the lock", async () => {
       bookingIs("RESERVED", LOCKED_WINDOW);
@@ -672,7 +703,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
       bookingId: "booking-1",
       sliceId: "slice-a",
       sources: MANUAL.sources,
-      window: SCOPE.window,
+      window: WINDOW,
       sourcesInPlay: true,
     });
     expect(createSystemBookingNote).toHaveBeenCalledWith(
@@ -727,7 +758,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
       organizationId: "org-1",
       bookingId: "booking-1",
       sliceId: "slice-a",
-      window: SCOPE.window,
+      window: WINDOW,
       sourcesInPlay: true,
     });
     expect(

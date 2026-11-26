@@ -6,8 +6,9 @@
  * renders one select per multi-placed pool, so the overview action calls
  * `assertNoCheckoutSourceQuestions` for them. This suite pins both answers:
  * silence when every pool to go out sits at one placement or none, or already
- * has its sources planned (it goes out by that plan), and the 400 with the
- * "open the booking" message when a LEGACY pool slice sits at two.
+ * has its sources planned or converts at this check-out (it goes out by
+ * allocation), and the 400 with the "open the booking" message when a LEGACY
+ * pool slice sits at two while adoption is off.
  *
  * @see {@link file://./checkout-source-location.server.ts}
  */
@@ -79,16 +80,32 @@ describe("assertNoCheckoutSourceQuestions", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("refuses with 400 and the open-the-booking message when a pool sits at two placements", async () => {
+  it("refuses with 400 and the open-the-booking message when a LEGACY pool sits at two placements and adoption is off", async () => {
     poolWithPlacements(2);
 
     await expect(
-      assertNoCheckoutSourceQuestions({ organizationId: ORG, bookingId: "b1" })
+      assertNoCheckoutSourceQuestions({
+        organizationId: ORG,
+        bookingId: "b1",
+        adoptionEnabled: false,
+      })
     ).rejects.toMatchObject({
       status: 400,
       message: CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE,
       additionalData: { bookingId: "b1", sliceIds: ["slice-1"] },
     });
+  });
+
+  it("lets a LEGACY pool at two placements through when adoption is on: it converts and goes out by allocation", async () => {
+    poolWithPlacements(2);
+
+    await expect(
+      assertNoCheckoutSourceQuestions({
+        organizationId: ORG,
+        bookingId: "b1",
+        adoptionEnabled: true,
+      })
+    ).resolves.toBeUndefined();
   });
 
   it("lets a slice with planned sources through: it goes out by its plan", async () => {

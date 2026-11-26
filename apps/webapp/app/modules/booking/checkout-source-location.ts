@@ -251,6 +251,28 @@ export type CheckoutSourceQuestion = {
 };
 
 /**
+ * Whether a check-out that picks nothing for this question would go out from
+ * a location nobody chose. A question whose default is "as planned"
+ * ({@link ALLOCATION_SOURCE_FORM_VALUE}) dispatches by allocation when left
+ * unanswered: a converted slice by its plan, a LEGACY slice that converts at
+ * this check-out (adoption on) by the plan it gets then. Any other default is
+ * a shelf guess, so a surface that cannot ask the question must send the
+ * operator to the booking page instead.
+ *
+ * Reads the default, so it is exact for questions built for a client with
+ * the `booking-sources` capability (the server's own guards); an older
+ * phone's defaults are always a real location.
+ *
+ * @param question - One question from `getCheckoutSourceQuestions`
+ * @returns True when only the booking page can check this slice out
+ */
+export function questionNeedsBookingPage(
+  question: Pick<CheckoutSourceQuestion, "defaultLocationId">
+): boolean {
+  return question.defaultLocationId !== ALLOCATION_SOURCE_FORM_VALUE;
+}
+
+/**
  * The words for a count of a pool's units: its unit of measure, or "units".
  *
  * @param unitOfMeasure - `Asset.unitOfMeasure`

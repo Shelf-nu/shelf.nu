@@ -188,10 +188,6 @@ export async function action({ request }: ActionFunctionArgs) {
       assetId,
       bookingId,
       organizationId,
-      window:
-        bookingAsset.booking.from && bookingAsset.booking.to
-          ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }
-          : null,
       quantity,
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,

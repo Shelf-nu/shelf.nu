@@ -490,6 +490,46 @@ describe("AdjustBookingAssetQuantityDialog", () => {
       return typeof raw === "string" ? JSON.parse(raw) : raw;
     }
 
+    it("keeps the operator's split when the booked quantity revalidates while open", () => {
+      const editor = editorData();
+      const { rerender } = render(dialog(editor, 15));
+
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "12" },
+      });
+      rerender(dialog(editor, 16));
+
+      expect(screen.getByLabelText("Demo Warehouse")).toHaveValue(12);
+    });
+
+    it("resets the split when the dialog is closed and opened again", () => {
+      const editor = editorData();
+      const onOpenChange = vi.fn();
+      /** Same dialog as `dialog`, with the open state driven by the test. */
+      const at = (open: boolean) => (
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={15}
+          maxQuantity={30}
+          totalQuantity={30}
+          sourceEditor={editor}
+          open={open}
+          onOpenChange={onOpenChange}
+        />
+      );
+      const { rerender } = render(at(true));
+
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "12" },
+      });
+      rerender(at(false));
+      rerender(at(true));
+
+      expect(screen.getByLabelText("Demo Warehouse")).toHaveValue(8);
+    });
+
     it("is hidden without editor data", () => {
       render(dialog(null));
 

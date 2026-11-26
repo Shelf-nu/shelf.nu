@@ -224,9 +224,15 @@ export function AdjustBookingAssetQuantityDialog({
 
   // The client-side complaint belongs to one opening too: the operator fixing
   // the number tomorrow should not be met with yesterday's objection to it.
+  // The reset runs only on the closed to open flip: a revalidation that hands
+  // in a new `currentQuantity` while the dialog is open must not wipe the
+  // operator's draft or split (the uncontrolled input keeps its typed value).
   const resetSplit = split.reset;
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    const opened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (opened) {
       dispatch({ type: "open", currentQuantity });
       resetSplit();
     }
