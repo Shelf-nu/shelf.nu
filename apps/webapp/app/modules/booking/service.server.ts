@@ -298,6 +298,7 @@ import {
 import {
   admitWindowChange,
   allocateNewSlices,
+  bookingSourcesInPlay,
   commitSettlement,
   openSettlement,
   resizeSlices,
@@ -1671,9 +1672,13 @@ export async function createBooking({
            * never refuses: units that fit nowhere wait on UNASSIGNED until the
            * booking is reserved. The booking row was inserted by this
            * transaction, so no other transaction can see or lock it, which is
-           * the booking lock the facade expects.
+           * the booking lock the facade expects. A new booking has no
+           * converted group, so with adoption off nothing is read or written.
            */
-          if (assetTypes.some((a) => a.type === AssetType.QUANTITY_TRACKED)) {
+          if (
+            BOOKING_SOURCES_ENABLED &&
+            assetTypes.some((a) => a.type === AssetType.QUANTITY_TRACKED)
+          ) {
             await allocateNewSlices(tx, {
               organizationId: booking.organizationId,
               bookingId: created.id,
@@ -1683,6 +1688,7 @@ export async function createBooking({
               }),
               window: { from: created.from, to: created.to },
               holdsNow: false,
+              sourcesInPlay: true,
             });
           }
         }
@@ -2017,10 +2023,18 @@ export async function updateBasicBooking({
             });
           }
           const written = await writeBooking(tx);
-          const poolSliceIds = await findPoolSliceIds(tx, {
-            bookingId: booking.id,
+          // Asked once: with sources out of play every group is LEGACY and
+          // no pool slice is read.
+          const sourcesInPlay = await bookingSourcesInPlay(tx, {
             organizationId,
+            bookingId: booking.id,
           });
+          const poolSliceIds = sourcesInPlay
+            ? await findPoolSliceIds(tx, {
+                bookingId: booking.id,
+                organizationId,
+              })
+            : [];
           if (poolSliceIds.length > 0) {
             await admitWindowChange(tx, {
               organizationId,
@@ -2029,6 +2043,7 @@ export async function updateBasicBooking({
               to: written.to,
               previous: { from: booking.from, to: booking.to },
               kind: "dates",
+              sourcesInPlay,
             });
           }
           return written;
@@ -2818,11 +2833,22 @@ export async function reserveBooking({
       /**
        * The booking's pool slices, standalone and kit, read after the booking
        * lock so none can join or leave before the source admission below.
+       * Only when sources take part (asked once, and only for a booking that
+       * holds assets): otherwise every group is LEGACY, nothing is admitted,
+       * and the lock below takes the standalone pools alone.
        */
-      const poolSlices = await findPoolSlices(tx, {
-        bookingId: bookingFound.id,
-        organizationId,
-      });
+      const sourcesInPlay =
+        sliceCount > 0 &&
+        (await bookingSourcesInPlay(tx, {
+          organizationId,
+          bookingId: bookingFound.id,
+        }));
+      const poolSlices = sourcesInPlay
+        ? await findPoolSlices(tx, {
+            bookingId: bookingFound.id,
+            organizationId,
+          })
+        : [];
 
       // One statement locks every quantity-tracked asset on the booking,
       // standalone and kit, in a deterministic (sorted) global order, so two
@@ -2947,6 +2973,7 @@ export async function reserveBooking({
           to: reservedWindow.to,
           previous: { from: bookingFound.from, to: bookingFound.to },
           kind: "reserve",
+          sourcesInPlay,
         });
       }
 
@@ -3440,6 +3467,7 @@ async function checkoutBookingWritesWithinTx(
     to,
     storedWindow,
     poolAssetIds: givenPoolAssetIds,
+    sourcesInPlay: givenSourcesInPlay,
     clientSupportsSources = true,
     checkedOutById,
     sourceLocations,
@@ -3463,6 +3491,13 @@ async function checkoutBookingWritesWithinTx(
      * no slice added concurrently is missed.
      */
     poolAssetIds?: Asset["id"][];
+    /**
+     * The caller's `bookingSourcesInPlay` answer for this transaction, asked
+     * after the booking lock; asked here when omitted. When false, no pool
+     * slice is read, no source is admitted or dispatched and no extra pool
+     * lock is taken: every slice goes out the LEGACY way.
+     */
+    sourcesInPlay?: boolean;
     /**
      * False for a phone build that does not announce the `booking-sources`
      * capability: a pick it sends for a split slice is ignored and the slice
@@ -3559,23 +3594,30 @@ async function checkoutBookingWritesWithinTx(
    * locks, so the facade and the guard only re-take rows already held. The
    * callers hold the booking lock (`bookingStatus` is what it read). A
    * refusal (400 naming each source's free units) stops the check-out before
-   * anything is written.
+   * anything is written. With sources out of play none of this runs.
    */
+  const sourcesInPlay =
+    givenSourcesInPlay ??
+    (await bookingSourcesInPlay(tx, { organizationId, bookingId }));
   // Read under the booking lock the caller holds, when not handed in.
-  const poolSlicesInTx = givenPoolAssetIds
-    ? null
-    : await findPoolSlices(tx, { bookingId, organizationId });
-  const poolAssetIds = givenPoolAssetIds ?? [
-    ...new Set((poolSlicesInTx ?? []).map((slice) => slice.assetId)),
-  ];
+  const poolSlicesInTx =
+    givenPoolAssetIds || !sourcesInPlay
+      ? null
+      : await findPoolSlices(tx, { bookingId, organizationId });
+  const poolAssetIds = sourcesInPlay
+    ? givenPoolAssetIds ?? [
+        ...new Set((poolSlicesInTx ?? []).map((slice) => slice.assetId)),
+      ]
+    : [];
 
   const committedWindow = windowAfterUpdate(dataToUpdate, storedWindow);
-  const admissionKind =
-    bookingStatus === BookingStatus.DRAFT
-      ? "reserve"
-      : windowMoved(committedWindow, storedWindow)
-      ? "dates"
-      : null;
+  const admissionKind = !sourcesInPlay
+    ? null
+    : bookingStatus === BookingStatus.DRAFT
+    ? "reserve"
+    : windowMoved(committedWindow, storedWindow)
+    ? "dates"
+    : null;
   if (admissionKind) {
     const poolSlices =
       poolSlicesInTx ??
@@ -3599,6 +3641,7 @@ async function checkoutBookingWritesWithinTx(
         to: committedWindow.to,
         previous: storedWindow,
         kind: admissionKind,
+        sourcesInPlay,
       });
     }
   }
@@ -3808,6 +3851,7 @@ async function checkoutBookingWritesWithinTx(
     submission: sourceLocations,
     window: committedWindow,
     clientSupportsSources,
+    sourcesInPlay,
   });
 
   /**
@@ -5374,18 +5418,27 @@ export async function fulfilModelRequestsAndCheckout({
          * the booking. Those assets are read here, under the booking lock so
          * no slice is added meanwhile, and locked with every scanned one in
          * one sorted statement, so the scan's locks, the facade's and the
-         * pool guard's only re-take rows already held.
+         * pool guard's only re-take rows already held. Asked once for the
+         * whole transaction: with sources out of play none of this runs and
+         * the scan and the check-out below skip their source work too.
          */
-        const poolAssetIdsInTx = (
-          await findPoolSlices(tx, { bookingId, organizationId })
-        ).map((slice) => slice.assetId);
+        const sourcesInPlay = await bookingSourcesInPlay(tx, {
+          organizationId,
+          bookingId,
+        });
+        const poolAssetIdsInTx = sourcesInPlay
+          ? (await findPoolSlices(tx, { bookingId, organizationId })).map(
+              (slice) => slice.assetId
+            )
+          : [];
         if (
-          lockedStatus === BookingStatus.DRAFT ||
-          windowMoved(
-            windowAfterUpdate(dataToUpdate, storedWindow),
-            storedWindow
-          ) ||
-          poolAssetIdsInTx.some((id) => !assetIds.includes(id))
+          sourcesInPlay &&
+          (lockedStatus === BookingStatus.DRAFT ||
+            windowMoved(
+              windowAfterUpdate(dataToUpdate, storedWindow),
+              storedWindow
+            ) ||
+            poolAssetIdsInTx.some((id) => !assetIds.includes(id)))
         ) {
           await lockAssetsForArchiveGuard(
             tx,
@@ -5407,6 +5460,7 @@ export async function fulfilModelRequestsAndCheckout({
           userId,
           hints,
           revealOtherBookings: seesAllBookings,
+          sourcesInPlay,
         });
         // Read post-commit, for the notes below. A scan that only claimed a
         // unit already on the booking added nothing to narrate.
@@ -5489,6 +5543,7 @@ export async function fulfilModelRequestsAndCheckout({
                 .map((ba) => ba.asset.id)
             ),
           ],
+          sourcesInPlay,
           clientSupportsSources,
           checkedOutById: userId ?? null,
           sourceLocations,
@@ -7309,16 +7364,28 @@ export async function checkinBooking({
         });
 
         /**
+         * Whether pool sources take part, asked once for the transaction and
+         * only when the check-in touches a pool. When they do not, every
+         * group is LEGACY: no source lock, read or write runs below and the
+         * per-slice locks in the loop are the only asset locks.
+         */
+        const sourcesInPlay =
+          qtyTrackedAssetIds.length > 0 &&
+          (await bookingSourcesInPlay(tx, { organizationId, bookingId: id }));
+
+        /**
          * Lock order: the booking above, then every quantity-tracked asset of
          * the check-in in one sorted statement, before any read that decides
          * what comes back. The per-slice locks below re-acquire rows this
          * transaction already holds.
          */
-        await lockEveryAssetForQuantityUpdate(
-          tx,
-          qtyTrackedAssetIds,
-          organizationId
-        );
+        if (sourcesInPlay) {
+          await lockEveryAssetForQuantityUpdate(
+            tx,
+            qtyTrackedAssetIds,
+            organizationId
+          );
+        }
 
         /**
          * Source rows of converted groups: each disposition is settled on the
@@ -7332,6 +7399,7 @@ export async function checkinBooking({
           bookingId: id,
           assetIds: qtyTrackedAssetIds,
           assetsLocked: true,
+          sourcesInPlay,
         });
 
         /**
@@ -9156,8 +9224,8 @@ export async function partialCheckinBooking({
        * writer of the booking's slices and source rows. The loop below walks
        * `dispositions` in payload order, so locking as it goes would let two
        * sessions that share assets take the locks in reverse and deadlock;
-       * its own lock calls, and the per-asset ones here, re-acquire rows this
-       * transaction already holds, which only re-reads them.
+       * its own lock calls re-acquire rows this transaction already holds,
+       * which only re-reads them.
        */
       await lockBookingForStatusCheck(tx, id, organizationId);
       await lockEveryAssetForQuantityUpdate(
@@ -9165,16 +9233,15 @@ export async function partialCheckinBooking({
         qtyDispositionAssetIds,
         organizationId
       );
-      for (const assetId of qtyDispositionAssetIds) {
-        await lockAssetForQuantityUpdate(tx, assetId, organizationId);
-      }
 
       /**
        * Source rows of converted groups: each disposition is settled on the
        * rows its units were out from before its logs are written, and every
        * log gets its shares at `commitSettlement` below. LEGACY groups keep
        * the path below unchanged. The asset lock above covers every asset the
-       * settlement opens.
+       * settlement opens. This is the transaction's only source call, so its
+       * own probe is the one probe: with adoption off and no converted group
+       * it reads nothing else.
        */
       const settlement = await openSettlement(tx, {
         organizationId,
@@ -11330,7 +11397,10 @@ export async function partialCheckoutBooking({
          * over it. Every quantity-tracked asset on the booking is locked
          * first, in one sorted statement with this batch's pools, so the
          * facade and the per-asset locks below only re-take rows already held.
-         * The stored window is the one read under the booking lock.
+         * The stored window is the one read under the booking lock. Whether
+         * sources take part is asked once for the transaction, only when a
+         * pool unit leaves or the window moves: when they do not, nothing is
+         * admitted and every slice goes out the LEGACY way.
          */
         const storedWindow = { from: locked.from, to: locked.to };
         const adjustedFrom =
@@ -11349,7 +11419,11 @@ export async function partialCheckoutBooking({
           from: adjustedFrom ?? storedWindow.from,
           to: storedWindow.to,
         };
-        if (windowMoved(committedWindow, storedWindow)) {
+        const sourcesInPlay =
+          (qtyDispositionAssetIds.length > 0 ||
+            windowMoved(committedWindow, storedWindow)) &&
+          (await bookingSourcesInPlay(tx, { organizationId, bookingId: id }));
+        if (sourcesInPlay && windowMoved(committedWindow, storedWindow)) {
           const poolSlices = await findPoolSlices(tx, {
             bookingId: id,
             organizationId,
@@ -11372,6 +11446,7 @@ export async function partialCheckoutBooking({
               to: committedWindow.to,
               previous: storedWindow,
               kind: "dates",
+              sourcesInPlay,
             });
           }
         }
@@ -12046,6 +12121,7 @@ export async function partialCheckoutBooking({
           submission: sourceLocations,
           window: committedWindow,
           clientSupportsSources,
+          sourcesInPlay,
         });
 
         for (const [sliceId, units] of unitsBySliceId) {
@@ -12825,12 +12901,11 @@ export async function updateBookingAssets({
       // READ COMMITTED it takes no lock, and a concurrent check-in,
       // cancellation or reservation could still commit before the writes.
       // The closed-booking refusal applies to everyone; the add-items rule is
-      // the caller's own (restricted roles add only to drafts).
-      const lockedStatus = await lockBookingForStatusCheck(
-        tx,
-        id,
-        organizationId
-      );
+      // the caller's own (restricted roles add only to drafts). The window is
+      // read in the same locked statement: the source writes below measure
+      // it, and no concurrent extension can move it while the row is held.
+      const locked = await lockBookingWithWindow(tx, id, organizationId);
+      const lockedStatus = locked.status;
       assertBookingIsOpen({
         status: lockedStatus,
         operation: "change the items on",
@@ -13269,7 +13344,8 @@ export async function updateBookingAssets({
           .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
           .map((asset) => asset.id)
       );
-      const sourcesWindow = { from: b.from, to: b.to };
+      // Read under the booking lock, never the pre-lock read above.
+      const sourcesWindow = { from: locked.from, to: locked.to };
       const holdsNow = (
         ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]
       ).includes(lockedStatus);
@@ -13291,12 +13367,36 @@ export async function updateBookingAssets({
           sliceId: row.id,
           quantity: standaloneQuantityByAssetId.get(row.assetId) ?? 1,
         }));
-      if (poolResizes.length > 0) {
+      /** The pool slices this call creates, found after the inserts. */
+      const newPoolSlices = {
+        standaloneAssetIds: [...newlyStandaloneAssetIds].filter((assetId) =>
+          poolAssetIds.has(assetId)
+        ),
+        assetKitIds: effectiveSlices
+          .filter(
+            (slice) =>
+              poolAssetIds.has(slice.assetId) &&
+              !preExistingAssetKitIds.has(slice.assetKitId)
+          )
+          .map((slice) => slice.assetKitId),
+      };
+      /**
+       * Asked once for the transaction, only when a pool slice is resized or
+       * created. When sources are out of play (adoption off, no converted
+       * group) every slice stays LEGACY and no source read or call runs.
+       */
+      const sourcesInPlay =
+        (poolResizes.length > 0 ||
+          newPoolSlices.standaloneAssetIds.length > 0 ||
+          newPoolSlices.assetKitIds.length > 0) &&
+        (await bookingSourcesInPlay(tx, { organizationId, bookingId: id }));
+      if (sourcesInPlay && poolResizes.length > 0) {
         await resizeSlices(tx, {
           organizationId,
           bookingId: id,
           changes: poolResizes,
           window: sourcesWindow,
+          sourcesInPlay,
         });
       }
 
@@ -13330,22 +13430,13 @@ export async function updateBookingAssets({
         }),
       ]);
 
-      const newPoolSliceIds = await findPoolSliceIds(tx, {
-        bookingId: id,
-        organizationId,
-        only: {
-          standaloneAssetIds: [...newlyStandaloneAssetIds].filter((assetId) =>
-            poolAssetIds.has(assetId)
-          ),
-          assetKitIds: effectiveSlices
-            .filter(
-              (slice) =>
-                poolAssetIds.has(slice.assetId) &&
-                !preExistingAssetKitIds.has(slice.assetKitId)
-            )
-            .map((slice) => slice.assetKitId),
-        },
-      });
+      const newPoolSliceIds = sourcesInPlay
+        ? await findPoolSliceIds(tx, {
+            bookingId: id,
+            organizationId,
+            only: newPoolSlices,
+          })
+        : [];
       if (newPoolSliceIds.length > 0) {
         await allocateNewSlices(tx, {
           organizationId,
@@ -13353,6 +13444,7 @@ export async function updateBookingAssets({
           sliceIds: newPoolSliceIds,
           window: sourcesWindow,
           holdsNow,
+          sourcesInPlay,
         });
       }
 
@@ -14555,6 +14647,9 @@ export async function extendBooking({
               to: newEndDate,
               previous: { from: booking.from, to: booking.to },
               kind: "extend",
+              // Adoption is on, or a group is converted (conversion is never
+              // undone), so the facade's own probe would only say yes.
+              sourcesInPlay: true,
             });
             // Read again under the locks and after any conversion, so the
             // pool measure below picks each group's method from its
@@ -15926,6 +16021,37 @@ export async function removeAssets({
         });
       }
 
+      /**
+       * A pool slice may own source rows and shares, so a removal that
+       * reaches a quantity-tracked asset takes the booking lock before it
+       * reads which slices go and whether they are converted: under the lock
+       * no source writer converts a group or adds a slice meanwhile. The
+       * status is checked again under it. A removal of INDIVIDUAL assets only
+       * owns no source row and takes no extra lock.
+       */
+      if (
+        removedAssets.some(
+          (a: { type: AssetType }) => a.type === AssetType.QUANTITY_TRACKED
+        )
+      ) {
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
+        if (!canUserRemoveBookingAssets({ status: lockedStatus })) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "Removing items is not allowed for the current status of the booking.",
+            additionalData: { bookingId: id, status: lockedStatus },
+            label,
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
       // When the caller removes one or more kits, scope the kit half of the
       // deletion to the kit-driven BookingAsset rows for those kits'
       // AssetKits. Otherwise removing a kit would also blow away any
@@ -16052,10 +16178,9 @@ export async function removeAssets({
        * slices' numbers do not change and nothing redistributes the removed
        * slice's history; a group left with no slice stays converted through
        * those shares. These are writes to source tables, so they take the
-       * same locks as every source writer: the booking first, then the pools
-       * in one sorted statement, and the status is checked again under the
-       * booking lock. LEGACY slices own no source rows or shares and keep
-       * today's statements.
+       * same locks as every source writer: the booking first (taken above,
+       * before the rows were read), then the pools in one sorted statement.
+       * LEGACY slices own no source rows or shares and take no pool lock.
        */
       const convertedPoolAssetIds = [
         ...new Set(
@@ -16065,22 +16190,6 @@ export async function removeAssets({
         ),
       ];
       if (convertedPoolAssetIds.length > 0) {
-        const lockedStatus = await lockBookingForStatusCheck(
-          tx,
-          id,
-          organizationId
-        );
-        if (!canUserRemoveBookingAssets({ status: lockedStatus })) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "Removing items is not allowed for the current status of the booking.",
-            additionalData: { bookingId: id, status: lockedStatus },
-            label,
-            status: 403,
-            shouldBeCaptured: false,
-          });
-        }
         await lockEveryAssetForQuantityUpdate(
           tx,
           convertedPoolAssetIds,
@@ -19034,6 +19143,8 @@ async function addScannedAssetsToBookingWithinTx(
     callerAccess,
     hints,
     revealOtherBookings = false,
+    sourcesInPlay: givenSourcesInPlay,
+    alsoLockAssetIds = [],
   }: {
     /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
@@ -19078,6 +19189,18 @@ async function addScannedAssetsToBookingWithinTx(
      * other members' bookings only when it is true.
      */
     revealOtherBookings?: boolean;
+    /**
+     * The caller's `bookingSourcesInPlay` answer for this transaction, asked
+     * after the booking lock. Asked here, only when the scan creates pool
+     * slices, when omitted.
+     */
+    sourcesInPlay?: boolean;
+    /**
+     * Further assets the caller changes in this transaction (the mobile
+     * re-add's resized slices). They are locked in the scan's first sorted
+     * asset lock, so the transaction takes its asset locks in one batch.
+     */
+    alsoLockAssetIds?: Asset["id"][];
   }
 ) {
   // The deduped union of standalone + kit-slice asset ids. Model-request
@@ -19153,12 +19276,18 @@ async function addScannedAssetsToBookingWithinTx(
    * left has nothing to book and is refused.
    */
   let archivedKitMembersLeftOut = 0;
+  // Row-lock first, the same lock the archive services and the other booking
+  // writes take: a plain read here could pass, then an archive commit before
+  // the BookingAsset rows below are written. Taken after the booking lock
+  // above, so the order matches `updateBookingAssets` (booking, then assets).
+  // The caller's further assets join this one sorted statement, so a later
+  // lock of theirs only re-takes a row already held.
+  await lockAssetsForArchiveGuard(
+    tx,
+    [...allScannedAssetIds, ...alsoLockAssetIds],
+    organizationId
+  );
   if (allScannedAssetIds.length > 0) {
-    // Row-lock first, the same lock the archive services and the other booking
-    // writes take: a plain read here could pass, then an archive commit before
-    // the BookingAsset rows below are written. Taken after the booking lock
-    // above, so the order matches `updateBookingAssets` (booking, then assets).
-    await lockAssetsForArchiveGuard(tx, allScannedAssetIds, organizationId);
     await assertAssetsAreNotArchived(
       {
         assetIds,
@@ -19807,23 +19936,34 @@ async function addScannedAssetsToBookingWithinTx(
    * itself). A rescan of a unit already on the booking creates nothing and
    * allocates nothing. A draft holds nothing, so its allocation never
    * refuses; an active booking's is admitted, and a refusal (400 naming each
-   * source's free units) rolls the scan back and reaches the operator.
+   * source's free units) rolls the scan back and reaches the operator. With
+   * sources out of play (adoption off, no converted group) the new slices
+   * stay LEGACY and nothing is read for them.
    */
   const isPoolAsset = (assetId: string) =>
     scannedAssetsMetaById.get(assetId)?.type === AssetType.QUANTITY_TRACKED;
-  const newPoolSliceIds = await findPoolSliceIds(tx, {
-    bookingId,
-    organizationId,
-    only: {
-      standaloneAssetIds: newStandaloneScans
-        .map((meta) => meta.id)
-        .filter(isPoolAsset),
-      assetKitIds: newKitSlices
-        .filter((slice) => isPoolAsset(slice.assetId))
-        .map((slice) => slice.assetKitId),
-    },
-  });
-  if (newPoolSliceIds.length > 0 && bookingWindow?.from && bookingWindow.to) {
+  const newPoolScans = {
+    standaloneAssetIds: newStandaloneScans
+      .map((meta) => meta.id)
+      .filter(isPoolAsset),
+    assetKitIds: newKitSlices
+      .filter((slice) => isPoolAsset(slice.assetId))
+      .map((slice) => slice.assetKitId),
+  };
+  const createsPoolSlices =
+    (newPoolScans.standaloneAssetIds.length > 0 ||
+      newPoolScans.assetKitIds.length > 0) &&
+    Boolean(bookingWindow?.from && bookingWindow.to);
+  const sourcesInPlay =
+    createsPoolSlices &&
+    (givenSourcesInPlay ??
+      (await bookingSourcesInPlay(tx, { organizationId, bookingId })));
+  if (sourcesInPlay && bookingWindow?.from && bookingWindow.to) {
+    const newPoolSliceIds = await findPoolSliceIds(tx, {
+      bookingId,
+      organizationId,
+      only: newPoolScans,
+    });
     await allocateNewSlices(tx, {
       organizationId,
       bookingId,
@@ -19832,6 +19972,7 @@ async function addScannedAssetsToBookingWithinTx(
       holdsNow: (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(
         scanTargetStatus
       ),
+      sourcesInPlay,
     });
   }
 
@@ -19913,7 +20054,15 @@ async function addScannedAssetsToBookingWithinTx(
   // rescan. `claimedAssetIds` travels out for the same reason a caller that
   // wants to report what a scan actually did (as opposed to what it asked
   // for) needs both sets, not just one.
-  return { booking, addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut };
+  return {
+    booking,
+    addedAssetIds,
+    claimedAssetIds,
+    archivedKitMembersLeftOut,
+    // What this transaction knows of `bookingSourcesInPlay`, for the caller's
+    // further source writes; undefined when it was never asked.
+    sourcesInPlay: createsPoolSlices ? sourcesInPlay : givenSourcesInPlay,
+  };
 }
 
 /**
@@ -19943,6 +20092,7 @@ export async function addScannedAssetsToBooking({
   kitSlices = [],
   access,
   inSameTransaction,
+  alsoLockAssetIds,
   hints,
   seesAllBookings,
 }: {
@@ -19963,11 +20113,19 @@ export async function addScannedAssetsToBooking({
   /**
    * Further writes that must commit or roll back with the add. Runs inside
    * the add's transaction, after its writes and before its notes, so a
-   * refusal here leaves the booking exactly as it was.
+   * refusal here leaves the booking exactly as it was. `sourcesInPlay` is the
+   * add's `bookingSourcesInPlay` answer when it asked (undefined otherwise),
+   * to pass to further source writes so the probe is not sent twice.
    */
   inSameTransaction?: (
-    tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]
+    tx: Parameters<Parameters<typeof db.$transaction>[0]>[0],
+    context: { sourcesInPlay: boolean | undefined }
   ) => Promise<void>;
+  /**
+   * Assets the `inSameTransaction` writes lock. They join the add's first
+   * sorted asset lock, so the transaction takes its asset locks in one batch.
+   */
+  alsoLockAssetIds?: Asset["id"][];
   /**
    * The caller's access. Its add-items rule is enforced inside the write
    * transaction against the locked booking status. `null` only for a flow
@@ -20023,8 +20181,9 @@ export async function addScannedAssetsToBooking({
         hints,
         revealOtherBookings:
           seesAllBookings ?? access?.bookings.seeAll ?? false,
+        alsoLockAssetIds,
       });
-      await inSameTransaction?.(tx);
+      await inSameTransaction?.(tx, { sourcesInPlay: result.sourcesInPlay });
       return result;
     });
 
@@ -21172,7 +21331,8 @@ export async function duplicateBooking({
        * choices were made for it. The copy is a DRAFT and holds nothing, so
        * this never refuses. The booking row was inserted by this
        * transaction, so no other transaction can see or lock it, which is
-       * the booking lock the facade expects.
+       * the booking lock the facade expects. The copy has no converted
+       * group, so with adoption off nothing is read or written.
        */
       const copiesPoolAssets = [
         ...standaloneSourceSlices.map((ba) => ({
@@ -21184,7 +21344,7 @@ export async function duplicateBooking({
           type: row.asset.type,
         })),
       ].some((row) => isActive(row) && row.type === AssetType.QUANTITY_TRACKED);
-      if (copiesPoolAssets) {
+      if (BOOKING_SOURCES_ENABLED && copiesPoolAssets) {
         await allocateNewSlices(tx, {
           organizationId,
           bookingId: created.id,
@@ -21194,6 +21354,7 @@ export async function duplicateBooking({
           }),
           window: { from: created.from, to: created.to },
           holdsNow: false,
+          sourcesInPlay: true,
         });
       }
 

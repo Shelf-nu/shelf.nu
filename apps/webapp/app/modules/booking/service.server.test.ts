@@ -512,6 +512,9 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // covered by `sources/booking-sources.server.test.ts`, and the writers' calls
 // into it by `service.server.sources.test.ts`; here it accepts everything.
 vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // Sources take part, so every writer still hands its slices to the facade
+  // spies below; the LEGACY skip has its own cases in the sources suite.
+  bookingSourcesInPlay: vitest.fn().mockResolvedValue(true),
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
@@ -15652,20 +15655,33 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       ],
     });
 
-    const lockedIds = (
-      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
-    ).mock.calls.map(([, assetId]) => assetId);
-    expect(lockedIds.slice(0, 2)).toEqual(["asset-alpha", "asset-zeta"]);
-    // No log is written until both locks are held.
-    expect(
-      (quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>)
-        .mock.invocationCallOrder[1]
-    ).toBeLessThan(
-      (
-        consumptionLogService.createConsumptionLog as ReturnType<
-          typeof vitest.fn
-        >
-      ).mock.invocationCallOrder[0]
+    // One sorted statement takes every lock; the per-disposition lock calls
+    // in the loop only re-take rows this transaction already holds.
+    expect(quantityLock.lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
+      db,
+      ["asset-alpha", "asset-zeta"],
+      "org-1"
+    );
+    // Held before any disposition is handled: before the loop's first lock
+    // call and before any log is written.
+    const bulkLockOrder = (
+      quantityLock.lockEveryAssetForQuantityUpdate as ReturnType<
+        typeof vitest.fn
+      >
+    ).mock.invocationCallOrder[0];
+    expect(bulkLockOrder).toBeLessThan(
+      Math.min(
+        (
+          quantityLock.lockAssetForQuantityUpdate as ReturnType<
+            typeof vitest.fn
+          >
+        ).mock.invocationCallOrder[0],
+        (
+          consumptionLogService.createConsumptionLog as ReturnType<
+            typeof vitest.fn
+          >
+        ).mock.invocationCallOrder[0]
+      )
     );
   });
 
@@ -17721,6 +17737,26 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     ];
     expect(calls.every((c) => c > 0) && calls).toEqual(
       [...calls].sort((a, b) => a - b)
+    );
+  });
+
+  it("with sources out of play, asks once and takes no source lock or read", async () => {
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    // Adoption off and no converted group on the booking.
+    vitest
+      .mocked(bookingSources.bookingSourcesInPlay)
+      .mockResolvedValueOnce(false);
+
+    await checkinBooking(baseParams);
+
+    expect(bookingSources.bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    // The per-slice locks in the loop are the only asset locks, as on a
+    // booking without sources.
+    expect(quantityLock.lockEveryAssetForQuantityUpdate).not.toHaveBeenCalled();
+    // The facade is told the answer, so it sends no probe of its own.
+    expect(bookingSources.openSettlement).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ sourcesInPlay: false })
     );
   });
 

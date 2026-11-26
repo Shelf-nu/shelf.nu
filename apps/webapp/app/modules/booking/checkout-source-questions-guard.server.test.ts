@@ -38,6 +38,7 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("./units-out-by-source.server", () => ({
   loadBookedOutBySource: vi.fn().mockResolvedValue(new Map()),
   bookedOutFromLegacySourcedSlices: vi.fn().mockResolvedValue(new Map()),
+  loadConvertedOutNow: vi.fn().mockResolvedValue([]),
   LEGACY_SOURCED_SLICE_WHERE: {},
 }));
 

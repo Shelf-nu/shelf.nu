@@ -20,6 +20,7 @@ import { ShelfError } from "~/utils/error";
 import {
   admitWindowChange,
   allocateNewSlices,
+  bookingSourcesInPlay,
   commitSettlement,
   dispatchUnits,
   getSliceSourceSummaries,
@@ -1102,6 +1103,7 @@ describe("getSliceSourceSummaries", () => {
     const summaries = await getSliceSourceSummaries({
       organizationId: ORG,
       bookingId: BOOKING,
+      now: new Date("2026-11-30T09:00:00Z"),
     });
 
     expect(summaries.get("s1")).toEqual({
@@ -1119,6 +1121,177 @@ describe("getSliceSourceSummaries", () => {
       parts: [],
       short: false,
       mode: "LEGACY",
+    });
+  });
+
+  describe("an expired RESERVED competing hold", () => {
+    /**
+     * Demo Warehouse holds 5. Another booking (earlier start, so granted
+     * first) reserved all 5 from 09:00 to 12:00 on the booking's first day
+     * and never checked out: by 15:00 its window has ended. This booking
+     * plans 5 there over its whole window.
+     */
+    const EXPIRED_HOLD = {
+      sliceId: "other-slice",
+      sourceKey: "LOCATION:loc-a",
+      bookingFrom: new Date("2026-11-20T09:00:00Z"),
+      bookingCreatedAt: new Date("2026-11-01T00:00:00Z"),
+      bookingId: "other-booking",
+      from: WINDOW.from,
+      to: new Date("2026-12-01T12:00:00Z"),
+      out: 0,
+      pending: 5,
+    };
+
+    beforeEach(() => {
+      vi.mocked(loadCompetingHoldsByPool).mockClear();
+      h.capacity = new Map([[POOL, new Map([["LOCATION:loc-a", 5]])]]);
+      h.holds = new Map([[POOL, [EXPIRED_HOLD]]]);
+      h.db = {
+        booking: {
+          findFirst: vi.fn(() => ({
+            id: BOOKING,
+            from: WINDOW.from,
+            to: WINDOW.to,
+            status: "RESERVED",
+            createdAt: new Date("2026-11-21T00:00:00Z"),
+          })),
+        },
+        bookingAsset: {
+          findMany: vi.fn(() => [
+            { id: "s1", assetId: POOL, sourceAllocation: "AUTO" },
+          ]),
+        },
+        bookingAssetSource: {
+          findMany: vi.fn(() => [
+            {
+              bookingAssetId: "s1",
+              kind: "LOCATION",
+              locationId: "loc-a",
+              quantity: 5,
+              outQuantity: 0,
+              releasedQuantity: 0,
+            },
+          ]),
+        },
+        location: {
+          findMany: vi.fn(() => [{ id: "loc-a", name: "Demo Warehouse" }]),
+        },
+      };
+    });
+
+    it("does not make a started booking short: it is measured from now, as its check-out is", async () => {
+      const now = new Date("2026-12-01T15:00:00Z");
+
+      const summaries = await getSliceSourceSummaries({
+        organizationId: ORG,
+        bookingId: BOOKING,
+        now,
+      });
+
+      expect(summaries.get("s1")?.short).toBe(false);
+      expect(summaries.get("s1")?.parts).toEqual([
+        expect.objectContaining({ label: "Demo Warehouse", short: false }),
+      ]);
+      expect(loadCompetingHoldsByPool).toHaveBeenCalledWith(
+        h.db,
+        expect.objectContaining({ window: { from: now, to: WINDOW.to } })
+      );
+    });
+
+    it("still makes the booking short before it starts, while the hold overlaps it", async () => {
+      const summaries = await getSliceSourceSummaries({
+        organizationId: ORG,
+        bookingId: BOOKING,
+        now: new Date("2026-11-30T09:00:00Z"),
+      });
+
+      expect(summaries.get("s1")?.short).toBe(true);
+    });
+
+    it("reads no competing hold once the booking's window is over, and keeps unassigned units short", async () => {
+      vi.mocked(loadSourceCapacity).mockClear();
+      h.db.bookingAssetSource = {
+        findMany: vi.fn(() => [
+          {
+            bookingAssetId: "s1",
+            kind: "LOCATION",
+            locationId: "loc-a",
+            quantity: 5,
+            outQuantity: 0,
+            releasedQuantity: 0,
+          },
+          {
+            bookingAssetId: "s1",
+            kind: "UNASSIGNED",
+            locationId: null,
+            quantity: 2,
+            outQuantity: 0,
+            releasedQuantity: 0,
+          },
+        ]),
+      };
+
+      const summaries = await getSliceSourceSummaries({
+        organizationId: ORG,
+        bookingId: BOOKING,
+        now: new Date("2026-12-03T09:00:00Z"),
+      });
+
+      expect(summaries.get("s1")).toEqual({
+        parts: [
+          expect.objectContaining({ label: "Demo Warehouse", short: false }),
+          expect.objectContaining({ label: "Needs a location", short: true }),
+        ],
+        short: true,
+        mode: "AUTO",
+      });
+      expect(loadSourceCapacity).not.toHaveBeenCalled();
+      expect(loadCompetingHoldsByPool).not.toHaveBeenCalled();
+    });
+
+    it("lets the check-out send the units out from Demo Warehouse at the same instant", async () => {
+      const now = new Date("2026-12-01T15:00:00Z");
+      h.freeFor = () => free(20, 5);
+      h.physical = new Map([[POOL, new Map([["LOCATION:loc-a", 5]])]]);
+      seedGroup({
+        converted: true,
+        slices: [
+          slice({
+            id: "s1",
+            mode: "AUTO",
+            rows: [
+              row("s1", {
+                kind: "LOCATION",
+                locationId: "loc-a",
+                quantity: 5,
+              }),
+            ],
+          }),
+        ],
+      });
+
+      const result = await dispatchUnits(fakeTx({ slices: [{ id: "s1" }] }), {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        picks: [{ sliceId: "s1", units: 5 }],
+        window: WINDOW,
+        now,
+        adoptionEnabled: false,
+      });
+
+      expect(result.dispatched).toEqual([
+        expect.objectContaining({
+          sliceId: "s1",
+          sources: [
+            expect.objectContaining({ locationId: "loc-a", quantity: 5 }),
+          ],
+        }),
+      ]);
+      expect(loadCompetingHoldsByPool).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ window: { from: now, to: WINDOW.to } })
+      );
     });
   });
 
@@ -1820,6 +1993,82 @@ describe("dispatchUnits", () => {
     expect(result.dispatched).toEqual([
       expect.objectContaining({ sliceId: "s1" }),
     ]);
+  });
+
+  it("sends no probe when the writer passes its answer: false leaves every pick LEGACY at once", async () => {
+    seedConverted([{ kind: "UNPLACED", quantity: 5 }]);
+
+    const result = await dispatchUnits(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      picks: [{ sliceId: "s1", units: 5 }],
+      window: WINDOW,
+      now: NOW,
+      adoptionEnabled: false,
+      sourcesInPlay: false,
+    });
+
+    expect(result).toEqual({ dispatched: [], legacySliceIds: ["s1"] });
+    expect(h.order).toEqual([]);
+  });
+
+  it("sends no probe when the writer passes its answer: true goes straight to the lock", async () => {
+    stageShelf({ "UNPLACED:": 5 });
+    seedConverted([{ kind: "UNPLACED", quantity: 5 }]);
+
+    await dispatchUnits(fakeTx({ slices: [{ id: "s1" }] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      picks: [{ sliceId: "s1", units: 5 }],
+      window: WINDOW,
+      now: NOW,
+      adoptionEnabled: false,
+      sourcesInPlay: true,
+    });
+
+    expect(h.order.slice(0, 2)).toEqual(["lock", "loadGroupStates"]);
+    expect(h.order).not.toContain("probe");
+  });
+});
+
+describe("bookingSourcesInPlay", () => {
+  it("is true with adoption on, without a query", async () => {
+    seedGroup({ slices: [slice({ id: "s1" })] });
+
+    const inPlay = await bookingSourcesInPlay(fakeTx({ slices: [] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      adoptionEnabled: true,
+    });
+
+    expect(inPlay).toBe(true);
+    expect(h.order).toEqual([]);
+  });
+
+  it("with adoption off, probes once: false while every group is LEGACY", async () => {
+    seedGroup({ slices: [slice({ id: "s1" })] });
+
+    const inPlay = await bookingSourcesInPlay(fakeTx({ slices: [] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      adoptionEnabled: false,
+    });
+
+    expect(inPlay).toBe(false);
+    expect(h.order).toEqual(["probe"]);
+  });
+
+  it("with adoption off, probes once: true when a group is converted", async () => {
+    seedGroup({ slices: [slice({ id: "s1", mode: "AUTO" })] });
+
+    const inPlay = await bookingSourcesInPlay(fakeTx({ slices: [] }), {
+      organizationId: ORG,
+      bookingId: BOOKING,
+      adoptionEnabled: false,
+    });
+
+    expect(inPlay).toBe(true);
+    expect(h.order).toEqual(["probe"]);
   });
 });
 

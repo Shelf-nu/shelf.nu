@@ -108,6 +108,8 @@ vi.mock("~/modules/booking-note/service.server", () => ({
 // own suite; here we assert what the route hands it and that a refusal
 // reaches the caller.
 vi.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // Sources take part: the adjust hands its change to the facade spies.
+  bookingSourcesInPlay: vi.fn().mockResolvedValue(true),
   resizeSlices: vi.fn().mockResolvedValue(undefined),
   setManualSources: vi.fn().mockResolvedValue(undefined),
   setAutoSources: vi.fn().mockResolvedValue(undefined),
@@ -233,7 +235,10 @@ beforeEach(() => {
   // The re-read under the lock sees the same 2 units the snapshot did.
   tx.bookingAsset.findUnique.mockResolvedValue({ quantity: 2 });
   tx.bookingAsset.update.mockResolvedValue(undefined);
-  tx.$queryRaw.mockResolvedValue([{ status: BookingStatus.DRAFT }]);
+  // The booking lock reads the status and the window in one statement.
+  tx.$queryRaw.mockResolvedValue([
+    { status: BookingStatus.DRAFT, from: BOOKING_FROM, to: BOOKING_TO },
+  ]);
   tx.bookingAssetSource.findMany.mockResolvedValue([]);
   tx.location.findMany.mockResolvedValue([]);
   transactionMock.mockImplementation((async (
@@ -445,6 +450,7 @@ describe("POST /api/mobile/bookings/adjust-asset-quantity with sources", () => {
       sliceId: SLICE_ID,
       sources: MANUAL.sources,
       window: { from: BOOKING_FROM, to: BOOKING_TO },
+      sourcesInPlay: true,
     });
   });
 

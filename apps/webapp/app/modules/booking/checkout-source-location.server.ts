@@ -479,7 +479,11 @@ export async function getCheckoutSourceQuestions({
   /** The converted slices' rows, as one array type whichever branch ran. */
   const sourceRows: Array<(typeof rows)[number]> = rows;
   const locationNames = namesPlan
-    ? await planLocationNames({ organizationId, rows: sourceRows, snapshots })
+    ? await planLocationNames(db, {
+        organizationId,
+        rows: sourceRows,
+        snapshots,
+      })
     : new Map<string, string>();
 
   const questions: CheckoutSourceQuestion[] = [];
@@ -552,20 +556,25 @@ export async function getCheckoutSourceQuestions({
  * pool is no longer placed at (its placement was removed while units stay
  * held there) is looked up, scoped to the workspace.
  *
+ * @param client - The client the caller reads through (its transaction, or
+ *   the root client), so the names come from the same snapshot as the rows
  * @param args.organizationId - Scopes the lookup
  * @param args.rows - The planned rows
  * @param args.snapshots - The pools' placements, keyed by asset id
  * @returns Location id to name; one query only when a name is missing
  */
-async function planLocationNames({
-  organizationId,
-  rows,
-  snapshots,
-}: {
-  organizationId: string;
-  rows: ReadonlyArray<{ locationId: string | null }>;
-  snapshots: ReadonlyMap<string, Pick<PoolSourceSnapshot, "placements">>;
-}): Promise<Map<string, string>> {
+async function planLocationNames(
+  client: Pick<ExtendedPrismaClient, "location">,
+  {
+    organizationId,
+    rows,
+    snapshots,
+  }: {
+    organizationId: string;
+    rows: ReadonlyArray<{ locationId: string | null }>;
+    snapshots: ReadonlyMap<string, Pick<PoolSourceSnapshot, "placements">>;
+  }
+): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   for (const snapshot of snapshots.values()) {
     for (const placement of snapshot.placements) {
@@ -580,7 +589,7 @@ async function planLocationNames({
     ),
   ];
   if (missing.length === 0) return names;
-  const locations = await db.location.findMany({
+  const locations = await client.location.findMany({
     where: { id: { in: missing }, organizationId },
     select: { id: true, name: true },
   });
@@ -624,6 +633,10 @@ export type CheckoutDeparture = {
  *   `booking-sources` capability; defaults to true
  * @param args.adoptionEnabled - Whether a LEGACY group may convert here;
  *   defaults to `BOOKING_SOURCES_ENABLED` (false keeps LEGACY groups as they are)
+ * @param args.sourcesInPlay - The writer's `bookingSourcesInPlay` answer for
+ *   this transaction. False skips the facade: every departing slice is
+ *   recorded the LEGACY way, with no source query. Probed by the facade when
+ *   omitted.
  * @returns The sources each converted slice dispatched from
  * @throws {ShelfError} 400 from either path; the transaction rolls back
  */
@@ -638,6 +651,7 @@ export async function dispatchCheckoutSources(
     window,
     clientSupportsSources = true,
     adoptionEnabled,
+    sourcesInPlay,
   }: {
     organizationId: string;
     bookingId: string;
@@ -647,10 +661,14 @@ export async function dispatchCheckoutSources(
     window: { from: Date; to: Date };
     clientSupportsSources?: boolean;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<DispatchedSlice[]> {
   const leaving = departures.filter((d) => d.units > 0);
-  const pools = leaving.filter((d) => poolAssetIds.has(d.assetId));
+  const pools =
+    sourcesInPlay === false
+      ? []
+      : leaving.filter((d) => poolAssetIds.has(d.assetId));
   const result =
     pools.length === 0
       ? { dispatched: [], legacySliceIds: [] }
@@ -659,6 +677,7 @@ export async function dispatchCheckoutSources(
           bookingId,
           window,
           clientSupportsSources,
+          sourcesInPlay,
           ...(adoptionEnabled === undefined ? {} : { adoptionEnabled }),
           picks: pools.map((d) => {
             const submitted = submittedSourceForSlice(submission, {
@@ -676,10 +695,11 @@ export async function dispatchCheckoutSources(
         });
 
   const legacy = new Set(result.legacySliceIds);
+  const dispatchedIds = new Set(pools.map((d) => d.sliceId));
   await recordCheckoutSourceLocations(tx, {
     organizationId,
     sliceIds: leaving
-      .filter((d) => !poolAssetIds.has(d.assetId) || legacy.has(d.sliceId))
+      .filter((d) => !dispatchedIds.has(d.sliceId) || legacy.has(d.sliceId))
       .map((d) => d.sliceId),
     submission,
   });

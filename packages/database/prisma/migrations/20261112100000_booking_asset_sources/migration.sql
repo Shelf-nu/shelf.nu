@@ -21,10 +21,18 @@
 --
 -- Additive only: new enums, two new BookingAsset columns (the NOT NULL one
 -- has a constant default, so adding it does not rewrite the table), two new
--- empty tables. No backfill. Each foreign key takes a brief SHARE ROW
--- EXCLUSIVE lock on the table it references ("BookingAsset", "Location",
--- "Organization", "ConsumptionLog", "Booking", "Asset"), which blocks writes
--- to that table until the key is added, so deploy it off-peak.
+-- empty tables. No backfill.
+--
+-- Locks: the ADD COLUMN on "BookingAsset" takes an ACCESS EXCLUSIVE lock on
+-- it, which blocks every read and write of the table while it waits and
+-- runs. Each foreign key takes a brief SHARE ROW EXCLUSIVE lock on the table
+-- it references ("BookingAsset", "Location", "Organization",
+-- "ConsumptionLog", "Booking", "Asset"), which blocks writes to that table
+-- until the key is added. The CREATE TRIGGER statements of the contract
+-- migration that follows take SHARE ROW EXCLUSIVE on their tables too. Run it
+-- by hand, off-peak, after `SET lock_timeout = '5s';` in the same session,
+-- and run it again when it times out (see the booking source locations
+-- runbook in the docs app).
 
 -- CreateEnum
 CREATE TYPE "BookingSourceAllocation" AS ENUM ('LEGACY', 'KIT', 'AUTO', 'MANUAL');

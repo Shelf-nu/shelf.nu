@@ -84,11 +84,6 @@ export function pendingOf(row: SourceRowState): number {
   return row.quantity - row.releasedQuantity - row.outQuantity;
 }
 
-/** Units the row still holds: pending plus out. */
-export function remainingReservationOf(row: SourceRowState): number {
-  return row.quantity - row.releasedQuantity;
-}
-
 /** Units that left and were settled: `dispatchedTotal - outQuantity`. */
 export function historyOf(row: SourceRowState): number {
   return row.dispatchedTotal - row.outQuantity;
@@ -252,40 +247,6 @@ export function settleOnRow(
       sharedQuantity: row.sharedQuantity + k,
     },
     toUnassigned: null,
-  };
-}
-
-/**
- * Moves `k` out units from one row to another (rehome). Plan, out and lifetime
- * counters move together; shares stay with the origin.
- *
- * @throws {Error} When `k` exceeds the origin's out units or either row is UNASSIGNED
- */
-export function partialMoveOut(
-  origin: SourceRowState,
-  dest: SourceRowState,
-  k: number
-): { origin: SourceRowState; dest: SourceRowState } {
-  assertPositive(k, "move quantity");
-  if (origin.kind === "UNASSIGNED" || dest.kind === "UNASSIGNED") {
-    throw new Error("Out units cannot move to or from UNASSIGNED");
-  }
-  if (k > origin.outQuantity) {
-    throw new Error(`Cannot move ${k}: only ${origin.outQuantity} out`);
-  }
-  return {
-    origin: {
-      ...origin,
-      quantity: origin.quantity - k,
-      outQuantity: origin.outQuantity - k,
-      dispatchedTotal: origin.dispatchedTotal - k,
-    },
-    dest: {
-      ...dest,
-      quantity: dest.quantity + k,
-      outQuantity: dest.outQuantity + k,
-      dispatchedTotal: dest.dispatchedTotal + k,
-    },
   };
 }
 

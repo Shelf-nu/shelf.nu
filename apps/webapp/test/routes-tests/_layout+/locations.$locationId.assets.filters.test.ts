@@ -39,6 +39,7 @@ vi.mock("~/modules/booking/checkout-source-location.server", () => ({
 }));
 vi.mock("~/modules/booking/units-out-by-source.server", () => ({
   countUnitsOnBookingsFromLocation: vi.fn(),
+  loadConvertedOutNow: vi.fn().mockResolvedValue([]),
 }));
 // why: "reserved next", the converted-pool probe and pool custody read
 // booking source and custody rows; the default is none, and the source

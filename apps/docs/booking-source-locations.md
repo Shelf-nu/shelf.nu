@@ -165,9 +165,34 @@ Production migrations are run by hand; the deploy does not run them.
    - `20261112100100_booking_source_contract`: the contract triggers.
 
    Both are additive. The running build keeps working against them unchanged:
-   `LEGACY` groups get only the checks they already satisfy. Run them off-peak:
-   adding the foreign keys briefly takes `SHARE ROW EXCLUSIVE` locks on the
-   referenced tables.
+   `LEGACY` groups get only the checks they already satisfy. Run them off-peak.
+   They take short but strong locks:
+
+   - `ALTER TABLE "BookingAsset" ADD COLUMN` takes an `ACCESS EXCLUSIVE` lock
+     on `BookingAsset` (no rewrite: the `NOT NULL` column has a constant
+     default), which blocks every read and write of the table while it waits
+     and while it runs;
+   - each foreign key takes a `SHARE ROW EXCLUSIVE` lock on the table it
+     references, and each `CREATE TRIGGER` / `CREATE CONSTRAINT TRIGGER` in
+     the contract migration takes `SHARE ROW EXCLUSIVE` on its table, which
+     block writes.
+
+   A lock request that queues behind a long-running transaction holds up
+   every query behind it, so cap the wait. Run each migration in its own
+   session, in one transaction, with a lock timeout set first:
+
+   ```sql
+   SET lock_timeout = '5s';
+   BEGIN;
+   -- the migration file, unchanged
+   COMMIT;
+   ```
+
+   (`psql --single-transaction` with the `SET` at the top of the input does
+   the same.) If it fails with `canceling statement due to lock timeout`, the
+   transaction rolls back and nothing was applied: find the blocking
+   transaction (`pg_stat_activity`, `pg_locks`), wait for it to finish, and
+   run the same migration again. Do not raise the timeout to get past it.
 
 2. **Deploy 1** with `BOOKING_SOURCES_ENABLED` unset or `false`. This build
    understands and maintains sources everywhere but creates none.

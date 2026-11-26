@@ -168,9 +168,12 @@ beforeEach(() => {
   vi.mocked(getMobileUserContext).mockResolvedValue(
     mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
   );
-  // The service runs the caller's in-transaction hook with its transaction.
+  // The service runs the caller's in-transaction hook with its transaction,
+  // and with what it learned of the sources probe (here: never asked).
   addScannedAssetsToBookingMock.mockImplementation(async (args) => {
-    await args.inSameTransaction?.(ADD_TX as never);
+    await args.inSameTransaction?.(ADD_TX as never, {
+      sourcesInPlay: undefined,
+    });
     return undefined as never;
   });
   // An empty booking that nothing has been scanned onto — each test states
@@ -770,10 +773,28 @@ describe("POST /api/mobile/bookings/add-scanned-assets: quantities", () => {
     );
     // Never re-inserted: the service gets no standalone id for it.
     expect(serviceCall().assetIds).toEqual([]);
+    // Locked in the add's first sorted asset lock, not in a second batch.
+    expect(serviceCall().alsoLockAssetIds).toEqual(["asset-9"]);
     const body = successBody(response);
     expect(body.updated).toBe(1);
     expect(body.added.assets).toBe(0);
     expect(body.skipped.assets).toBe(0);
+  });
+
+  it("hands the resize the add's sources probe answer, so it is not asked twice", async () => {
+    assetsExist(["asset-9"]);
+    bookingHoldsSlice("asset-9");
+    addScannedAssetsToBookingMock.mockImplementation(async (args) => {
+      await args.inSameTransaction?.(ADD_TX as never, { sourcesInPlay: false });
+      return undefined as never;
+    });
+
+    await post({ assetIds: ["asset-9"], quantities: { "asset-9": 5 } });
+
+    expect(setQuantitiesMock).toHaveBeenCalledWith(
+      ADD_TX,
+      expect.objectContaining({ sourcesInPlay: false })
+    );
   });
 
   it("leaves the booked amount alone when the named quantity is unchanged", async () => {

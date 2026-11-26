@@ -295,7 +295,7 @@ export async function countUnitsOnBookingsFromLocation({
 }): Promise<Map<string, number>> {
   const [bookedOut, convertedOut] = await Promise.all([
     loadBookedOutBySource(db, { assetIds, organizationId, locationId }),
-    loadConvertedOutAtLocation({ organizationId, locationId, assetIds }),
+    loadConvertedOutNow(db, { organizationId, locationId, assetIds }),
   ]);
   const counts = new Map<string, number>();
   for (const [assetId, rows] of bookedOut) {
@@ -304,69 +304,193 @@ export async function countUnitsOnBookingsFromLocation({
       rows.reduce((sum, row) => sum + row.quantity, 0)
     );
   }
-  for (const [assetId, quantity] of convertedOut) {
+  for (const { assetId, quantity } of convertedOut) {
     counts.set(assetId, (counts.get(assetId) ?? 0) + quantity);
   }
   return counts;
 }
 
+/** Units out now from one loose source row of a converted slice. */
+export type ConvertedOutNow = {
+  assetId: string;
+  kind: "LOCATION" | "UNPLACED";
+  /** The location for a LOCATION row; null for UNPLACED. */
+  locationId: string | null;
+  quantity: number;
+};
+
 /**
- * Units out right now from one location on converted groups, per pool: the
- * `outQuantity` of LOCATION source rows there whose AUTO or MANUAL slice is on
- * an ONGOING or OVERDUE booking. One indexed source-row read, then a slice read only when
- * rows exist; none when no pool is asked about. KIT rows are never read.
- *
- * @param args.organizationId - Scopes both reads
- * @param args.locationId - The location page being viewed
- * @param args.assetIds - The pools listed on that page
- * @returns Units out per asset id; assets with none are absent
+ * A slice a caller already read for {@link loadConvertedOutNow}. Mode and
+ * booking status are re-checked when present, so a caller may hand over a
+ * read that also holds LEGACY slices or non-physical bookings.
  */
-async function loadConvertedOutAtLocation({
-  organizationId,
-  locationId,
-  assetIds,
-}: {
-  organizationId: string;
-  locationId: string;
-  assetIds: string[];
-}): Promise<Map<string, number>> {
-  const result = new Map<string, number>();
-  const ids = [...new Set(assetIds)];
-  if (ids.length === 0) return result;
+export type ConvertedOutSliceRef = {
+  id: string;
+  assetId: string;
+  sourceAllocation?: string;
+  booking?: { status: BookingStatus } | null;
+};
 
-  // Source rows first: the (organizationId, locationId) index answers this
-  // with nothing while no group is converted, so a LEGACY-only page pays one
-  // empty indexed read and no slice query.
-  const rows = await db.bookingAssetSource.findMany({
-    where: {
-      organizationId,
-      locationId,
-      kind: "LOCATION",
-      outQuantity: { gt: 0 },
-    },
-    select: { bookingAssetId: true, outQuantity: true },
-  });
-  if (rows.length === 0) return result;
+/** The client {@link loadConvertedOutNow} reads through. */
+type ConvertedOutTx = Pick<
+  ExtendedPrismaClient,
+  "bookingAsset" | "bookingAssetSource"
+>;
 
-  const slices = await db.bookingAsset.findMany({
-    where: {
-      id: { in: [...new Set(rows.map((row) => row.bookingAssetId))] },
-      assetId: { in: ids },
-      // Only converted slices carry LOCATION rows that count; the mode filter
-      // keeps the read honest even if a row survives on another mode.
-      sourceAllocation: { in: ["AUTO", "MANUAL"] },
-      booking: {
-        organizationId,
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+/** Statuses whose units are physically out. */
+const PHYSICAL_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * True for an AUTO or MANUAL slice on an ONGOING or OVERDUE booking. Terminal
+ * and reserved bookings have nothing physically out, whatever their rows
+ * still say.
+ */
+function isConvertedAndOut(slice: ConvertedOutSliceRef): boolean {
+  const converted =
+    slice.sourceAllocation === undefined ||
+    slice.sourceAllocation === "AUTO" ||
+    slice.sourceAllocation === "MANUAL";
+  const physical =
+    !slice.booking || PHYSICAL_BOOKING_STATUSES.includes(slice.booking.status);
+  return converted && physical;
+}
+
+/**
+ * Units out right now on converted groups, per pool and loose source: the
+ * `outQuantity` of LOCATION and UNPLACED source rows whose AUTO or MANUAL
+ * slice is on an ONGOING or OVERDUE booking. KIT rows and kit slices never
+ * count, so a kit departure never lowers loose units.
+ *
+ * The one reader of converted units out now: physical-now, the units-out
+ * snapshot behind custody and check-out, and the location page all count
+ * through it.
+ *
+ * Queries, by what the caller has:
+ * - `slices` given (a read the caller shares with its LEGACY half): the
+ *   source rows only (one, none when no slice is converted and out);
+ * - `locationId` given: the source rows at that location first, on the
+ *   (organizationId, locationId) index, then their slices (one, only when
+ *   rows exist), so a page with no converted group pays one empty read;
+ * - otherwise: the converted slices, then their rows (one, only when a slice
+ *   is out).
+ *
+ * @param tx - The caller's transaction, or `db` for a read-only loader
+ * @param args.organizationId - Scopes both reads when given; a caller
+ *   without it has proven the pools belong to the workspace
+ * @param args.assetIds - The pools to read
+ * @param args.locationId - Only LOCATION rows at this location
+ * @param args.slices - Slices the caller already read; skips the slice read
+ * @returns One entry per source row with units out
+ */
+export async function loadConvertedOutNow(
+  tx: ConvertedOutTx,
+  args: {
+    organizationId?: string;
+    assetIds: string[];
+    locationId?: string;
+    slices?: ReadonlyArray<ConvertedOutSliceRef>;
+  }
+): Promise<ConvertedOutNow[]> {
+  const { organizationId, locationId } = args;
+  const ids = new Set(args.assetIds);
+  if (ids.size === 0) return [];
+
+  const orgScope = organizationId ? { organizationId } : {};
+  const sliceWhere = {
+    assetId: { in: [...ids] },
+    sourceAllocation: { in: ["AUTO" as const, "MANUAL" as const] },
+    booking: { ...orgScope, status: { in: PHYSICAL_BOOKING_STATUSES } },
+  };
+  const rowSelect = {
+    bookingAssetId: true,
+    kind: true,
+    locationId: true,
+    outQuantity: true,
+  } as const;
+  const rowScope = locationId
+    ? { ...orgScope, kind: "LOCATION" as const, locationId }
+    : {
+        ...orgScope,
+        kind: { in: ["LOCATION" as const, "UNPLACED" as const] },
+      };
+
+  let assetBySlice: Map<string, string>;
+  let rows: Array<{
+    bookingAssetId: string;
+    kind: string;
+    locationId: string | null;
+    outQuantity: number;
+  }>;
+  if (locationId && !args.slices) {
+    rows = await tx.bookingAssetSource.findMany({
+      where: { ...rowScope, outQuantity: { gt: 0 } },
+      select: rowSelect,
+    });
+    if (rows.length === 0) return [];
+    const slices = await tx.bookingAsset.findMany({
+      where: {
+        ...sliceWhere,
+        id: { in: [...new Set(rows.map((row) => row.bookingAssetId))] },
       },
-    },
-    select: { id: true, assetId: true },
-  });
-  const assetBySlice = new Map(slices.map((s) => [s.id, s.assetId]));
+      select: { id: true, assetId: true },
+    });
+    assetBySlice = new Map(slices.map((s) => [s.id, s.assetId]));
+  } else {
+    const slices: ReadonlyArray<ConvertedOutSliceRef> =
+      args.slices ??
+      (await tx.bookingAsset.findMany({
+        where: sliceWhere,
+        select: {
+          id: true,
+          assetId: true,
+          booking: { select: { status: true } },
+        },
+      }));
+    assetBySlice = new Map(
+      slices
+        .filter((s) => ids.has(s.assetId) && isConvertedAndOut(s))
+        .map((s) => [s.id, s.assetId])
+    );
+    if (assetBySlice.size === 0) return [];
+    rows = await tx.bookingAssetSource.findMany({
+      where: {
+        ...rowScope,
+        // The slice ids come from the scoped read above.
+        bookingAssetId: { in: [...assetBySlice.keys()] },
+        outQuantity: { gt: 0 },
+      },
+      select: rowSelect,
+    });
+  }
+
+  const out: ConvertedOutNow[] = [];
   for (const row of rows) {
     const assetId = assetBySlice.get(row.bookingAssetId);
-    if (!assetId) continue;
-    result.set(assetId, (result.get(assetId) ?? 0) + row.outQuantity);
+    if (!assetId || row.outQuantity <= 0) continue;
+    // A location read asked for LOCATION rows at that location only, so the
+    // row's source is the location asked for.
+    if (locationId) {
+      out.push({
+        assetId,
+        kind: "LOCATION",
+        locationId,
+        quantity: row.outQuantity,
+      });
+      continue;
+    }
+    let kind: ConvertedOutNow["kind"];
+    if (row.kind === "LOCATION") kind = "LOCATION";
+    else if (row.kind === "UNPLACED") kind = "UNPLACED";
+    else continue;
+    out.push({
+      assetId,
+      kind,
+      locationId: kind === "LOCATION" ? row.locationId : null,
+      quantity: row.outQuantity,
+    });
   }
-  return result;
+  return out;
 }

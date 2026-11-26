@@ -98,6 +98,8 @@ vi.mock("~/utils/roles.server", () => ({
 // own suite; here we assert what the route hands it and that a refusal
 // reaches the caller.
 vi.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // Sources take part: the adjust hands its change to the facade spies.
+  bookingSourcesInPlay: vi.fn().mockResolvedValue(true),
   resizeSlices: vi.fn().mockResolvedValue(undefined),
   setManualSources: vi.fn().mockResolvedValue(undefined),
   setAutoSources: vi.fn().mockResolvedValue(undefined),

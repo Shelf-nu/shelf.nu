@@ -6,8 +6,8 @@
  * the first time a booking path touches it with adoption enabled: its slices,
  * logs and shares are read under the asset lock, the conversion is planned in
  * memory ({@link planGroupConversion}), the pending units of each standalone
- * slice are allocated to sources, and everything is written in one
- * {@link writeSourcePlan} call. A group whose out units do not fit its plan is
+ * slice are allocated to sources, and the writer persists everything in one
+ * `writeSourcePlan` call. A group whose out units do not fit its plan is
  * held back: nothing is written, the action proceeds with LEGACY behaviour,
  * and a Sentry info log records the raw numbers.
  *
@@ -59,11 +59,7 @@ import { Logger } from "~/utils/logger";
 import { computeFreeBySourceForPools } from "./capacity.server";
 import type { CapacityTx } from "./capacity.server";
 import { planGroupConversion } from "./conversion";
-import {
-  groupMapKey,
-  loadGroupStates,
-  writeSourcePlan,
-} from "./repository.server";
+import { groupMapKey, loadGroupStates } from "./repository.server";
 import type {
   GroupState,
   SourcePlanWrite,
@@ -697,7 +693,7 @@ function sameCounters(a: SourceRowState, b: SourceRowState): boolean {
 }
 
 /**
- * Turns a session into the one plan {@link writeSourcePlan} persists: every
+ * Turns a session into the one plan `writeSourcePlan` persists: every
  * new or changed row, the seeded shares, and every mode change (moving off
  * LEGACY stamps `sourcesConvertedAt`). Rows that end empty are dropped by the
  * repository.
@@ -737,71 +733,4 @@ export function buildSessionPlan(session: GroupSession): SourcePlanWrite {
     }
   }
   return plan;
-}
-
-/**
- * Converts the given groups when they are LEGACY and adoption is enabled.
- *
- * Takes the asset lock first (sorted, workspace-scoped), then reads and plans
- * every group, allocates the pending units of converted standalone slices by
- * the transition's rule, and writes everything in one {@link writeSourcePlan}
- * call. A held-back group writes nothing and logs a Sentry info event with the
- * slice ids and raw `Q`, `D` and `S`. A converted group is left as it is,
- * except that a LEGACY slice found in it is adopted (KIT or AUTO).
- *
- * The caller holds the booking lock of every group's booking (lock order:
- * booking rows, then asset rows) and calls this inside its transaction.
- *
- * Queries: the lock (one), `loadGroupStates` (four),
- * `computeFreeBySourceForPools` (five) per distinct booking with a group that
- * converts now or has a slice to adopt, location names (one) only on a
- * refusal, and the write.
- *
- * @param tx - The caller's transaction
- * @param args.organizationId - The trusted workspace id
- * @param args.groups - Groups to convert; non-quantity-tracked assets are skipped
- * @param args.adoptionEnabled - The adoption flag (`BOOKING_SOURCES_ENABLED`)
- * @param args.transition - `involuntary` for a check-in (never refuses, the
- *   rest goes to UNASSIGNED), `voluntary` otherwise (refuses with a 400)
- * @param args.window - The booking window pending units are admitted over
- * @returns Status per group, keyed by `${bookingId}:${assetId}`; a skipped
- *   asset is reported `legacy`
- * @throws {ShelfError} 400 on a voluntary refusal; nothing is written
- */
-export async function ensureGroupsConverted(
-  tx: BookingSourcesTx,
-  args: {
-    organizationId: string;
-    groups: GroupKey[];
-    adoptionEnabled: boolean;
-    transition: "voluntary" | "involuntary";
-    window: Window;
-  }
-): Promise<Map<string, GroupStatus>> {
-  const { organizationId, groups, adoptionEnabled, transition, window } = args;
-  const result = new Map<string, GroupStatus>();
-  if (groups.length === 0) return result;
-
-  const pools = await lockGroupAssets(
-    tx,
-    organizationId,
-    groups.map((g) => g.assetId)
-  );
-  for (const g of groups) result.set(groupMapKey(g), "legacy");
-
-  const session = await openGroupSession(tx, {
-    organizationId,
-    groups: groups.filter((g) => pools.has(g.assetId)),
-    adoptionEnabled,
-    window,
-    loadFree: false,
-  });
-  await allocateSessionPending(tx, session, transition);
-  await writeSourcePlan(tx, {
-    organizationId,
-    plan: buildSessionPlan(session),
-  });
-
-  for (const [key, group] of session.groups) result.set(key, group.status);
-  return result;
 }

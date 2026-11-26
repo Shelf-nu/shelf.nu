@@ -50,6 +50,7 @@ import {
   bookedOutFromLegacySourcedSlices,
   LEGACY_SOURCED_SLICE_WHERE,
   loadBookedOutBySource,
+  loadConvertedOutNow,
 } from "../units-out-by-source.server";
 
 /** The transaction client these readers need. */
@@ -68,12 +69,6 @@ export type CapacityWindow = { from: Date; to: Date };
 
 /** Source key of a pool's unplaced units. */
 const UNPLACED_KEY = sourceKey({ kind: "UNPLACED", locationId: null });
-
-/** Statuses whose units are physically out. */
-const PHYSICAL_STATUSES: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-]);
 
 /** Statuses whose source rows hold units (drafts hold nothing). */
 const ACTIVE_STATUSES: ReadonlySet<string> = new Set<string>(
@@ -493,7 +488,7 @@ export async function loadPhysicalNow(
 
   const [pools, convertedOut, legacyOut] = await Promise.all([
     loadPoolSources(tx, { organizationId, assetIds: ids }),
-    loadConvertedOutNow(tx, organizationId, ids),
+    loadConvertedOutNow(tx, { organizationId, assetIds: ids }),
     loadBookedOutBySource(tx, { assetIds: ids, organizationId }),
   ]);
 
@@ -506,8 +501,8 @@ export async function loadPhysicalNow(
     if (!perSource) return;
     perSource.set(key, (perSource.get(key) ?? 0) - quantity);
   };
-  for (const { assetId, key, quantity } of convertedOut) {
-    subtract(assetId, key, quantity);
+  for (const { assetId, kind, locationId, quantity } of convertedOut) {
+    subtract(assetId, sourceKey({ kind, locationId }), quantity);
   }
   for (const [assetId, perLocation] of legacyOut) {
     for (const { locationId, quantity } of perLocation) {
@@ -522,62 +517,6 @@ type UnitsOutTx = Pick<
   ExtendedPrismaClient,
   "bookingAsset" | "bookingAssetSource" | "consumptionLog"
 >;
-
-/**
- * Units out now on converted slices, per pool and loose source: LOCATION and
- * UNPLACED rows of AUTO / MANUAL slices on ONGOING or OVERDUE bookings.
- */
-async function loadConvertedOutNow(
-  tx: CapacityTx,
-  organizationId: string,
-  assetIds: string[]
-): Promise<Array<{ assetId: string; key: string; quantity: number }>> {
-  const slices = await tx.bookingAsset.findMany({
-    where: {
-      assetId: { in: assetIds },
-      sourceAllocation: { in: ["AUTO", "MANUAL"] },
-      booking: {
-        organizationId,
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-      },
-    },
-    select: { id: true, assetId: true, booking: { select: { status: true } } },
-  });
-  // Terminal and reserved bookings have nothing physically out, whatever
-  // their rows still say.
-  const assetBySlice = new Map(
-    slices
-      .filter(
-        (s) => s.booking !== null && PHYSICAL_STATUSES.has(s.booking.status)
-      )
-      .map((s) => [s.id, s.assetId])
-  );
-  if (assetBySlice.size === 0) return [];
-
-  const rows = await tx.bookingAssetSource.findMany({
-    where: {
-      organizationId,
-      bookingAssetId: { in: [...assetBySlice.keys()] },
-      kind: { in: ["LOCATION", "UNPLACED"] },
-      outQuantity: { gt: 0 },
-    },
-    select: {
-      bookingAssetId: true,
-      kind: true,
-      locationId: true,
-      outQuantity: true,
-    },
-  });
-
-  const out: Array<{ assetId: string; key: string; quantity: number }> = [];
-  for (const row of rows) {
-    if (row.kind !== "LOCATION" && row.kind !== "UNPLACED") continue;
-    const assetId = assetBySlice.get(row.bookingAssetId);
-    if (!assetId || row.outQuantity <= 0) continue;
-    out.push({ assetId, key: sourceKey(row), quantity: row.outQuantity });
-  }
-  return out;
-}
 
 /** Units of one pool out on bookings from one loose source; NULL is Unplaced. */
 export type UnitsOutFromSource = {
@@ -641,42 +580,19 @@ export async function loadUnitsOutBySource(
   });
   const isConverted = (s: (typeof slices)[number]) =>
     s.sourceAllocation === "AUTO" || s.sourceAllocation === "MANUAL";
-  // Terminal and reserved bookings have nothing physically out, whatever
-  // their rows still say.
-  const assetBySlice = new Map(
-    slices
-      .filter(
-        (s) =>
-          isConverted(s) &&
-          s.booking !== null &&
-          s.booking !== undefined &&
-          PHYSICAL_STATUSES.has(s.booking.status)
-      )
-      .map((s) => [s.id, s.assetId])
-  );
 
-  const [legacyOut, rows] = await Promise.all([
+  // One slice read serves both halves: the LEGACY counter takes the LEGACY
+  // slices, the converted reader the rest (it re-checks mode and status).
+  const [legacyOut, convertedOut] = await Promise.all([
     bookedOutFromLegacySourcedSlices(
       tx,
       slices.filter((s) => !isConverted(s))
     ),
-    assetBySlice.size === 0
-      ? Promise.resolve([])
-      : tx.bookingAssetSource.findMany({
-          where: {
-            // The slice ids come from the scoped read above.
-            ...(organizationId ? { organizationId } : {}),
-            bookingAssetId: { in: [...assetBySlice.keys()] },
-            kind: { in: ["LOCATION", "UNPLACED"] },
-            outQuantity: { gt: 0 },
-          },
-          select: {
-            bookingAssetId: true,
-            kind: true,
-            locationId: true,
-            outQuantity: true,
-          },
-        }),
+    loadConvertedOutNow(tx, {
+      organizationId,
+      assetIds: ids,
+      slices: slices.filter(isConverted),
+    }),
   ]);
 
   const totals = new Map<string, Map<string | null, number>>();
@@ -689,13 +605,8 @@ export async function loadUnitsOutBySource(
   for (const [assetId, perLocation] of legacyOut) {
     for (const row of perLocation) add(assetId, row.locationId, row.quantity);
   }
-  for (const row of rows) {
-    const assetId = assetBySlice.get(row.bookingAssetId);
-    if (!assetId) continue;
-    if (row.kind === "UNPLACED") add(assetId, null, row.outQuantity);
-    else if (row.kind === "LOCATION") {
-      add(assetId, row.locationId, row.outQuantity);
-    }
+  for (const row of convertedOut) {
+    add(row.assetId, row.locationId, row.quantity);
   }
   for (const [assetId, perSource] of totals) {
     result.set(

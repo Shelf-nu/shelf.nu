@@ -34,6 +34,7 @@ import {
 } from "./service.server";
 import {
   admitWindowChange,
+  bookingSourcesInPlay,
   dispatchUnits,
 } from "./sources/booking-sources.server";
 
@@ -309,6 +310,9 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // it reports every picked slice LEGACY by default, so the LEGACY source path
 // runs as it does without sources, and the dispatch tests below override it.
 vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // Sources take part, so the session hands its pools to the facade spies;
+  // the skip when they do not is pinned in its own case below.
+  bookingSourcesInPlay: vitest.fn().mockResolvedValue(true),
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
@@ -4073,6 +4077,8 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         bookingId: "booking-1",
         window: { from: futureFrom, to: futureTo },
         clientSupportsSources: false,
+        // Asked once for the session, then handed to every source call.
+        sourcesInPlay: true,
         picks: [
           { sliceId: "ba-qty-1", units: 5, fromLocationId: "loc-warehouse" },
         ],
@@ -4226,6 +4232,53 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       });
 
       expect(admitWindowChange).not.toHaveBeenCalled();
+    });
+
+    it("with sources out of play, asks once and then reads, admits and dispatches nothing through sources", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // Adoption off and no converted group on the booking.
+      vitest.mocked(bookingSourcesInPlay).mockResolvedValueOnce(false);
+      // An early first scan that moves the start: the admission would run
+      // were sources in play.
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the row it reads
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED),
+      ]);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+      expect(admitWindowChange).not.toHaveBeenCalled();
+      expect(dispatchUnits).not.toHaveBeenCalled();
+      // No pool-slice read for sources was sent: the asset-type read that
+      // selects only `id` and `assetId`. The LEGACY source recorder's own
+      // read (it also selects `assetKitId`) runs, as it does without sources.
+      const poolSliceReads = vitest
+        .mocked(db.bookingAsset.findMany)
+        .mock.calls.filter(([args]) => {
+          const read = args as
+            | {
+                where?: { asset?: { type?: unknown } };
+                select?: Record<string, unknown>;
+              }
+            | undefined;
+          return (
+            read?.where?.asset?.type !== undefined &&
+            Object.keys(read.select ?? {})
+              .sort()
+              .join(",") === "assetId,id"
+          );
+        });
+      expect(poolSliceReads).toEqual([]);
     });
 
     it("dispatches by allocation when nothing was picked", async () => {

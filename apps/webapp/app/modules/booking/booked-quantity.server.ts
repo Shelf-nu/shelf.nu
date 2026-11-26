@@ -16,12 +16,14 @@ import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
+  bookingSourcesInPlay,
   resizeSlices,
   setAutoSources,
   setManualSources,
 } from "./sources/booking-sources.server";
 import type { BookingSourcesInput } from "./sources/sources-input";
-import { lockBookingForStatusCheck } from "./utils.server";
+import type { Window } from "./sources/types";
+import { lockBookingWithWindow } from "./utils.server";
 
 /**
  * Booked Quantity Service
@@ -50,7 +52,8 @@ import { lockBookingForStatusCheck } from "./utils.server";
  *   as the value before the change.
  * - The booking row is locked first, then the asset row, and the slice is
  *   re-read under those locks, so two concurrent edits cannot both pass the
- *   guard.
+ *   guard. Source writes measure the booking window read in that same locked
+ *   statement, never a window the caller read before the lock.
  * - A set of changes lands together: in a transaction of its own, or inside
  *   the caller's when it must commit with other writes (the mobile re-add).
  *
@@ -86,7 +89,11 @@ export type BookedQuantityChange = {
 type BookingScope = {
   bookingId: string;
   organizationId: string;
-  /** The booking's own window, or null for a dateless booking. */
+  /**
+   * The booking's own window as the caller read it, or null for a dateless
+   * booking. It windows the availability guard only; source writes use the
+   * window read under the booking lock.
+   */
   window: { from: Date; to: Date } | null;
 };
 
@@ -261,6 +268,11 @@ async function readChangeableSlice(
  * `admit: false` when the caller sets the slice's sources next in the same
  * transaction: the resize then admits nothing, and the sources call admits
  * the combined result (new quantity and new split) once.
+ *
+ * @param args.lockedWindow - The booking window read under the booking lock;
+ *   the source rows are resized over it
+ * @param args.sourcesInPlay - The caller's `bookingSourcesInPlay` answer for
+ *   this transaction; the facade probes when omitted
  */
 async function applyChangesUnderBookingLock(
   tx: BookedQuantityTx,
@@ -268,13 +280,17 @@ async function applyChangesUnderBookingLock(
     bookingId,
     organizationId,
     window,
+    lockedWindow,
     changes,
     bookingStatus,
     admit = true,
+    sourcesInPlay,
   }: BookingScope & {
+    lockedWindow: Window;
     changes: BookedQuantityChange[];
     bookingStatus: BookingStatus;
     admit?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<AppliedBookedQuantityChange[]> {
   const ordered = [...changes].sort((a, b) =>
@@ -312,9 +328,8 @@ async function applyChangesUnderBookingLock(
     (change, i) => applied[i].previousQuantity !== change.quantity
   );
   // Every changed slice is a quantity-tracked standalone slice; the facade
-  // leaves LEGACY ones alone. A booking always has dates; a window-less
-  // scope has no holds to keep in step.
-  if (window && resized.length > 0) {
+  // leaves LEGACY ones alone, and with sources out of play it is not called.
+  if (resized.length > 0 && sourcesInPlay !== false) {
     await resizeSlices(tx, {
       organizationId,
       bookingId,
@@ -322,8 +337,9 @@ async function applyChangesUnderBookingLock(
         sliceId: c.bookingAssetId,
         quantity: c.quantity,
       })),
-      window,
+      window: lockedWindow,
       admit,
+      sourcesInPlay,
     });
   }
   for (const change of resized) {
@@ -345,6 +361,8 @@ async function applyChangesUnderBookingLock(
  *
  * @param tx - The caller's interactive transaction
  * @param args.changes - The slices to change, with their new amounts
+ * @param args.sourcesInPlay - The transaction's `bookingSourcesInPlay`
+ *   answer when the caller already has it; asked by the facade otherwise
  * @returns what each change did; unchanged slices report equal quantities
  * @throws {ShelfError} 404 when the booking or a slice vanished, 400 when a
  *   checked-out slice may not change, when the sources refuse the change, or
@@ -353,15 +371,22 @@ async function applyChangesUnderBookingLock(
  */
 export async function setStandaloneBookedQuantitiesWithinTx(
   tx: BookedQuantityTx,
-  args: BookingScope & { changes: BookedQuantityChange[] }
+  args: BookingScope & {
+    changes: BookedQuantityChange[];
+    sourcesInPlay?: boolean;
+  }
 ): Promise<AppliedBookedQuantityChange[]> {
   if (args.changes.length === 0) return [];
-  const bookingStatus = await lockBookingForStatusCheck(
+  const locked = await lockBookingWithWindow(
     tx,
     args.bookingId,
     args.organizationId
   );
-  return applyChangesUnderBookingLock(tx, { ...args, bookingStatus });
+  return applyChangesUnderBookingLock(tx, {
+    ...args,
+    bookingStatus: locked.status,
+    lockedWindow: { from: locked.from, to: locked.to },
+  });
 }
 
 /**
@@ -499,30 +524,27 @@ export function sourcesMoved(
  * @param args.before - The slice's state read before any change of this
  *   request (quantity included), so the event never records an
  *   intermediate state
+ * @param args.window - The booking window read under the booking lock
+ * @param args.sourcesInPlay - The transaction's `bookingSourcesInPlay` answer
  * @returns True when a note and an event were written
- * @throws {ShelfError} 400 on a booking without dates, or any refusal of the
- *   facade (a location that is not a placement of the asset, a split that
- *   does not add up, units that do not fit)
+ * @throws {ShelfError} 400 on any refusal of the facade (a slice that cannot
+ *   have sources, a location that is not a placement of the asset, a split
+ *   that does not add up, units that do not fit)
  */
 async function applySourcesUnderBookingLock(
   tx: BookedQuantityTx,
   args: {
     organizationId: string;
     bookingId: string;
-    window: BookingScope["window"];
+    window: Window;
     change: BookedQuantityChange;
     sources: SourcesRequest;
     before: SourcesState;
+    sourcesInPlay: boolean;
   }
 ): Promise<boolean> {
   const { organizationId, bookingId, window, change, sources, before } = args;
-  if (!window) {
-    throw userError(
-      "Sources not changed",
-      "Sources can be chosen only for a booking with dates.",
-      { bookingId }
-    );
-  }
+  const { sourcesInPlay } = args;
   const sliceId = change.bookingAssetId;
   if (sources.input.mode === "MANUAL") {
     await setManualSources(tx, {
@@ -531,9 +553,16 @@ async function applySourcesUnderBookingLock(
       sliceId,
       sources: sources.input.sources,
       window,
+      sourcesInPlay,
     });
   } else {
-    await setAutoSources(tx, { organizationId, bookingId, sliceId, window });
+    await setAutoSources(tx, {
+      organizationId,
+      bookingId,
+      sliceId,
+      window,
+      sourcesInPlay,
+    });
   }
   const after = await readSourcesState(tx, organizationId, sliceId);
   if (!sourcesMoved(before, after)) return false;
@@ -618,12 +647,17 @@ export async function setStandaloneBookedQuantity({
   sourcesChanged: boolean;
 }> {
   return db.$transaction(async (tx) => {
-    const bookingStatus = await lockBookingForStatusCheck(
-      tx,
-      bookingId,
-      organizationId
-    );
+    // The window is read in the same locked statement: every source write
+    // below measures it, and no extension can move it meanwhile.
+    const locked = await lockBookingWithWindow(tx, bookingId, organizationId);
+    const bookingStatus = locked.status;
+    const lockedWindow = { from: locked.from, to: locked.to };
     assertCanChangeBookedQuantity({ access, bookingId, bookingStatus });
+    // Asked once for both source calls below; without a sources change the
+    // resize asks for itself, only when the quantity changes.
+    const sourcesInPlay = sources
+      ? await bookingSourcesInPlay(tx, { organizationId, bookingId })
+      : undefined;
     // Read before the quantity changes, so the event compares committed
     // states only.
     const before = sources
@@ -633,20 +667,23 @@ export async function setStandaloneBookedQuantity({
       bookingId,
       organizationId,
       window,
+      lockedWindow,
       changes: [change],
       bookingStatus,
       // The sources call below admits the new quantity with the new split.
       admit: !sources,
+      sourcesInPlay,
     });
     const sourcesChanged =
       sources && before
         ? await applySourcesUnderBookingLock(tx, {
             organizationId,
             bookingId,
-            window,
+            window: lockedWindow,
             change,
             sources,
             before,
+            sourcesInPlay: sourcesInPlay ?? true,
           })
         : false;
     return { previousQuantity: applied.previousQuantity, sourcesChanged };

@@ -16,9 +16,7 @@ import {
   isRowRemovable,
   KNOWN_KINDS,
   moveHistory,
-  partialMoveOut,
   pendingOf,
-  remainingReservationOf,
   settleOnRow,
   sourceKey,
   sourceRowViolations,
@@ -55,7 +53,6 @@ test("pending and remaining reservation", () => {
     sharedQuantity: 3,
   });
   assert.equal(pendingOf(r), 3);
-  assert.equal(remainingReservationOf(r), 7);
   assert.equal(historyOf(r), 3);
 });
 
@@ -226,35 +223,6 @@ test("settle refuses UNASSIGNED, k beyond out and k <= 0", () => {
     settleOnRow(row({ quantity: 5, outQuantity: 1, dispatchedTotal: 1 }), 2)
   );
   assert.throws(() => settleOnRow(row({ quantity: 5 }), 0));
-});
-
-test("partial move keeps both invariants", () => {
-  const origin = row({
-    quantity: 6,
-    outQuantity: 4,
-    releasedQuantity: 1,
-    dispatchedTotal: 5,
-    sharedQuantity: 1,
-  });
-  const dest = row({ kind: "UNPLACED", quantity: 2 });
-  const moved = partialMoveOut(origin, dest, 3);
-  assert.deepEqual(
-    [
-      moved.origin.quantity,
-      moved.origin.outQuantity,
-      moved.origin.dispatchedTotal,
-      moved.origin.sharedQuantity,
-    ],
-    [3, 1, 2, 1]
-  );
-  assert.deepEqual(
-    [moved.dest.quantity, moved.dest.outQuantity, moved.dest.dispatchedTotal],
-    [5, 3, 3]
-  );
-  assert.deepEqual(sourceRowViolations(moved.origin), []);
-  assert.deepEqual(sourceRowViolations(moved.dest), []);
-  assert.throws(() => partialMoveOut(origin, dest, 5));
-  assert.throws(() => partialMoveOut(origin, row({ kind: "UNASSIGNED" }), 1));
 });
 
 test("history move carries dispatchedTotal - out and shares", () => {

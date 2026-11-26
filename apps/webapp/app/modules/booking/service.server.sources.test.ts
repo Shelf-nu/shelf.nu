@@ -51,6 +51,7 @@ import {
 import {
   admitWindowChange,
   allocateNewSlices,
+  bookingSourcesInPlay,
   dispatchUnits,
   resizeSlices,
 } from "./sources/booking-sources.server";
@@ -105,6 +106,12 @@ const store = vitest.hoisted(() => ({
   bookable: 100,
   /** `BOOKING_SOURCES_ENABLED` as the service reads it. */
   adoptionEnabled: false,
+  /**
+   * Whether the booking has a converted group, as the probe answers it. On by
+   * default so the writers reach the facade spies; the LEGACY skip cases turn
+   * it off with adoption.
+   */
+  hasConvertedGroup: true,
 }));
 
 /** True when a fake slice matches one `where` clause of a findMany. */
@@ -257,6 +264,12 @@ vitest.mock("~/database/db.server", () => {
 // why: the facade is the collaborator under observation; its own suite covers
 // what it does with the slices.
 vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // The probe answers from the store: adoption on, or a converted group.
+  bookingSourcesInPlay: vitest
+    .fn()
+    .mockImplementation(() =>
+      Promise.resolve(store.adoptionEnabled || store.hasConvertedGroup)
+    ),
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
@@ -476,6 +489,7 @@ beforeEach(() => {
   store.sourceRows = [];
   store.bookable = 100;
   store.adoptionEnabled = false;
+  store.hasConvertedGroup = true;
   // `clearAllMocks` keeps implementations, so the spies a case reprograms are
   // reset to their defaults here.
   vitest
@@ -510,6 +524,7 @@ describe("createBooking", () => {
   };
 
   it("allocates every pool slice of the new draft in one call, without holding", async () => {
+    store.adoptionEnabled = true;
     store.assetTypes = {
       "qt-1": "QUANTITY_TRACKED",
       "qt-2": "QUANTITY_TRACKED",
@@ -540,6 +555,7 @@ describe("createBooking", () => {
       sliceIds: ["ba-qt-1", "ba-qt-2"],
       window: { from, to },
       holdsNow: false,
+      sourcesInPlay: true,
     });
     expect(firstCallOrder(tx.booking.create)).toBeLessThan(
       firstCallOrder(allocateNewSlices)
@@ -547,6 +563,7 @@ describe("createBooking", () => {
   });
 
   it("never calls the facade for a booking of INDIVIDUAL assets only", async () => {
+    store.adoptionEnabled = true;
     store.slices = [
       { id: "ba-ind-1", assetId: "ind-1", assetKitId: null, quantity: 1 },
     ];
@@ -558,6 +575,23 @@ describe("createBooking", () => {
     await createBooking({ ...params, assetIds: ["ind-1"] });
 
     expect(allocateNewSlices).not.toHaveBeenCalled();
+  });
+
+  it("with adoption off, reads no pool slice and calls no source function: a new booking has no converted group", async () => {
+    store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
+    store.slices = [
+      { id: "ba-qt-1", assetId: "qt-1", assetKitId: null, quantity: 1 },
+    ];
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.create)
+      .mockResolvedValue({ id: BOOKING_ID, from, to } as never);
+
+    await createBooking({ ...params, assetIds: ["qt-1"] });
+
+    expect(allocateNewSlices).not.toHaveBeenCalled();
+    expect(bookingSourcesInPlay).not.toHaveBeenCalled();
+    expect(poolSliceReads()).toHaveLength(0);
   });
 });
 
@@ -610,6 +644,7 @@ describe("updateBasicBooking", () => {
       to,
       previous: { from: oldFrom, to: oldTo },
       kind: "dates",
+      sourcesInPlay: true,
     });
     expect(bookingLockOrder()).toBeLessThan(firstCallOrder(admitWindowChange));
   });
@@ -774,6 +809,7 @@ describe("reserveBooking", () => {
       to,
       previous: { from, to },
       kind: "reserve",
+      sourcesInPlay: true,
     });
     expect(bookingLockOrder()).toBeLessThan(firstCallOrder(admitWindowChange));
     expect(firstCallOrder(admitWindowChange)).toBeLessThan(
@@ -858,6 +894,33 @@ describe("reserveBooking", () => {
 
     expect(admitWindowChange).not.toHaveBeenCalled();
   });
+
+  it("with sources out of play, asks once and then reads no pool slice, locks only the standalone pools and admits nothing", async () => {
+    store.hasConvertedGroup = false;
+    vitest
+      .mocked(db.booking.findUniqueOrThrow)
+      .mockResolvedValue(
+        bookingRow(BookingStatus.DRAFT, [
+          loadedSlice("qt-1", AssetType.QUANTITY_TRACKED),
+        ]) as never
+      );
+    stageSlices("qt-1", "qt-kit");
+    const tx = openTx();
+    vitest.mocked(tx.booking.update).mockResolvedValue(reservedRow as never);
+
+    await reserveBooking(params);
+
+    expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    expect(poolSliceReads()).toHaveLength(0);
+    expect(admitWindowChange).not.toHaveBeenCalled();
+    // The kit-only pool is not added to the lock: the statements are the
+    // ones a booking without sources sends.
+    expect(lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
+      tx,
+      ["qt-1"],
+      ORG_ID
+    );
+  });
 });
 
 describe("checkoutBooking source admission", () => {
@@ -927,6 +990,7 @@ describe("checkoutBooking source admission", () => {
       to,
       previous: { from, to },
       kind: "reserve",
+      sourcesInPlay: true,
     });
     expect(bookingLockOrder()).toBeLessThan(firstCallOrder(admitWindowChange));
     expect(lockEveryAssetForQuantityUpdate).toHaveBeenCalledWith(
@@ -958,6 +1022,7 @@ describe("checkoutBooking source admission", () => {
       to,
       previous: { from, to },
       kind: "reserve",
+      sourcesInPlay: true,
     });
   });
 
@@ -981,6 +1046,7 @@ describe("checkoutBooking source admission", () => {
       to,
       previous: { from, to },
       kind: "dates",
+      sourcesInPlay: true,
     });
   });
 
@@ -1012,6 +1078,7 @@ describe("checkoutBooking source admission", () => {
       to: newEndDate,
       previous: { from: pastFrom, to: pastTo },
       kind: "dates",
+      sourcesInPlay: true,
     });
   });
 
@@ -1027,12 +1094,40 @@ describe("checkoutBooking source admission", () => {
 
     expect(admitWindowChange).not.toHaveBeenCalled();
   });
+
+  it("with sources out of play, asks once and then reads no pool slice, admits and dispatches nothing through sources", async () => {
+    store.hasConvertedGroup = false;
+    stageBooking(BookingStatus.DRAFT);
+    stagePool();
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID } as never);
+
+    await checkout({ intentChoice: CheckoutIntentEnum["with-adjusted-date"] });
+
+    expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    // The departures read (it filters on `checkedOutAt`) is the check-out's
+    // own; no pool-slice read for sources is sent.
+    expect(
+      poolSliceReads().filter((args) => !("checkedOutAt" in (args.where ?? {})))
+    ).toHaveLength(0);
+    expect(admitWindowChange).not.toHaveBeenCalled();
+    expect(dispatchUnits).not.toHaveBeenCalled();
+    // No pool lock beyond the legacy guard's own: the outer read holds no
+    // standalone pool, and the kit-only lock is skipped with sources.
+    expect(lockEveryAssetForQuantityUpdate).not.toHaveBeenCalled();
+  });
 });
 
 describe("updateBookingAssets", () => {
-  /** The booking as the in-transaction read returns it. */
+  /**
+   * The booking as the in-transaction read returns it; the booking lock reads
+   * the same window unless a case moves it.
+   */
   function stageBooking(status: BookingStatus) {
     store.lockedStatus = status;
+    store.lockedWindow = { from, to };
     vitest.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
       id: BOOKING_ID,
       name: "Booking",
@@ -1089,6 +1184,7 @@ describe("updateBookingAssets", () => {
       bookingId: BOOKING_ID,
       changes: [{ sliceId: "ba-qt-old", quantity: 5 }],
       window: { from, to },
+      sourcesInPlay: true,
     });
     expect(allocateNewSlices).toHaveBeenCalledTimes(1);
     expect(allocateNewSlices).toHaveBeenCalledWith(tx, {
@@ -1097,6 +1193,7 @@ describe("updateBookingAssets", () => {
       sliceIds: ["ba-qt-new", "ba-qt-kit"],
       window: { from, to },
       holdsNow: true,
+      sourcesInPlay: true,
     });
     // The facade reads the stored quantity as the pre-change value.
     expect(firstCallOrder(resizeSlices)).toBeLessThan(
@@ -1187,6 +1284,79 @@ describe("updateBookingAssets", () => {
     });
     expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
+
+  it("measures the window read under the booking lock when the stored end moved after the earlier read", async () => {
+    stageBooking(BookingStatus.RESERVED);
+    // An extension committed between the pre-lock read and the lock.
+    const movedTo = new Date(to.getTime() + 24 * 60 * 60 * 1000);
+    store.lockedWindow = { from, to: movedTo };
+    store.assetTypes = {
+      "qt-old": "QUANTITY_TRACKED",
+      "qt-new": "QUANTITY_TRACKED",
+    };
+    store.slices = [
+      { id: "ba-qt-old", assetId: "qt-old", assetKitId: null, quantity: 2 },
+    ];
+    const tx = openTx();
+    vitest.mocked(tx.$executeRaw).mockImplementation((() => {
+      if (!store.slices.some((s) => s.id === "ba-qt-new")) {
+        store.slices.push({
+          id: "ba-qt-new",
+          assetId: "qt-new",
+          assetKitId: null,
+          quantity: 1,
+        });
+      }
+      return Promise.resolve(1);
+    }) as never);
+
+    await updateBookingAssets({
+      id: BOOKING_ID,
+      organizationId: ORG_ID,
+      assetIds: ["qt-old", "qt-new"],
+      quantities: { "qt-old": 5, "qt-new": 1 },
+      userId: "user-1",
+      access: admin,
+      skipBookingNote: true,
+    });
+
+    expect(resizeSlices).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ window: { from, to: movedTo } })
+    );
+    expect(allocateNewSlices).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ window: { from, to: movedTo } })
+    );
+  });
+
+  it("with sources out of play, asks once and then reads no pool slice and calls no source function", async () => {
+    stageBooking(BookingStatus.RESERVED);
+    store.hasConvertedGroup = false;
+    store.assetTypes = {
+      "qt-old": "QUANTITY_TRACKED",
+      "qt-new": "QUANTITY_TRACKED",
+    };
+    store.slices = [
+      { id: "ba-qt-old", assetId: "qt-old", assetKitId: null, quantity: 2 },
+    ];
+    openTx();
+
+    await updateBookingAssets({
+      id: BOOKING_ID,
+      organizationId: ORG_ID,
+      assetIds: ["qt-old", "qt-new"],
+      quantities: { "qt-old": 5, "qt-new": 1 },
+      userId: "user-1",
+      access: admin,
+      skipBookingNote: true,
+    });
+
+    expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    expect(resizeSlices).not.toHaveBeenCalled();
+    expect(allocateNewSlices).not.toHaveBeenCalled();
+    expect(poolSliceReads()).toHaveLength(0);
+  });
 });
 
 describe("addScannedAssetsToBooking", () => {
@@ -1253,11 +1423,50 @@ describe("addScannedAssetsToBooking", () => {
       sliceIds: ["ba-qt-1-loose", "ba-qt-kit-ak-1"],
       window: { from, to },
       holdsNow: true,
+      sourcesInPlay: true,
     });
     expect(bookingLockOrder()).toBeLessThan(firstCallOrder(allocateNewSlices));
     expect(firstCallOrder(tx.booking.update)).toBeLessThan(
       firstCallOrder(allocateNewSlices)
     );
+  });
+
+  it("with sources out of play, asks once and then reads no pool slice and allocates nothing", async () => {
+    store.hasConvertedGroup = false;
+    stageBooking(BookingStatus.RESERVED);
+    store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
+    const tx = openTx();
+    landCreatedRows(tx);
+
+    await addScannedAssetsToBooking({
+      assetIds: ["qt-1"],
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: "user-1",
+      quantities: { "qt-1": 3 },
+      access: admin,
+    });
+
+    expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    expect(poolSliceReads()).toHaveLength(0);
+    expect(allocateNewSlices).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing about sources when the scan creates no pool slice", async () => {
+    stageBooking(BookingStatus.RESERVED);
+    const tx = openTx();
+    landCreatedRows(tx);
+
+    await addScannedAssetsToBooking({
+      assetIds: ["ind-1"],
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: "user-1",
+      access: admin,
+    });
+
+    expect(bookingSourcesInPlay).not.toHaveBeenCalled();
+    expect(allocateNewSlices).not.toHaveBeenCalled();
   });
 
   it("allocates nothing for a rescan of a unit already on the booking", async () => {
@@ -1301,6 +1510,7 @@ describe("addScannedAssetsToBooking", () => {
       sliceIds: ["ba-qt-1-loose"],
       window: { from, to },
       holdsNow: false,
+      sourcesInPlay: true,
     });
     // And the scan result carries no question for the operator to answer.
     expect(Object.keys(result).sort()).toEqual([
@@ -1329,7 +1539,52 @@ describe("allocation rule for a pool with no placements", () => {
 });
 
 describe("duplicateBooking", () => {
+  /** Stages a COMPLETE booking with one pool and one named asset to copy. */
+  function stageCopy() {
+    vitest
+      .mocked(db.booking.findFirstOrThrow)
+      .mockResolvedValue(
+        bookingRow(BookingStatus.COMPLETE, [
+          loadedSlice("qt-1", AssetType.QUANTITY_TRACKED),
+          loadedSlice("ind-1", AssetType.INDIVIDUAL),
+        ]) as never
+      );
+    store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
+    const tx = openTx();
+    vitest.mocked(tx.booking.create).mockImplementation(((args: {
+      data: { bookingAssets: { create: Array<{ assetId: string }> } };
+    }) => {
+      store.slices = args.data.bookingAssets.create.map((row) => ({
+        id: `copy-${row.assetId}`,
+        assetId: row.assetId,
+        assetKitId: null,
+        quantity: 2,
+      }));
+      return Promise.resolve({ id: "booking-copy", from, to });
+    }) as never);
+    return tx;
+  }
+
+  it("with adoption off, reads no pool slice and calls no source function: the copy has no converted group", async () => {
+    stageCopy();
+
+    await duplicateBooking({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: "user-1",
+      from,
+      to,
+      request: new Request("https://example.com"),
+      access: admin,
+    });
+
+    expect(allocateNewSlices).not.toHaveBeenCalled();
+    expect(bookingSourcesInPlay).not.toHaveBeenCalled();
+    expect(poolSliceReads()).toHaveLength(0);
+  });
+
   it("gives the copy a fresh allocation of its pool slices and copies no source rows", async () => {
+    store.adoptionEnabled = true;
     vitest
       .mocked(db.booking.findFirstOrThrow)
       .mockResolvedValue(
@@ -1369,6 +1624,7 @@ describe("duplicateBooking", () => {
       sliceIds: ["copy-qt-1"],
       window: { from, to },
       holdsNow: false,
+      sourcesInPlay: true,
     });
     // The copy's slices carry booking data only: no source rows ride along.
     const [createArgs] = vitest.mocked(tx.booking.create).mock
@@ -1503,6 +1759,7 @@ describe("extendBooking source admission", () => {
       to: newEndDate,
       previous: { from: startedAt, to: currentEnd },
       kind: "extend",
+      sourcesInPlay: true,
     });
     expect(bookingLockOrder()).toBeLessThan(firstCallOrder(admitWindowChange));
     expect(firstCallOrder(admitWindowChange)).toBeLessThan(
@@ -1765,10 +2022,52 @@ describe("removeAssets", () => {
     expect(tx.bookingAsset.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("takes no extra lock for a LEGACY group: the statements stay as they were", async () => {
+  it("locks the booking before reading which pool slices go, and takes no pool lock for a LEGACY group", async () => {
     const tx = stageKitRemoval("LEGACY");
 
     await removeKit();
+
+    expect(tx.bookingAsset.deleteMany).toHaveBeenCalledTimes(1);
+    // The booking lock, and nothing else raw.
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    // Under the lock, before the read that decides which slices go and
+    // whether they are converted.
+    expect(bookingLockOrder()).toBeLessThan(
+      firstCallOrder(tx.bookingAsset.findMany)
+    );
+    expect(lockEveryAssetForQuantityUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses under the booking lock before reading the slices when the booking left a removable status", async () => {
+    const tx = stageKitRemoval("LEGACY");
+    store.lockedStatus = BookingStatus.COMPLETE;
+
+    const error = await removeKit().catch((e: unknown) => e);
+
+    expect((error as ShelfError).status).toBe(403);
+    expect(tx.bookingAsset.findMany).not.toHaveBeenCalled();
+    expect(tx.bookingAsset.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("takes no booking lock for a removal of INDIVIDUAL assets only", async () => {
+    store.lockedStatus = BookingStatus.ONGOING;
+    store.slices = [
+      { id: "ba-ind", assetId: "ind-1", assetKitId: null, quantity: 1 },
+    ];
+    vitest.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+      status: BookingStatus.ONGOING,
+      name: "Booking",
+    } as never);
+    const tx = openTx();
+
+    await removeAssets({
+      booking: { id: BOOKING_ID, assetIds: ["ind-1"] },
+      firstName: "Test",
+      lastName: "User",
+      displayName: null,
+      userId: "user-1",
+      organizationId: ORG_ID,
+    });
 
     expect(tx.bookingAsset.deleteMany).toHaveBeenCalledTimes(1);
     expect(db.$queryRaw).not.toHaveBeenCalled();

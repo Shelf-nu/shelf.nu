@@ -11,15 +11,6 @@ import type { SourceRowState } from "@shelf/quantity-control";
 
 import type { SourceAllocationMode } from "./types";
 
-/** Quantity-level disposition of one asset on a booking. */
-export type UntaggedDisposition = {
-  assetId: string;
-  returned: number;
-  consumed: number;
-  lost: number;
-  damaged: number;
-};
-
 /** Units of an untagged disposition attributed to one slice row. */
 export type ResolvedShare = {
   sliceId: string;

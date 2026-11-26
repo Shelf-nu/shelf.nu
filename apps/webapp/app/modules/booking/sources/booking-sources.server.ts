@@ -52,7 +52,6 @@ import {
   describeBookingSources,
   dispatchFromRow,
   pendingOf,
-  resolveIntervalTo,
   sourceKey,
 } from "@shelf/quantity-control";
 import type {
@@ -106,6 +105,7 @@ import {
   settlementWindow,
 } from "./settlement";
 import type { Settlement, UnsharedLog } from "./settlement";
+import { shortageWindow } from "./shortage-window";
 import type { SourceAllocationMode, Window } from "./types";
 
 /** Source kinds that hold location or Unplaced capacity. */
@@ -214,6 +214,40 @@ async function bookingHasConvertedGroup(
 }
 
 /**
+ * Whether a booking's pool sources take part in a transaction: true when
+ * adoption is enabled (LEGACY groups convert as they are touched), otherwise
+ * true only when the booking already has a converted group.
+ *
+ * A writer that makes several source calls in one transaction asks this once,
+ * after the booking lock, and passes the answer to each call as
+ * `sourcesInPlay`. When it is false, the writer skips every source read, lock
+ * and call: every slice of the booking is LEGACY and stays LEGACY, so the
+ * writer behaves exactly as it does without source rows. The answer holds for
+ * the rest of the transaction: the booking lock keeps any other writer from
+ * converting a group of this booking, and with adoption off this transaction
+ * converts nothing either.
+ *
+ * Queries: none with adoption on; one probe otherwise.
+ *
+ * @param tx - The caller's transaction; the caller holds the booking lock
+ * @param args.organizationId - The trusted workspace id
+ * @param args.bookingId - The booking
+ * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @returns True when the caller must run its source work
+ */
+export async function bookingSourcesInPlay(
+  tx: BookingSourcesTx,
+  args: {
+    organizationId: string;
+    bookingId: string;
+    adoptionEnabled?: boolean;
+  }
+): Promise<boolean> {
+  if (args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED) return true;
+  return bookingHasConvertedGroup(tx, args.organizationId, args.bookingId);
+}
+
+/**
  * Steps 1 and 2 of every write: read the touched slices and the booking's
  * status, lock the assets, open the session.
  *
@@ -221,7 +255,10 @@ async function bookingHasConvertedGroup(
  * one probe ({@link bookingHasConvertedGroup}) and an empty context, without
  * the slice, booking, lock, state or free-unit reads. Every slice is then
  * LEGACY to the caller, and a slice id that is not on the booking is not
- * reported (nothing is written for it either).
+ * reported (nothing is written for it either). A caller that already asked
+ * {@link bookingSourcesInPlay} in this transaction passes its answer as
+ * `sourcesInPlay` and the probe is not sent again: false returns the empty
+ * context at once, true goes straight to the reads.
  *
  * Only quantity-tracked assets are read and locked when `sliceIds` is
  * omitted: an INDIVIDUAL asset has no source rows, and a caller that locked
@@ -240,6 +277,8 @@ async function bookingHasConvertedGroup(
  * @param args.assetsLocked - True when the caller already holds the sorted
  *   asset lock of every touched quantity-tracked asset; only with `sliceIds`
  *   omitted (the slice read then keeps to quantity-tracked assets)
+ * @param args.sourcesInPlay - The caller's {@link bookingSourcesInPlay}
+ *   answer for this transaction; probed here when omitted
  * @throws {ShelfError} 404 when a slice is not on this booking in this
  *   workspace; not raised when adoption is off and the booking has no
  *   converted group (the call returns the empty context first)
@@ -255,15 +294,15 @@ async function openCall(
     adoptionEnabled: boolean;
     newSliceIds?: ReadonlySet<string>;
     assetsLocked?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<CallContext> {
   const { organizationId, bookingId, sliceIds } = args;
-  if (
-    !args.adoptionEnabled &&
-    !(await bookingHasConvertedGroup(tx, organizationId, bookingId))
-  ) {
-    return emptyCallContext(organizationId);
-  }
+  const inPlay =
+    args.sourcesInPlay ??
+    (args.adoptionEnabled ||
+      (await bookingHasConvertedGroup(tx, organizationId, bookingId)));
+  if (!inPlay) return emptyCallContext(organizationId);
 
   // Reading the slice list before the asset lock is safe: the caller holds
   // the booking lock, so no slice is added or removed meanwhile, and every
@@ -456,6 +495,8 @@ async function finishCall(tx: BookingSourcesTx, ctx: CallContext) {
  * @param args.holdsNow - True for an active booking (admitted, refuses);
  *   false for a draft (never refuses, the rest waits on UNASSIGNED)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @throws {ShelfError} 400 naming each source's free units; 404 for
  *   a slice not on this booking, except when adoption is off and the booking
  *   has no converted group (nothing is planned or written then)
@@ -469,6 +510,7 @@ export async function allocateNewSlices(
     window: Window;
     holdsNow: boolean;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<void> {
   if (args.sliceIds.length === 0) return;
@@ -508,6 +550,8 @@ export async function allocateNewSlices(
  * @param args.changes - New quantity per slice
  * @param args.window - The booking window, half-open
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @param args.admit - Defaults to true; false only when sources are set next
  * @throws {ShelfError} 400 when an increase does not fit (admitted calls) or
  *   a decrease goes below the units out
@@ -520,6 +564,7 @@ export async function resizeSlices(
     changes: Array<{ sliceId: string; quantity: number }>;
     window: Window;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
     admit?: boolean;
   }
 ): Promise<void> {
@@ -654,6 +699,8 @@ function standaloneSlice(ctx: CallContext, sliceId: string) {
  * @param args.sources - Planned units per source
  * @param args.window - The booking window, half-open
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @throws {ShelfError} 400 when a location does not hold this asset, the
  *   split does not add up, a source would lose units that are out, or the
  *   change does not fit
@@ -667,6 +714,7 @@ export async function setManualSources(
     sources: Array<{ locationId: string | null; quantity: number }>;
     window: Window;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<void> {
   const ctx = await openCall(tx, {
@@ -781,6 +829,8 @@ export async function setManualSources(
  * @param args.sliceId - The slice
  * @param args.window - The booking window, half-open
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @throws {ShelfError} 400 when the pending units do not fit (active
  *   bookings), or the slice cannot have sources
  */
@@ -792,6 +842,7 @@ export async function setAutoSources(
     sliceId: string;
     window: Window;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<void> {
   const ctx = await openCall(tx, {
@@ -929,6 +980,8 @@ async function allocateSeededOverRemainingWindow(
  * @param args.kind - What changed
  * @param args.now - The current time, for extensions (defaults to now)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @throws {ShelfError} 400 naming the sources whose shortage the change creates or worsens
  */
 export async function admitWindowChange(
@@ -942,6 +995,7 @@ export async function admitWindowChange(
     kind: "dates" | "reserve" | "extend";
     now?: Date;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<void> {
   const { organizationId, bookingId, from, to, kind, previous } = args;
@@ -959,6 +1013,7 @@ export async function admitWindowChange(
     bookingId,
     window,
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
+    sourcesInPlay: args.sourcesInPlay,
   });
   const voluntary = kind === "reserve" || !ctx.isDraft;
 
@@ -1500,6 +1555,8 @@ function shortKeysBySlice(
  *   `booking-sources` capability; defaults to true
  * @param args.now - The current time (defaults to now)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @returns The sources each converted slice dispatched from, and the slices
  *   left LEGACY
  * @throws {ShelfError} 400 as listed above; 404 for a slice not on this
@@ -1516,6 +1573,7 @@ export async function dispatchUnits(
     clientSupportsSources?: boolean;
     now?: Date;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<DispatchResult> {
   const { organizationId, bookingId } = args;
@@ -1524,17 +1582,12 @@ export async function dispatchUnits(
   const clientSupportsSources = args.clientSupportsSources ?? true;
   const now = args.now ?? new Date();
 
-  // Re-claims and moves are admitted over the rest of the window. Once now
-  // reaches its end (an overdue check-out) nothing remains of it: nothing is
-  // admitted or swept, and the empty window [now, now) counts no other
-  // booking's holds. Physical-now still guards the units leaving.
-  const windowOver = now.getTime() >= args.window.to.getTime();
-  const window: Window = windowOver
-    ? { from: now, to: now }
-    : {
-        from: new Date(Math.max(args.window.from.getTime(), now.getTime())),
-        to: args.window.to,
-      };
+  // Re-claims and moves are admitted, and sources swept, over the rest of the
+  // window (the shortage window the booking page reads too). Once now reaches
+  // its end (an overdue check-out) nothing remains of it: nothing is admitted
+  // or swept, and the empty window [now, now) counts no other booking's
+  // holds. Physical-now still guards the units leaving.
+  const { window, over: windowOver } = shortageWindow(args.window, now);
 
   const ctx = await openCall(tx, {
     organizationId,
@@ -1542,6 +1595,7 @@ export async function dispatchUnits(
     sliceIds: [...new Set(picks.map((p) => p.sliceId))],
     window,
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
+    sourcesInPlay: args.sourcesInPlay,
   });
   await allocateSessionPending(tx, ctx.session, "voluntary");
 
@@ -1763,6 +1817,8 @@ export async function dispatchUnits(
  *   every one of `assetIds` (the statement is not sent again)
  * @param args.now - The current time (defaults to now)
  * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.sourcesInPlay - The writer's {@link bookingSourcesInPlay} answer
+ *   for this transaction; probed here when omitted
  * @returns The settlement to pass to `settleUnits` and {@link commitSettlement}
  * @throws {ShelfError} 404 when the booking is not in this workspace, except
  *   when adoption is off and the booking has no converted group (the empty
@@ -1777,6 +1833,7 @@ export async function openSettlement(
     assetsLocked?: boolean;
     now?: Date;
     adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
   }
 ): Promise<Settlement> {
   const { organizationId, bookingId } = args;
@@ -1792,6 +1849,7 @@ export async function openSettlement(
     assetsLocked: args.assetsLocked,
     window: (booking) => settlementWindow(booking, now),
     adoptionEnabled: args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED,
+    sourcesInPlay: args.sourcesInPlay,
   });
   if (ctx.session.groups.size === 0) {
     return emptySettlement({ organizationId, bookingId });
@@ -1938,25 +1996,31 @@ export type SliceSourceSummary = {
  * is short over the booking window, and its mode. Read-only: no lock and no
  * conversion. LEGACY and KIT slices get no parts and are never short.
  *
- * Shortness comes from the short sweep over the booking window: other active
- * bookings' holds plus this booking's own rows (whatever its status), with
- * units out granted first and pending units by priority. Pending units on
- * UNASSIGNED are always short. COMPLETE, CANCELLED and ARCHIVED bookings
- * hold nothing, so they are never short: the sweep is skipped and no part is
- * flagged, UNASSIGNED included.
+ * Shortness comes from the short sweep over the shortage window (what is left
+ * of the booking's stored window, see `shortage-window.ts`), the window
+ * {@link dispatchUnits} refuses over, so a slice shows short exactly when a
+ * check-out from that source would refuse: other active bookings' holds plus
+ * this booking's own rows (whatever its status), with units out granted
+ * first and pending units by priority. Pending units on UNASSIGNED are always
+ * short. Once nothing is left of the window, only UNASSIGNED is short and no
+ * capacity or competing hold is read. COMPLETE, CANCELLED and ARCHIVED
+ * bookings hold nothing, so they are never short: the sweep is skipped and no
+ * part is flagged, UNASSIGNED included.
  *
  * Queries: slices with the booking (two, parallel), source rows (one), then
  * capacity (three), competing holds (two) and location names (one) in
- * parallel, whatever the number of pools. A finished booking reads only the
- * location names in that last step.
+ * parallel, whatever the number of pools. A finished booking, or one whose
+ * window is over, reads only the location names in that last step.
  *
  * @param args.organizationId - The trusted workspace id
  * @param args.bookingId - The booking
+ * @param args.now - The current time (defaults to now)
  * @returns Per slice id
  */
 export async function getSliceSourceSummaries(args: {
   organizationId: string;
   bookingId: string;
+  now?: Date;
 }): Promise<Map<string, SliceSourceSummary>> {
   const { organizationId, bookingId } = args;
   const result = new Map<string, SliceSourceSummary>();
@@ -1980,10 +2044,12 @@ export async function getSliceSourceSummaries(args: {
   }
   if (loose.length === 0) return result;
 
-  const window: Window = {
-    from: booking.from,
-    to: resolveIntervalTo(booking.status, booking.to, booking.to),
-  };
+  // The stored end, as the check-out reads it: an OVERDUE booking's window is
+  // over, so it sweeps nothing, exactly as its check-out admits nothing.
+  const { window, over: windowOver } = shortageWindow(
+    { from: booking.from, to: booking.to },
+    args.now ?? new Date()
+  );
   const assetIds = [...new Set(loose.map((s) => s.assetId))];
   const rows = await db.bookingAssetSource.findMany({
     where: { organizationId, bookingAssetId: { in: loose.map((s) => s.id) } },
@@ -2004,11 +2070,13 @@ export async function getSliceSourceSummaries(args: {
     booking.status !== "COMPLETE" &&
     booking.status !== "CANCELLED" &&
     booking.status !== "ARCHIVED";
+  // Over an empty window only UNASSIGNED is short: nothing else is read.
+  const sweeps = reportsShortness && !windowOver;
   const [capacity, holdsByPool, locations] = await Promise.all([
-    reportsShortness
+    sweeps
       ? loadSourceCapacity(db, { organizationId, assetIds })
       : Promise.resolve(null),
-    reportsShortness
+    sweeps
       ? loadCompetingHoldsByPool(db, {
           organizationId,
           assetIds,
@@ -2036,10 +2104,14 @@ export async function getSliceSourceSummaries(args: {
           locationNames,
           shortSourceKeys: new Set(),
         });
+        // UNASSIGNED pending units flag themselves short: kept while the
+        // booking holds, cleared on a finished booking.
+        const shown = reportsShortness
+          ? parts
+          : parts.map((part) => ({ ...part, short: false }));
         result.set(slice.id, {
-          // UNASSIGNED pending units flag themselves short; cleared here too.
-          parts: parts.map((part) => ({ ...part, short: false })),
-          short: false,
+          parts: shown,
+          short: shown.some((part) => part.short),
           mode: slice.sourceAllocation,
         });
       }
@@ -2063,7 +2135,8 @@ export async function getSliceSourceSummaries(args: {
       own.push({
         sliceId: r.bookingAssetId,
         sourceKey: sourceKey(r),
-        bookingFrom: window.from,
+        // The stored start is the sweep priority, as on the check-out.
+        bookingFrom: booking.from,
         bookingCreatedAt: booking.createdAt,
         bookingId,
         from: window.from,

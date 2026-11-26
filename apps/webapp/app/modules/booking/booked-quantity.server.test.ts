@@ -31,6 +31,7 @@ import {
   type BookedQuantityChange,
 } from "./booked-quantity.server";
 import {
+  bookingSourcesInPlay,
   resizeSlices,
   setAutoSources,
   setManualSources,
@@ -83,6 +84,8 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 // own suite; here we assert when it is called, with what, and in which order
 // against the quantity write.
 vi.mock("./sources/booking-sources.server", () => ({
+  // Sources take part unless a case says otherwise.
+  bookingSourcesInPlay: vi.fn(),
   resizeSlices: vi.fn(),
   setManualSources: vi.fn(),
   setAutoSources: vi.fn(),
@@ -144,9 +147,12 @@ function slicesHold(rows: Record<string, HeldSlice | null>) {
   tx.bookingAsset.findUnique.mockImplementation(read);
 }
 
-/** The status the booking lock reads. */
-function bookingIs(status: string) {
-  tx.$queryRaw.mockResolvedValue([{ status }]);
+/**
+ * The status the booking lock reads, with the window it reads in the same
+ * statement (the caller's window unless a case moves it).
+ */
+function bookingIs(status: string, window = SCOPE.window) {
+  tx.$queryRaw.mockResolvedValue([{ status, ...window }]);
 }
 
 /** A source row as the service reads it. */
@@ -177,6 +183,7 @@ beforeEach(() => {
   ) => callback(tx)) as never);
   vi.mocked(assertAssetQuantityAvailable).mockResolvedValue(undefined);
   vi.mocked(lockAssetForQuantityUpdate).mockResolvedValue(undefined as never);
+  vi.mocked(bookingSourcesInPlay).mockResolvedValue(true);
 });
 
 describe("setStandaloneBookedQuantities", () => {
@@ -363,6 +370,84 @@ describe("pool source rows", () => {
     expect(vi.mocked(resizeSlices).mock.invocationCallOrder[0]).toBeLessThan(
       tx.bookingAsset.update.mock.invocationCallOrder[0]
     );
+  });
+
+  describe("when the stored end moved after the caller read the booking", () => {
+    /** The window the booking lock reads: extended by a day since. */
+    const LOCKED_WINDOW = {
+      from: SCOPE.window.from,
+      to: new Date("2026-09-13T17:00:00.000Z"),
+    };
+
+    it("resizes the source rows over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 2, sourceAllocation: "AUTO" } });
+
+      await setStandaloneBookedQuantities({
+        ...SCOPE,
+        changes: [change("a", 5)],
+      });
+
+      expect(resizeSlices).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+
+    it("sets sources over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 15, sourceAllocation: "AUTO" } });
+
+      await setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 15),
+        sources: { input: { mode: "AUTO" }, userId: "user-1" },
+      });
+
+      expect(setAutoSources).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+  });
+
+  it("asks once whether sources take part and hands the answer to the resize and the sources call", async () => {
+    slicesHold({ "slice-a": { quantity: 10, sourceAllocation: "AUTO" } });
+
+    await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 15),
+      sources: { input: { mode: "AUTO" }, userId: "user-1" },
+    });
+
+    expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    expect(resizeSlices).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ sourcesInPlay: true })
+    );
+    expect(setAutoSources).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ sourcesInPlay: true })
+    );
+  });
+
+  it("skips the resize when the caller's answer says sources are out of play", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+
+    await setStandaloneBookedQuantitiesWithinTx(tx as never, {
+      ...SCOPE,
+      changes: [change("a", 5)],
+      sourcesInPlay: false,
+    });
+
+    expect(resizeSlices).not.toHaveBeenCalled();
+    // The quantity is still written: the slice is LEGACY.
+    expect(tx.bookingAsset.update).toHaveBeenCalledWith({
+      where: { id: "slice-a" },
+      data: { quantity: 5 },
+    });
   });
 
   it("locks the booking before the asset", async () => {
@@ -588,6 +673,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
       sliceId: "slice-a",
       sources: MANUAL.sources,
       window: SCOPE.window,
+      sourcesInPlay: true,
     });
     expect(createSystemBookingNote).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -642,6 +728,7 @@ describe("setStandaloneBookedQuantity with sources", () => {
       bookingId: "booking-1",
       sliceId: "slice-a",
       window: SCOPE.window,
+      sourcesInPlay: true,
     });
     expect(
       vi.mocked(createSystemBookingNote).mock.calls[0][0].content

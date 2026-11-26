@@ -102,6 +102,7 @@ vitest.mock("~/modules/booking/checked-out.server", () => ({
 // own suite and needs models this tx mock does not stand in for; these tests
 // target the pool-wide availability guard only.
 vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  bookingSourcesInPlay: vitest.fn().mockResolvedValue(true),
   resizeSlices: vitest.fn(),
   setManualSources: vitest.fn(),
   setAutoSources: vitest.fn(),
