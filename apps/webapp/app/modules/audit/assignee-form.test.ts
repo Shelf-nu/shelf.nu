@@ -20,7 +20,7 @@ describe("parseAssigneeUserId", () => {
     expect(parseAssigneeUserId(blob("user-2"))).toBe("user-2");
   });
 
-  it("accepts a bare user id (pre-multi-assign clients)", () => {
+  it("accepts a bare user id (the singular field from older clients)", () => {
     expect(parseAssigneeUserId("user-9")).toBe("user-9");
   });
 
@@ -53,7 +53,7 @@ describe("resolveAssigneeUserIds", () => {
     ).toEqual(["user-2"]);
   });
 
-  it("merges the legacy singular field with the array", () => {
+  it("merges the singular field with the array", () => {
     expect(resolveAssigneeUserIds([blob("user-2")], blob("user-3"))).toEqual([
       "user-2",
       "user-3",

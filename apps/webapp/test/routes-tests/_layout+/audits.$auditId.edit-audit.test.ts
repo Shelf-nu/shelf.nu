@@ -11,8 +11,8 @@
  * the service cannot see:
  *   - every `assignees[i]` picker blob is resolved to a user id and forwarded
  *     as the FULL desired set (an empty selection means "remove everyone");
- *   - the pre-multi-assign singular `assignee` field is still honoured, so a
- *     form loaded before the deploy saves without wiping the team;
+ *   - the singular `assignee` field from older clients is still honoured, so
+ *     it saves without wiping the team;
  *   - only the people the service reports as ADDED are emailed, never the
  *     editor themselves.
  *
@@ -180,7 +180,7 @@ describe("audits.$auditId action, edit-audit intent", () => {
     );
   });
 
-  it("still honours the singular pre-multi-assign field", async () => {
+  it("still honours the singular field from older clients", async () => {
     await editAs(OrganizationRoles.ADMIN, { assignee: blob("user-7") });
 
     expect(updateAuditSession).toHaveBeenCalledWith(
@@ -191,7 +191,7 @@ describe("audits.$auditId action, edit-audit intent", () => {
   });
 
   it("emails only the people the service reports as added, never the editor", async () => {
-    vi.mocked(updateAuditSession).mockResolvedValue({
+    vi.mocked(updateAuditSession).mockResolvedValueOnce({
       audit: { id: "audit-1" },
       addedAssigneeIds: ["user-3", "user-1"],
       removedAssigneeIds: ["user-9"],

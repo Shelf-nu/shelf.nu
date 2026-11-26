@@ -593,7 +593,7 @@ describe("audit service", () => {
     expect(mockDb.auditSession.create).not.toHaveBeenCalled();
   });
 
-  describe("updateAuditSession — assignees as a set", () => {
+  describe("updateAuditSession: assignees as a set", () => {
     const currentAudit = {
       name: "Q4 audit",
       description: null,

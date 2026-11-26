@@ -5097,8 +5097,8 @@ export type DuplicateAuditResult = {
  * (route action, background jobs, future internal callers).
  *
  * Assignees carry over (those still in the workspace); notes, scans, images,
- * and the due date are NOT copied — the
- * new audit starts clean. Creator is set to `userId`.
+ * and the due date are NOT copied: the new audit starts clean. Creator is set
+ * to `userId`.
  *
  * @param auditSessionId - ID of the audit to duplicate
  * @param organizationId - Workspace scoping

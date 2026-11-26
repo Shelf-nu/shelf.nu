@@ -118,8 +118,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         : null;
 
       // The edit form always renders the selector, so an empty list means
-      // "remove everyone". The singular `assignee` is the pre-multi-assign
-      // field, still accepted so a form loaded before the deploy saves cleanly.
+      // "remove everyone". The singular `assignee` field is still accepted
+      // from older clients; resolveAssigneeUserIds merges it into the list.
       const assigneeUserIds = resolveAssigneeUserIds(
         parsedData.assignees,
         parsedData.assignee

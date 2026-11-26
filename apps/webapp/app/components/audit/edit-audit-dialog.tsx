@@ -26,7 +26,7 @@ export const EditAuditSchema = z.object({
   dueDate: z.string().optional(),
   /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
   assignees: z.array(z.string()).optional(),
-  /** Pre-multi-assign singular field; still parsed server-side. */
+  /** Singular field, still accepted from older clients and parsed server-side. */
   assignee: z.string().optional(),
 });
 
@@ -37,7 +37,7 @@ type EditAuditDialogProps = {
     description: string | null;
     dueDate: Date | null;
     status: AuditStatus;
-    /** Only `userId` is read — it maps back to each assignee's team member. */
+    /** Only `userId` is read: it maps back to each assignee's team member. */
     assignments: Array<{ userId: string }>;
   };
   teamMembers: Array<{

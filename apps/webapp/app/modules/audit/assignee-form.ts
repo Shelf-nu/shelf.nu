@@ -4,8 +4,8 @@
  * `AuditTeamMemberSelector` submits one bracket-indexed hidden input per
  * selected member (`assignees[0]`, `assignees[1]`, …), each a JSON blob
  * `{ id, name, userId }`; only `userId` matters server-side. The singular
- * `assignee` field is what forms rendered before multi-assign shipped submit,
- * and it stays accepted so a page left open across the deploy still saves.
+ * `assignee` field is still accepted from older clients and merged into the
+ * list by `resolveAssigneeUserIds`.
  *
  * Client-safe: no server imports, so the zod schemas can use it on both sides.
  */
@@ -16,8 +16,8 @@ export const AUDIT_ASSIGNEES_FIELD = "assignees";
 /**
  * Extracts the user id from one submitted assignee value.
  *
- * Accepts the picker's JSON blob or a bare user id (the pre-multi-assign
- * fallback). Returns undefined for anything without a usable user id, so a
+ * Accepts the picker's JSON blob or a bare user id (what the singular
+ * `assignee` field may carry). Returns undefined for anything without a usable user id, so a
  * hidden input rendered before the member list loaded cannot smuggle an empty
  * id into the assignment table.
  */
@@ -46,7 +46,7 @@ export function parseAssigneeUserId(
  * Resolves the submitted assignee fields to a deduplicated list of user ids.
  *
  * @param assignees - The bracket-indexed `assignees[i]` values, if any.
- * @param assignee - The legacy singular `assignee` value, if any.
+ * @param assignee - The singular `assignee` value, if any.
  */
 export function resolveAssigneeUserIds(
   assignees: string[] | undefined,

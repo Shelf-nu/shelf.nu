@@ -45,7 +45,7 @@ describe("StartAuditSchema", () => {
     }
   });
 
-  it("still accepts the pre-multi-assign singular assignee field", () => {
+  it("still accepts the singular assignee field from older clients", () => {
     const result = StartAuditSchema.safeParse({
       ...base,
       assetIds: ["a1"],

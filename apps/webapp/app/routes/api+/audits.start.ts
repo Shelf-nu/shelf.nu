@@ -48,8 +48,8 @@ export const BaseAuditSchema = z.object({
   // One `assignees[i]` entry per selected member, each a JSON blob from
   // AuditTeamMemberSelector; resolved to user ids by resolveAssigneeUserIds.
   assignees: z.array(z.string()).optional(),
-  // Pre-multi-assign singular field, kept so a form loaded before the deploy
-  // still submits cleanly.
+  // Singular field, still accepted from older clients; merged into the list
+  // by resolveAssigneeUserIds.
   assignee: z.string().optional(),
 });
 

@@ -164,7 +164,7 @@ const blob = (userId: string) =>
 /**
  * Who gets assigned and who gets told. The creator is "user-1" (see buildArgs).
  */
-describe("start-audit action — assignees", () => {
+describe("start-audit action: assignees", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolveAssetIdsForAudit.mockResolvedValue({
@@ -211,7 +211,7 @@ describe("start-audit action — assignees", () => {
     );
   });
 
-  it("still accepts the singular pre-multi-assign field", async () => {
+  it("still accepts the singular field from older clients", async () => {
     await action(buildArgs(undefined, { assignee: blob("user-5") }));
 
     expect(createAuditSession).toHaveBeenCalledWith(
