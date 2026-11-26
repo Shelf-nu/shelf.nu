@@ -332,13 +332,14 @@ type GetAssetAvailabilityArgs = {
  * "Reserved (bookings)" figure — UPCOMING (RESERVED) bookings only, disjoint
  * from `checkedOut`.
  *
- * Reserved rows are restricted to standalone reservations
- * (`assetKitId IS NULL`) — kit-driven slices are already accounted for via
- * `inKits` and must never be summed twice. Per-booking remaining quantity
- * subtracts already-logged RETURN/CONSUME/LOSS/DAMAGE dispositions exactly as
- * `computeBookingAvailableQuantity` does (partial check-in writes
- * `ConsumptionLog` rows without decrementing `BookingAsset.quantity`), and is
- * clamped at 0 per row as defence-in-depth.
+ * Only standalone reservations (`assetKitId IS NULL`) are summed: kit-driven
+ * slices are already accounted for via `inKits` and must never be summed
+ * twice. They are still read, so each already-logged RETURN/CONSUME/LOSS/DAMAGE
+ * unit is taken off the slice it was logged on and never off a sibling
+ * ({@link loggedUnitsByReservationRow}). Partial check-in writes
+ * `ConsumptionLog` rows without decrementing `BookingAsset.quantity`, so each
+ * row's remaining is its quantity minus its own logged units, clamped at 0 as
+ * defence-in-depth.
  *
  * @param args.assetId - The asset to compute availability for.
  * @param args.organizationId - Caller's organization (scopes every query).
@@ -716,9 +717,9 @@ type GetAssetAvailabilityBatchCommonArgs = {
  *   too would double-count the same units. Kit-driven rows are still read,
  *   to place each logged unit on the slice it was logged on (see
  *   {@link loggedUnitsByReservationRow}).
- * - Logged RETURN/CONSUME/LOSS/DAMAGE dispositions reduce each booking's
- *   remaining reserved quantity before the peak-concurrent sweep, clamped at
- *   0 per (booking, asset) row.
+ * - Logged RETURN/CONSUME/LOSS/DAMAGE dispositions reduce the remaining
+ *   reserved quantity of the slice they were logged on before the
+ *   peak-concurrent sweep, clamped at 0 per row.
  * - `checkedOut` is window-independent and feeds ONLY `physicalAvailable`;
  *   `bookable` subtracts `reserved` only — ONGOING bookings are windowed by
  *   their real `[from, to]`, OVERDUE bookings get a sentinel `to`

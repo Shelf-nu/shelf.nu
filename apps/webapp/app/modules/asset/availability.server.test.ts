@@ -358,8 +358,9 @@ describe("getAssetAvailability", () => {
     // @ts-expect-error mocked
     db.assetKit.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
     const booking = {
-      from: new Date("2026-01-01T00:00:00Z"),
-      to: new Date("2026-01-05T00:00:00Z"),
+      from: new Date("2026-06-01T00:00:00Z"),
+      to: new Date("2026-06-05T00:00:00Z"),
+      status: "RESERVED",
     };
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
@@ -369,6 +370,14 @@ describe("getAssetAvailability", () => {
         bookingId: "b1",
         quantity: 3,
         assetKitId: "ak-1",
+        booking,
+      },
+      // An upcoming booking that holds the asset only through a kit.
+      {
+        id: "ba-kit-only",
+        bookingId: "b2",
+        quantity: 4,
+        assetKitId: "ak-2",
         booking,
       },
     ]);
@@ -384,6 +393,9 @@ describe("getAssetAvailability", () => {
 
     expect(a.inKits).toBe(3);
     expect(a.reserved).toBe(2); // kit-driven row NOT summed again
+    // The informational figures count upcoming standalone reservations only.
+    expect(a.reservedTotal).toBe(2);
+    expect(a.reservingBookingCount).toBe(1);
   });
 
   it("does not take a return logged on the kit slice off the standalone slice", async () => {
@@ -580,12 +592,14 @@ describe("getAssetAvailability", () => {
 
   it("subtracts logged dispositions (RETURN/CONSUME/LOSS/DAMAGE) per booking", async () => {
     resetMocks();
-    // Booked 5, but 2 already returned via partial check-in — remaining 3.
+    // Booked 5 and sent out, 2 already returned via partial check-in:
+    // remaining 3.
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
       {
         bookingId: "b1",
         quantity: 5,
+        checkedOutQuantity: 5,
         booking: {
           from: new Date("2026-01-01T00:00:00Z"),
           to: new Date("2026-01-05T00:00:00Z"),
@@ -653,6 +667,7 @@ describe("getAssetAvailability", () => {
     // @ts-expect-error mocked
     db.bookingAsset.findMany.mockResolvedValue([
       {
+        id: "ba-b1",
         bookingId: "b1",
         quantity: 2,
         booking: {
@@ -661,9 +676,10 @@ describe("getAssetAvailability", () => {
         },
       },
     ]);
+    // The logs name the row, so all 5 count for it.
     // @ts-expect-error mocked
     db.consumptionLog.groupBy.mockResolvedValue([
-      { bookingId: "b1", _sum: { quantity: 5 } },
+      { bookingAssetId: "ba-b1", bookingId: "b1", _sum: { quantity: 5 } },
     ]);
 
     const a = await getAssetAvailability({
@@ -2060,7 +2076,7 @@ describe("loggedUnitsByReservationRow", () => {
     _sum: { quantity },
   });
 
-  it("gives a booking's only row every unit logged for the pair", () => {
+  it("gives a booking's only row the units logged for the pair", () => {
     const logged = loggedUnitsByReservationRow(
       [loose],
       [group(null, 2), group("ba-loose", 3)]
@@ -2103,6 +2119,55 @@ describe("loggedUnitsByReservationRow", () => {
     );
     expect(logged.get(stamped)).toBe(6);
     expect(logged.get(kit)).toBe(2);
+  });
+
+  it("caps a booking's only row at what it sent, for logs that name no slice", () => {
+    // A kit slice was returned and then removed from the booking, so its 6
+    // logged units name no slice. The loose slice never left: none are its.
+    const onShelf = { ...loose, checkedOutQuantity: 0, checkedOutAt: null };
+    const logged = loggedUnitsByReservationRow([onShelf], [group(null, 6)]);
+    expect(logged.get(onShelf)).toBe(0);
+  });
+
+  it("fills kit slices in slice id order, whatever order the rows arrive in", () => {
+    const sentTwo = { ...loose, checkedOutQuantity: 2 };
+    const kitA = { ...kit, id: "ba-kit-1", checkedOutQuantity: 4 };
+    const kitB = { ...kit, id: "ba-kit-2", checkedOutQuantity: 4 };
+    // 2 fill the loose slice; the other 3 go to the first kit slice by id.
+    const logged = loggedUnitsByReservationRow(
+      [sentTwo, kitB, kitA],
+      [group(null, 5)]
+    );
+    expect(logged.get(sentTwo)).toBe(2);
+    expect(logged.get(kitA)).toBe(3);
+    expect(logged.get(kitB)).toBe(0);
+  });
+
+  it("attributes rows read without an id or an asset id", () => {
+    // The single-asset read selects neither on some clients.
+    const bareLoose = { bookingId: "b1", quantity: 6, checkedOutQuantity: 6 };
+    const bareKit = { ...bareLoose, assetKitId: "ak-1" };
+    const logged = loggedUnitsByReservationRow(
+      [bareKit, bareLoose],
+      [{ bookingAssetId: null, bookingId: "b1", _sum: { quantity: 8 } }]
+    );
+    expect(logged.get(bareLoose)).toBe(6);
+    expect(logged.get(bareKit)).toBe(2);
+  });
+
+  it("gives no row a log that names a slice outside the pair", () => {
+    const logged = loggedUnitsByReservationRow(
+      [loose, kit],
+      [group("ba-gone", 4)]
+    );
+    expect(logged.get(loose)).toBe(0);
+    expect(logged.get(kit)).toBe(0);
+  });
+
+  it("leaves units beyond what every slice sent with no row", () => {
+    const logged = loggedUnitsByReservationRow([loose, kit], [group(null, 20)]);
+    expect(logged.get(loose)).toBe(6);
+    expect(logged.get(kit)).toBe(6);
   });
 
   it("keeps bookings and assets apart", () => {

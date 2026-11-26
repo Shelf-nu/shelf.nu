@@ -26,8 +26,8 @@
  *
  * This leaf imports NEITHER `booking/service.server` NOR `consumption-log`
  * (only the dependency-free `@shelf/quantity-control` package, `@prisma/client`
- * enums, `~/utils/error`, the pure `booking/checkout-attribution` helpers, and
- * TYPE-only shapes from `availability.server`, which are erased at build
+ * enums, `~/utils/error`, the pure `booking/checkout-attribution` and
+ * `booking/checkin-receipt` helpers, and TYPE-only shapes from `availability.server`, which are erased at build
  * time), so `consumption-log` can import the guard
  * from here without forming a runtime cycle. `availability.server` re-exports
  * everything here, so every existing consumer keeps importing these symbols
@@ -47,6 +47,7 @@ import {
   resolveIntervalTo,
 } from "@shelf/quantity-control";
 import type { AvailabilityInterval } from "@shelf/quantity-control";
+import { resolveSentUnits } from "~/modules/booking/checkin-receipt";
 import {
   attributeDispositionsByBookingAsset,
   type CheckoutAttributionLog,
@@ -221,13 +222,13 @@ export type LoggedUnitsGroup = {
  * return on the kit slice free the standalone slice while its units are out,
  * so every availability read sizes its rows through this.
  *
- * - A pair with ONE row: every log of the pair is that row's.
- * - A pair with several: a log naming its row counts for that row. One naming
- *   none is placed by {@link attributeDispositionsByBookingAsset}: standalone
- *   slice first, then kit-driven ones, each taking at most the units it sent
- *   out (the cumulative counter, or the whole booked quantity of a row that is
- *   marked out with no counter). That is the order and the capacity the
- *   check-in writer and every booking surface use.
+ * A log naming its row counts for that row. One naming none is placed by
+ * {@link attributeDispositionsByBookingAsset}: standalone slice first, then
+ * kit-driven ones in slice id order, each taking at most the units it sent
+ * out ({@link resolveSentUnits}). That is the order and the capacity the
+ * check-in writer and every booking surface use. A log loses its row when
+ * the slice it named is removed from the booking, so the cap applies to a
+ * booking's only row too: a row that never left takes none of them.
  *
  * Callers must pass EVERY row of each pair, kit-driven ones included, or an
  * untagged log has nowhere to go but the standalone slice. Kit-driven rows are
@@ -264,60 +265,36 @@ export function loggedUnitsByReservationRow<
 
   const loggedByRow = new Map<Row, number>();
   for (const [key, pairRows] of rowsByPair) {
-    const logs = logsByPair.get(key) ?? [];
-    if (pairRows.length === 1) {
-      loggedByRow.set(
-        pairRows[0],
-        logs.reduce((sum, log) => sum + log.quantity, 0)
-      );
-      continue;
-    }
-
-    // Rows are keyed by position, so a read that selects no `id` still
-    // attributes; a tagged log finds its row through the id when there is one.
-    const positionById = new Map<string, string>();
-    pairRows.forEach((row, position) => {
-      if (row.id) positionById.set(row.id, String(position));
-    });
+    // Each row keeps its own id as its key: the fill order among slices is
+    // defined on it (`compareSlicesForGreedyFill`), and it is how a log finds
+    // the row it names. A row read without an id gets a key no log can name.
+    const keyOf = (row: Row, position: number) => row.id ?? `#${position}`;
     const attributed = attributeDispositionsByBookingAsset({
       bookingAssetRows: pairRows.map((row, position) => ({
-        id: String(position),
+        id: keyOf(row, position),
         assetKitId: row.assetKitId ?? null,
-        quantity: unitsSentOut(row),
+        quantity: resolveSentUnits({
+          quantity: row.quantity,
+          checkedOutAt: row.checkedOutAt ?? null,
+          checkedOutQuantity: row.checkedOutQuantity ?? null,
+        }),
       })),
-      consumptionLogs: logs.map((log) => ({
-        bookingAssetId: log.bookingAssetId
-          ? positionById.get(log.bookingAssetId) ?? log.bookingAssetId
-          : null,
-        quantity: log.quantity,
-      })),
+      consumptionLogs: logsByPair.get(key) ?? [],
     });
     pairRows.forEach((row, position) => {
-      loggedByRow.set(row, attributed.get(String(position)) ?? 0);
+      loggedByRow.set(row, attributed.get(keyOf(row, position)) ?? 0);
     });
   }
   return loggedByRow;
 }
 
 /**
- * Units a reservation row has sent out: its cumulative counter when that
- * holds anything, else its whole booked quantity when it is marked out, else
- * none. The same reading as `resolveSentUnits` in the booking module, kept
- * here because this module must stay free of that module's imports.
- */
-function unitsSentOut(row: ReservationRowForAttribution): number {
-  const counted = row.checkedOutQuantity ?? 0;
-  if (counted > 0) return counted;
-  return row.checkedOutAt ? row.quantity : 0;
-}
-
-/**
  * The two reads {@link getPeakReservedUnitsByAsset} issues.
  *
- * Structural, and declared here rather than widened out of the shared
- * availability client: the `groupBy` needs `bookingAssetId` in its `by`, which
- * the shared client does not expose, and broadening that type reaches every
- * other availability read.
+ * Structural, and declared here rather than taken from the shared
+ * availability client: this read needs every column of its rows (`id`,
+ * `assetKitId` and `checkedOutQuantity` are optional on the shared client),
+ * so a caller that cannot supply them fails to compile.
  */
 export type PeakReservedTxClient = {
   bookingAsset: {
@@ -384,12 +361,9 @@ export type PeakReservedTxClient = {
  * booking's remaining footprint first. They are attributed per
  * `BookingAsset` ROW: one (booking, asset) pair can hold a standalone slice
  * and kit-driven ones at once, so a return logged against a kit slice must not
- * shrink the standalone reservation this guard is protecting. A disposition
- * logged without a row id is placed by
- * {@link attributeDispositionsByBookingAsset}: standalone slice first, then
- * kit-driven ones, each taking up to the units it has sent out. That is the
- * order the check-out markers and every booking surface use, so this read
- * agrees with the units they show as out.
+ * shrink the standalone reservation this guard is protecting. The
+ * attribution is {@link loggedUnitsByReservationRow}, shared with every
+ * availability read, so this read agrees with the units they show as out.
  *
  * A row never counts for less than the units it has out right now, so a slice
  * returned in full and checked out again keeps its second trip in the peak

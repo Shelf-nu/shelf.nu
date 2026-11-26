@@ -76,8 +76,8 @@ function mockedDb() {
  * Wires `bookingAsset.findMany` to behave like a real Postgres call for the
  * two shapes `getAssetAvailabilityBatch` issues against it:
  *  - `computeCheckedOutBatch`'s ONGOING/OVERDUE pivots read (its status
- *    filter leaves RESERVED out) — always empty in these tests (no checkouts).
- *  - The reservation-rows read (its status filter includes RESERVED) — here
+ *    filter leaves RESERVED out): always empty in these tests (no checkouts).
+ *  - The reservation-rows read (its status filter includes RESERVED): here
  *    we actually APPLY the `where.booking.OR` filter to `candidateRows`,
  *    exactly like Postgres would. Since the windowed-occupancy fix
  *    (`buildActiveBookingWhere`), that `OR` has TWO branches: an unconditional
@@ -111,7 +111,7 @@ function wireReservedRows(
         } => "AND" in branch
       );
       if (!bookingWhere?.status?.in?.includes("RESERVED")) {
-        // computeCheckedOutBatch pivots — no checked-out rows in these tests.
+        // computeCheckedOutBatch pivots: no checked-out rows in these tests.
         return Promise.resolve([]);
       }
       if (!dateBranch) {
