@@ -1779,11 +1779,17 @@ describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
     // The units taken off a slice are the ones attributed to that slice. A
     // booking-wide total would let a return on a kit slice free the
     // standalone slice of the same booking.
-    expect(sql).toContain(
-      `GREATEST(act.quantity - COALESCE(logged.units, 0), 0) AS remaining`
-    );
+    expect(sql).toContain(`act.quantity - COALESCE(logged.units, 0),`);
     expect(sql).toContain(`LEFT JOIN logged ON logged.slice_id = act.slice_id`);
     expect(sql).not.toContain("booked_logs");
+  });
+
+  it("never sizes a slice below the units it has out right now", () => {
+    // `reservedUnitsStillHeld` in SQL: the counter is cumulative, so a slice
+    // returned in full and sent out again still holds its second trip.
+    expect(sql).toContain(
+      `LEAST(act.quantity, GREATEST(COALESCE(act.counter, 0) - COALESCE(logged.units, 0), 0)),`
+    );
   });
 
   it("places untagged logged units standalone first, each slice up to what it sent", () => {

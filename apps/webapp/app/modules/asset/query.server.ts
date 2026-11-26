@@ -2614,7 +2614,11 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
  *   slice counts for that slice. One naming none fills standalone slices
  *   first, then by id in byte order, each up to the units it sent out. A
  *   booking-wide total would let a return on a kit slice free the standalone
- *   slice of the same booking while its units are out.
+ *   slice of the same booking while its units are out. A slice never counts
+ *   for less than the units it has out right now (its cumulative counter
+ *   minus its logged units, capped at its booked quantity), as
+ *   `reservedUnitsStillHeld` reads it: one returned in full and sent out
+ *   again keeps its second trip.
  * - **What is still out is what left minus what came back**, per slice, as
  *   `computeUnitsStillOutBySlice` (`modules/booking/checkout-attribution.ts`)
  *   computes it. What left: the larger of one trip's reading (the slice's
@@ -2789,7 +2793,14 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
     slices AS (
       SELECT
         act.*,
-        GREATEST(act.quantity - COALESCE(logged.units, 0), 0) AS remaining,
+        -- Never below what the slice has out right now: its counter is
+        -- cumulative, so a slice returned in full and sent out again still
+        -- holds the units of its second trip.
+        GREATEST(
+          act.quantity - COALESCE(logged.units, 0),
+          LEAST(act.quantity, GREATEST(COALESCE(act.counter, 0) - COALESCE(logged.units, 0), 0)),
+          0
+        ) AS remaining,
         COALESCE(out_now.units, 0) AS out_now,
         COALESCE(act.end_at, 'infinity'::timestamptz) > now() AS ahead
       FROM active act
