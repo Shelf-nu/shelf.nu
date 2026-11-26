@@ -26,8 +26,7 @@ const mocks = vi.hoisted(() => ({
   sendEmail: vi.fn(),
   findUser: vi.fn(),
   findOrganization: vi.fn(),
-  countEvents: vi.fn(),
-  countNotes: vi.fn(),
+  countSent: vi.fn(),
   createReport: vi.fn(),
   createEvent: vi.fn(),
   lock: vi.fn(),
@@ -79,11 +78,14 @@ vi.mock("~/utils/logger", () => ({ Logger: { error: mocks.loggerError } }));
 // query themselves run against Postgres in the db suite
 vi.mock("~/database/db.server", () => {
   const tx = {
-    $queryRaw: mocks.lock,
+    // The transaction's two raw statements: the member lock, then the count
+    $queryRaw: (sql: TemplateStringsArray, ...values: unknown[]) =>
+      sql.join("?").includes("pg_try_advisory_xact_lock")
+        ? mocks.lock(sql, ...values)
+        : mocks.countSent(sql, ...values),
     problemReport: { create: mocks.createReport },
-    note: { count: mocks.countNotes },
     // `recordEvent` is the real one; its insert is the output under test
-    activityEvent: { create: mocks.createEvent, count: mocks.countEvents },
+    activityEvent: { create: mocks.createEvent },
   };
   return {
     db: {
@@ -179,8 +181,7 @@ describe("reportAssetProblem", () => {
       title: "ZZ Camera",
       archivedAt: null,
     });
-    mocks.countEvents.mockResolvedValue(0);
-    mocks.countNotes.mockResolvedValue(0);
+    mocks.countSent.mockResolvedValue([{ sent: 0 }]);
     mocks.lock.mockResolvedValue([{ locked: true }]);
     mocks.assertAssetsAreNotArchived.mockResolvedValue(undefined);
     mocks.findUser.mockResolvedValue(reporter);
@@ -239,9 +240,9 @@ describe("reportAssetProblem", () => {
 
     expect(mocks.lock).toHaveBeenCalledTimes(1);
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.countEvents.mock.invocationCallOrder[0]
+      mocks.countSent.mock.invocationCallOrder[0]
     );
-    expect(mocks.countEvents.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.countSent.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createNote.mock.invocationCallOrder[0]
     );
   });
@@ -261,7 +262,7 @@ describe("reportAssetProblem", () => {
       status: 429,
       title: "Too many reports",
     });
-    expect(mocks.countEvents).not.toHaveBeenCalled();
+    expect(mocks.countSent).not.toHaveBeenCalled();
     expect(mocks.createNote).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
@@ -278,58 +279,48 @@ describe("reportAssetProblem", () => {
       vi.useRealTimers();
     });
 
-    it("counts only the report events this member is the actor of in this workspace from the last hour", async () => {
+    it("counts, in one statement, the member's report events and their report notes without a row, in this workspace from the last hour", async () => {
       await report();
 
-      expect(mocks.countEvents).toHaveBeenCalledWith({
-        where: {
-          organizationId: "org-1",
-          action: "ASSET_PROBLEM_REPORTED",
-          actorUserId: reporter.id,
-          occurredAt: {
-            gte: new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS),
-          },
-        },
-      });
-    });
-
-    it("also counts this member's report notes from the last hour that have no row", async () => {
-      await report();
-
-      expect(mocks.countNotes).toHaveBeenCalledWith({
-        where: {
-          userId: reporter.id,
-          type: "UPDATE",
-          createdAt: {
-            gte: new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS),
-          },
-          content: { contains: PROBLEM_REPORT_PHRASE },
-          asset: { organizationId: "org-1" },
-          problemReport: { is: null },
-        },
-      });
+      expect(mocks.countSent).toHaveBeenCalledTimes(1);
+      const [sql, ...values] = mocks.countSent.mock.calls[0];
+      const text = (sql as string[]).join("?").replace(/\s+/g, " ");
+      // Events the member is the actor of, by action, workspace and time.
+      expect(text).toContain('FROM "ActivityEvent" e');
+      expect(text).toContain(`e."action" = 'ASSET_PROBLEM_REPORTED'`);
+      expect(text).toContain('e."actorUserId" = ?');
+      expect(text).toContain('e."occurredAt" >= ?');
+      // Report notes by the member in the workspace that have no row.
+      expect(text).toContain(`n."type" = 'UPDATE'`);
+      expect(text).toContain(`(n."createdAt" AT TIME ZONE 'UTC') >= ?`);
+      expect(text).toContain('position(? in n."content") > 0');
+      expect(text).toContain('a."organizationId" = ?');
+      expect(text).toContain(
+        'NOT EXISTS ( SELECT 1 FROM "ProblemReport" pr WHERE pr."noteId" = n."id" )'
+      );
+      const since = new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS);
+      expect(values).toEqual([
+        "org-1",
+        reporter.id,
+        since,
+        reporter.id,
+        since,
+        PROBLEM_REPORT_PHRASE,
+        "org-1",
+      ]);
     });
   });
 
   it("admits the report that reaches the hourly limit", async () => {
-    mocks.countEvents.mockResolvedValue(PROBLEM_REPORT_LIMIT - 1);
+    mocks.countSent.mockResolvedValue([{ sent: PROBLEM_REPORT_LIMIT - 1 }]);
 
     await expect(report()).resolves.toMatchObject({
       report: { id: "report-1" },
     });
   });
 
-  it("adds events and notes without a row: refuses when together they reach the limit", async () => {
-    mocks.countEvents.mockResolvedValue(PROBLEM_REPORT_LIMIT - 4);
-    mocks.countNotes.mockResolvedValue(4);
-
-    await expect(report()).rejects.toMatchObject({ status: 429 });
-    expect(mocks.createNote).not.toHaveBeenCalled();
-    expect(mocks.createReport).not.toHaveBeenCalled();
-  });
-
   it("refuses a member over the hourly report limit and writes nothing", async () => {
-    mocks.countEvents.mockResolvedValue(PROBLEM_REPORT_LIMIT);
+    mocks.countSent.mockResolvedValue([{ sent: PROBLEM_REPORT_LIMIT }]);
 
     await expect(report()).rejects.toMatchObject({ status: 429 });
     expect(mocks.createNote).not.toHaveBeenCalled();
@@ -357,7 +348,7 @@ describe("reportAssetProblem", () => {
         organizationId: "org-1",
         actorUserId: reporter.id,
       },
-      expect.objectContaining({ activityEvent: expect.anything() })
+      expect.objectContaining({ $queryRaw: expect.any(Function) })
     );
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.assertAssetsAreNotArchived.mock.invocationCallOrder[0]
@@ -377,7 +368,7 @@ describe("reportAssetProblem", () => {
         assetId: "asset-1",
         organizationId: "org-1",
       },
-      expect.objectContaining({ activityEvent: expect.anything() })
+      expect.objectContaining({ $queryRaw: expect.any(Function) })
     );
     expect(result).toMatchObject({ note: { id: "note-1" }, emailed: true });
     await result.emailsDone;

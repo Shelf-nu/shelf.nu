@@ -421,30 +421,39 @@ async function lockMemberProblemReports(
  */
 async function assertUnderProblemReportLimit(
   { userId, organizationId }: { userId: string; organizationId: string },
-  tx: Pick<typeof db, "activityEvent" | "note">
+  tx: Pick<typeof db, "$queryRaw">
 ) {
   const since = new Date(Date.now() - PROBLEM_REPORT_WINDOW_MS);
-  // One after the other: both run on the transaction's single connection.
-  const events = await tx.activityEvent.count({
-    where: {
-      organizationId,
-      action: "ASSET_PROBLEM_REPORTED",
-      actorUserId: userId,
-      occurredAt: { gte: since },
-    },
-  });
-  // A note that has its row has its event, counted above, never twice.
-  const notesWithoutRow = await tx.note.count({
-    where: {
-      userId,
-      type: "UPDATE",
-      createdAt: { gte: since },
-      content: { contains: PROBLEM_REPORT_PHRASE },
-      asset: { organizationId },
-      problemReport: { is: null },
-    },
-  });
-  const sent = events + notesWithoutRow;
+  // One statement, so both counts read the same snapshot: a note that gets
+  // its row and event between two separate reads would be counted twice or
+  // not at all. A note that has its row has its event and is counted there.
+  // `Note."createdAt"` is a timestamp without time zone holding UTC, so it is
+  // read as UTC before it is compared with the instant.
+  const [row] = await tx.$queryRaw<{ sent: number }[]>`
+    SELECT (
+      (
+        SELECT COUNT(*)
+        FROM "ActivityEvent" e
+        WHERE e."organizationId" = ${organizationId}
+          AND e."action" = 'ASSET_PROBLEM_REPORTED'
+          AND e."actorUserId" = ${userId}
+          AND e."occurredAt" >= ${since}
+      ) + (
+        SELECT COUNT(*)
+        FROM "Note" n
+        JOIN "Asset" a ON a."id" = n."assetId"
+        WHERE n."userId" = ${userId}
+          AND n."type" = 'UPDATE'
+          AND (n."createdAt" AT TIME ZONE 'UTC') >= ${since}
+          AND position(${PROBLEM_REPORT_PHRASE} in n."content") > 0
+          AND a."organizationId" = ${organizationId}
+          AND NOT EXISTS (
+            SELECT 1 FROM "ProblemReport" pr WHERE pr."noteId" = n."id"
+          )
+      )
+    )::int AS sent
+  `;
+  const sent = row?.sent ?? 0;
 
   if (sent >= PROBLEM_REPORT_LIMIT) {
     throw new ShelfError({
