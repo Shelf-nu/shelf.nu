@@ -18298,7 +18298,435 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     ]);
     expect(db.consumptionLog.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ assetId: mockQtyAssetId }),
+        where: expect.objectContaining({
+          assetId: { in: [mockQtyAssetId] },
+        }),
+      })
+    );
+  });
+
+  describe("a disposition that names no slice, on an asset with two slices", () => {
+    /**
+     * The booking holds the pool twice: a standalone slice of 4 that left from
+     * Studio, and a kit slice of 6. Both went out.
+     *
+     * @param loose - Fields to override on the standalone slice
+     */
+    function arrangeLooseAndKitSlices(
+      loose: {
+        checkedInAt?: Date;
+        checkedOutAt?: Date | null;
+        checkedOutQuantity?: number;
+      } = {}
+    ) {
+      setupQtyMocks();
+      const booking = makeQtyBooking();
+      const [base] = booking.bookingAssets;
+      // why: the booking under test is the fixture; this gives it the two
+      // slices of one asset the split is about.
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...booking,
+        bookingAssets: [
+          {
+            ...base,
+            id: "ba-kit",
+            quantity: 6,
+            checkedOutQuantity: 6,
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            sourceLocationId: "loc-kit-shelf",
+          },
+          {
+            ...base,
+            id: "ba-loose",
+            quantity: 4,
+            checkedOutQuantity: 4,
+            assetKitId: null,
+            sourceKitId: null,
+            sourceLocationId: "loc-studio",
+            ...loose,
+          },
+        ],
+      });
+      installStatefulPlacements([
+        { id: "al-store", locationId: "loc-store", quantity: 60 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+    }
+
+    /** The slice and units of every RETURN log the check-in wrote. */
+    const returnLogs = () =>
+      vitest
+        .mocked(consumptionLogService.createConsumptionLog)
+        .mock.calls.map(([log]) => log)
+        .filter((log) => log.category === "RETURN")
+        .map((log) => [log.bookingAssetId, log.quantity]);
+
+    it("tags each RETURN with the slice it is split onto, loose slice first", async () => {
+      arrangeLooseAndKitSlices();
+
+      // 6 back with no slice named: 4 fill the loose slice, 2 go to the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 6 }],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 4],
+        ["ba-kit", 2],
+      ]);
+    });
+
+    it("fills around a slice-named entry of the same asset in one request", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the per-slice limit is read from the booking's slices of the
+      // asset. The shared mock answers that read with one generic row, so
+      // this hands it the two slices this booking holds.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation((args: { where: { assetId?: unknown } }) =>
+        args.where.assetId
+          ? Promise.resolve([
+              { id: "ba-kit", assetId: mockQtyAssetId, quantity: 6 },
+              { id: "ba-loose", assetId: mockQtyAssetId, quantity: 4 },
+            ])
+          : genericRows?.(args)
+      );
+
+      // 4 unnamed and 4 named to the loose slice. The loose slice only sent
+      // 4, so the unnamed 4 have to land on the kit slice, whatever order the
+      // entries arrive in.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [
+          { assetId: mockQtyAssetId, returned: 4 },
+          { assetId: mockQtyAssetId, bookingAssetId: "ba-loose", returned: 4 },
+        ],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 4],
+        ["ba-kit", 4],
+      ]);
+    });
+
+    it("sizes each slice by what it sent as read inside the transaction", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the booking is loaded before the asset lock, so a check-out that
+      // commits in between is only visible to the read made under the lock.
+      // This answers that read with the loose slice having sent 4 more units.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation(
+        (args: { select?: { checkedOutQuantity?: boolean } }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                {
+                  id: "ba-loose",
+                  quantity: 8,
+                  checkedOutQuantity: 8,
+                  checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
+                  sourceLocationId: "loc-studio",
+                  sourceKitId: null,
+                },
+              ])
+            : genericRows?.(args)
+      );
+
+      // The loaded booking says the loose slice sent 4; under the lock it has
+      // sent 8, so all 6 unnamed units are its own.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 6 }],
+      });
+
+      expect(returnLogs()).toEqual([["ba-loose", 6]]);
+    });
+
+    it("settles a slice the loaded booking calls returned when it has gone out again", async () => {
+      // The loaded booking shows the loose slice as already returned. A
+      // check-out committed since then sent it out again, which only the
+      // read under the lock can see.
+      arrangeLooseAndKitSlices({
+        checkedInAt: new Date("2026-01-06T09:00:00.000Z"),
+      });
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      const looseNow: Record<string, unknown> = {
+        id: "ba-loose",
+        quantity: 4,
+        checkedOutQuantity: 4,
+        checkedOutAt: new Date("2026-01-07T09:00:00.000Z"),
+        checkedInAt: null,
+        sourceLocationId: "loc-studio",
+        sourceKitId: null,
+      };
+      // why: the check-in reads its slices again under the asset lock, which
+      // is the only place the second departure shows. This answers that read
+      // with the slice as it now stands, and only the selected fields come
+      // back, as from the database.
+      sliceRows.mockImplementation(
+        (args: { select?: Record<string, boolean> }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                Object.fromEntries(
+                  Object.keys(args.select).map((key) => [key, looseNow[key]])
+                ),
+              ])
+            : genericRows?.(args)
+      );
+
+      // why: settling reads the booking's logs back after writing them. With
+      // `createConsumptionLog` mocked nothing reaches the database, so this
+      // answers the log reads with the RETURN logs written so far.
+      (
+        db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() =>
+        Promise.resolve(
+          returnLogs().map(([bookingAssetId, quantity]) => ({
+            assetId: mockQtyAssetId,
+            bookingAssetId,
+            quantity,
+          }))
+        )
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 4 }],
+      });
+
+      expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ["ba-loose"] } }),
+        })
+      );
+    });
+
+    it("fills around the logs the booking already has, read once for the request", async () => {
+      arrangeLooseAndKitSlices();
+      // why: the logs stored before this request live in the database. This
+      // answers the log reads with 3 units already back on the loose slice.
+      const logReads = db.consumptionLog.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const priorLogReads = logReads.getMockImplementation();
+      onTestFinished(() => {
+        if (priorLogReads) logReads.mockImplementation(priorLogReads);
+        else logReads.mockReset();
+      });
+      logReads.mockClear();
+      logReads.mockResolvedValue([
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-loose", quantity: 3 },
+      ]);
+
+      // The loose slice has room for 1 more; the other 2 are the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 3 }],
+      });
+
+      expect(returnLogs()).toEqual([
+        ["ba-loose", 1],
+        ["ba-kit", 2],
+      ]);
+      // One read before the entries and one to settle, whatever the entries.
+      expect(logReads).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses an unnamed claim for more units than are out", async () => {
+      // The loose slice is booked but still on the shelf: only the kit's 6
+      // are out, so 8 cannot have come back.
+      arrangeLooseAndKitSlices({ checkedOutAt: null, checkedOutQuantity: 0 });
+
+      await expect(
+        partialCheckinBooking({
+          ...baseParams,
+          checkins: [{ assetId: mockQtyAssetId, returned: 8 }],
+        })
+      ).rejects.toThrow("Only 6 are out on this booking");
+      expect(returnLogs()).toEqual([]);
+    });
+
+    it("refuses a claim naming a slice for more units than that slice sent", async () => {
+      // 1 of the 4 booked loose units left; the other 3 are on the shelf and
+      // cannot have been used up.
+      arrangeLooseAndKitSlices({ checkedOutQuantity: 1 });
+      // why: the per-slice figures are read from the booking's slices of the
+      // asset. The shared mock answers that read with one generic row, so
+      // this hands it the two slices this booking holds.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation((args: { where: { assetId?: unknown } }) =>
+        args.where.assetId
+          ? Promise.resolve([
+              { id: "ba-kit", assetId: mockQtyAssetId, quantity: 6 },
+              { id: "ba-loose", assetId: mockQtyAssetId, quantity: 4 },
+            ])
+          : genericRows?.(args)
+      );
+
+      await expect(
+        partialCheckinBooking({
+          ...baseParams,
+          checkins: [
+            {
+              assetId: mockQtyAssetId,
+              bookingAssetId: "ba-loose",
+              consumed: 4,
+            },
+          ],
+        })
+      ).rejects.toThrow("Only 1 are out on this booking");
+      expect(db.asset.update).not.toHaveBeenCalled();
+    });
+
+    it("takes used-up units off the location a slice left from as read inside the transaction", async () => {
+      arrangeLooseAndKitSlices();
+      const placements = installStatefulPlacements([
+        { id: "al-store", locationId: "loc-store", quantity: 60 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+      // why: the loaded booking says the loose slice left from Studio. The
+      // read under the asset lock is the only place a later check-out from
+      // Store shows, so this answers that read with the slice as it stands.
+      const sliceRows = db.bookingAsset.findMany as ReturnType<
+        typeof vitest.fn
+      >;
+      const genericRows = sliceRows.getMockImplementation() as
+        | ((args: unknown) => Promise<unknown>)
+        | undefined;
+      sliceRows.mockImplementation(
+        (args: { select?: { checkedOutQuantity?: boolean } }) =>
+          args.select?.checkedOutQuantity
+            ? Promise.resolve([
+                {
+                  id: "ba-loose",
+                  quantity: 4,
+                  checkedOutQuantity: 4,
+                  checkedOutAt: new Date("2026-01-07T09:00:00.000Z"),
+                  checkedInAt: null,
+                  sourceLocationId: "loc-store",
+                  sourceKitId: null,
+                },
+              ])
+            : genericRows?.(args)
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, consumed: 4 }],
+      });
+
+      expect(placements).toEqual([
+        { id: "al-store", locationId: "loc-store", quantity: 56 },
+        { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+      ]);
+    });
+
+    it("settles only the loose slice when the units that came back fit on it", async () => {
+      arrangeLooseAndKitSlices();
+
+      // 4 back with no slice named: all 4 are the loose slice's. The kit's 6
+      // are still out, so its slice stays open and the kit stays checked out.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, returned: 4 }],
+      });
+
+      expect(returnLogs()).toEqual([["ba-loose", 4]]);
+      expect(db.kit.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("tags the ledger rows of lost and damaged units the same way", async () => {
+      arrangeLooseAndKitSlices();
+
+      // Lost fills before damaged: 4 lost on the loose slice, 1 on the kit's,
+      // and both damaged units on the kit's.
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, lost: 5, damaged: 2 }],
+      });
+
+      expect(
+        recordedStockEvents().map((event) => [
+          event.category,
+          event.bookingAssetId,
+          event.change,
+        ])
+      ).toEqual([
+        ["LOSS", "ba-loose", -4],
+        ["LOSS", "ba-kit", -1],
+        ["DAMAGE", "ba-kit", -2],
+      ]);
+    });
+
+    it("tags the ledger rows of used-up units the same way", async () => {
+      arrangeLooseAndKitSlices();
+
+      await partialCheckinBooking({
+        ...baseParams,
+        checkins: [{ assetId: mockQtyAssetId, consumed: 6 }],
+      });
+
+      expect(
+        recordedStockEvents().map((event) => [
+          event.category,
+          event.bookingAssetId,
+          event.change,
+        ])
+      ).toEqual([
+        ["CONSUME", "ba-loose", -4],
+        ["CONSUME", "ba-kit", -2],
+      ]);
+    });
+  });
+
+  it("tags an unnamed disposition with the asset's only slice", async () => {
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    // why: the booking under test is the fixture; this gives its one slice a
+    // known id to find on the log.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        {
+          ...booking.bookingAssets[0],
+          id: "ba-pens",
+          assetKitId: null,
+          sourceLocationId: "loc-studio",
+        },
+      ],
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "RETURN",
+        bookingAssetId: "ba-pens",
+        quantity: 10,
       })
     );
   });
@@ -23290,6 +23718,78 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     );
 
     expect(db.kit.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("holds a kit back for a slice the loaded booking calls returned that has gone out again", async () => {
+    expect.assertions(1);
+
+    // Kit A's ladder came back on an earlier trip, so the loaded booking
+    // marks its slice returned. Another session sent it out again while this
+    // request ran: only the read made inside the transaction sees it as out.
+    const ladderSlice = {
+      id: "ba-kit-a-ladder",
+      assetId: "asset-ladder",
+      quantity: 1,
+      assetKitId: null,
+      sourceKitId: "kit-a",
+      checkedOutAt: OUT,
+      checkedInAt: OUT,
+      asset: {
+        id: "asset-ladder",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [{ kitId: "kit-a" }],
+      },
+    };
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      ladderSlice,
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({
+      slices,
+      stillOutNow: [
+        {
+          id: "ba-kit-a-ladder",
+          assetKitId: null,
+          sourceKitId: "kit-a",
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: [{ kitId: "kit-a" }],
+          },
+        },
+      ],
+    });
+    // why: `mockSliceReads` answers every still-out read alike. The release
+    // helper's own "held by another booking" read is one of them, told apart
+    // by its `bookingId.notIn`; no other booking holds kit A here, so the
+    // decision under test is the gate's, not that helper's.
+    const sliceReads = db.bookingAsset.findMany as ReturnType<typeof vitest.fn>;
+    const routed = sliceReads.getMockImplementation() as
+      | ((q: unknown) => Promise<unknown>)
+      | undefined;
+    sliceReads.mockImplementation(
+      (q?: { where?: { bookingId?: { notIn?: string[] } } }) =>
+        q?.where?.bookingId?.notIn ? Promise.resolve([]) : routed?.(q)
+    );
+    // why: settling reads the booking's logs back from the database, and no
+    // log this request writes reaches the mocked one. This is the RETURN of
+    // kit A's six, so its tape slice settles and kit A becomes a candidate.
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 6 },
+        ],
+      })
+    );
+
+    expect(releasedKitIds()).toEqual([]);
   });
 
   it("still releases a kit whose member was detached mid-booking", async () => {

@@ -15,7 +15,8 @@ import {
   resolveSliceSource,
   sliceForDisposition,
   sourceLocationFieldName,
-  untaggedCheckinPlacementSources,
+  spreadUntaggedCheckin,
+  placementSourcesForShares,
   sourceSubmissionFromRecord,
   submittedSourceForSlice,
 } from "./checkout-source-location";
@@ -523,11 +524,21 @@ describe("checkoutSourceOptions", () => {
   });
 });
 
-describe("untaggedCheckinPlacementSources", () => {
+describe("placementSourcesForShares", () => {
+  /** The placement drop of one unnamed disposition, split then placed. */
+  const placementSourcesOf = (
+    args: Parameters<typeof spreadUntaggedCheckin>[0]
+  ) =>
+    placementSourcesForShares({
+      slices: args.slices,
+      shares: spreadUntaggedCheckin(args),
+    });
+
   const loose = {
     id: "ba-loose",
     quantity: 4,
     checkedOutQuantity: 4,
+    checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
     assetKitId: null,
     sourceKitId: null,
     sourceLocationId: "loc-studio",
@@ -536,6 +547,7 @@ describe("untaggedCheckinPlacementSources", () => {
     id: "ba-kit",
     quantity: 6,
     checkedOutQuantity: 6,
+    checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
     assetKitId: "ak-1",
     sourceKitId: "kit-1",
     sourceLocationId: "loc-kit-shelf",
@@ -543,7 +555,7 @@ describe("untaggedCheckinPlacementSources", () => {
 
   it("fills the standalone slice first, as the readers do", () => {
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [kit, loose],
         priorLogs: [],
         consumed: 6,
@@ -554,7 +566,7 @@ describe("untaggedCheckinPlacementSources", () => {
   it("puts returned units first, so used-up ones land where the readers put them", () => {
     // 3 returned fill the loose slice to 1 left; 2 consumed: 1 there, 1 on the kit.
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [loose, kit],
         priorLogs: [],
         returned: 3,
@@ -565,7 +577,7 @@ describe("untaggedCheckinPlacementSources", () => {
 
   it("counts earlier logs, tagged or not, before filling", () => {
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [loose, kit],
         priorLogs: [{ bookingAssetId: null, quantity: 4 }],
         consumed: 2,
@@ -573,13 +585,146 @@ describe("untaggedCheckinPlacementSources", () => {
     ).toEqual([]);
   });
 
+  it("takes the whole booked quantity of a dispatched slice with no counter", () => {
+    // A stamped marker with a zero counter means every booked unit left.
+    expect(
+      placementSourcesOf({
+        slices: [{ ...loose, checkedOutQuantity: 0 }, kit],
+        priorLogs: [],
+        lost: 5,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 4 }]);
+  });
+
   it("lets a slice that went out twice absorb both trips", () => {
     expect(
-      untaggedCheckinPlacementSources({
+      placementSourcesOf({
         slices: [{ ...loose, checkedOutQuantity: 8 }, kit],
         priorLogs: [],
         consumed: 6,
       })
     ).toEqual([{ locationId: "loc-studio", quantity: 6 }]);
+  });
+});
+
+describe("spreadUntaggedCheckin", () => {
+  const loose = {
+    id: "ba-loose",
+    quantity: 4,
+    checkedOutQuantity: 4,
+    checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
+    assetKitId: null,
+    sourceKitId: null,
+    sourceLocationId: "loc-studio",
+  };
+  const kit = {
+    id: "ba-kit",
+    quantity: 6,
+    checkedOutQuantity: 6,
+    checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
+    assetKitId: "ak-1",
+    sourceKitId: "kit-1",
+    sourceLocationId: "loc-kit-shelf",
+  };
+  const share = (
+    bookingAssetId: string | null,
+    units: Partial<Record<"returned" | "consumed" | "lost" | "damaged", number>>
+  ) => ({
+    bookingAssetId,
+    returned: 0,
+    consumed: 0,
+    lost: 0,
+    damaged: 0,
+    ...units,
+  });
+
+  it("fills the standalone slice first, then the kit slice", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [kit, loose],
+        priorLogs: [],
+        returned: 6,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 4 }),
+      share("ba-kit", { returned: 2 }),
+    ]);
+  });
+
+  it("gives nothing to a slice that never went out", () => {
+    // The loose units are still on the shelf: only the kit's can come back.
+    expect(
+      spreadUntaggedCheckin({
+        slices: [{ ...loose, checkedOutQuantity: 0, checkedOutAt: null }, kit],
+        priorLogs: [],
+        returned: 5,
+      })
+    ).toEqual([share("ba-kit", { returned: 5 })]);
+  });
+
+  it("caps a partly dispatched slice at the units it sent", () => {
+    // 1 of the 4 booked loose units left: the other 3 are still on the shelf.
+    expect(
+      spreadUntaggedCheckin({
+        slices: [{ ...loose, checkedOutQuantity: 1 }, kit],
+        priorLogs: [],
+        returned: 3,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 1 }),
+      share("ba-kit", { returned: 2 }),
+    ]);
+  });
+
+  it("takes the whole booked quantity of a dispatched slice with no counter", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [{ ...loose, checkedOutQuantity: 0 }, kit],
+        priorLogs: [],
+        returned: 5,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 4 }),
+      share("ba-kit", { returned: 1 }),
+    ]);
+  });
+
+  it("lets a slice that went out twice take both trips", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [{ ...loose, checkedOutQuantity: 8 }, kit],
+        priorLogs: [{ bookingAssetId: "ba-loose", quantity: 4 }],
+        returned: 4,
+      })
+    ).toEqual([share("ba-loose", { returned: 4 })]);
+  });
+
+  it("counts earlier logs before filling, and fills the categories in log order", () => {
+    // 3 already back on the loose slice leaves it 1; returned fills first.
+    expect(
+      spreadUntaggedCheckin({
+        slices: [loose, kit],
+        priorLogs: [{ bookingAssetId: "ba-loose", quantity: 3 }],
+        returned: 2,
+        consumed: 1,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 1 }),
+      share("ba-kit", { returned: 1, consumed: 1 }),
+    ]);
+  });
+
+  it("leaves units beyond every slice's room untagged", () => {
+    expect(
+      spreadUntaggedCheckin({
+        slices: [loose, kit],
+        priorLogs: [],
+        returned: 12,
+      })
+    ).toEqual([
+      share("ba-loose", { returned: 4 }),
+      share("ba-kit", { returned: 6 }),
+      share(null, { returned: 2 }),
+    ]);
   });
 });

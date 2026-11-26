@@ -231,7 +231,9 @@ import {
   checkinStockEvents,
   parseSourceLocationsFromFormData,
   sliceForDisposition,
-  untaggedCheckinPlacementSources,
+  spreadUntaggedCheckin,
+  placementSourcesForShares,
+  type UntaggedCheckinShare,
 } from "./checkout-source-location";
 import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
 import {
@@ -5867,7 +5869,8 @@ export type BookingCheckinRemaining = {
  * re-querying after every disposition, because the session's own logs are
  * the only ones written while it holds the locks, and each disposition writes
  * exactly the units it claims (a RETURN log plus the CONSUME / LOSS / DAMAGE
- * ledger rows), tagged with its slice when it names one.
+ * ledger rows). Each is tagged with a slice: the one the disposition names,
+ * or the one the writer assigns when it names none.
  *
  * - Asset level: `Σ(BookingAsset.quantity) − Σ(every check-in log of the
  *   asset)`, legacy untagged logs included.
@@ -8540,6 +8543,16 @@ export async function partialCheckinBooking({
         bareCheckinAssetIds.add(assetId);
       }
     }
+    /**
+     * Entries that name their slice go first. An entry that names none is
+     * spread over whatever room the asset's slices have left, read from the
+     * logs written so far, so it must run after the named entries of the same
+     * asset have written theirs. The sort is stable: entries keep their
+     * submitted order otherwise.
+     */
+    dispositions.sort(
+      (a, b) => Number(!a.bookingAssetId) - Number(!b.bookingAssetId)
+    );
 
     if (dispositions.length === 0) {
       throw new ShelfError({
@@ -9045,6 +9058,35 @@ export async function partialCheckinBooking({
       );
 
       /**
+       * The booking's slices as they stand under the locks. The booking was
+       * loaded before the transaction, and a check-out of the same booking
+       * that commits in between changes what a slice sent, where it left from
+       * and whether it is still out. Everything below that sizes, places or
+       * settles a slice reads these rows.
+       */
+      const dispatchBySliceId = new Map(
+        (qtyAssetIdsInSession.length > 0
+          ? await tx.bookingAsset.findMany({
+              where: { bookingId: id, assetId: { in: qtyAssetIdsInSession } },
+              select: {
+                id: true,
+                quantity: true,
+                checkedOutAt: true,
+                checkedOutQuantity: true,
+                checkedInAt: true,
+                sourceLocationId: true,
+                sourceKitId: true,
+              },
+            })
+          : []
+        ).map((row) => [row.id, row])
+      );
+      const lockedSlices = bookingFound.bookingAssets.map((slice) => ({
+        ...slice,
+        ...dispatchBySliceId.get(slice.id),
+      }));
+
+      /**
        * Units still to check in, read once under the locks. The asset's
        * figure is counted down as each disposition claims units (see
        * `computeBookingCheckinRemaining` for why that matches a fresh read).
@@ -9151,6 +9193,47 @@ export async function partialCheckinBooking({
           cap = Math.min(cap, sliceRemaining);
         }
 
+        /**
+         * Units of the asset that left and are not accounted for yet. Only
+         * these can come back or have been used up: consuming units that
+         * never left the shelf would destroy stock (and on a kit slice leave
+         * the kit holding units the stock no longer has), and returning them
+         * would log a return for units that never went out. Mirrors the
+         * auto-default in `checkinBooking`.
+         *
+         * Every entry is held to this figure for the asset. One that names
+         * its slice is also held to what that slice still has out
+         * (`sliceStillOut`), so it cannot claim a sibling's units either.
+         */
+        const slicesOfAsset = lockedSlices.filter(
+          (slice) => slice.assetId === disp.assetId
+        );
+        const unitsStillOut = Math.max(
+          0,
+          slicesOfAsset.reduce(
+            (sum, slice) => sum + resolveSentUnits(slice),
+            0
+          ) -
+            (slicesOfAsset.reduce((sum, slice) => sum + slice.quantity, 0) -
+              remaining)
+        );
+
+        /**
+         * What the named slice still has out: the units it sent minus the
+         * logs tagged with it. `null` for an entry that names no slice.
+         */
+        const namedSlice = disp.bookingAssetId
+          ? slicesOfAsset.find((slice) => slice.id === disp.bookingAssetId)
+          : undefined;
+        const sliceStillOut = namedSlice
+          ? Math.max(
+              0,
+              resolveSentUnits(namedSlice) -
+                (namedSlice.quantity -
+                  (checkinRemaining.bySlice.get(namedSlice.id) ?? 0))
+            )
+          : null;
+
         // Bare scan of a QUANTITY_TRACKED asset (no explicit disposition):
         // default to the units still out: return them for a returnable
         // (TWO_WAY) asset, consume them for a consumable (ONE_WAY) one. Mirrors
@@ -9173,24 +9256,6 @@ export async function partialCheckinBooking({
               shouldBeCaptured: false,
             });
           }
-          /**
-           * Units of the asset that left and are not accounted for yet. Only
-           * these can come back or have been used up: consuming units that
-           * never left the shelf would destroy stock (and on a kit slice leave
-           * the kit holding units the stock no longer has), and returning them
-           * would log a return for units that never went out. Mirrors the
-           * auto-default in `checkinBooking`.
-           */
-          const slices = bookingFound.bookingAssets.filter(
-            (slice) => slice.assetId === disp.assetId
-          );
-          const sentOut = slices.reduce(
-            (sum, slice) => sum + resolveSentUnits(slice),
-            0
-          );
-          const logged =
-            slices.reduce((sum, slice) => sum + slice.quantity, 0) - remaining;
-          const unitsStillOut = Math.max(0, sentOut - logged);
           if (unitsStillOut === 0) {
             throw new ShelfError({
               cause: null,
@@ -9215,6 +9280,19 @@ export async function partialCheckinBooking({
             status: 400,
             label,
             message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${cap} remaining on this booking.`,
+            shouldBeCaptured: false,
+          });
+        }
+        const stillOut = Math.min(
+          unitsStillOut,
+          sliceStillOut ?? unitsStillOut
+        );
+        if (claimed > stillOut) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label,
+            message: `Cannot check in ${claimed} units for "${lockedAsset.title}". Only ${stillOut} are out on this booking.`,
             shouldBeCaptured: false,
           });
         }
@@ -9250,25 +9328,45 @@ export async function partialCheckinBooking({
           }
         }
 
-        // One ConsumptionLog per non-zero category, all scoped to this booking.
-        // `bookingAssetId` carries per-row attribution when the caller knows
-        // the slice (drawer post-Polish-6); legacy callers leave it null and
-        // the loader's greedy-fill handles them on read.
-        const dispBookingAssetId = disp.bookingAssetId ?? null;
         /**
          * The slice these units belong to, for the location they left from.
-         * A disposition that names no slice (an older phone app) resolves
-         * only when the asset has a single slice on this booking.
+         * A disposition that names no slice (an older phone app, or a
+         * check-in that sends only asset ids) resolves when the asset has a
+         * single slice on this booking.
          */
-        const sourceSlice = sliceForDisposition(bookingFound.bookingAssets, {
+        const sourceSlice = sliceForDisposition(lockedSlices, {
           assetId: disp.assetId,
           bookingAssetId: disp.bookingAssetId,
         });
         /**
-         * Where used-up, lost and damaged units come off. With no single
-         * slice (untagged, several slices) the units are spread over the
-         * slices the way the readers will attribute the logs written below,
-         * so read the asset's earlier logs first, under the asset lock.
+         * The disposition as the logs record it: one share per slice, each
+         * tagged with its `bookingAssetId` where a slice can be found for it,
+         * so no reader has to guess later which slice the units came back to.
+         * Units beyond every slice's room have no slice to name and stay
+         * untagged.
+         *
+         * A disposition that names its slice, or whose asset has one slice
+         * here, is a single share. One that names none on an asset with
+         * several slices is split by {@link spreadUntaggedCheckin}, in the
+         * order every reader uses, against the asset's earlier logs.
+         */
+        let shares: Array<
+          UntaggedCheckinShare & {
+            slice: (typeof bookingFound.bookingAssets)[number] | null;
+          }
+        > = [
+          {
+            slice: sourceSlice,
+            bookingAssetId: disp.bookingAssetId ?? sourceSlice?.id ?? null,
+            returned: disp.returned ?? 0,
+            consumed: disp.consumed ?? 0,
+            lost: disp.lost ?? 0,
+            damaged: disp.damaged ?? 0,
+          },
+        ];
+        /**
+         * Where used-up, lost and damaged units come off: the manual source
+         * of each share's slice.
          */
         let placementSources = checkinPlacementSources({
           slice: sourceSlice,
@@ -9276,49 +9374,65 @@ export async function partialCheckinBooking({
           lost: disp.lost,
           damaged: disp.damaged,
         });
-        if (!sourceSlice && !disp.bookingAssetId && poolDecrement > 0) {
-          const priorLogs = await tx.consumptionLog.findMany({
-            where: {
-              bookingId: id,
-              assetId: disp.assetId,
-              category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
-            },
-            select: { bookingAssetId: true, quantity: true },
-          });
-          placementSources = untaggedCheckinPlacementSources({
-            slices: bookingFound.bookingAssets.filter(
-              (ba) => ba.assetId === disp.assetId
-            ),
+        if (!sourceSlice && !disp.bookingAssetId) {
+          const assetSlices = lockedSlices.filter(
+            (ba) => ba.assetId === disp.assetId
+          );
+          // Everything logged for the asset so far: what was there before
+          // this session (read once under the locks) and what this session's
+          // earlier entries wrote. An asset with several slices always holds
+          // a kit slice, so both are kept for it.
+          const priorLogs = [
+            ...(priorLogsByAssetId.get(disp.assetId) ?? []),
+            ...(sessionLogsByAssetId.get(disp.assetId) ?? []),
+          ];
+          shares = spreadUntaggedCheckin({
+            slices: assetSlices,
             priorLogs,
             returned: disp.returned,
             consumed: disp.consumed,
             lost: disp.lost,
             damaged: disp.damaged,
+          }).map((share) => ({
+            ...share,
+            slice:
+              assetSlices.find((slice) => slice.id === share.bookingAssetId) ??
+              null,
+          }));
+          placementSources = placementSourcesForShares({
+            slices: assetSlices,
+            shares,
           });
         }
-        if ((disp.returned ?? 0) > 0) {
+
+        // One RETURN log per share. CONSUME / LOSS / DAMAGE are written with
+        // the stock ledger below.
+        for (const share of shares) {
+          if (share.returned <= 0) continue;
           await createConsumptionLog({
             assetId: disp.assetId,
             category: "RETURN",
-            quantity: disp.returned!,
+            quantity: share.returned,
             userId,
             bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
+            bookingAssetId: share.bookingAssetId,
+            locationId: share.slice?.sourceLocationId ?? null,
             tx,
           });
         }
 
         if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
           const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
-          for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
-            const quantity = disp[CATEGORY_FIELD[category]] ?? 0;
-            if (quantity > 0) {
-              sessionLogs.push({
-                bookingAssetId: dispBookingAssetId,
-                category,
-                quantity,
-              });
+          for (const share of shares) {
+            for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
+              const quantity = share[CATEGORY_FIELD[category]] ?? 0;
+              if (quantity > 0) {
+                sessionLogs.push({
+                  bookingAssetId: share.bookingAssetId,
+                  category,
+                  quantity,
+                });
+              }
             }
           }
           sessionLogsByAssetId.set(disp.assetId, sessionLogs);
@@ -9372,9 +9486,9 @@ export async function partialCheckinBooking({
           });
 
           /**
-           * Written per disposition, not once after the loop: a later
-           * untagged disposition of this asset spreads its units over the
-           * booking's logs it reads above (`priorLogs`), so it must see these.
+           * Written per disposition, with the stock read before it
+           * (`stockBefore`), so each change is recorded against the stock it
+           * started from.
            */
           await recordStockChanges(tx, {
             organizationId,
@@ -9383,12 +9497,14 @@ export async function partialCheckinBooking({
               {
                 assetId: disp.assetId,
                 before: stockBefore,
-                events: checkinStockEvents({
-                  slice: sourceSlice,
-                  disposition: disp,
-                  bookingId: id,
-                  bookingAssetId: dispBookingAssetId,
-                }),
+                events: shares.flatMap((share) =>
+                  checkinStockEvents({
+                    slice: share.slice,
+                    disposition: share,
+                    bookingId: id,
+                    bookingAssetId: share.bookingAssetId,
+                  })
+                ),
               },
             ],
           });
@@ -9397,8 +9513,9 @@ export async function partialCheckinBooking({
         const pendingAfter = remaining - claimed;
         // Count the claim off what is left for the asset: this disposition
         // just wrote logs for exactly these units. A slice's remaining needs
-        // no count-down, because a session names each slice at most once
-        // (repeated asset and slice pairs collapse above).
+        // no count-down: a session names each slice at most once (repeated
+        // asset and slice pairs collapse above), and an entry that names no
+        // slice runs after the named ones and sizes its shares from the logs.
         checkinRemaining.byAsset.set(disp.assetId, pendingAfter);
         if (pendingAfter === 0) {
           fullyReconciledQtyAssetIds.push(disp.assetId);
@@ -9539,7 +9656,7 @@ export async function partialCheckinBooking({
         string,
         (typeof bookingFound.bookingAssets)[number][]
       >();
-      for (const slice of bookingFound.bookingAssets) {
+      for (const slice of lockedSlices) {
         const bucket = bookingSlicesByAssetId.get(slice.assetId);
         if (bucket) {
           bucket.push(slice);
@@ -9749,17 +9866,19 @@ export async function partialCheckinBooking({
       }
 
       /**
-       * Slices this request never saw.
+       * Slices still out as the transaction sees them.
        *
-       * The booking was loaded before the transaction opened — several
-       * round-trips earlier — so a progressive checkout that committed in
-       * between is invisible to it, and releasing a kit whose gear left in that
-       * window is the failure this gate exists to prevent.
+       * The booking was loaded before the transaction opened, several
+       * round-trips earlier, so a check-out that committed in between is
+       * invisible to it: a slice it never saw, or one it calls returned that
+       * has gone out again. Releasing a kit whose gear left in that window is
+       * the failure this gate exists to prevent.
        *
        * Read as a VETO only: it runs when a kit is already a candidate, and
-       * only slices absent from the snapshot contribute. It can hold a kit
-       * back; it can never release one. So a read that comes back short leaves
-       * the decision exactly where the snapshot put it.
+       * every slice it finds can only hold a kit back, never release one. So
+       * a read that comes back short leaves the decision exactly where the
+       * loaded booking put it. Slices settled above are stamped before this
+       * read, so they are not in it.
        */
       if (kitIdsSettledHere.size > 0) {
         const stillOutNow = await tx.bookingAsset.findMany({
@@ -9782,6 +9901,13 @@ export async function partialCheckinBooking({
             },
           },
         });
+        // A slice the loaded booking knows but calls returned: it went out
+        // again since the load. Its kits are already resolved.
+        for (const slice of stillOutNow) {
+          for (const kitId of kitIdsBySliceId.get(slice.id) ?? []) {
+            kitIdsStillOut.add(kitId);
+          }
+        }
         const unseenSlices = stillOutNow.filter(
           (slice) => !sliceById.has(slice.id)
         );
