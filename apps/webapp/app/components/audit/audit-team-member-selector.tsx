@@ -28,10 +28,16 @@ type AuditTeamMemberSelectorProps = {
   error?: string;
   /**
    * Members to pre-select (edit dialog). Carries the user id so the hidden
-   * inputs are complete before the member list has loaded — otherwise a save
+   * inputs are complete before the member list has loaded. Otherwise a save
    * during that window would submit an empty selection and remove everyone.
    */
   defaultSelected?: AuditAssigneeDefault[];
+  /**
+   * Freezes the self toggle while the enclosing form submits. A fetcher form
+   * must pass its own submitting state: the picker itself can only see route
+   * navigation, which a fetcher submit never starts.
+   */
+  disabled?: boolean;
 };
 
 type KnownMember = { userId: string; name: string };
@@ -43,7 +49,7 @@ type KnownMember = { userId: string; name: string };
  * may scan, annotate and complete the audit. Each selection is submitted as
  * its own bracket-indexed hidden input (`assignees[0]`, `assignees[1]`, …)
  * because the server's form parser collapses repeated same-name fields but
- * turns bracket indices into an array — the convention `assetIds[i]` uses.
+ * turns bracket indices into an array, the convention `assetIds[i]` uses.
  *
  * Only shows team members with user accounts (excludes NRMs).
  */
@@ -52,6 +58,7 @@ export default function AuditTeamMemberSelector({
   style,
   error,
   defaultSelected,
+  disabled = false,
 }: AuditTeamMemberSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   // Lazy initializer avoids a false-positive derived-state lint: after mount this
@@ -73,8 +80,10 @@ export default function AuditTeamMemberSelector({
 
   const user = useUserData();
   // The picker lives inside a form; while that form submits, the self toggle
-  // must not change the selection under the request.
-  const isSubmitting = useDisabled();
+  // must not change the selection under the request. `useDisabled()` covers a
+  // route form, the `disabled` prop covers a fetcher form.
+  const isNavigating = useDisabled();
+  const isSubmitting = disabled || isNavigating;
 
   const { isLoading, data } = useApiQuery<{
     teamMembers: AuditTeamMember[];

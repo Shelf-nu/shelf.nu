@@ -193,6 +193,29 @@ describe("AuditTeamMemberSelector", () => {
     expect(screen.getByText("Assign to self")).toBeTruthy();
   });
 
+  it("freezes the self toggle while a fetcher form reports it is submitting", () => {
+    const { container, rerender } = render(
+      <AuditTeamMemberSelector disabled />
+    );
+
+    const selfToggle = screen.getByRole("button", { name: "Assign to self" });
+    expect(selfToggle).toHaveProperty("disabled", true);
+
+    fireEvent.click(selfToggle);
+    expect(hiddenInputs(container)).toEqual([]);
+
+    rerender(<AuditTeamMemberSelector disabled={false} />);
+    const releasedToggle = screen.getByRole("button", {
+      name: "Assign to self",
+    });
+    expect(releasedToggle).toHaveProperty("disabled", false);
+
+    fireEvent.click(releasedToggle);
+    expect(hiddenInputs(container).map((i) => i.value.userId)).toEqual([
+      "user-1",
+    ]);
+  });
+
   it("still submits a selected member when the search filter hides their row", () => {
     const { container } = render(<AuditTeamMemberSelector />);
 

@@ -48,7 +48,7 @@ const StartAuditFromContextFormSchema = z.object({
     ),
   /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
   assignees: z.array(z.string()).optional(),
-  /** Pre-multi-assign singular field; still parsed server-side. */
+  /** Singular field, still accepted from older clients and parsed server-side. */
   assignee: z.string().optional(),
 });
 
@@ -279,7 +279,7 @@ export function StartAuditFromContextDialog({
                   {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets
                   those people perform it, including several at different times.
                 </p>
-                <AuditTeamMemberSelector />
+                <AuditTeamMemberSelector disabled={isSubmitting} />
               </div>
             </div>
 

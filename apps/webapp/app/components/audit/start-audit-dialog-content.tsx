@@ -175,7 +175,10 @@ export function StartAuditDialogContent({
             {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets those
             people perform it, including several at different times.
           </p>
-          <AuditTeamMemberSelector error={assigneeError} />
+          <AuditTeamMemberSelector
+            error={assigneeError}
+            disabled={formDisabled}
+          />
         </div>
       </div>
 
