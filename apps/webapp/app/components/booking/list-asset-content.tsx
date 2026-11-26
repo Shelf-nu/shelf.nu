@@ -95,7 +95,12 @@ export default function ListAssetContent({
    * working — the lookup just returns `undefined` and both the badge
    * condition and the dialog fall back to their pre-existing behavior.
    */
-  const { booking, availableUnitsByAsset, poolSourcesBySlice } = useLoaderData<{
+  const {
+    booking,
+    availableUnitsByAsset,
+    poolSourcesBySlice,
+    sourceLocationsBySlice,
+  } = useLoaderData<{
     booking: BookingWithCustodians;
     availableUnitsByAsset?: Record<
       string,
@@ -108,10 +113,22 @@ export default function ListAssetContent({
      * location. Absent on surfaces that do not ship it.
      */
     poolSourcesBySlice?: Record<string, PoolSourceCell>;
+    /**
+     * Where each checked-out `LEGACY` pool slice's units left from, keyed by
+     * `bookingAssetId`, for the "from <Location>" line under the title.
+     * Absent on surfaces that do not ship it.
+     */
+    sourceLocationsBySlice?: Record<string, { id: string; name: string }>;
   }>();
   const sourceCell = item.bookingAssetId
     ? poolSourcesBySlice?.[item.bookingAssetId] ?? null
     : null;
+  // A row that shows its sources in the Location cell never also gets the
+  // "from <Location>" line.
+  const sourceLocation =
+    !sourceCell && item.bookingAssetId
+      ? sourceLocationsBySlice?.[item.bookingAssetId] ?? null
+      : null;
   const currentOrganization = useCurrentOrganization();
   const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
@@ -412,6 +429,19 @@ export default function ListAssetContent({
                     resolved in the overview loader. */}
                 {item.fulfilsModelName ? (
                   <FulfilsModelBadge modelName={item.fulfilsModelName} />
+                ) : null}
+                {/* Where this pool slice's units left from. Recorded only when
+                    the slice goes out, so its presence alone means it went
+                    out (the row's unit counter is session-derived and reads 0
+                    after a one-click check-out). Resolved in the overview
+                    loader, only for LEGACY slices of pools at two or more
+                    placements. It is also what check-in takes used-up units
+                    off, so a location picked by default is never a silent
+                    guess. */}
+                {sourceLocation ? (
+                  <span className="text-xs text-gray-500">
+                    from {sourceLocation.name}
+                  </span>
                 ) : null}
               </div>
             </div>

@@ -9,7 +9,7 @@
  * - several sources: one wrapping line such as "Demo Warehouse 8 · Unplaced 7",
  *   with a tooltip listing planned and out units per source;
  * - a "Short at {source}" chip for each source that cannot cover its pending
- *   units over the booking window.
+ *   units over the booking window (the warnings of `describeSourceLine`).
  *
  * The display parts come from `describeBookingSources` in
  * `@shelf/quantity-control`, and whether the cell applies comes from
@@ -23,6 +23,7 @@
  */
 
 import {
+  describeSourceLine,
   formatSourceSummary,
   type BookingSourcePart,
 } from "@shelf/quantity-control";
@@ -80,10 +81,10 @@ export function BookingSourceCell({
   rowLocation,
 }: BookingSourceCellProps) {
   const { parts } = cell;
-  // "Needs a location" already says what is wrong, so it gets no extra chip.
-  const shortParts = parts.filter(
-    (part) => part.short && part.kind !== "UNASSIGNED"
-  );
+  // The "Short at" notes come from the shared line the PDF and the companion
+  // print, so all three name a short source the same way. Two locations with
+  // the same name read the same note, so it is shown once.
+  const warnings = [...new Set(describeSourceLine(parts)?.warnings ?? [])];
 
   return (
     <div className="flex flex-col items-start gap-1">
@@ -92,9 +93,9 @@ export function BookingSourceCell({
       ) : (
         <SplitSources parts={parts} />
       )}
-      {shortParts.map((part) => (
-        <span key={part.key} style={WARNING_STYLE} className={WARNING_CLASS}>
-          Short at {part.label}
+      {warnings.map((warning) => (
+        <span key={warning} style={WARNING_STYLE} className={WARNING_CLASS}>
+          {warning}
         </span>
       ))}
     </div>

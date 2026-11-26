@@ -116,6 +116,17 @@ const TIMEOUT_MARGIN = 0.5;
 /** Timeout of one sample's transaction. */
 const SAMPLE_TX_TIMEOUT_MS = 120_000;
 
+/**
+ * Per-hook and per-test time limits. Their sum, 80 minutes, is the
+ * `timeout-minutes` of the benchmark step in
+ * `.github/workflows/test.yml`, and the job allows 20 more for the main
+ * database suite (100 in all). Change one, change the workflow with it.
+ */
+const BUILD_TIMEOUT_MS = 30 * 60_000;
+const CLEANUP_TIMEOUT_MS = 10 * 60_000;
+const TIMINGS_TIMEOUT_MS = 25 * 60_000;
+const PLANS_TIMEOUT_MS = 15 * 60_000;
+
 /** Slices of the big RESERVED booking a partial check-out sends out. */
 const PARTIAL_CHECKOUT_SLICES = 250;
 
@@ -1070,7 +1081,7 @@ describe.skipIf(!RUN_BENCHMARKS)("booking sources benchmark", () => {
         '"BookingAssetSource", "BookingDispositionShare", "ConsumptionLog", ' +
         '"Location", "AssetKit"'
     );
-  }, 1_800_000);
+  }, BUILD_TIMEOUT_MS);
 
   afterAll(async () => {
     const pools = [legacyWorld, sourcesWorld].flatMap((w) =>
@@ -1080,200 +1091,211 @@ describe.skipIf(!RUN_BENCHMARKS)("booking sources benchmark", () => {
     await disconnectTestDb();
     // `getSliceSourceSummaries` and the booking details read use the app client.
     await appDb.$disconnect();
-  }, 600_000);
+  }, CLEANUP_TIMEOUT_MS);
 
-  it("times each operation on LEGACY data with adoption off and on converted data with adoption on", async () => {
-    const results: Result[] = [];
-    for (const op of operations) {
-      results.push(await measure(op));
-    }
-    console.info(
-      `${TAG} ${SAMPLES} samples per arm after one warm-up; times in ms, ` +
-        `deferred triggers included\n${formatTable(results)}`
-    );
-    const failures = results.flatMap((r) => (r.failure ? [r.failure] : []));
-    expect(failures).toEqual([]);
-  }, 1_800_000);
-
-  it("prints EXPLAIN (ANALYZE, BUFFERS) for every statement the operations send, the foreign key lookups and the deletes", async () => {
-    const capturing = createCapturingClient();
-    const distinct = new Map<string, DistinctStatement>();
-    const queryCounts: string[] = [];
-
-    /** Captures one labelled run and folds its statements into `distinct`. */
-    const record = async (
-      label: string,
-      fn: (tx: TxClient) => Promise<void>
-    ) => {
-      const statements = await capturing.capture(fn);
-      queryCounts.push(`${label}: ${statements.length} statements`);
-      for (const statement of statements) {
-        const key = statementKey(statement.sql);
-        const found = distinct.get(key);
-        if (found) found.labels.add(label);
-        else distinct.set(key, { ...statement, labels: new Set([label]) });
-      }
-    };
-
-    try {
+  it(
+    "times each operation on LEGACY data with adoption off and on converted data with adoption on",
+    async () => {
+      const results: Result[] = [];
       for (const op of operations) {
-        if (op.kind !== "write") continue;
-        for (const [armName, arm] of [
-          ["legacy", op.legacy],
-          ["sources", op.sources],
-        ] as const) {
-          const world = arm.world();
-          await record(`${op.name} [${armName}]`, (tx) =>
-            op.body(tx, world, arm.adoptionEnabled)
-          );
-        }
+        results.push(await measure(op));
       }
-
-      const world = sources();
-      const { organizationId } = world;
-      const ongoing = world.bigOngoing;
-      const assetIds = assetIdsOf(ongoing);
-      await record("booking details: summary reads [sources]", (tx) =>
-        summaryReads(tx, world)
-      );
-      await record("facade read: loadGroupStates (500 groups)", async (tx) => {
-        await loadGroupStates(tx, {
-          organizationId,
-          groups: assetIds.map((assetId) => ({
-            bookingId: ongoing.bookingId,
-            assetId,
-          })),
-        });
-      });
-      await record(
-        "facade read: computeFreeBySourceForPools (500 pools)",
-        async (tx) => {
-          await computeFreeBySourceForPools(tx, {
-            organizationId,
-            assetIds,
-            window: ongoing.window,
-            excludeBookingId: ongoing.bookingId,
-          });
-        }
-      );
-      await record("facade read: loadPhysicalNow (500 pools)", async (tx) => {
-        await loadPhysicalNow(tx, { organizationId, assetIds });
-      });
-      await record("kit detach probe (adoption off)", async (tx) => {
-        await lockKitDetachPools(tx, {
-          organizationId,
-          assetKitIds: [world.assetKitId],
-          adoptionEnabled: false,
-        });
-      });
-
       console.info(
-        `${TAG} statements per run:\n${queryCounts.join("\n")}\n` +
-          `${TAG} ${distinct.size} distinct statements`
+        `${TAG} ${SAMPLES} samples per arm after one warm-up; times in ms, ` +
+          `deferred triggers included\n${formatTable(results)}`
       );
+      const failures = results.flatMap((r) => (r.failure ? [r.failure] : []));
+      expect(failures).toEqual([]);
+    },
+    TIMINGS_TIMEOUT_MS
+  );
 
-      const seqScans: string[] = [];
-      await inRollback(async (tx) => {
-        let n = 0;
-        for (const statement of distinct.values()) {
-          n += 1;
-          if (n > MAX_EXPLAINED) {
-            console.info(
-              `${TAG} stopped after ${MAX_EXPLAINED} statements; ` +
-                `${distinct.size - MAX_EXPLAINED} not explained`
+  it(
+    "prints EXPLAIN (ANALYZE, BUFFERS) for every statement the operations send, the foreign key lookups and the deletes",
+    async () => {
+      const capturing = createCapturingClient();
+      const distinct = new Map<string, DistinctStatement>();
+      const queryCounts: string[] = [];
+
+      /** Captures one labelled run and folds its statements into `distinct`. */
+      const record = async (
+        label: string,
+        fn: (tx: TxClient) => Promise<void>
+      ) => {
+        const statements = await capturing.capture(fn);
+        queryCounts.push(`${label}: ${statements.length} statements`);
+        for (const statement of statements) {
+          const key = statementKey(statement.sql);
+          const found = distinct.get(key);
+          if (found) found.labels.add(label);
+          else distinct.set(key, { ...statement, labels: new Set([label]) });
+        }
+      };
+
+      try {
+        for (const op of operations) {
+          if (op.kind !== "write") continue;
+          for (const [armName, arm] of [
+            ["legacy", op.legacy],
+            ["sources", op.sources],
+          ] as const) {
+            const world = arm.world();
+            await record(`${op.name} [${armName}]`, (tx) =>
+              op.body(tx, world, arm.adoptionEnabled)
             );
-            break;
           }
-          const sql = inlineParams(statement);
-          const plan = sql
-            ? await explainSql(tx, sql)
-            : `plan unavailable: parameters not readable (${statement.params.slice(
-                0,
-                200
-              )})`;
-          if (
-            /Seq Scan on "?(BookingAssetSource|BookingDispositionShare|BookingAsset)"?\b/.test(
-              plan
-            )
-          ) {
-            seqScans.push(`#${n}`);
-          }
-          printPlan(
-            `statement #${n} (from: ${[...statement.labels].join(" | ")})`,
-            `${statement.sql}\nparams: ${statement.params.slice(
-              0,
-              500
-            )}\n${plan}`
-          );
         }
 
-        for (const fk of FOREIGN_KEYS) {
-          const hot = await tx.$queryRawUnsafe<Array<{ value: string }>>(
-            `SELECT "${fk.column}" AS "value" FROM "${fk.table}"
+        const world = sources();
+        const { organizationId } = world;
+        const ongoing = world.bigOngoing;
+        const assetIds = assetIdsOf(ongoing);
+        await record("booking details: summary reads [sources]", (tx) =>
+          summaryReads(tx, world)
+        );
+        await record(
+          "facade read: loadGroupStates (500 groups)",
+          async (tx) => {
+            await loadGroupStates(tx, {
+              organizationId,
+              groups: assetIds.map((assetId) => ({
+                bookingId: ongoing.bookingId,
+                assetId,
+              })),
+            });
+          }
+        );
+        await record(
+          "facade read: computeFreeBySourceForPools (500 pools)",
+          async (tx) => {
+            await computeFreeBySourceForPools(tx, {
+              organizationId,
+              assetIds,
+              window: ongoing.window,
+              excludeBookingId: ongoing.bookingId,
+            });
+          }
+        );
+        await record("facade read: loadPhysicalNow (500 pools)", async (tx) => {
+          await loadPhysicalNow(tx, { organizationId, assetIds });
+        });
+        await record("kit detach probe (adoption off)", async (tx) => {
+          await lockKitDetachPools(tx, {
+            organizationId,
+            assetKitIds: [world.assetKitId],
+            adoptionEnabled: false,
+          });
+        });
+
+        console.info(
+          `${TAG} statements per run:\n${queryCounts.join("\n")}\n` +
+            `${TAG} ${distinct.size} distinct statements`
+        );
+
+        const seqScans: string[] = [];
+        await inRollback(async (tx) => {
+          let n = 0;
+          for (const statement of distinct.values()) {
+            n += 1;
+            if (n > MAX_EXPLAINED) {
+              console.info(
+                `${TAG} stopped after ${MAX_EXPLAINED} statements; ` +
+                  `${distinct.size - MAX_EXPLAINED} not explained`
+              );
+              break;
+            }
+            const sql = inlineParams(statement);
+            const plan = sql
+              ? await explainSql(tx, sql)
+              : `plan unavailable: parameters not readable (${statement.params.slice(
+                  0,
+                  200
+                )})`;
+            if (
+              /Seq Scan on "?(BookingAssetSource|BookingDispositionShare|BookingAsset)"?\b/.test(
+                plan
+              )
+            ) {
+              seqScans.push(`#${n}`);
+            }
+            printPlan(
+              `statement #${n} (from: ${[...statement.labels].join(" | ")})`,
+              `${statement.sql}\nparams: ${statement.params.slice(
+                0,
+                500
+              )}\n${plan}`
+            );
+          }
+
+          for (const fk of FOREIGN_KEYS) {
+            const hot = await tx.$queryRawUnsafe<Array<{ value: string }>>(
+              `SELECT "${fk.column}" AS "value" FROM "${fk.table}"
              WHERE "organizationId" = $1 AND "${fk.column}" IS NOT NULL
              GROUP BY 1 ORDER BY count(*) DESC LIMIT 1`,
-            organizationId
-          );
-          const value = hot[0]?.value;
-          if (!value) {
-            printPlan(`FK ${fk.table}.${fk.column}`, "no rows to look up");
-            continue;
+              organizationId
+            );
+            const value = hot[0]?.value;
+            if (!value) {
+              printPlan(`FK ${fk.table}.${fk.column}`, "no rows to look up");
+              continue;
+            }
+            const lookup =
+              `SELECT 1 FROM ONLY "public"."${fk.table}" x ` +
+              `WHERE $1::text OPERATOR(pg_catalog.=) x."${fk.column}" FOR KEY SHARE OF x`;
+            printPlan(
+              `FK lookup ${fk.table}.${fk.column} (ON DELETE ${fk.onDelete}), busiest value`,
+              `${lookup}\n${await explainSql(tx, lookup, [value])}`
+            );
           }
-          const lookup =
-            `SELECT 1 FROM ONLY "public"."${fk.table}" x ` +
-            `WHERE $1::text OPERATOR(pg_catalog.=) x."${fk.column}" FOR KEY SHARE OF x`;
-          printPlan(
-            `FK lookup ${fk.table}.${fk.column} (ON DELETE ${fk.onDelete}), busiest value`,
-            `${lookup}\n${await explainSql(tx, lookup, [value])}`
-          );
-        }
 
-        const historyIds = world.historyBookings.map((b) => b.bookingId);
-        printPlan(
-          `bulk booking delete (${historyIds.length} history bookings), cascades included`,
-          await explainSql(
-            tx,
-            `DELETE FROM "Booking" WHERE "id" = ANY($1::text[]) AND "organizationId" = $2`,
-            [historyIds, organizationId]
-          )
-        );
-        printPlan(
-          "asset delete (busiest pool asset), cascades included",
-          await explainSql(
-            tx,
-            `DELETE FROM "Asset" WHERE "id" = $1 AND "organizationId" = $2`,
-            [world.pool.assetId, organizationId]
-          )
-        );
-        const deleted = world.locationIds.slice(0, DELETED_LOCATIONS);
-        await tx.$executeRawUnsafe("SAVEPOINT bench_evacuate");
-        try {
-          await evacuateLocationsForDelete(tx, {
-            organizationId,
-            locationIds: deleted,
-          });
+          const historyIds = world.historyBookings.map((b) => b.bookingId);
           printPlan(
-            `location delete (${deleted.length} locations, after evacuation), cascades included`,
+            `bulk booking delete (${historyIds.length} history bookings), cascades included`,
             await explainSql(
               tx,
-              `DELETE FROM "Location" WHERE "id" = ANY($1::text[]) AND "organizationId" = $2`,
-              [deleted, organizationId]
+              `DELETE FROM "Booking" WHERE "id" = ANY($1::text[]) AND "organizationId" = $2`,
+              [historyIds, organizationId]
             )
           );
-        } finally {
-          await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT bench_evacuate");
-        }
-      });
+          printPlan(
+            "asset delete (busiest pool asset), cascades included",
+            await explainSql(
+              tx,
+              `DELETE FROM "Asset" WHERE "id" = $1 AND "organizationId" = $2`,
+              [world.pool.assetId, organizationId]
+            )
+          );
+          const deleted = world.locationIds.slice(0, DELETED_LOCATIONS);
+          await tx.$executeRawUnsafe("SAVEPOINT bench_evacuate");
+          try {
+            await evacuateLocationsForDelete(tx, {
+              organizationId,
+              locationIds: deleted,
+            });
+            printPlan(
+              `location delete (${deleted.length} locations, after evacuation), cascades included`,
+              await explainSql(
+                tx,
+                `DELETE FROM "Location" WHERE "id" = ANY($1::text[]) AND "organizationId" = $2`,
+                [deleted, organizationId]
+              )
+            );
+          } finally {
+            await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT bench_evacuate");
+          }
+        });
 
-      console.info(
-        `${TAG} plans with a Seq Scan on BookingAsset, BookingAssetSource or ` +
-          `BookingDispositionShare: ${
-            seqScans.length > 0 ? seqScans.join(", ") : "none"
-          }`
-      );
-      expect(distinct.size).toBeGreaterThan(0);
-    } finally {
-      await capturing.client.$disconnect();
-    }
-  }, 1_800_000);
+        console.info(
+          `${TAG} plans with a Seq Scan on BookingAsset, BookingAssetSource or ` +
+            `BookingDispositionShare: ${
+              seqScans.length > 0 ? seqScans.join(", ") : "none"
+            }`
+        );
+        expect(distinct.size).toBeGreaterThan(0);
+      } finally {
+        await capturing.client.$disconnect();
+      }
+    },
+    PLANS_TIMEOUT_MS
+  );
 });

@@ -119,6 +119,10 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import {
+  legacySourceLocationsBySlice,
+  loadLegacySourceLocations,
+} from "~/utils/booking-legacy-source-line.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -444,6 +448,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       modelShortfalls,
       nextReservations,
       sliceSourceSummaries,
+      legacySourceLocationsById,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -664,6 +669,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       hasSourcedPoolSlice
         ? getSliceSourceSummaries({ organizationId, bookingId })
         : new Map<string, SliceSourceSummary>(),
+
+      /**
+       * Names of the locations checked-out `LEGACY` pool slices left from,
+       * for their "from <Location>" line. Sends no query when the booking
+       * has no such slice.
+       */
+      loadLegacySourceLocations({
+        organizationId,
+        bookingAssets: booking.bookingAssets,
+      }),
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -729,6 +744,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         if (cell) poolSourcesBySlice[ba.id] = cell;
       }
     }
+
+    /**
+     * The "from <Location>" line per checked-out `LEGACY` pool slice of a
+     * pool at two or more manual placements, keyed by `bookingAssetId`. A
+     * slice whose Location cell shows its sources never gets it.
+     */
+    const sourceLocationsBySlice = legacySourceLocationsBySlice({
+      bookingAssets: booking.bookingAssets,
+      sourceLocationsById: legacySourceLocationsById,
+      manualPlacementCount: (assetId) =>
+        assetDetailsMap
+          .get(assetId)
+          ?.assetLocations.filter((al) => al.assetKitId === null).length ?? 0,
+      hasSourceCell: (bookingAssetId) => bookingAssetId in poolSourcesBySlice,
+    });
 
     const enrichedAssetsForView = booking.bookingAssets.map((ba) => {
       const detail = assetDetailsMap.get(ba.assetId);
@@ -1370,6 +1400,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * serialised, empty `{}` when no slice shows its sources.
          */
         poolSourcesBySlice,
+        /**
+         * Where each checked-out `LEGACY` pool slice's units left from,
+         * keyed by `bookingAssetId`; read by `list-asset-content.tsx` for the
+         * "from <Location>" line. Always serialised, empty `{}` when no slice
+         * shows it.
+         */
+        sourceLocationsBySlice,
         partialCheckoutDetails,
         // Pivot-projected, view-ready raw assets + raw kits + shaping inputs
         // so clientLoader can re-shape without a server round-trip on

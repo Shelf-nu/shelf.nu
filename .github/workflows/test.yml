@@ -210,7 +210,8 @@ jobs:
   db-tests:
     name: 🗄️ Database tests
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ (inputs.run_benchmarks || contains(github.event.pull_request.labels.*.name, 'run-benchmarks')) && 75 || 20 }}
+    # 20 minutes for the main suite, plus the benchmark step's 80 when it runs.
+    timeout-minutes: ${{ (inputs.run_benchmarks || contains(github.event.pull_request.labels.*.name, 'run-benchmarks')) && 100 || 20 }}
     services:
       postgres:
         image: postgres:15.8
@@ -261,6 +262,9 @@ jobs:
       # which runs without RUN_BENCHMARKS.
       - name: ⏱️ Run booking sources benchmark
         if: ${{ inputs.run_benchmarks || contains(github.event.pull_request.labels.*.name, 'run-benchmarks') }}
+        # The sum of the benchmark's hook and test timeouts (BUILD_TIMEOUT_MS
+        # and its siblings in the test file). Change them together.
+        timeout-minutes: 80
         env:
           RUN_BENCHMARKS: "1"
         run: >-

@@ -90,6 +90,7 @@ import {
   adjustSheetSources,
   describeSourcesForA11y,
   sliceSourceLine,
+  sourceLineText,
   standaloneSlice,
 } from "@/lib/booking-sources";
 import {
@@ -2810,7 +2811,7 @@ function BookingDetailScreen({ id }: { id: string }) {
           info={
             qtyEdit.sources.line
               ? [
-                  `From ${qtyEdit.sources.line.text}`,
+                  sourceLineText(qtyEdit.sources.line),
                   ...qtyEdit.sources.line.warnings,
                 ]
               : undefined
@@ -3545,7 +3546,8 @@ const useStyles = createStyles((colors, shadows) => ({
  * quantity: its planned sources ("From Demo Warehouse 8 · Unplaced 7", with a
  * "Short at" line per short source) when the slice is planned by source,
  * else the location its units left from at check-out. Nothing for a slice
- * with neither.
+ * with neither. A plan with no place to leave from ("Needs a location",
+ * "Unknown") prints its label alone, in the warning style.
  *
  * @param props.slice - The row's only slice
  */
@@ -3555,8 +3557,11 @@ function SliceSourceLines({ slice }: { slice: BookingAssetSlice }) {
   if (line) {
     return (
       <>
-        <Text style={styles.assetKit} numberOfLines={2}>
-          From {line.text}
+        <Text
+          style={line.placed ? styles.assetKit : styles.sourceWarning}
+          numberOfLines={2}
+        >
+          {sourceLineText(line)}
         </Text>
         {line.warnings.map((warning) => (
           <Text key={warning} style={styles.sourceWarning}>

@@ -1065,6 +1065,83 @@ describe("ListAssetContent", () => {
       expect(screen.queryByText(/ · /)).not.toBeInTheDocument();
     });
 
+    it("says which location a checked-out LEGACY pool slice left from, even when its unit counter reads 0", () => {
+      mockUseLoaderData.mockReturnValue({
+        ...finishedBooking,
+        poolSourcesBySlice: {},
+        sourceLocationsBySlice: {
+          "ba-1": { id: "loc-studio", name: "Studio" },
+        },
+      });
+
+      renderRow({
+        ...baseAsset,
+        bookingAssetId: "ba-1",
+        // A one-click check-out writes no scan session, so the row's
+        // session-derived counter stays 0; the recorded source still shows.
+        checkedOutQuantity: 0,
+      } as unknown as AssetWithBooking);
+
+      expect(screen.getByText("from Studio")).toBeInTheDocument();
+    });
+
+    it("keeps only the sources cell for a slice planned by source", () => {
+      mockUseLoaderData.mockReturnValue({
+        ...finishedBooking,
+        poolSourcesBySlice: {
+          "ba-1": {
+            parts: [
+              {
+                key: "LOCATION:loc-a",
+                kind: "LOCATION",
+                locationId: "loc-a",
+                label: "Demo Warehouse",
+                planned: 8,
+                out: 8,
+                short: false,
+              },
+              {
+                key: "UNPLACED",
+                kind: "UNPLACED",
+                locationId: null,
+                label: "Unplaced",
+                planned: 7,
+                out: 0,
+                short: false,
+              },
+            ],
+          },
+        },
+        sourceLocationsBySlice: {
+          "ba-1": { id: "loc-studio", name: "Studio" },
+        },
+      });
+
+      renderRow({
+        ...baseAsset,
+        bookingAssetId: "ba-1",
+      } as unknown as AssetWithBooking);
+
+      expect(
+        screen.getByText("Demo Warehouse 8 · Unplaced 7")
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
+    });
+
+    it("says nothing about a source the loader did not resolve", () => {
+      mockUseLoaderData.mockReturnValue({
+        ...finishedBooking,
+        sourceLocationsBySlice: {},
+      });
+
+      renderRow({
+        ...baseAsset,
+        bookingAssetId: "ba-1",
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
+    });
+
     it("does NOT label a row that answered no reservation", () => {
       mockUseLoaderData.mockReturnValue(finishedBooking);
 

@@ -17,6 +17,7 @@ import {
   adjustSheetSources,
   describeSourcesForA11y,
   sliceSourceLine,
+  sourceLineText,
   standaloneSlice,
 } from "./booking-sources";
 
@@ -58,11 +59,11 @@ test("a split reads as the summary, one source by its name", () => {
         sources: [part("Demo Warehouse", 8), part("Unplaced", 7, "UNPLACED")],
       })
     ),
-    { text: "Demo Warehouse 8 · Unplaced 7", warnings: [] }
+    { text: "Demo Warehouse 8 · Unplaced 7", warnings: [], placed: true }
   );
   assert.deepEqual(
     sliceSourceLine(slice({ sources: [part("Demo Warehouse", 15)] })),
-    { text: "Demo Warehouse", warnings: [] }
+    { text: "Demo Warehouse", warnings: [], placed: true }
   );
 });
 
@@ -99,7 +100,11 @@ test("the sheet offers Auto only for a split set by hand", () => {
   assert.deepEqual(
     adjustSheetSources(slice({ sources, sourceAllocation: "MANUAL" })),
     {
-      line: { text: "Demo Warehouse 8 · Unplaced 7", warnings: [] },
+      line: {
+        text: "Demo Warehouse 8 · Unplaced 7",
+        warnings: [],
+        placed: true,
+      },
       canUseAuto: true,
     }
   );
@@ -175,5 +180,62 @@ test("a slice without planned sources is described by where its units left from"
       slices: [slice({ sourceLocation: { id: "cam", name: "Camera Room" } })],
     }),
     ""
+  );
+});
+
+test("a line with a place reads From; a lone Needs a location or Unknown reads as its label", () => {
+  const placed = sliceSourceLine(
+    slice({
+      sources: [
+        part("Demo Warehouse", 8),
+        part("Needs a location", 7, "UNASSIGNED", true),
+      ],
+    })
+  );
+  assert.ok(placed);
+  assert.equal(
+    sourceLineText(placed),
+    "From Demo Warehouse 8 · Needs a location 7"
+  );
+
+  const unassigned = sliceSourceLine(
+    slice({ sources: [part("Needs a location", 15, "UNASSIGNED", true)] })
+  );
+  assert.deepEqual(unassigned, {
+    text: "Needs a location",
+    warnings: [],
+    placed: false,
+  });
+  assert.equal(sourceLineText(unassigned), "Needs a location");
+
+  const unknown = sliceSourceLine(
+    slice({ sources: [part("Unknown", 15, "UNKNOWN")] })
+  );
+  assert.deepEqual(unknown, { text: "Unknown", warnings: [], placed: false });
+  assert.equal(sourceLineText(unknown), "Unknown");
+
+  const unplaced = sliceSourceLine(
+    slice({ sources: [part("Unplaced", 15, "UNPLACED")] })
+  );
+  assert.ok(unplaced);
+  assert.equal(sourceLineText(unplaced), "From Unplaced");
+});
+
+test("the screen-reader label says From only when a source is a place", () => {
+  assert.equal(
+    describeSourcesForA11y({
+      type: "QUANTITY_TRACKED",
+      slices: [
+        slice({ sources: [part("Needs a location", 15, "UNASSIGNED", true)] }),
+      ],
+    }),
+    ", Needs a location"
+  );
+  assert.equal(
+    describeSourcesForA11y({
+      type: "QUANTITY_TRACKED",
+      slices: [slice({ sources: [part("Unknown", 15, "UNKNOWN", true)] })],
+    }),
+    ", Unknown, Short at Unknown"
   );
 });

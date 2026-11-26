@@ -1444,8 +1444,15 @@ const CustomForm = ({
       method="post"
     >
       {/* A refusal only the server can make, such as units leaving from a
-          source that is short for the slice. */}
-      <CheckoutRefusal />
+          source that is short for the slice. Dismissed once the submitted
+          list changes. */}
+      <CheckoutRefusal
+        listKey={JSON.stringify([
+          assetIdsForCheckout,
+          selectedBookingAssetIds,
+          checkoutsPayload,
+        ])}
+      />
       <div className="flex w-full gap-2 px-3 py-2">
         {/* Hidden form fields */}
         {assetIdsForCheckout.map((assetId, index) => (

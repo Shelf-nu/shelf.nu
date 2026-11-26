@@ -145,7 +145,10 @@ The benchmark is a separate step of the `🗄️ Database tests` job. It runs wh
   the event that started the run, so add it and then push a commit. A re-run of
   an older run does not see a label added later.
 
-The job timeout rises from 20 to 75 minutes when the benchmark runs.
+The job timeout rises from 20 to 100 minutes when the benchmark runs: 20 for
+the main suite and 80 for the benchmark step, which is the sum of the
+benchmark's hook and test timeouts (`BUILD_TIMEOUT_MS` and its siblings in the
+test file). Change the step timeout and those constants together.
 
 ### Running it locally
 

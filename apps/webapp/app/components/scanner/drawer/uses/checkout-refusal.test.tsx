@@ -47,8 +47,32 @@ describe("CheckoutRefusal", () => {
   it("announces the server's refusal", () => {
     vi.mocked(useActionData).mockReturnValue(REFUSAL);
 
-    render(<CheckoutRefusal />);
+    render(<CheckoutRefusal listKey="list-a" />);
 
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Not enough units at Studio for this booking."
+    );
+  });
+
+  it("clears once the scanned list changes, and stays clear until the next refusal", () => {
+    vi.mocked(useActionData).mockReturnValue(REFUSAL);
+
+    const { rerender } = render(<CheckoutRefusal listKey="list-a" />);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    // The refused pool is removed from the list.
+    rerender(<CheckoutRefusal listKey="list-b" />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // Scanning it again does not bring the old answer back.
+    rerender(<CheckoutRefusal listKey="list-a" />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // The next submit is refused again: a new answer is shown.
+    vi.mocked(useActionData).mockReturnValue({
+      error: { ...REFUSAL.error },
+    });
+    rerender(<CheckoutRefusal listKey="list-a" />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Not enough units at Studio for this booking."
     );
@@ -57,7 +81,7 @@ describe("CheckoutRefusal", () => {
   it("renders nothing before a refusal", () => {
     vi.mocked(useActionData).mockReturnValue(undefined);
 
-    render(<CheckoutRefusal />);
+    render(<CheckoutRefusal listKey="list-a" />);
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

@@ -84,21 +84,50 @@ export function commitTx<T>(fn: (tx: TxClient) => Promise<T>): Promise<T> {
 }
 
 /**
- * Removes committed workspaces and their owners. Best effort: a leftover row
- * from a failed cleanup is harmless to other tests.
+ * Removes committed workspaces and their owners.
+ *
+ * Runs every delete even when one fails, so one stuck row does not leave the
+ * rest behind, and logs each failure with the row it concerns. A leftover row
+ * is harmless to other tests (each seeds its own workspace), but a failing
+ * delete points at a cascade or trigger that blocks removing a workspace, so
+ * it is reported, not swallowed. Callers that want to assert a clean removal
+ * check the returned list.
  *
  * @param pools - Workspaces seeded by `seedOrgWithPool`.
+ * @returns One message per failed delete; empty when everything was removed.
  */
-export async function cleanupPools(pools: SeededOrgWithPool[]): Promise<void> {
+export async function cleanupPools(
+  pools: SeededOrgWithPool[]
+): Promise<string[]> {
   const db = getTestDb();
+  const failures: string[] = [];
+  /** Runs one delete and records its error instead of throwing it. */
+  const attempt = async (what: string, run: () => Promise<unknown>) => {
+    try {
+      await run();
+    } catch (cause) {
+      const message = `cleanupPools: could not delete ${what}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`;
+      console.error(message);
+      failures.push(message);
+    }
+  };
   for (const pool of pools) {
-    await db.$executeRaw`
-      DELETE FROM "Organization" WHERE "id" = ${pool.organizationId}
-    `.catch(() => undefined);
-    await db.$executeRaw`
-      DELETE FROM "User" WHERE "id" = ${pool.userId}
-    `.catch(() => undefined);
+    await attempt(
+      `Organization ${pool.organizationId}`,
+      () => db.$executeRaw`
+        DELETE FROM "Organization" WHERE "id" = ${pool.organizationId}
+      `
+    );
+    await attempt(
+      `User ${pool.userId}`,
+      () => db.$executeRaw`
+        DELETE FROM "User" WHERE "id" = ${pool.userId}
+      `
+    );
   }
+  return failures;
 }
 
 /**

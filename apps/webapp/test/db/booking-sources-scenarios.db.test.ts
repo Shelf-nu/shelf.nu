@@ -359,6 +359,18 @@ describe("booking sources scenarios", () => {
         sliceIds: [seed.sliceId],
         groups: [{ bookingId: seed.bookingId, assetId: seed.assetId }],
       });
+
+      // A workspace with source rows, logs and shares is removed in full:
+      // every cascade and deferred trigger lets the delete through.
+      expect(await cleanupPools(created.splice(0))).toEqual([]);
+      const left = await getTestDb().$queryRaw<Array<{ count: number }>>`
+        SELECT (
+          (SELECT COUNT(*) FROM "Organization" WHERE "id" = ${seed.organizationId})
+          + (SELECT COUNT(*) FROM "User" WHERE "id" = ${seed.userId})
+          + (SELECT COUNT(*) FROM "BookingAssetSource" WHERE "bookingAssetId" = ${seed.sliceId})
+        )::int AS count
+      `;
+      expect(left).toEqual([{ count: 0 }]);
     } finally {
       await cleanupPools(created);
     }

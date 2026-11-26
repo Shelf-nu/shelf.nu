@@ -34,6 +34,16 @@ import type {
 export const AUTO_SOURCES: AdjustBookingSourcesInput = { mode: "AUTO" };
 
 /**
+ * A slice's source line as the booking screen prints it.
+ *
+ * `placed` is true when at least one source is a place units can leave from
+ * (a location or Unplaced). Only then does the line read "From ...": a line
+ * made only of "Needs a location" or "Unknown" names a problem, not a place,
+ * so it prints on its own in the warning style.
+ */
+export type SliceSourceLine = BookingSourceLine & { placed: boolean };
+
+/**
  * The line a booking row prints for a slice's sources: one source by name,
  * several as "Demo Warehouse 8 · Unplaced 7", with a "Short at" note per
  * source that cannot cover its units.
@@ -44,8 +54,25 @@ export const AUTO_SOURCES: AdjustBookingSourcesInput = { mode: "AUTO" };
  */
 export function sliceSourceLine(
   slice: Pick<BookingAssetSlice, "sources">
-): BookingSourceLine | null {
-  return describeSourceLine(slice.sources ?? []);
+): SliceSourceLine | null {
+  const parts = slice.sources ?? [];
+  const line = describeSourceLine(parts);
+  if (!line) return null;
+  return {
+    ...line,
+    placed: parts.some((p) => p.kind === "LOCATION" || p.kind === "UNPLACED"),
+  };
+}
+
+/**
+ * The words of a source line: "From Demo Warehouse" when the line names a
+ * place, else the label alone ("Needs a location", "Unknown").
+ *
+ * @param line - Output of {@link sliceSourceLine}
+ * @returns The text to print
+ */
+export function sourceLineText(line: SliceSourceLine): string {
+  return line.placed ? `From ${line.text}` : line.text;
 }
 
 /**
@@ -71,7 +98,7 @@ export function standaloneSlice(
  *   Shelf
  */
 export function adjustSheetSources(slice: BookingAssetSlice | null): {
-  line: BookingSourceLine | null;
+  line: SliceSourceLine | null;
   canUseAuto: boolean;
 } {
   if (!slice) return { line: null, canUseAuto: false };
@@ -88,7 +115,7 @@ export function adjustSheetSources(slice: BookingAssetSlice | null): {
  *
  * Each standalone slice is described once: its planned sources when it has
  * them (", units from Demo Warehouse 8 · Unplaced 7, Short at Demo
- * Warehouse"), else the location its units left from at check-out, gathered
+ * Warehouse", or ", Needs a location" when no source is a place), else the location its units left from at check-out, gathered
  * into ", booked units from Camera Room, Studio". Kit slices and individual
  * assets add nothing.
  *
@@ -105,7 +132,8 @@ export function describeSourcesForA11y(
     if (slice.kit) continue;
     const line = sliceSourceLine(slice);
     if (line) {
-      planned.push([`, units from ${line.text}`, ...line.warnings].join(", "));
+      const words = line.placed ? `units from ${line.text}` : line.text;
+      planned.push([`, ${words}`, ...line.warnings].join(", "));
     } else if (slice.sourceLocation) {
       leftFrom.push(slice.sourceLocation.name);
     }

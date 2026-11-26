@@ -40,11 +40,11 @@ vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
     // why: the lifecycle-progress roll-up reads the slice markers
-    // (BookingAsset.checkedOutAt/checkedInAt) plus the checkout sessions to
+    // (BookingAsset.checkedOutAt/checkedInAt) and the checkout sessions to
     // judge dispatched units per asset, and the asset order counts the
-    // sessions and the quantity-tracked assets' disposition logs per slice;
-    // stub all three to empty - not what this suite checks
-    // serialization contract under test.
+    // sessions and the quantity-tracked assets' disposition logs per slice.
+    // None of that is the source fields this suite checks, so all three
+    // return empty.
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
     consumptionLog: { findMany: vi.fn().mockResolvedValue([]) },
@@ -61,11 +61,11 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: mobile-auth is the request-auth boundary - it resolves the actor and
-// org from a Supabase JWT. Stub requireMobileAuth/requireOrganizationAccess/
-// assertMobileCanUseBookings/getMobileUserContext so the test drives a
-// deterministic authenticated user + org without real JWT verification;
-// not what this suite checks serialization contract under test.
+// why: mobile-auth is the request-auth boundary: it resolves the actor and
+// org from a Supabase JWT. requireMobileAuth, requireOrganizationAccess,
+// assertMobileCanUseBookings and getMobileUserContext are stubbed so each
+// case runs as a fixed signed-in user and org without verifying a real JWT.
+// Authentication is not what this suite checks; the source fields are.
 vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
