@@ -84,7 +84,7 @@ We have multiple user creation flows throughout the application (registration, i
 
 **Scaling watch item**: every transaction that touches a converted group creates and drops two temp tables (`ON COMMIT DROP`), which churns the system catalog. Fine at today's volume; watch catalog bloat (`pg_class`, `pg_attribute`) as converted groups become the common case.
 
-**Do not** run `SET CONSTRAINTS ALL IMMEDIATE` in a transaction that writes these tables: each key is checked once per transaction, so a check fired early is not repeated for later writes.
+**Do not** set these constraint triggers `IMMEDIATE` in a transaction that writes these tables, whether `SET CONSTRAINTS` names them or uses `ALL`: each key is checked once per transaction, so a check fired early is not repeated for later writes.
 
 ---
 

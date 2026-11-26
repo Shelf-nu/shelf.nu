@@ -2277,26 +2277,35 @@ describe("dispatchUnits", () => {
       stageShelf({ "LOCATION:loc-a": 5 });
       seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 6 }]);
 
-      await dispatchRefusal(dispatchPicks([{ units: 3 }, { units: 3 }]));
+      const error = await dispatchRefusal(
+        dispatchPicks([{ units: 3 }, { units: 3 }])
+      );
 
+      expect(error.message).toBe(
+        "Only 5 units are at Demo Warehouse right now."
+      );
       expect(h.writes).toHaveLength(0);
     });
 
     it("refuses picks of one slice that name different sources", async () => {
       h.freeFor = () => free3(20, 20, 20);
-      stageShelf({ "UNPLACED:": 5, "LOCATION:loc-a": 5 });
+      // Plenty on hand everywhere, so only the conflicting choice can refuse.
+      stageShelf({ "UNPLACED:": 20, "LOCATION:loc-a": 20 });
       seedConverted([
         { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
         { kind: "UNPLACED", quantity: 3 },
       ]);
 
-      await dispatchRefusal(
+      const error = await dispatchRefusal(
         dispatchPicks([
           { units: 2, fromLocationId: "loc-a" },
           { units: 3, fromLocationId: null },
         ])
       );
 
+      expect(error.message).toBe(
+        "Units of one booking item cannot leave from different sources in one check-out."
+      );
       expect(h.writes).toHaveLength(0);
     });
   });

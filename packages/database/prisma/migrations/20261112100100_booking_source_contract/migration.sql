@@ -13,9 +13,11 @@
 --     the affected slice ids and group keys from OLD and NEW, ignore NULL
 --     keys, and add each key to pg_temp.booking_source_checked. Only the call
 --     that adds a key runs its check, so each slice and each group is checked
---     once per transaction, on the final state. Because of that, never run
---     SET CONSTRAINTS ALL IMMEDIATE in a transaction that writes these
---     tables: a check fired early is not repeated for later writes.
+--     once per transaction, on the final state. Because of that, keep these
+--     constraint triggers deferred until COMMIT in any transaction that
+--     writes these tables: never set them IMMEDIATE, whether SET CONSTRAINTS
+--     names them or uses ALL. A check fired early is not repeated for later
+--     writes.
 --   * LEGACY fast path: a "BookingAsset" write that is LEGACY before and
 --     after, or a booking "ConsumptionLog" write, whose group is unconverted
 --     at commit (no non-LEGACY slice, no share row) returns after
