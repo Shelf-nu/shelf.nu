@@ -13,6 +13,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { QuantityTrackedOneUnitNotice } from "~/components/assets/quantity-tracked-one-unit-notice";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import Input from "~/components/forms/input";
 import { CheckIcon } from "~/components/icons/library";
@@ -308,6 +309,8 @@ export default function AddAssetsToExistingBookingDialog() {
                 bookings are shown. Assets added to an ongoing booking stay
                 available until you check them out.
               </div>
+
+              <QuantityTrackedOneUnitNotice selectedItems={selectedAssets} />
 
               <When truthy={!isFetchingBookings && bookings.length === 0}>
                 <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
