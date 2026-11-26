@@ -925,38 +925,34 @@ export async function updateAuditSession({
             tx,
           })
         );
-        for (const targetUserId of addedAssigneeIds) {
-          notePromises.push(
-            recordEvent(
-              {
-                organizationId,
-                actorUserId: userId,
-                action: "AUDIT_ASSIGNEE_ADDED",
-                entityType: "AUDIT",
-                entityId: id,
-                auditSessionId: id,
-                targetUserId,
-              },
-              tx
-            )
-          );
-        }
-        for (const targetUserId of removedAssigneeIds) {
-          notePromises.push(
-            recordEvent(
-              {
-                organizationId,
-                actorUserId: userId,
-                action: "AUDIT_ASSIGNEE_REMOVED",
-                entityType: "AUDIT",
-                entityId: id,
-                auditSessionId: id,
-                targetUserId,
-              },
-              tx
-            )
-          );
-        }
+        // One batched write: recordEvents resolves the actor once and
+        // inserts every row together, so a large team change costs the
+        // transaction two statements, not two per person.
+        const assigneeEvent = (
+          action: "AUDIT_ASSIGNEE_ADDED" | "AUDIT_ASSIGNEE_REMOVED",
+          targetUserId: string
+        ) => ({
+          organizationId,
+          actorUserId: userId,
+          action,
+          entityType: "AUDIT" as const,
+          entityId: id,
+          auditSessionId: id,
+          targetUserId,
+        });
+        notePromises.push(
+          recordEvents(
+            [
+              ...addedAssigneeIds.map((targetUserId) =>
+                assigneeEvent("AUDIT_ASSIGNEE_ADDED", targetUserId)
+              ),
+              ...removedAssigneeIds.map((targetUserId) =>
+                assigneeEvent("AUDIT_ASSIGNEE_REMOVED", targetUserId)
+              ),
+            ],
+            tx
+          )
+        );
       }
 
       // Execute all note creations in parallel

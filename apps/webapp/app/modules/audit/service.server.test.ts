@@ -640,19 +640,22 @@ describe("audit service", () => {
           removedUserIds: ["user-2"],
         })
       );
-      expect(recordEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: "AUDIT_ASSIGNEE_ADDED",
-          targetUserId: "user-4",
-          auditSessionId: "audit-1",
-        }),
-        mockDb
-      );
-      expect(recordEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: "AUDIT_ASSIGNEE_REMOVED",
-          targetUserId: "user-2",
-        }),
+      // One batched call, with the transaction client: one event per person.
+      const assigneeEvent = (action: string, targetUserId: string) => ({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action,
+        entityType: "AUDIT",
+        entityId: "audit-1",
+        auditSessionId: "audit-1",
+        targetUserId,
+      });
+      expect(recordEvents).toHaveBeenCalledTimes(1);
+      expect(recordEvents).toHaveBeenCalledWith(
+        [
+          assigneeEvent("AUDIT_ASSIGNEE_ADDED", "user-4"),
+          assigneeEvent("AUDIT_ASSIGNEE_REMOVED", "user-2"),
+        ],
         mockDb
       );
     });
@@ -716,6 +719,7 @@ describe("audit service", () => {
       expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
       expect(createAssigneesChangedNote).not.toHaveBeenCalled();
       expect(recordEvent).not.toHaveBeenCalled();
+      expect(recordEvents).not.toHaveBeenCalled();
     });
 
     it("refuses a newcomer who is not a workspace member", async () => {
