@@ -198,7 +198,8 @@ export async function sendAuditAssignedEmail({
     });
 
     // Awaited so the caller's loop only moves on once this email is sent or
-    // safely queued; a failure lands in the catch below with this recipient.
+    // its queue fallback has been tried. sendEmailAndWait logs its own send
+    // and enqueue failures and does not reject.
     await sendEmailAndWait({
       to: assigneeEmail,
       subject: auditEmailSubject("ASSIGNED", audit.name),
@@ -228,7 +229,7 @@ export async function sendAuditAssignedEmail({
     });
 
     Logger.info(
-      `Audit assignment email sent to ${assigneeName} (${assigneeEmail}) for audit: ${audit.name}`
+      `Audit assignment email handed off for ${assigneeName} (${assigneeEmail}) for audit: ${audit.name}`
     );
   } catch (emailError) {
     Logger.error(

@@ -1,3 +1,16 @@
+/**
+ * Audit assignment email fan-out.
+ *
+ * Tells the people who were just assigned to an audit, one email each. The
+ * create route, the edit action and the duplicate route all call it with the
+ * users who are new to the audit, so a person added later gets the same email
+ * as one picked at creation.
+ *
+ * @see {@link file://./email-helpers.ts} sendAuditAssignedEmail
+ * @see {@link file://./../../routes/api+/audits.start.ts}
+ * @see {@link file://./../../routes/_layout+/audits.$auditId.tsx}
+ * @see {@link file://./../../routes/_layout+/audits.$auditId.duplicate.tsx}
+ */
 import { db } from "~/database/db.server";
 import type { ClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";

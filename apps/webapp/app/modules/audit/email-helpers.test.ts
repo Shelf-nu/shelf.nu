@@ -7,6 +7,7 @@
 import { sendEmail, sendEmailAndWait } from "~/emails/mail.server";
 import { sendPush } from "~/modules/push/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { Logger } from "~/utils/logger";
 import {
   sendAuditAssignedEmail,
   sendAuditOverdueEmail,
@@ -115,6 +116,36 @@ describe("sendAuditAssignedEmail", () => {
         },
       ],
     ]);
+  });
+
+  it("logs a failure for that recipient, sends no push and does not throw", async () => {
+    const lookupDown = new Error("connection lost");
+    vi.mocked(resolveUserFormatPrefsById).mockRejectedValueOnce(lookupDown);
+
+    await expect(
+      sendAuditAssignedEmail({
+        audit,
+        assigneeEmail: "user-a@example.com",
+        assigneeName: "Ana",
+        assigneeUserId: "user-a",
+        hints,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(sendEmailAndWait).not.toHaveBeenCalled();
+    expect(sendPush).not.toHaveBeenCalled();
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+    expect(Logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: lookupDown,
+        message: "Failed to send audit assignment email",
+        additionalData: {
+          auditId: "audit-1",
+          assigneeEmail: "user-a@example.com",
+          assigneeName: "Ana",
+        },
+      })
+    );
   });
 });
 

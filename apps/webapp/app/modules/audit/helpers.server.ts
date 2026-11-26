@@ -749,12 +749,7 @@ export async function createAssigneesChangedNote({
   );
   const users: Array<UserNameFields & { id: string }> = await tx.user.findMany({
     where: { id: { in: userIds } },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      displayName: true,
-    },
+    select: { id: true, ...USER_NAME_SELECT },
   });
   const byId = new Map(users.map((user) => [user.id, user]));
 
