@@ -55,7 +55,10 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
-import { getBooking } from "~/modules/booking/service.server";
+import {
+  getBooking,
+  assertRequestMayBeCheckedOut,
+} from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -78,6 +81,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
+import { scanSaveError } from "~/utils/scan-save-error.server";
+import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -180,6 +185,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
+    // A pending request is approved first, never checked out: the scanner is
+    // not opened for it. Its check-out is refused in the service too.
+    await assertRequestMayBeCheckedOut({
+      bookingId: booking.id,
+      organizationId,
+    });
 
     /**
      * Outstanding model requests plus the assets already on the booking that
@@ -368,9 +380,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `error()` also sends the refusal to this user as an error notification.
     // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
-    return data(error(reason), { status: reason.status });
+    return scanSaveError(reason);
   }
 }
+
+/**
+ * Keeps the scanner, and the list on it, on screen when the save request gets
+ * no answer (a gateway timeout, an unreachable server, a dropped connection).
+ * The drawer then tells the operator to check before confirming again,
+ * because a request cut off in transit may still have been saved.
+ */
+export const clientAction = keepScanListOnSubmitFailure;
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },

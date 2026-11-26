@@ -6,7 +6,10 @@ import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
 import { isUnsupportedBrowser } from "~/utils/browser-support";
-import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
+import {
+  SENTRY_TRACES_SAMPLE_RATE,
+  SENTRY_TUNNEL_PATH,
+} from "~/utils/constants";
 import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
@@ -27,7 +30,7 @@ if (window.env?.SENTRY_DSN) {
     // such as a page that reloaded itself after a failed download.
     enableLogs: true,
     integrations: [Sentry.reactRouterTracingIntegration()],
-    tracesSampleRate: 0.1,
+    tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
     beforeSendTransaction(event) {
       const spans = event.spans || [];
 
@@ -82,9 +85,13 @@ if (isUnsupportedBrowser()) {
   // The inline check in `root.tsx` flagged a browser that cannot run this
   // bundle. Leave the server-rendered "browser out of date" screen in place
   // rather than hydrating an app that would crash behind it, and record the
-  // visit so the size of that audience stays visible.
+  // visit so the size of that audience stays visible. It goes to Sentry Logs,
+  // not issues: the screen is expected behaviour with nothing to fix.
   if (window.env?.SENTRY_DSN) {
-    Sentry.captureMessage("Unsupported browser blocked", "info");
+    Sentry.logger.info("Unsupported browser blocked", {
+      label: "Browser support",
+      path: window.location.pathname,
+    });
   }
 } else {
   React.startTransition(() => {

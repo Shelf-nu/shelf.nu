@@ -302,6 +302,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetId,
       bookingId,
       organizationId,
+      actorUserId: userId,
       quantity,
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,

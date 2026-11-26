@@ -14,6 +14,7 @@
  */
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createBookingSettings } from "@factories";
 import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -240,6 +241,32 @@ describe("bulkCheckoutBookings", () => {
     await expect(bulkCheckoutBookings(args(["b1", "b2"]))).rejects.toThrow(
       /"Booking b1" still has reserved units with no asset assigned/
     );
+    expect(checkoutMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses the whole batch when a booking is a request still waiting for approval, whoever asks", async () => {
+    // A batch carries no request version, so it cannot approve a request,
+    // even for someone who may approve. The batch is refused before any
+    // write rather than when the pending booking's turn comes.
+    settingsMock.mockResolvedValueOnce(
+      createBookingSettings({
+        requireApprovalForBase: true,
+        requireApprovalForSelfService: true,
+      })
+    );
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.RESERVED, { approvedAt: new Date() }),
+      selected("b2", BookingStatus.RESERVED, { approvedAt: null }),
+    ] as never);
+
+    await expect(
+      bulkCheckoutBookings(args(["b1", "b2"]))
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(
+        /"Booking b2" is still waiting for approval.*Nothing was changed/
+      ),
+    });
     expect(checkoutMock).not.toHaveBeenCalled();
   });
 

@@ -23,6 +23,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
+import { assertSignupEnabled } from "~/modules/auth/signup-gate.server";
 import {
   clearSignupIntentHeaders,
   readSignupIntent,
@@ -35,6 +36,7 @@ import {
 } from "~/modules/signup-intent/schema";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import {
   ShelfError,
   isZodValidationError,
@@ -57,20 +59,9 @@ import { passwordSchema } from "~/utils/zod";
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const title = "Create an account";
   const subHeading = "Start your journey with Shelf";
-  const { disableSignup } = config;
 
   try {
-    if (disableSignup) {
-      throw new ShelfError({
-        cause: null,
-        title: "Signup is disabled",
-        message:
-          "For more information, please contact your workspace administrator.",
-        label: "User onboarding",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
+    assertSignupEnabled();
     if (context.isAuthenticated) {
       return redirect("/");
     }
@@ -129,6 +120,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
     switch (getActionMethod(request)) {
       case "POST": {
+        // The page refuses too, but a POST does not need the page first.
+        assertSignupEnabled();
+
         const { email, password } = parseData(
           await request.formData(),
           JoinFormSchema,
@@ -153,7 +147,9 @@ export async function action({ request }: ActionFunctionArgs) {
         }
 
         // Sign up with the provided email and password
-        await signUpWithEmailPass(email, password);
+        await signUpWithEmailPass(email, password, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
 
         return redirect(
           `/otp?email=${encodeURIComponent(email)}&mode=confirm_signup`,

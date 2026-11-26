@@ -54,6 +54,11 @@ type RolePolicyShape = {
     bypassTimeLimits: boolean;
     /** Which workspace explicit check-out/in switch applies; "none" = exempt or not covered. */
     explicitScanSetting: "admin" | "selfService" | "none";
+    /**
+     * Which workspace booking-approval switch gates this role's reservations;
+     * "none" = this role's reservations are approved on the spot.
+     */
+    approvalSetting: "base" | "selfService" | "none";
     /** The booking custodian picker is fixed to the user themself. */
     custodianPicker: "anyone" | "self";
     /** The bookings-index bulk-actions menu is shown. */
@@ -97,6 +102,8 @@ type RolePolicyShape = {
     inventoryAlerts: boolean;
     /** May be picked as an extra booking-notification or reminder recipient. */
     selectableAsRecipient: boolean;
+    /** Receives the email when a member reports a problem with an asset. */
+    problemReports: boolean;
   };
   ui: {
     /** Where `/` sends the user. */
@@ -164,6 +171,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "none",
+      approvalSetting: "none",
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -177,6 +185,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       manageBookingRecipients: true,
       inventoryAlerts: true,
       selectableAsRecipient: true,
+      problemReports: true,
     },
     ui: {
       landing: "/assets",
@@ -205,6 +214,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
+      approvalSetting: "none",
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -218,6 +228,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       manageBookingRecipients: true,
       inventoryAlerts: true,
       selectableAsRecipient: true,
+      problemReports: true,
     },
     ui: {
       landing: "/assets",
@@ -251,6 +262,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
+      approvalSetting: "none",
       custodianPicker: "anyone",
       showBulkActions: true,
       documentsForOthers: true,
@@ -264,6 +276,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       manageBookingRecipients: true,
       inventoryAlerts: false,
       selectableAsRecipient: true,
+      problemReports: true,
     },
     ui: {
       landing: "/bookings",
@@ -294,6 +307,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: true,
       bypassTimeLimits: false,
       explicitScanSetting: "selfService",
+      approvalSetting: "selfService",
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,
@@ -307,6 +321,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       manageBookingRecipients: false,
       inventoryAlerts: false,
       selectableAsRecipient: false,
+      problemReports: false,
     },
     ui: {
       landing: "/assets",
@@ -335,6 +350,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: false,
       bypassTimeLimits: false,
       explicitScanSetting: "none",
+      approvalSetting: "base",
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,
@@ -348,6 +364,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       manageBookingRecipients: false,
       inventoryAlerts: false,
       selectableAsRecipient: false,
+      problemReports: false,
     },
     ui: {
       landing: "/assets",

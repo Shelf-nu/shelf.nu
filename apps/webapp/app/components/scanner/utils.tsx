@@ -6,7 +6,7 @@ import {
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
 import { isQrId } from "~/utils/id";
-import { isShelfQrCode } from "~/utils/qr-code";
+import { getShelfQrId } from "~/utils/qr-code";
 import type { OnCodeDetectionSuccess } from "./code-scanner";
 
 // Supported barcode formats that match our BarcodeType enum
@@ -29,8 +29,6 @@ const ZXING_FORMAT_TO_BARCODE_TYPE: Record<string, BarcodeType> = {
 function normalizeZxingFormat(format: string): string {
   return ZXING_FORMAT_TO_BARCODE_TYPE[format] ?? format;
 }
-
-// isShelfQrCode function moved to ~/utils/qr-code.ts for shared usage
 
 /**
  * Common patterns for back camera labels across different devices and operating systems
@@ -287,27 +285,15 @@ export const processFrame = async ({
 
       // Check if it's a QR code first
       if (detectedFormat === "QRCode") {
-        // Check if it's a Shelf QR code by checking against known Shelf QR patterns
-        const isShelfQr = isShelfQrCode(result.text);
-
-        if (isShelfQr) {
-          // Handle as Shelf QR code
-          await handleDetection({
-            result: result.text,
-            onCodeDetectionSuccess,
-            allowNonShelfCodes,
-            paused,
-          });
-        } else {
-          // Handle as external QR code (treat as ExternalQR barcode type)
-          await handleDetection({
-            result: result.text,
-            onCodeDetectionSuccess,
-            allowNonShelfCodes,
-            paused,
-            barcodeType: "ExternalQR",
-          });
-        }
+        // A QR carries no barcode type: handleDetection decides whether it is
+        // a Shelf QR or an outside one, the same way it does for a handheld
+        // scanner.
+        await handleDetection({
+          result: result.text,
+          onCodeDetectionSuccess,
+          allowNonShelfCodes,
+          paused,
+        });
       } else if (
         SUPPORTED_BARCODE_FORMATS.includes(normalizeZxingFormat(detectedFormat))
       ) {
@@ -385,22 +371,19 @@ export const handleDetection = async ({
   if (!result || paused) return;
 
   /**
-   * The QR heuristics below are host-agnostic, so they only get to speak when
-   * the caller has not already classified the code. A `barcodeType` means it
-   * has: the camera path decides against `isShelfQrCode`, which knows our own
-   * host and the shortener, and sends `ExternalQR` precisely for a QR that is
-   * NOT ours. Letting the pattern re-read that as a Shelf id claims somebody
-   * else's QR code, and a structured barcode whose value happens to read like a
-   * cuid would be claimed the same way.
+   * The one place a scanned code is classified, for the camera and a handheld
+   * scanner alike. A QR arrives without a `barcodeType`; `getShelfQrId` (our
+   * own host, the shortener or a raw id) decides whether it is ours, and a url
+   * on any other host falls through to the barcode lookup as `ExternalQR`.
+   *
+   * A `barcodeType` means the camera read a structured barcode and knows its
+   * format, so the QR checks do not speak: a Code128 whose value happens to
+   * read like a cuid must not be claimed as a QR id.
    */
   if (!barcodeType) {
-    // Check if it's a QR code (URL pattern)
-    const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-    const qrMatch = result.match(qrRegex);
+    const qrId = getShelfQrId(result);
 
-    if (qrMatch) {
-      // It's a QR code URL
-      const qrId = qrMatch[2];
+    if (qrId) {
       await onCodeDetectionSuccess?.({
         value: qrId,
         type: "qr",
@@ -408,18 +391,10 @@ export const handleDetection = async ({
       });
       return;
     }
-
-    // Check if it's a raw QR ID (before checking barcodes)
-    if (isQrId(result)) {
-      await onCodeDetectionSuccess?.({
-        value: result,
-        type: "qr",
-      });
-      return;
-    }
   }
 
-  // If we have a specific barcode type passed in (like ExternalQR), use it
+  // A structured barcode the camera read keeps its format when its value is
+  // valid for that format.
   if (barcodeType) {
     // Validate the value for the specific barcode type
     const normalizedValue = normalizeBarcodeValue(barcodeType, result);
@@ -435,17 +410,15 @@ export const handleDetection = async ({
     }
   }
 
-  // If not a QR code, check if it's a valid barcode
+  // Untyped, or invalid for the format the camera read: report the type the
+  // value actually validates as, so the lookup searches the type it can match.
   const barcodeCheck = isValidBarcode(result);
 
-  if (barcodeCheck.isValid) {
-    // It's a valid barcode
-    const detectedBarcodeType = barcodeType || barcodeCheck.type;
-    const normalizedValue = normalizeBarcodeValue(detectedBarcodeType!, result);
+  if (barcodeCheck.isValid && barcodeCheck.type) {
     await onCodeDetectionSuccess?.({
-      value: normalizedValue,
+      value: normalizeBarcodeValue(barcodeCheck.type, result),
       type: "barcode",
-      barcodeType: detectedBarcodeType,
+      barcodeType: barcodeCheck.type,
     });
     return;
   }

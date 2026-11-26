@@ -93,6 +93,18 @@ vi.mock("~/modules/booking/service.server", async () => {
     ...actual,
     computeBookingAssetRemaining: vi.fn().mockResolvedValue(0),
     computeBookingAssetRemainingToCheckOut: vi.fn().mockResolvedValue(0),
+    // why: the loader reads every asset's remaining units in one batched call
+    // each; nothing remains in these fixtures.
+    computeBookingCheckinRemaining: vi.fn(
+      async (_client: unknown, _bookingId: string, assetIds: string[]) => ({
+        byAsset: new Map(assetIds.map((assetId) => [assetId, 0])),
+        bySlice: new Map<string, number>(),
+      })
+    ),
+    computeBookingAssetsRemainingToCheckOut: vi.fn(
+      async (_client: unknown, _bookingId: string, assetIds: string[]) =>
+        new Map(assetIds.map((assetId) => [assetId, 0]))
+    ),
     getDetailedPartialCheckinData: vi
       .fn()
       .mockResolvedValue({ checkedInAssetIds: [], partialCheckinDetails: {} }),

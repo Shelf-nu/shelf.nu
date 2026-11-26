@@ -95,6 +95,7 @@ import {
   loadRemainingReservationBySlice,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 } from "./availability-primitives.server";
 import type {
@@ -118,6 +119,7 @@ export {
   computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 };
 export type {
@@ -183,6 +185,9 @@ export type PrismaClientOrTx = {
         bookingId: true;
         quantity: true;
         sourceAllocation: true;
+        // Sizes a slice that came back and went out again; see
+        // `reservedUnitsStillHeld`.
+        checkedOutQuantity: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
@@ -191,6 +196,7 @@ export type PrismaClientOrTx = {
         bookingId: string;
         quantity: number;
         sourceAllocation?: BookingSourceAllocation;
+        checkedOutQuantity?: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
@@ -403,6 +409,7 @@ export async function getAssetAvailability({
         bookingId: true,
         quantity: true,
         sourceAllocation: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     });
@@ -453,13 +460,18 @@ export async function getAssetAvailability({
       }
 
       for (const row of reservedRows) {
-        // Clamp at 0 per row so an over-logged booking (should not happen,
-        // but defence-in-depth) can't push `reserved` negative.
+        // A converted slice holds what its source rows have not released.
+        // A LEGACY slice is never negative, and never below the units it has
+        // out right now: a slice returned in full and checked out again
+        // still holds the units of its second trip.
         const remaining = isConvertedSlice(row.sourceAllocation)
           ? convertedRemaining.get(row.id) ?? 0
-          : Math.max(
-              0,
-              row.quantity - (loggedByBookingId.get(row.bookingId) ?? 0)
+          : reservedUnitsStillHeld(
+              {
+                quantity: row.quantity,
+                checkedOutQuantity: row.checkedOutQuantity ?? null,
+              },
+              loggedByBookingId.get(row.bookingId) ?? 0
             );
         if (remaining === 0) continue;
 
@@ -822,6 +834,7 @@ export async function getAssetAvailabilityBatch(
         bookingId: true,
         quantity: true,
         sourceAllocation: true,
+        checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
     });
@@ -875,14 +888,17 @@ export async function getAssetAvailabilityBatch(
       }
 
       for (const row of reservedRows) {
-        // Clamp at 0 per row so an over-logged booking can't push a single
-        // asset's reserved total negative, mirroring the singular primitive.
+        // Converted slices read their source rows; LEGACY slices are never
+        // negative and never below the units they have out right now.
+        // Mirrors the singular primitive.
         const remaining = isConvertedSlice(row.sourceAllocation)
           ? convertedRemaining.get(row.id ?? "") ?? 0
-          : Math.max(
-              0,
-              row.quantity -
-                (loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0)
+          : reservedUnitsStillHeld(
+              {
+                quantity: row.quantity,
+                checkedOutQuantity: row.checkedOutQuantity ?? null,
+              },
+              loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0
             );
         if (remaining === 0) continue;
 

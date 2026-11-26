@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
+  getMobileWorkspaceAccess,
   requireOrganizationAccess,
   resignAndShapeMobileAsset,
 } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { ShelfError } from "~/utils/error";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
@@ -49,6 +51,16 @@ vi.mock("~/utils/subscription.server", () => ({
 // heavy imports.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
+  // why: the lapse gate has its own tests in
+  // mobile-auth.server.workspace-lapse.test.ts. Here it answers membership
+  // from the mocked membership row, so the QR path's wrong-workspace branches
+  // stay driven by `userOrganization.findUnique`.
+  getMobileWorkspaceAccess: vi.fn(
+    async (args: { userId: string; organizationId: string }) =>
+      (
+        await import("@mocks/mobile-workspace-access")
+      ).fakeMobileWorkspaceAccess(args)
+  ),
   // why: custody visibility is read per owning workspace; the route tests pin
   // the filtering itself, so here every caller may see all custody and the
   // assertions check which workspace was asked.
@@ -474,5 +486,80 @@ describe("resolveMobileScannedCode owning workspace on the QR path", () => {
         asset: { id: "asset-7", title: "Asset seven" },
       },
     });
+  });
+
+  it("refuses a code whose linked asset is outside the code's workspace", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-mixed",
+      assetId: "asset-foreign",
+      kitId: null,
+      organizationId: "org-1",
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-1" });
+    // The org-scoped read finds nothing: the asset is in another workspace.
+    assetFindFirst.mockResolvedValue(null);
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-mixed"));
+
+    expect(result).toEqual({
+      ok: false,
+      status: 404,
+      message:
+        "This code doesn't exist or it doesn't belong to your current organization.",
+    });
+    expect(resignAndShape).not.toHaveBeenCalled();
+  });
+
+  it("refuses a code whose linked kit is outside the code's workspace", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-mixed-kit",
+      assetId: null,
+      kitId: "kit-foreign",
+      organizationId: "org-1",
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-1" });
+    // The org-scoped read finds nothing: the kit is in another workspace.
+    vi.mocked(db.kit.findFirst).mockResolvedValue(null);
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-mixed-kit"));
+
+    expect(result).toMatchObject({ ok: false, status: 404 });
+  });
+});
+
+/**
+ * A scan opens the item in the workspace that owns the code, so that
+ * workspace must be active, whatever workspace the app is in.
+ */
+describe("resolveMobileScannedCode inactive owning workspace", () => {
+  it("refuses the scan and reads no linked data when the code's workspace is inactive", async () => {
+    qrRowFindUnique.mockResolvedValue({
+      id: "qr-lapsed",
+      assetId: "asset-8",
+      kitId: null,
+      organizationId: "org-lapsed",
+    });
+    vi.mocked(getMobileWorkspaceAccess).mockResolvedValueOnce({
+      access: "inactive",
+      error: new ShelfError({
+        cause: null,
+        message:
+          "The workspace this code belongs to is inactive because its subscription has expired.",
+        label: "Auth",
+        status: 403,
+      }),
+    });
+
+    await expect(
+      resolveMobileScannedCode(resolveArgs("qr-lapsed"))
+    ).rejects.toMatchObject({ status: 403 });
+    expect(getMobileWorkspaceAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        organizationId: "org-lapsed",
+        reason: "code",
+      })
+    );
+    expect(assetFindFirst).not.toHaveBeenCalled();
   });
 });

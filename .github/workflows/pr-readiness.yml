@@ -1,0 +1,55 @@
+name: 🚦 PR readiness
+
+# Runs only when a review is requested: the "this PR is ready" signal in
+# CONTRIBUTING.md ("The pull request process"). That covers the first request
+# after "Ready for review", a "Re-request review", a CODEOWNERS auto-request,
+# and a maintainer adding the request for an outside contributor. Pushes and
+# reviews do not run it: work in progress stays quiet.
+#
+# If the PR has unresolved review threads, the gate removes every pending review
+# request (so the PR leaves the review queue), posts a comment review
+# mentioning the author, and sets the `PR readiness` commit status to failed.
+# With no open threads it sets the status to passed and edits its earlier
+# reviews to say so. Logic: .github/scripts/pr-readiness.mjs
+#
+# Security: `pull_request_target` runs the workflow and script from the BASE
+# branch with a write token, which is what lets it act on fork PRs. It never
+# checks out or runs PR code, only reads PR data through the API.
+
+on:
+  pull_request_target:
+    types: [review_requested]
+
+# Several reviewers requested at once fire one event each. Queue them so they
+# never run side by side on the same PR.
+concurrency:
+  group: pr-readiness-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  readiness:
+    name: 🚦 PR readiness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: ⬇️ Checkout gate script (base branch)
+        uses: actions/checkout@v4
+        with:
+          # Default ref under pull_request_target is the base branch, so this
+          # is trusted code, never the PR's.
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: 🚦 Check review threads
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            const { run } = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-readiness.mjs`
+            );
+            await run({ github, context, core });

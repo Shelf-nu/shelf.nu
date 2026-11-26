@@ -173,6 +173,8 @@ function createTxMock({
       findUnique: vitest.fn().mockResolvedValue({ quantity: currentQuantity }),
       update: vitest.fn().mockResolvedValue({}),
     },
+    // why: a changed amount moves the booking's version (`updatedAt`) first.
+    booking: { updateMany: vitest.fn().mockResolvedValue({ count: 1 }) },
     consumptionLog: {
       findMany: vitest.fn().mockResolvedValue([]),
       groupBy: vitest.fn().mockResolvedValue([]),

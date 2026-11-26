@@ -1,8 +1,9 @@
 import type { WorkingHoursOverride } from "@prisma/client";
+import { BOOKING_SETTINGS_ANCHORS } from "~/utils/settings-card-anchors";
 import { tw } from "~/utils/tw";
 import { NewOverrideDialog } from "./override-dialog";
 import { OverridePreview } from "./override-preview";
-import { Card } from "../../shared/card";
+import { Card, CardTitle } from "../../shared/card";
 
 export function Overrides({
   overrides,
@@ -10,10 +11,10 @@ export function Overrides({
   overrides: WorkingHoursOverride[];
 }) {
   return (
-    <Card className={tw("my-0")}>
+    <Card id={BOOKING_SETTINGS_ANCHORS.dateOverrides} className={tw("my-0")}>
       <div className="flex w-full items-start justify-between border-b pb-4">
         <div className="">
-          <h3 className="text-text-lg font-semibold">Date overrides</h3>
+          <CardTitle>Date overrides</CardTitle>
           <p className="text-sm text-gray-600">
             Add dates when working hours change from your daily hours.
           </p>

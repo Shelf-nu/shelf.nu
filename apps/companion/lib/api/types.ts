@@ -50,6 +50,16 @@ export type Organization = {
    * older servers; read as `false`, which only ever under-offers.
    */
   managersCanEditAssets?: boolean;
+  /**
+   * From `/api/mobile/me`: `true` when the mobile API refuses requests in this
+   * workspace (a lapsed Team plan, or switched off by a Shelf admin). Absent on
+   * older servers, which refuse nothing; read it through `isWorkspaceInactive`.
+   */
+  inactive?: boolean;
+  /** Why the workspace is inactive, or `null` when it is active. */
+  inactiveReason?: "lapsed" | "disabled" | null;
+  /** The server's text for an inactive workspace, or `null` when it is active. */
+  inactiveMessage?: string | null;
 };
 
 export type MeResponse = {
@@ -771,6 +781,11 @@ export type LocationsResponse = {
   perPage?: number;
   totalCount?: number;
   totalPages?: number;
+  /**
+   * Set only on requests sent without `page` and `perPage`: true when the
+   * server's 1000-row cap cut the list, so `locations` is not every location.
+   */
+  truncated?: boolean;
 };
 
 export type CustodyResponse = {
@@ -837,12 +852,17 @@ export type UpdateImageResponse = {
 
 /**
  * Response of the three mobile bulk endpoints (bulk-assign-custody,
- * bulk-release-custody, bulk-update-location). Mixed selections skip
- * QUANTITY_TRACKED assets server-side and report the count via
- * `skippedQuantityTracked`; selections that are 100% quantity-tracked
- * surface as an error envelope instead (never a skip count). For every
- * other eligibility rule the client-side blockers (lib/batch-blockers.ts)
- * keep batches clean before submit.
+ * bulk-release-custody, bulk-update-location).
+ *
+ * The two custody endpoints skip QUANTITY_TRACKED assets in a mixed selection
+ * and report the count via `skippedQuantityTracked`; a selection that is 100%
+ * quantity-tracked surfaces as an error envelope instead (never a skip count).
+ *
+ * bulk-update-location never skips: a list holding a QUANTITY_TRACKED asset is
+ * refused with an error envelope that names the assets, and no assets move.
+ *
+ * For every other eligibility rule the client-side blockers
+ * (lib/batch-blockers.ts) keep batches clean before submit.
  */
 export type BulkActionResponse = {
   success: boolean;
@@ -1200,6 +1220,34 @@ export type BookingDetail = {
    */
   hasAlreadyBookedAssets?: boolean;
   /**
+   * True while this reservation request awaits a decision (the workspace
+   * requires approval for a role and the booking has no `approvedAt`).
+   * Optional for rolling-deploy safety: an older server omits it, and absent
+   * must read as `false` so nothing is hidden.
+   */
+  isPendingApproval?: boolean;
+  /**
+   * Whether this caller may approve the pending request: the server's
+   * `booking:approve` answer (Owner, Administrator, Manager), false unless
+   * {@link isPendingApproval}. The booking screen offers "Approve request"
+   * only when true; the approve endpoint enforces the permission on its own.
+   * Absent on an older server.
+   */
+  canApprove?: boolean;
+  /**
+   * The request version this screen shows (the booking plus everything it
+   * holds), sent back with Approve so a request that changed since is
+   * refused. Present only with `canApprove`; absent on an older server.
+   */
+  requestVersion?: string | null;
+  /**
+   * True on a DRAFT whose reservation by this caller would wait for approval
+   * (workspace requires it, and the caller's role is one whose reservations
+   * do). The screen then words Reserve as a request. Absent on an older
+   * server, which reads as a plain reservation.
+   */
+  reservationNeedsApproval?: boolean;
+  /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview
    * uses, so the mobile progress bar shows identical numbers to web. `null` /
@@ -1355,6 +1403,12 @@ export type BookingMutationResponse = {
     name: string;
     status: BookingStatus;
   };
+  /**
+   * Reserve only: whether the reservation became a request waiting for
+   * approval, decided by the write itself. Absent on other mutations and on
+   * servers that predate it.
+   */
+  isPendingApproval?: boolean;
   /**
    * Duplicate only: how many archived assets the server left out of the copy
    * (archived assets cannot be booked). Absent on other mutations and on
@@ -1525,13 +1579,19 @@ export type AvailableKitsResponse = {
  * A bookable asset model in the book-by-model picker, with how many units are
  * free to reserve in the booking's window. `available` = total − in-custody −
  * reserved (concrete + via other model requests). Server-computed; the app
- * caps the reserve input at `available` + the amount already fulfilled.
+ * caps the reserve input with `modelReservationBounds`.
  */
 export type AvailableModel = {
   id: string;
   name: string;
   total: number;
   available: number;
+  /**
+   * Units of this model the booking already holds by name, outside custody.
+   * They come out of the same pool as the reservation. Optional because a
+   * server older than this field does not send it; treat missing as 0.
+   */
+  namedNotInCustody?: number;
   inCustody: number;
   reservedConcrete: number;
   reservedViaRequest: number;

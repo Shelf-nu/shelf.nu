@@ -34,14 +34,16 @@ function slice(
 }
 
 describe("resolveUntaggedDisposition", () => {
-  it("takes the most out first across slices", () => {
+  it("fills the slices in allocation order, whatever each has out", () => {
+    // The earlier slice has fewer out and still goes first: the order is the
+    // one the LEGACY check-in uses (standalone first), not most out first.
     const shares = resolveUntaggedDisposition({
-      slices: [slice("s2", 2, [row("r2", 3)]), slice("s1", 1, [row("r1", 5)])],
-      units: 8,
+      slices: [slice("s2", 2, [row("r2", 5)]), slice("s1", 1, [row("r1", 3)])],
+      units: 4,
     });
     expect(shares).toEqual([
-      { sliceId: "s1", sourceRowId: "r1", units: 5 },
-      { sliceId: "s2", sourceRowId: "r2", units: 3 },
+      { sliceId: "s1", sourceRowId: "r1", units: 3 },
+      { sliceId: "s2", sourceRowId: "r2", units: 1 },
     ]);
   });
 
@@ -94,7 +96,7 @@ describe("resolveUntaggedDisposition", () => {
     ).toThrow();
   });
 
-  it("breaks a tie on units out and allocation order by row id", () => {
+  it("takes a slice's rows most out first, breaking a tie by row id", () => {
     const shares = resolveUntaggedDisposition({
       slices: [slice("s1", 1, [row("r-b", 3), row("r-a", 3)])],
       units: 4,
@@ -123,9 +125,9 @@ describe("resolveUntaggedDisposition", () => {
       units: 9,
     });
     expect(shares).toEqual([
-      { sliceId: "kit", sourceRowId: "k", units: 4 },
       { sliceId: "s1", sourceRowId: "p", units: 3 },
       { sliceId: "s1", sourceRowId: "u", units: 2 },
+      { sliceId: "kit", sourceRowId: "k", units: 4 },
     ]);
   });
 

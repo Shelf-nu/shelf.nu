@@ -7,7 +7,6 @@ import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -24,6 +23,14 @@ import type {
 } from "./sso-enforcement.server";
 
 const label: ErrorLabel = "Auth";
+
+/**
+ * The visitor an auth call acts for. `clientIp` comes from
+ * `getClientIpFromHeaders(request.headers)` and is forwarded to Supabase Auth
+ * so its per-IP sign-in limits count the visitor. Omit it only for calls no
+ * visitor triggered.
+ */
+export type VisitorIp = { clientIp?: string | null };
 
 /** The message a wrong email/password pair shows, whatever the account. */
 export const INVALID_CREDENTIALS_MESSAGE = "Incorrect email or password";
@@ -152,6 +159,41 @@ export async function endAllSessionsForUser(userId: string): Promise<number> {
 }
 
 /**
+ * Ends the one Supabase session that owns `refreshToken`, so the refresh token
+ * in a signed-out browser's cookie stops working on the server as well.
+ *
+ * Deleting the `auth.sessions` row cascades to all of its refresh tokens
+ * (`refresh_tokens_session_id_fkey`), including rotated ones. The account's
+ * other sessions (other browsers, the companion app) stay signed in.
+ *
+ * Best-effort: signing out must always succeed for the person in front of the
+ * browser, so a failure is logged rather than thrown.
+ *
+ * @param refreshToken - The refresh token stored in the session cookie
+ */
+export async function endSessionByRefreshToken(
+  refreshToken: string
+): Promise<void> {
+  try {
+    await db.$executeRaw`
+      DELETE FROM auth.sessions
+      WHERE id IN (
+        SELECT session_id FROM auth.refresh_tokens
+        WHERE token = ${refreshToken}
+      )
+    `;
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to end the session on sign-out.",
+        label,
+      })
+    );
+  }
+}
+
+/**
  * Asks the legacy sign-in decision for an address that has just authenticated,
  * and ends the session it opened when the address must use SSO.
  *
@@ -164,7 +206,8 @@ export async function endAllSessionsForUser(userId: string): Promise<number> {
  *   authenticated address, never one taken from the request. Pass `userId`
  *   (the session's auth user id) whenever it is known, so the decision is
  *   made for exactly that account rather than for whichever account the
- *   address resolves to.
+ *   address resolves to. With `userId`, the account's stored `User.email` is
+ *   decided too, and a refusal under either address refuses the session.
  * @returns null when the sign-in may proceed, otherwise why it is refused
  * @throws {ShelfError} If the decision fails (the session is already revoked)
  */
@@ -269,9 +312,13 @@ export async function confirmExistingAuthAccount(
   }
 }
 
-export async function signUpWithEmailPass(email: string, password: string) {
+export async function signUpWithEmailPass(
+  email: string,
+  password: string,
+  { clientIp }: VisitorIp = {}
+) {
   try {
-    const { data, error } = await getSupabaseAdmin().auth.signUp({
+    const { data, error } = await getSupabaseAdmin({ clientIp }).auth.signUp({
       email: email,
       password: password,
       options: {
@@ -323,9 +370,12 @@ export async function signUpWithEmailPass(email: string, password: string) {
   }
 }
 
-export async function resendVerificationEmail(email: string) {
+export async function resendVerificationEmail(
+  email: string,
+  { clientIp }: VisitorIp = {}
+) {
   try {
-    const { error } = await getSupabaseAdmin().auth.resend({
+    const { error } = await getSupabaseAdmin({ clientIp }).auth.resend({
       type: "signup",
       email,
     });
@@ -360,15 +410,22 @@ export async function resendVerificationEmail(email: string) {
  *
  * @param email - the address to sign in with
  * @param password - the plaintext password
+ * @param visitor - see {@link VisitorIp}
  * @returns the mapped auth session, or null when the email is not confirmed
  * @throws {ShelfError} 403 when the credentials are right but the address must
  *   use SSO; {@link INVALID_CREDENTIALS_MESSAGE} for a wrong pair; otherwise a
  *   wrapped Supabase failure
  */
-export async function signInWithEmail(email: string, password: string) {
+export async function signInWithEmail(
+  email: string,
+  password: string,
+  { clientIp }: VisitorIp = {}
+) {
   let authSession: AuthSession;
   try {
-    const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
+    const { data, error } = await getSupabaseAdmin({
+      clientIp,
+    }).auth.signInWithPassword({
       email,
       password,
     });
@@ -420,55 +477,6 @@ export async function signInWithEmail(email: string, password: string) {
   return authSession;
 }
 
-export async function signInWithSSO(
-  domain: string,
-  /**
-   * Which client is initiating SSO. `"mobile"` lands the post-auth redirect on
-   * the native-app callback path (which hands a session back to the app);
-   * defaults to the web callback. The redirect path is built HERE (never taken
-   * from the caller) so it is always an allow-listed, query-free Supabase
-   * redirect URL — Supabase treats `?` as a wildcard in the allow-list.
-   */
-  { platform = "web" }: { platform?: "web" | "mobile" } = {}
-) {
-  try {
-    const redirectTo = `${SERVER_URL}/oauth/callback${
-      platform === "mobile" ? "/mobile" : ""
-    }`;
-
-    const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
-      domain,
-      options: {
-        redirectTo,
-      },
-    });
-
-    if (error) {
-      throw error;
-    }
-
-    return data.url;
-  } catch (cause) {
-    let message =
-      "Something went wrong. Please try again later or contact support.";
-    let shouldBeCaptured = true;
-
-    // @ts-expect-error
-    if (cause?.code === "sso_provider_not_found") {
-      message = "No SSO provider assigned for your organization's domain";
-      shouldBeCaptured = false;
-    }
-
-    throw new ShelfError({
-      cause,
-      message,
-      label,
-      shouldBeCaptured,
-      additionalData: { domain },
-    });
-  }
-}
-
 /**
  * Whether Supabase refused a one-time code because the address has no account
  * and accounts are not created from a code (`shouldCreateUser: false`, or
@@ -493,14 +501,15 @@ function isNoAccountForCodeError(error: AuthError): boolean {
  * yet, so its response must not depend on the account behind the address.
  *
  * @param email - the address to send the code to
+ * @param visitor - see {@link VisitorIp}
  * @throws {ShelfError} a wrapped Supabase failure
  */
-export async function sendOTP(email: string) {
+export async function sendOTP(email: string, { clientIp }: VisitorIp = {}) {
   try {
     const decision = await getLegacyLoginDecision(email);
     if (!decision.allowed) return;
 
-    const { error } = await getSupabaseAdmin().auth.signInWithOtp({
+    const { error } = await getSupabaseAdmin({ clientIp }).auth.signInWithOtp({
       email,
       options: {
         shouldCreateUser: !config.disableSignup, // If signup is disabled, don't create a new user
@@ -576,14 +585,18 @@ export async function sendOTP(email: string) {
  * every address.
  *
  * @param email - the address to send the reset code to
+ * @param visitor - see {@link VisitorIp}
  * @throws {ShelfError} a wrapped Supabase failure
  */
-export async function sendResetPasswordLink(email: string) {
+export async function sendResetPasswordLink(
+  email: string,
+  { clientIp }: VisitorIp = {}
+) {
   try {
     const decision = await getLegacyLoginDecision(email);
     if (!decision.allowed) return;
 
-    await getSupabaseAdmin().auth.resetPasswordForEmail(email);
+    await getSupabaseAdmin({ clientIp }).auth.resetPasswordForEmail(email);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -765,19 +778,29 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
-export async function validateSession(token: string) {
+/**
+ * Checks that the session cookie still points at a live refresh token that
+ * belongs to the user the cookie names. This is the web auth boundary: the
+ * `protect()` middleware calls it on every non-public request.
+ *
+ * The session cookie is bound to its refresh token's user, so a cookie whose
+ * `userId` and `refreshToken` belong to different accounts is not a session.
+ * GoTrue stores `auth.refresh_tokens.user_id` as text, so the id is compared
+ * as text.
+ *
+ * @param token - The refresh token stored in the session cookie
+ * @param userId - The user id stored in the same session cookie
+ * @returns true when an unrevoked refresh token of that user matches
+ */
+export async function validateSession(token: string, userId: string) {
   try {
-    // const t0 = performance.now();
     const result = await db.$queryRaw<{ id: string; revoked: boolean }[]>`
-      SELECT id, revoked FROM auth.refresh_tokens 
-      WHERE token = ${token} 
+      SELECT id, revoked FROM auth.refresh_tokens
+      WHERE token = ${token}
+      AND user_id::text = ${userId}
       AND revoked = false
-      LIMIT 1 
+      LIMIT 1
     `;
-    // const t1 = performance.now();
-
-    // eslint-disable-next-line no-console
-    // console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
 
     if (result.length === 0) {
       //logging for debug
@@ -804,8 +827,20 @@ export async function validateSession(token: string) {
   }
 }
 
+/**
+ * Trades a refresh token for a fresh session.
+ *
+ * Supabase counts refresh grants in the same per-IP token-endpoint limit as
+ * password sign-ins, so every caller acting for a visitor passes their IP.
+ *
+ * @param refreshToken - The session's refresh token
+ * @param visitor - see {@link VisitorIp}
+ * @returns The refreshed auth session
+ * @throws {ShelfError} When the token is missing or Supabase refuses it
+ */
 export async function refreshAccessToken(
-  refreshToken?: string
+  refreshToken?: string,
+  { clientIp }: VisitorIp = {}
 ): Promise<AuthSession> {
   try {
     if (!refreshToken) {
@@ -816,7 +851,9 @@ export async function refreshAccessToken(
       });
     }
 
-    const { data, error } = await getSupabaseAdmin().auth.refreshSession({
+    const { data, error } = await getSupabaseAdmin({
+      clientIp,
+    }).auth.refreshSession({
       refresh_token: refreshToken,
     });
 
@@ -876,18 +913,25 @@ export async function verifyAuthSession(authSession: AuthSession) {
  *
  * @param email - the address the code was sent to
  * @param otp - the code the person typed
+ * @param visitor - see {@link VisitorIp}
  * @returns the mapped auth session
  * @throws {ShelfError} {@link INVALID_OTP_MESSAGE} for a wrong or expired code
  *   and for a refused address; otherwise a wrapped verification failure
  */
-export async function verifyOtpAndSignin(email: string, otp: string) {
+export async function verifyOtpAndSignin(
+  email: string,
+  otp: string,
+  { clientIp }: VisitorIp = {}
+) {
   let authSession: AuthSession;
   try {
-    const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
-      email,
-      token: otp,
-      type: "email",
-    });
+    const { data, error } = await getSupabaseAdmin({ clientIp }).auth.verifyOtp(
+      {
+        email,
+        token: otp,
+        type: "email",
+      }
+    );
 
     if (error) {
       throw error;

@@ -20,6 +20,7 @@ import { BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 
+import { resolveSentUnits } from "./checkin-receipt";
 import {
   attributeDispositionsByBookingAsset,
   BOOKING_DISPOSITION_CATEGORIES,
@@ -33,7 +34,9 @@ export type CountedSlice = {
   quantity: number;
   assetKitId: string | null;
   /** Units sent out on it so far, cumulative across trips. */
-  checkedOutQuantity?: number;
+  checkedOutQuantity: number;
+  /** When the slice was last dispatched; `null` when it never was. */
+  checkedOutAt: Date | null;
 };
 
 /**
@@ -56,7 +59,7 @@ export function unitsStillOutBySlice({
   siblings,
   logs,
 }: {
-  sourced: Array<CountedSlice & { checkedOutQuantity: number }>;
+  sourced: CountedSlice[];
   siblings: CountedSlice[];
   logs: Array<{
     bookingId: string | null;
@@ -87,16 +90,20 @@ export function unitsStillOutBySlice({
     const groupKey = key(slice.bookingId, slice.assetId);
     let attributed = attributedByGroup.get(groupKey);
     if (!attributed) {
-      // A slice can go out and come back more than once, so what it can
-      // absorb is its cumulative departures, not one booked quantity.
-      // Otherwise untagged returns from later trips spill nowhere and read
-      // as units still out.
+      // A slice absorbs at most the units it sent (`resolveSentUnits`), the
+      // capacity the check-in writer and the booking page use. Cumulative, so
+      // untagged returns from a later trip still find room; and nothing for a
+      // slice that never left, so a return cannot land on it.
       attributed = attributeDispositionsByBookingAsset({
         bookingAssetRows: (slicesByGroup.get(groupKey) ?? [slice]).map(
           (row) => ({
             id: row.id,
             assetKitId: row.assetKitId,
-            quantity: Math.max(row.quantity, row.checkedOutQuantity ?? 0),
+            quantity: resolveSentUnits({
+              quantity: row.quantity,
+              checkedOutAt: row.checkedOutAt,
+              checkedOutQuantity: row.checkedOutQuantity,
+            }),
           })
         ),
         consumptionLogs: logsByGroup.get(groupKey) ?? [],
@@ -179,6 +186,7 @@ const SLICE_SELECT = {
   assetId: true,
   quantity: true,
   assetKitId: true,
+  checkedOutAt: true,
 } as const;
 
 /**
@@ -196,8 +204,14 @@ export const LEGACY_SOURCED_SLICE_WHERE = {
   checkedOutQuantity: { gt: 0 },
 } as const;
 
-/** A LEGACY slice with a recorded source, as the booked-out counter reads it. */
-export type LegacySourcedSlice = CountedSlice & {
+/**
+ * A LEGACY slice with a recorded source, as the booked-out counter reads it.
+ * `checkedOutAt` is optional: {@link LEGACY_SOURCED_SLICE_WHERE} requires
+ * `checkedOutQuantity > 0`, so the units such a slice sent are its counted
+ * departures and never fall back to the dispatch marker.
+ */
+export type LegacySourcedSlice = Omit<CountedSlice, "checkedOutAt"> & {
+  checkedOutAt?: Date | null;
   checkedOutQuantity: number;
   sourceLocationId: string | null;
 };
@@ -246,7 +260,14 @@ export async function bookedOutFromLegacySourcedSlices(
     }),
   ]);
 
-  const stillOut = unitsStillOutBySlice({ sourced, siblings, logs });
+  const stillOut = unitsStillOutBySlice({
+    sourced: sourced.map((slice) => ({
+      ...slice,
+      checkedOutAt: slice.checkedOutAt ?? null,
+    })),
+    siblings,
+    logs,
+  });
   const byAssetAndLocation = new Map<string, Map<string, number>>();
   for (const slice of sourced) {
     const out = stillOut.get(slice.id) ?? 0;

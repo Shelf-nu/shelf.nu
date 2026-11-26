@@ -32,7 +32,7 @@ tags:
 # stays reusable across runs. Tear down with `seed-e2e.sh down`.
 #
 # @see ../../../app/(tabs)/bookings/index.tsx   card reserved-count
-# @see ../../../app/(tabs)/scanner.tsx          fulfilExtras / CTA
+# @see ../../../components/scanner/scanner-screen.tsx  fulfilExtras / CTA
 
 - runFlow: ../../shared/login.yaml
 

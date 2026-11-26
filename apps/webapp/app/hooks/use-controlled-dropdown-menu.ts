@@ -10,9 +10,12 @@ type UseControlledDropdownMenuReturn = {
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
   /**
-   * Pass to the Radix menu's `onOpenChange`. Applies the open state Radix
-   * asks for only after a QR-scan auto-open on a sheet viewport; otherwise the
-   * menu's own triggers and `setOpen` drive it.
+   * Pass to the Radix menu's `onOpenChange`. On desktop it applies every open
+   * change Radix asks for: the trigger (mouse and keyboard), Escape, Tab-out,
+   * an outside click and an item select. The trigger must therefore not also
+   * toggle `open` in its own `onClick`, or one click opens and closes it.
+   * On a sheet viewport it applies them only after a QR-scan auto-open: there
+   * the desktop trigger is hidden, and the mobile button and overlay drive it.
    */
   onOpenChange: (open: boolean) => void;
 };
@@ -56,7 +59,7 @@ export function useControlledDropdownMenu(
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
-      if (defaultApplied && isSheetViewport()) setOpen(nextOpen);
+      if (!isSheetViewport() || defaultApplied) setOpen(nextOpen);
     },
     [defaultApplied]
   );

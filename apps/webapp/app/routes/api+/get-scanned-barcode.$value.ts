@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
@@ -12,6 +11,7 @@ import {
   ScannerPickerContextSchema,
   type ScannerPickerMeta,
 } from "~/modules/scanner/picker-meta.server";
+import { redactScannedItemForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -25,20 +25,16 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
-import { requirePermission } from "~/utils/roles.server";
 import {
-  sanitizeAssetExtraInclude,
-  sanitizeKitExtraInclude,
-} from "~/utils/scanner-extra-include.server";
+  isRestoredLookup,
+  RESTORED_LOOKUP_PARAM,
+} from "~/utils/restored-scan-lookup";
+import { requirePermission } from "~/utils/roles.server";
 import type {
   AssetFromScanner,
   KitFromScanner,
 } from "~/utils/scanner-includes.server";
-import {
-  ASSET_INCLUDE,
-  BARCODE_INCLUDE,
-  KIT_INCLUDE,
-} from "~/utils/scanner-includes.server";
+import { BARCODE_INCLUDE } from "~/utils/scanner-includes.server";
 
 // Export types for barcode scanning
 export type AssetFromBarcode = AssetFromScanner;
@@ -53,7 +49,9 @@ export type KitFromBarcode = KitFromScanner;
  * Each resolve records the scan as `WEB_DRAWER`, with no note on the asset: a
  * drawer row is a list entry, and the action the drawer performs keeps its
  * own trail. A resolve carrying `auditSessionId` records nothing, because the
- * audit's own writer (`recordAuditScan`) records that scan.
+ * audit's own writer (`recordAuditScan`) records that scan. Neither does one
+ * carrying `restored=1`: the row was put back from a scan draft, so no one
+ * scanned the barcode just now (see {@link RESTORED_LOOKUP_PARAM}).
  *
  * @see {@link file://./get-scanned-item.$qrId.ts} the QR / SAM ID twin
  */
@@ -63,7 +61,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
 
   try {
-    const { organizationId, canUseBarcodes } = await requirePermission({
+    const { organizationId, canUseBarcodes, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset, // Use asset permissions for barcode scanning
@@ -99,37 +97,12 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     // a loader sees them; the URL still has the difference.
     const value = readRawLastPathSegment(request, encodedValue);
 
-    const {
-      assetExtraInclude,
-      kitExtraInclude,
-      auditSessionId,
-      pickerContext,
-    } = parseData(
+    const { auditSessionId, pickerContext, restored } = parseData(
       searchParams,
       z.object({
-        assetExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for assetExtraInclude");
-            }
-          }),
-        kitExtraInclude: z
-          .string()
-          .optional()
-          .transform((val) => {
-            if (!val) return undefined;
-            try {
-              return JSON.parse(val);
-            } catch (_error) {
-              throw new Error("Invalid JSON input for kitExtraInclude");
-            }
-          }),
         auditSessionId: z.string().optional(),
+        /** `1` when a restored scan draft row looks the code up again. */
+        [RESTORED_LOOKUP_PARAM]: z.string().optional(),
         /** Mirror of the get-scanned-item shape; see that endpoint. */
         pickerContext: z
           .string()
@@ -150,35 +123,15 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           }),
       })
     ) as {
-      assetExtraInclude: Prisma.AssetInclude | undefined;
-      kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
-    };
-
-    // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
-    // user-controlled JSON. Allowlist them before merging into the Prisma
-    // include so relation traversal / deep nesting cannot be injected.
-    const safeAssetExtraInclude = sanitizeAssetExtraInclude(assetExtraInclude);
-    const safeKitExtraInclude = sanitizeKitExtraInclude(kitExtraInclude);
-
-    const include = {
-      ...BARCODE_INCLUDE,
-
-      // Include additional data based on search params. This will override the default includes
-      ...(safeAssetExtraInclude
-        ? { asset: { include: { ...ASSET_INCLUDE, ...safeAssetExtraInclude } } }
-        : undefined),
-
-      ...(safeKitExtraInclude
-        ? { kit: { include: { ...KIT_INCLUDE, ...safeKitExtraInclude } } }
-        : undefined),
+      restored?: string;
     };
 
     const barcode = await getBarcodeByValue({
       value,
       organizationId,
-      include,
+      include: BARCODE_INCLUDE,
     });
 
     if (!barcode) {
@@ -189,6 +142,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { value, shouldSendNotification: false },
         label: "Barcode",
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
       });
     }
 
@@ -198,11 +153,13 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         message: "Barcode is not linked to any asset or kit",
         additionalData: { value, shouldSendNotification: false },
         shouldBeCaptured: false,
+        // A refusal of the code itself, so a 4xx: a scan draft drops it.
+        status: 404,
         label: "Barcode",
       });
     }
 
-    if (!auditSessionId) {
+    if (!auditSessionId && !isRestoredLookup(restored)) {
       // Non-fatal: a failed record never fails the resolve. Not awaited: a
       // drawer row needs only the resolved item, and a scanner list resolves
       // one code per scan.
@@ -265,17 +222,26 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           })
         : null;
 
+    // Custodians the viewer may not see are redacted from the asset and the
+    // kit, as on their own pages; the viewer's own custody stays named.
+    const visibility = { canSeeAllCustody: access.custody.seeAll, userId };
+
     return data(
       payload({
         barcode: {
           ...barcode,
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
+          kit: barcode.kit
+            ? redactScannedItemForViewer(barcode.kit, visibility)
+            : barcode.kit,
           asset: barcode.asset
             ? {
                 // Collapse the model-image cascade into the flat image
                 // fields the scanner drawers read; the nested relation is
                 // dropped so the row carries one source of truth.
-                ...serializeAssetImage(barcode.asset),
+                ...serializeAssetImage(
+                  redactScannedItemForViewer(barcode.asset, visibility)
+                ),
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,

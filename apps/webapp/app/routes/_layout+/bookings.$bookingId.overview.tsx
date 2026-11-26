@@ -13,6 +13,7 @@ import type {
   MetaFunction,
 } from "react-router";
 import { z } from "zod";
+import { ApproveBookingSchema } from "~/components/booking/approval/approve-booking-dialog";
 import { BulkRemoveAssetsAndKitSchema } from "~/components/booking/bulk-remove-asset-and-kit-dialog";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
@@ -22,6 +23,7 @@ import {
   ExtendBookingSchema,
 } from "~/components/booking/forms/forms-schema";
 import { BookingPageContent } from "~/components/booking/page-content";
+import { RevertToDraftSchema } from "~/components/booking/revert-to-draft-dialog";
 import { ErrorContent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -32,6 +34,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import { resolveBookingCustodian } from "~/modules/booking/booking-custodian.server";
 import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
   primeBookingOverviewCache,
@@ -52,6 +55,7 @@ import {
   loadNextReservations,
   NO_NEXT_RESERVATIONS,
 } from "~/modules/booking/next-reservations.server";
+import { readBookingRequestVersion } from "~/modules/booking/request-version.server";
 import {
   assertBookingDeleteConfirmed,
   archiveBooking,
@@ -69,6 +73,7 @@ import {
   getDetailedPartialCheckoutData,
   removeAssets,
   reserveBooking,
+  approveBooking,
   revertBookingToDraft,
   updateBasicBooking,
   updateBookingNotificationRecipients,
@@ -157,6 +162,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
@@ -188,6 +194,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         entity: PermissionEntity.booking,
         action: PermissionAction.read,
       });
+
+    /**
+     * The version an approver approves, read BEFORE anything this page shows,
+     * so a change that commits while the page loads makes the version older
+     * than the contents on screen, never newer: Approve then refuses instead
+     * of approving what the approver did not see. Read only for someone who
+     * may approve, and used only while the booking is a pending request.
+     */
+    const reviewableVersion =
+      authSession?.userId &&
+      (await hasPermission({
+        userId: authSession.userId,
+        organizationId,
+        // The membership requirePermission already read: no second lookup.
+        roles: userOrganizations.find(
+          (o) => o.organization.id === organizationId
+        )?.roles,
+        workspace: access.workspaceGrants,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.approve,
+      }))
+        ? await readBookingRequestVersion(db, {
+            bookingId,
+            organizationId,
+            pendingOnly: true,
+          })
+        : null;
 
     // Get the booking with basic asset information
     const [booking, tags, notifyData] = await Promise.all([
@@ -1293,12 +1326,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : [];
 
+    // Only a request still waiting for a decision needs the version.
+    const requestVersion =
+      booking.status === BookingStatus.RESERVED && booking.approvedAt === null
+        ? reviewableVersion
+        : null;
+
     return data(
       payload({
         userId,
         currentOrganization,
         header,
         booking,
+        requestVersion,
         modelShortfalls,
         modelName,
         /**
@@ -1542,6 +1582,7 @@ const INTENT_VERB = {
   cancel: "cancel",
   removeKit: "remove kits from",
   "revert-to-draft": "revert",
+  "approve-booking": "approve",
   "extend-booking": "change the end date of",
   "bulk-remove-asset-or-kit": "remove items from",
   "partial-checkin": "check in",
@@ -1585,6 +1626,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "cancel",
           "removeKit",
           "revert-to-draft",
+          "approve-booking",
           "extend-booking",
           "bulk-remove-asset-or-kit",
           "partial-checkin",
@@ -1628,6 +1670,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
+      // Owner/Administrator (resolver short-circuit) and Manager (matrix row)
+      // decide requests; Base/Self service cannot approve their own.
+      "approve-booking": PermissionAction.approve,
       "extend-booking": PermissionAction.extend,
       "bulk-remove-asset-or-kit": PermissionAction.update,
       "partial-checkin": PermissionAction.checkin,
@@ -1717,7 +1762,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          // creatorId/custodianUserId feed the ownership guard below.
+          // creatorId/custodianUserId feed the ownership guard below;
+          // custodianTeamMemberId tells save/reserve whether the custodian
+          // changes.
           select: {
             id: true,
             status: true,
@@ -1725,6 +1772,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             to: true,
             creatorId: true,
             custodianUserId: true,
+            custodianTeamMemberId: true,
           },
         }),
         getWorkingHoursForOrganization(organizationId),
@@ -1833,6 +1881,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const tags = buildTagsSet(parsedData.tags).set;
 
+        // The custodian is loaded from this workspace and held to the
+        // self-only rule; its user link comes from that row, not the form.
+        const custodian = await resolveBookingCustodian({
+          custodianTeamMemberId: parsedData.custodian.id,
+          organizationId,
+          userId,
+          access,
+          currentCustodianTeamMemberId: basicBookingInfo.custodianTeamMemberId,
+        });
+
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -1840,8 +1898,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianTeamMemberId: custodian.id,
           tags,
           userId,
           hints: getClientHint(request),
@@ -1890,6 +1947,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const formattedFrom = parsedData.startDate;
         const formattedTo = parsedData.endDate;
 
+        // Same custodian rule as the "save" branch.
+        const custodian = await resolveBookingCustodian({
+          custodianTeamMemberId: parsedData.custodian.id,
+          organizationId,
+          userId,
+          access,
+          currentCustodianTeamMemberId: basicBookingInfo.custodianTeamMemberId,
+        });
+
         const booking = await reserveBooking({
           id,
           organizationId,
@@ -1897,19 +1963,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianTeamMemberId: custodian.id,
           hints: getClientHint(request),
           alertsOrgOnReservation:
             access.policy.notifications.reservationAlertsAdmins,
+          actorApprovalSetting: access.policy.bookings.approvalSetting,
           tags,
           userId,
           seesAllBookings: access.bookings.seeAll,
         });
 
+        // A reservation request reads as a request, not a done deal.
+        // `reserveBooking` writes `approvedAt` on every reservation (now, or
+        // empty for a request), so its result alone decides; a settings read
+        // from earlier in this action could be out of date.
+        const isPendingRequest = booking.approvedAt === null;
         sendNotification({
-          title: "Booking reserved",
-          message: "Your booking has been reserved successfully",
+          title: isPendingRequest ? "Request sent" : "Booking reserved",
+          message: isPendingRequest
+            ? "Your booking request is waiting for approval. You will receive an email once it has been reviewed."
+            : "Your booking has been reserved successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
@@ -2275,12 +2348,51 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
+      case "approve-booking": {
+        const { reviewedVersion } = parseData(formData, ApproveBookingSchema, {
+          additionalData: { userId, id, organizationId },
+        });
+        // The page always renders the version it shows; a post without one
+        // is from a page that never had it (loaded before the request was
+        // pending), so the approver reloads and reviews the request first.
+        if (!reviewedVersion) {
+          throw new ShelfError({
+            cause: null,
+            label: "Booking",
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "This booking request changed since you opened it. Reload it and review it again before approving.",
+          });
+        }
+        await approveBooking({
+          id,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+          reviewedVersion,
+        });
+
+        sendNotification({
+          title: "Booking approved",
+          message: "The booking request has been approved successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
+      }
       case "revert-to-draft": {
+        // The optional note the custodian gets with the "sent back" email.
+        const { revertReason } = parseData(formData, RevertToDraftSchema, {
+          additionalData: { userId, id, organizationId },
+        });
         await revertBookingToDraft({
           id,
           organizationId,
           userId,
           hints: getClientHint(request),
+          reason: revertReason,
         });
 
         sendNotification({

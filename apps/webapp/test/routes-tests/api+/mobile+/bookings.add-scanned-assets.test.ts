@@ -21,6 +21,8 @@
 
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -41,15 +43,13 @@ import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 import { action } from "~/routes/api+/mobile+/bookings.add-scanned-assets";
 import { ShelfError } from "~/utils/error";
 
-import { assertIsDataWithResponseInit } from "@helpers/assertions";
-import { mobileUserContext } from "@helpers/mobile-user-context";
-
 // @vitest-environment node
 
 // why: db is the integration boundary. `booking.findFirst` is the org-scoped
 // booking read, `bookingAsset.findMany` is the scoped read of the standalone
 // rows a scan could duplicate, `assetKit.findMany` is what resolves a kit into
 // its memberships, and `asset.findMany` backs the org guard on the scanned ids.
+
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
@@ -749,6 +749,8 @@ describe("POST /api/mobile/bookings/add-scanned-assets: quantities", () => {
     expect(setQuantitiesMock).toHaveBeenCalledWith(ADD_TX, {
       bookingId: BOOKING_ID,
       organizationId: "org-1",
+      // Who makes the change, for the approval rule on a raised amount.
+      actorUserId: "user-1",
       changes: [
         {
           bookingAssetId: "slice-asset-9",

@@ -1,9 +1,17 @@
+import { SENTRY_TUNNEL_MAX_ENVELOPE_BYTES } from "~/utils/constants";
 import {
   buildSentryEnvelopeUrl,
   envelopeDsnMatches,
   getConfiguredSentryTarget,
+  readBodyWithinLimit,
 } from "~/utils/sentry-tunnel.server";
 import type { Route } from "./+types/sentry-tunnel";
+
+/**
+ * Response headers Sentry uses to tell the SDK how long to hold back, and for
+ * which data types. Every other upstream header is left behind.
+ */
+const SENTRY_RATE_LIMIT_HEADERS = ["X-Sentry-Rate-Limits", "Retry-After"];
 
 /**
  * Sentry tunnel endpoint.
@@ -13,9 +21,18 @@ import type { Route } from "./+types/sentry-tunnel";
  * Enhanced Tracking Protection).
  *
  * The destination is pinned to the server's own configured Sentry project. The
- * DSN in the client's envelope is only ever compared against it — it never
- * builds the URL we fetch. Deriving the host from the envelope made this a
- * full-read SSRF; see `~/utils/sentry-tunnel.server` for the full account.
+ * DSN in the client's envelope is only ever compared against it: it never
+ * builds the URL we fetch, so the caller chooses nothing about where the
+ * request goes; see `~/utils/sentry-tunnel.server`.
+ *
+ * The body is capped at {@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES} here as well
+ * as in the server middleware, so the bound holds for every method and path
+ * spelling that reaches this action.
+ *
+ * Sentry's rate-limit headers are passed back with its status. The browser SDK
+ * reads `X-Sentry-Rate-Limits` to pause only the data types Sentry limited
+ * (spans when the span quota is spent, say); a 429 without it makes the SDK
+ * pause every type, errors included, for 60 seconds.
  *
  * @see https://docs.sentry.io/platforms/javascript/troubleshooting/#using-the-tunnel-option
  * @see {@link file://./../../utils/sentry-tunnel.server.ts}
@@ -33,7 +50,15 @@ export async function action({ request }: Route.ActionArgs) {
       return new Response("Sentry tunnel is not configured", { status: 404 });
     }
 
-    const envelopeBytes = await request.arrayBuffer();
+    const envelopeBytes = await readBodyWithinLimit(
+      request,
+      SENTRY_TUNNEL_MAX_ENVELOPE_BYTES
+    );
+
+    if (!envelopeBytes) {
+      return new Response("Envelope too large", { status: 413 });
+    }
+
     const envelope = new TextDecoder().decode(envelopeBytes);
 
     // The first line of the envelope is a JSON header containing the DSN
@@ -66,13 +91,19 @@ export async function action({ request }: Route.ActionArgs) {
       redirect: "manual",
     });
 
+    const headers = new Headers({
+      "Content-Type":
+        sentryResponse.headers.get("Content-Type") ||
+        "application/x-sentry-envelope",
+    });
+    for (const name of SENTRY_RATE_LIMIT_HEADERS) {
+      const value = sentryResponse.headers.get(name);
+      if (value !== null) headers.set(name, value);
+    }
+
     return new Response(sentryResponse.body, {
       status: sentryResponse.status,
-      headers: {
-        "Content-Type":
-          sentryResponse.headers.get("Content-Type") ||
-          "application/x-sentry-envelope",
-      },
+      headers,
     });
   } catch {
     return new Response("Invalid envelope", { status: 400 });

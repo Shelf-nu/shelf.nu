@@ -136,7 +136,8 @@ export type BookingLifecycleAction =
   | "BOOKING_PARTIAL_CHECKIN"
   | "BOOKING_PARTIAL_CHECKOUT"
   | "BOOKING_CANCELLED"
-  | "BOOKING_ARCHIVED";
+  | "BOOKING_ARCHIVED"
+  | "BOOKING_APPROVED";
 
 export type BookingLifecycleEventInput = BaseEventInput & {
   action: BookingLifecycleAction;

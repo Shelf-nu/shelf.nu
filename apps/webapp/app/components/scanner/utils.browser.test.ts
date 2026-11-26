@@ -1,12 +1,14 @@
 /**
- * The camera path, classified with the environment a browser actually has.
+ * The camera and handheld paths, classified with the environment a browser
+ * actually has.
  *
  * Every other test runs under Node, where `isBrowser` is false and `~/utils/env`
  * reads the full server environment. A real browser reads only `window.env`
  * (the payload of `getBrowserEnv`), and `getEnv` answers `""` for anything
- * declared secret. `isShelfQrCode` decides whether a scanned QR is ours from
+ * declared secret. `getShelfQrId` decides whether a scanned QR is ours from
  * those values, so this file loads the env module the way the browser does and
- * sends Shelf labels through `processFrame`, exactly as the camera does.
+ * sends codes through `processFrame` and `handleScannerInputValue`, exactly as
+ * the camera and a handheld scanner do.
  *
  * @see {@link file://./utils.tsx}
  * @see {@link file://../../utils/qr-code.ts}
@@ -34,7 +36,12 @@ window.env = {
   SUPPORT_EMAIL: "support@shelf.nu",
 } as unknown as typeof window.env;
 
+// why: code-scanner renders a lottie animation on success, and lottie paints
+// on a canvas at import time, which the test DOM does not provide.
+vi.mock("./success-animation", () => ({ default: () => null }));
+
 const { processFrame } = await import("./utils");
+const { handleScannerInputValue } = await import("./code-scanner");
 
 /** A value `isQrId` accepts: 10 characters, lowercase, leading letter. */
 const QR_ID = "abc1234567";
@@ -47,6 +54,8 @@ async function scanQr(text: string) {
     { format: "QRCode", text, position: undefined },
   ]);
 
+  // why: the test env has no 2D canvas or playing video. The decoder is
+  // mocked, so the frame only has to be readable, not real.
   const ctx = { drawImage: vi.fn(), getImageData: vi.fn(() => ({})) };
   const canvas = { getContext: () => ctx } as unknown as HTMLCanvasElement;
   const video = {
@@ -61,6 +70,8 @@ async function scanQr(text: string) {
     canvas,
     animationFrame: { current: 0 },
     paused: false,
+    // why: setPaused and setError are React state setters; these cases
+    // assert only on what onCodeDetectionSuccess receives.
     setPaused: vi.fn(),
     onCodeDetectionSuccess,
     allowNonShelfCodes: false,
@@ -95,9 +106,59 @@ describe("processFrame in the browser", () => {
     ).resolves.toEqual({ value: QR_ID, type: "qr", error: undefined });
   });
 
+  it("treats a /qr/ url on somebody else's host as external", async () => {
+    await expect(
+      scanQr("http://other-vendor.example/qr/01383d6c")
+    ).resolves.toEqual({
+      value: "http://other-vendor.example/qr/01383d6c",
+      type: "barcode",
+      barcodeType: "ExternalQR",
+    });
+  });
+
   it("still treats a QR on somebody else's host as external", async () => {
     await expect(scanQr(`https://example.com/${QR_ID}`)).resolves.toEqual({
       value: `https://example.com/${QR_ID}`,
+      type: "barcode",
+      barcodeType: "ExternalQR",
+    });
+  });
+});
+
+describe("a handheld scanner in the browser", () => {
+  // A keyboard-wedge scanner types the code into an input, so it reaches
+  // handleDetection without a format, and must get the camera's answer.
+  async function typeIn(rawValue: string) {
+    await handleScannerInputValue({
+      rawValue,
+      paused: false,
+      onCodeDetectionSuccess,
+      allowNonShelfCodes: false,
+    });
+
+    expect(onCodeDetectionSuccess).toHaveBeenCalledTimes(1);
+    return onCodeDetectionSuccess.mock.calls[0][0];
+  }
+
+  it("reads a shortener label as a Shelf QR", async () => {
+    await expect(typeIn(`https://eam.sh/${QR_ID}`)).resolves.toEqual({
+      value: QR_ID,
+      type: "qr",
+      error: undefined,
+    });
+  });
+
+  it("reads a label pointing at this app's own /qr route as a Shelf QR", async () => {
+    await expect(
+      typeIn(`${window.location.origin}/qr/${QR_ID}`)
+    ).resolves.toEqual({ value: QR_ID, type: "qr", error: undefined });
+  });
+
+  it("treats a /qr/ url on somebody else's host as external", async () => {
+    await expect(
+      typeIn("http://other-vendor.example/qr/01383d6c")
+    ).resolves.toEqual({
+      value: "http://other-vendor.example/qr/01383d6c",
       type: "barcode",
       barcodeType: "ExternalQR",
     });

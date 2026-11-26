@@ -418,6 +418,7 @@ export async function action({ request }: ActionFunctionArgs) {
         appliedResizes = await setStandaloneBookedQuantitiesWithinTx(tx, {
           bookingId,
           organizationId,
+          actorUserId: user.id,
           changes: resizes,
           // The add's answer when it asked, so the probe is not sent twice.
           sourcesInPlay,

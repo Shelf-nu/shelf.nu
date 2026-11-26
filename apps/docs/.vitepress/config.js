@@ -76,6 +76,16 @@ export default {
         ],
       },
       {
+        text: "⬆️ Upgrade Guides",
+        collapsed: false,
+        items: [
+          {
+            text: "Supabase API keys",
+            link: "/upgrading/supabase-api-keys",
+          },
+        ],
+      },
+      {
         text: "⚙️ Configuration",
         collapsed: true,
         items: [

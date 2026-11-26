@@ -50,12 +50,18 @@ type CallerEntry = {
   lock: string;
   /** Calls its body must contain (booking disposition writers). */
   mustCall: string[];
+  /**
+   * The one sorted, org-scoped `FOR UPDATE` statement a booking disposition
+   * writer locks its assets with, after the booking lock.
+   */
+  assetLock?:
+    | "lockEveryAssetForQuantityUpdate"
+    | "lockAssetRowsForQuantityUpdate";
 };
 
-/** Calls every booking disposition writer must make. */
+/** Calls every booking disposition writer must make, besides its asset lock. */
 const BOOKING_WRITER_CALLS = [
   "lockBookingForStatusCheck",
-  "lockEveryAssetForQuantityUpdate",
   "openSettlement",
   "settleUnits",
   "commitSettlement",
@@ -69,12 +75,14 @@ const CALLERS: Record<string, CallerEntry> = {
   "modules/booking/service.server.ts#checkinBooking": {
     writesBookingDispositions: true,
     lock: "booking lock, then lockEveryAssetForQuantityUpdate over the booking's quantity-tracked assets in one sorted statement, before openSettlement and every read that decides what comes back",
-    mustCall: BOOKING_WRITER_CALLS,
+    mustCall: [...BOOKING_WRITER_CALLS, "lockEveryAssetForQuantityUpdate"],
+    assetLock: "lockEveryAssetForQuantityUpdate",
   },
   "modules/booking/service.server.ts#partialCheckinBooking": {
     writesBookingDispositions: true,
-    lock: "booking lock, then lockEveryAssetForQuantityUpdate over the session's quantity-tracked assets in one sorted statement, before openSettlement and every read that decides what comes back",
-    mustCall: BOOKING_WRITER_CALLS,
+    lock: "booking lock, then lockAssetRowsForQuantityUpdate over the session's quantity-tracked assets in one sorted statement that returns the rows, before openSettlement and every read that decides what comes back",
+    mustCall: [...BOOKING_WRITER_CALLS, "lockAssetRowsForQuantityUpdate"],
+    assetLock: "lockAssetRowsForQuantityUpdate",
   },
   "modules/asset/service.server.ts#createAsset": {
     writesBookingDispositions: false,
@@ -256,12 +264,10 @@ describe("disposition log writers", () => {
       if (!entry.writesBookingDispositions) continue;
       const body = callers.get(key) ?? "";
       const at = (call: string) => body.search(new RegExp(`\\b${call}\\(`));
-      expect(at("lockBookingForStatusCheck"), key).toBeLessThan(
-        at("lockEveryAssetForQuantityUpdate")
-      );
-      expect(at("lockEveryAssetForQuantityUpdate"), key).toBeLessThan(
-        at("openSettlement")
-      );
+      const assetLock = entry.assetLock ?? "lockEveryAssetForQuantityUpdate";
+      expect(at(assetLock), key).toBeGreaterThan(-1);
+      expect(at("lockBookingForStatusCheck"), key).toBeLessThan(at(assetLock));
+      expect(at(assetLock), key).toBeLessThan(at("openSettlement"));
       expect(at("openSettlement"), key).toBeLessThan(
         at("createConsumptionLog")
       );

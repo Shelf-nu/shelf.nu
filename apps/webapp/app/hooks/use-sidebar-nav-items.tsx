@@ -33,6 +33,7 @@ import {
 } from "~/utils/permissions/settings-tabs";
 import { useCurrentOrganization } from "./use-current-organization";
 import { useOrganizationRoles } from "./use-organization-roles";
+import { useRememberedListHref } from "./use-remembered-list-href";
 
 type BaseNavItem = {
   title: string;
@@ -42,6 +43,8 @@ type BaseNavItem = {
   badge?: {
     show: boolean;
     variant?: "unread";
+    /** A number to show next to the title, e.g. requests waiting for a decision. */
+    count?: number;
   };
 };
 
@@ -80,10 +83,17 @@ export type NavItem =
  * @returns The top and bottom menu items, hidden entries already removed
  */
 export function useSidebarNavItems() {
-  const { isAdmin, canUseBookings, subscription, unreadUpdatesCount } =
-    useLoaderData<typeof loader>();
+  const {
+    isAdmin,
+    canUseBookings,
+    subscription,
+    unreadUpdatesCount,
+    pendingApprovalCount,
+  } = useLoaderData<typeof loader>();
   const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
+  // Lists open on their remembered filters, so the loader need not redirect.
+  const withListFilters = useRememberedListHref();
   const isPersonalOrganization = isPersonalOrg(currentOrganization);
 
   /** Each admin area shows with the matrix grant of the page it opens. */
@@ -157,13 +167,13 @@ export function useSidebarNavItems() {
     {
       type: "child",
       title: "Assets",
-      to: "/assets",
+      to: withListFilters("/assets"),
       Icon: PackageOpenIcon,
     },
     {
       type: "child",
       title: "Kits",
-      to: "/kits",
+      to: withListFilters("/kits"),
       Icon: Package,
     },
     {
@@ -202,8 +212,14 @@ export function useSidebarNavItems() {
       children: [
         {
           title: "View Bookings",
-          to: "/bookings",
+          to: withListFilters("/bookings"),
           disabled: bookingDisabled,
+          // Requests waiting for this viewer's decision; the layout loader
+          // sends 0 for everyone who cannot approve.
+          badge: {
+            show: (pendingApprovalCount || 0) > 0,
+            count: pendingApprovalCount || 0,
+          },
         },
         {
           title: "Calendar",

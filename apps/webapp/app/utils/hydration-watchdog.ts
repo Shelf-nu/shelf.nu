@@ -31,7 +31,10 @@
  * not load. The script therefore keeps a report in `sessionStorage`, and the
  * next page that does hydrate sends it ({@link markHydrated}). A load whose
  * automatic reload worked at once is sent as an info log, since the user only
- * saw a reload; anything that showed the recovery screen is a warning issue.
+ * saw a reload; anything that showed the recovery screen is a warning issue,
+ * except a timeout that fired before its clock ran out, which only a client
+ * running timers early produces and which is logged as well
+ * ({@link timedOutEarly}).
  *
  * @see {@link file://./browser-support.ts} - the same inline gate pattern for unsupported browsers
  * @see {@link file://./../root.tsx} - renders the screen and calls markHydrated
@@ -88,6 +91,15 @@ export const MAX_MISSING_BUNDLE_FILES = 10;
  * The timings in such a report do not describe a user waiting.
  */
 export const HYDRATION_CLOCK_GAP_MS = 5_000;
+
+/**
+ * User agents of search crawlers and link previewers. They report
+ * `navigator.webdriver` as false but load pages the way a bot does, so a
+ * failure they hit says nothing about users. Matched case-insensitively.
+ * Keep it free of backslashes: it is interpolated into the inline script.
+ */
+export const CRAWLER_USER_AGENT_PATTERN =
+  "googlebot|bingbot|yandexbot|duckduckbot|baiduspider|applebot|petalbot|slurp|facebookexternalhit|crawler|spider|lighthouse";
 
 /** Global the inline script exposes so the bundle can stand it down. */
 const WATCHDOG_GLOBAL = "__shelfHydrationWatchdog";
@@ -148,7 +160,10 @@ export type HydrationFailureReport = {
   wallClockMs?: number | null;
   /** `navigator.connection.effectiveType`, where the browser exposes it. */
   connection?: string | null;
-  /** The browser is driven by automation (`navigator.webdriver`). */
+  /**
+   * The page was loaded by automation (`navigator.webdriver`) or by a crawler
+   * whose user agent matches {@link CRAWLER_USER_AGENT_PATTERN}.
+   */
   automated?: boolean;
 };
 
@@ -310,7 +325,9 @@ export const HYDRATION_WATCHDOG_SCRIPT = `(function () {
       // Monotonic time stops while the device sleeps; wall-clock time does not.
       wallClockMs: perf && perf.timeOrigin ? Math.round(Date.now() - perf.timeOrigin) : null,
       connection: connection || null,
-      automated: navigator.webdriver === true
+      automated:
+        navigator.webdriver === true ||
+        new RegExp("${CRAWLER_USER_AGENT_PATTERN}", "i").test(navigator.userAgent || "")
     };
   }
 
@@ -492,14 +509,43 @@ export function hasClockGap(report: HydrationFailureReport): boolean {
 }
 
 /**
+ * Whether a timeout fired before {@link HYDRATION_TIMEOUT_MS} had passed on the
+ * page's own clock. The timer counts only visible time, so in a browser that
+ * runs timers normally it can never fire sooner than that after navigation
+ * start. One that did ran its timers early: link scanners that pre-open emailed
+ * links do, several tabs within the same second and no file loaded, and so can
+ * a browser restoring a session. Such a report says nothing about how long
+ * anyone waited for the bundle.
+ *
+ * A device that slept also leaves a short page clock, since the page clock
+ * stops during sleep. That case has its own tag ({@link hasClockGap}) and is
+ * not counted here.
+ *
+ * @param report - The report the failed load left behind
+ * @returns `true` for a timeout reported under {@link HYDRATION_TIMEOUT_MS}
+ *   with no clock gap; `false` for a load error, a sleeping device, or a report
+ *   with no page-clock reading
+ */
+export function timedOutEarly(report: HydrationFailureReport): boolean {
+  return (
+    report.reason === "timeout" &&
+    report.failedAfterMs != null &&
+    report.failedAfterMs < HYDRATION_TIMEOUT_MS &&
+    !hasClockGap(report)
+  );
+}
+
+/**
  * Stands the watchdog down and reports any earlier failed load to Sentry.
  * Call once, after hydration commits.
  *
  * A report present here means the page did hydrate in the end: after the
  * automatic reload, after a manual one, or late, past the timeout. A
  * recovered reload ({@link isRecoveredReload}) goes to Sentry Logs, which keep
- * its rate visible without raising an issue for each flaky download; every
- * other report is a warning issue, one per reason.
+ * its rate visible without raising an issue for each flaky download. A timeout
+ * that fired early ({@link timedOutEarly}), before its 20 seconds had passed on
+ * the page clock, goes to Sentry Logs too and never counts toward the warning
+ * issues, one per reason.
  */
 export function markHydrated(): void {
   window[WATCHDOG_GLOBAL]?.done();
@@ -526,16 +572,28 @@ export function markHydrated(): void {
     return;
   }
 
+  if (timedOutEarly(report)) {
+    Sentry.logger.info("Hydration timeout fired before its clock ran out", {
+      label: "Hydration",
+      path: report.path,
+      failedAfterMs: report.failedAfterMs,
+      hydratedAfterMs,
+    });
+    return;
+  }
+
+  const tags = {
+    hydration_failure: report.reason,
+    hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
+    hydration_tab_hidden: report.hidden ? "yes" : "no",
+    hydration_clock_gap: hasClockGap(report) ? "yes" : "no",
+  };
+
   Sentry.captureMessage("App bundle failed to load before hydration", {
     level: "warning",
     // One issue per reason, not one per failing chunk URL.
     fingerprint: ["hydration-failure", report.reason],
-    tags: {
-      hydration_failure: report.reason,
-      hydration_auto_reloaded: report.reloadedAt !== null ? "yes" : "no",
-      hydration_tab_hidden: report.hidden ? "yes" : "no",
-      hydration_clock_gap: hasClockGap(report) ? "yes" : "no",
-    },
+    tags,
     extra: { ...report, hydratedAfterMs },
   });
 }

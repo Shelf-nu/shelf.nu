@@ -141,6 +141,16 @@ export async function getAssetModels(params: {
   search?: string | null;
   /** Also load each model's default custom field values. */
   withCustomFieldDefaults?: boolean;
+  /**
+   * A model that must be in the result even when it falls outside the page,
+   * such as the one an asset being edited already has. A select shows its
+   * value only if the value is among its options.
+   *
+   * When it is not on the page it is added first, ahead of the `updatedAt`
+   * order, ignoring `search` and `page`, so the list can be `perPage + 1`
+   * long. Meant for an unfiltered first page, such as the edit form's.
+   */
+  includeId?: string | null;
 }) {
   const {
     organizationId,
@@ -148,6 +158,7 @@ export async function getAssetModels(params: {
     perPage = 8,
     search,
     withCustomFieldDefaults = false,
+    includeId,
   } = params;
 
   try {
@@ -156,24 +167,38 @@ export async function getAssetModels(params: {
 
     const where = getAssetModelsWhereInput({ organizationId, search });
 
-    const [assetModels, totalAssetModels] = await Promise.all([
+    const include = {
+      _count: {
+        select: { assets: true },
+      },
+      defaultCategory: {
+        select: { id: true, name: true, color: true },
+      },
+    } as const;
+
+    const [pageModels, totalAssetModels, includedModel] = await Promise.all([
       db.assetModel.findMany({
         skip,
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        include: {
-          _count: {
-            select: { assets: true },
-          },
-          defaultCategory: {
-            select: { id: true, name: true, color: true },
-          },
-        },
+        include,
       }),
 
       db.assetModel.count({ where }),
+
+      includeId
+        ? db.assetModel.findFirst({
+            where: { id: includeId, organizationId },
+            include,
+          })
+        : null,
     ]);
+
+    const assetModels =
+      includedModel && !pageModels.some((m) => m.id === includedModel.id)
+        ? [includedModel, ...pageModels]
+        : pageModels;
 
     const modelIds = assetModels.map((model) => model.id);
     const [archivedCounts, fieldDefaults] = await Promise.all([

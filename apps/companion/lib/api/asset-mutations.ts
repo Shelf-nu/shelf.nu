@@ -11,6 +11,7 @@
  */
 
 import { apiFetch, apiUpload } from "./client";
+import { mobilePaths } from "./paths";
 import { cachedApiFetch, invalidateResponseCache } from "./cache";
 import type {
   CategoriesResponse,
@@ -217,7 +218,7 @@ export const assetMutationsApi = {
     } as any);
 
     return apiUpload<UpdateImageResponse>(
-      `/api/mobile/asset/update-image?orgId=${orgId}&assetId=${assetId}`,
+      mobilePaths.assetImage(assetId, orgId),
       formData
     );
   },

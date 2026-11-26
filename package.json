@@ -8,7 +8,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "test:tooling": "bash scripts/__tests__/pr-review.test.sh && node --test scripts/__tests__/pr-review-context.test.mjs scripts/__tests__/pr-review-files.test.mjs",
+    "test:tooling": "bash scripts/__tests__/pr-review.test.sh && node --test scripts/__tests__/pr-review-context.test.mjs scripts/__tests__/pr-review-files.test.mjs .github/scripts/__tests__/pr-readiness.test.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "prepare": "git config --unset core.hooksPath || echo ok && npx lefthook install || echo ok",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
@@ -66,7 +66,7 @@
   "pnpm": {
     "overrides": {
       "baseline-browser-mapping@<2.11.0": "2.11.0",
-      "body-parser@>=1.0.0 <1.20.6": "1.20.6",
+      "body-parser@>=1.0.0 <1.20.9": "1.20.9",
       "brace-expansion@<1.1.21": "1.1.21",
       "brace-expansion@>=5.0.0 <5.0.12": "5.0.12",
       "browserslist@<4.28.7": "^4.28.7",
@@ -75,10 +75,11 @@
       "defu@<6.1.5": "6.1.5",
       "@docsearch/react>react": "19.2.1",
       "@docsearch/react>react-dom": "19.2.1",
+      "effect@<3.22.1": "3.22.1",
       "fast-copy@>=4.0.0 <4.1.0": "4.1.0",
-      "fast-uri@>=3.0.0 <3.1.8": "3.1.8",
+      "fast-uri@>=3.0.0 <3.1.9": "3.1.9",
       "flatted@<3.4.0": "3.4.2",
-      "@hono/node-server@<1.19.15": "1.19.15",
+      "@hono/node-server@<1.19.18": "1.19.18",
       "@humanfs/node@<0.16.8": "0.16.8",
       "js-yaml@<3.15.2": "3.15.2",
       "js-yaml@>=4.0.0 <4.3.2": "4.3.2",
@@ -90,7 +91,7 @@
       "moment@<2.31.0": "2.31.0",
       "morgan@<1.12.1": "1.12.1",
       "nanoid@<3.3.18": "3.3.18",
-      "node-forge@<1.4.0": "1.4.0",
+      "node-forge@<1.4.3": "1.4.3",
       "p-map": "4.0.0",
       "path-to-regexp@<0.1.13": "0.1.13",
       "picomatch@<2.3.2": "2.3.2",
@@ -100,7 +101,7 @@
       "postcss-selector-parser@6.0.10": "6.1.5",
       "postcss@<8.5.31": "8.5.31",
       "proxy-addr@<2.0.8": "2.0.8",
-      "qs@>=6.0.0 <6.16.0": "6.16.0",
+      "qs@>=6.0.0 <6.16.1": "6.16.1",
       "shell-quote@<1.12.0": "1.12.0",
       "smol-toml@<1.9.0": "1.9.0",
       "tar@>=7.0.0 <7.5.21": "7.5.21",
@@ -118,11 +119,12 @@
     },
     "patchedDependencies": {
       "expo-in-app-updates@0.12.0": "patches/expo-in-app-updates@0.12.0.patch",
-      "expo-quick-actions@6.0.1": "patches/expo-quick-actions@6.0.1.patch"
+      "expo-quick-actions@6.0.1": "patches/expo-quick-actions@6.0.1.patch",
+      "expo-asset@58.0.19": "patches/expo-asset@58.0.19.patch"
     }
   },
   "engines": {
-    "node": ">=24.22.1"
+    "node": ">=24.22.3"
   },
   "packageManager": "pnpm@9.15.9"
 }

@@ -7,7 +7,8 @@
  * disposition, before writing its logs, calls {@link settleUnits}. In a
  * converted group that picks the rows the units were out from (a disposition
  * naming its slice settles on that slice; one naming no slice is spread over
- * the group's rows by {@link resolveUntaggedDisposition}), applies the settle
+ * the group's slices in {@link compareSlicesForGreedyFill} order, standalone
+ * first, by {@link resolveUntaggedDisposition}), applies the settle
  * transition to them, and remembers one planned share per (category, slice,
  * row). After every log is written, `commitSettlement` in the facade gives
  * each new log its RECORDED shares ({@link matchSharesToLogs}) and writes the
@@ -34,7 +35,10 @@ import type { SourceRowState } from "@shelf/quantity-control";
 
 import { ShelfError } from "~/utils/error";
 
-import { BOOKING_DISPOSITION_CATEGORIES } from "../checkout-attribution";
+import {
+  BOOKING_DISPOSITION_CATEGORIES,
+  compareSlicesForGreedyFill,
+} from "../checkout-attribution";
 import type { BookingDispositionCategory } from "../checkout-attribution";
 
 import type {
@@ -169,14 +173,6 @@ function unitsOf(d: SettlementDisposition): number {
   );
 }
 
-/** Standalone slices before kit slices, then by id: the allocation order. */
-function compareAllocationOrder(a: WorkingSlice, b: WorkingSlice): number {
-  const kitA = a.assetKitId === null ? 0 : 1;
-  const kitB = b.assetKitId === null ? 0 : 1;
-  if (kitA !== kitB) return kitA - kitB;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
-
 /**
  * A stable reference to a row for the resolver: its id when persisted, else
  * a reference sorting after every persisted id (rows conversion just seeded).
@@ -270,7 +266,7 @@ export function slicesUnderLock<T extends { id: string; assetId: string }>(
     }
     if (placed.has(slice.assetId)) continue;
     placed.add(slice.assetId);
-    for (const working of [...group.slices].sort(compareAllocationOrder)) {
+    for (const working of [...group.slices].sort(compareSlicesForGreedyFill)) {
       const read = slices.find((s) => s.id === working.id);
       result.push(adopt(working, read, slice));
     }
@@ -319,8 +315,12 @@ function addReleasedToUnassigned(slice: WorkingSlice, units: number) {
  *
  * - LEGACY group: nothing changes; `legacy: true`.
  * - Slice named: its rows with units out, most out first, then row order.
- * - No slice named: every row of the group with units out, most out first,
- *   then slice allocation order (standalone first), then row order.
+ * - No slice named: the group's slices in {@link compareSlicesForGreedyFill}
+ *   order (standalone first, then kit-driven, each by id), the order the
+ *   LEGACY check-in spreads an untagged disposition in
+ *   (`spreadUntaggedCheckin`). Each slice takes at most what its rows have
+ *   out, its rows most out first, then row order. A LEGACY and a converted
+ *   group therefore tag an untagged check-in onto the same slices.
  *
  * The units are poured into the chosen (slice, row) pieces category by
  * category (returned, consumed, lost, damaged), so one log covering several
@@ -348,7 +348,7 @@ export function settleUnits(
     };
   }
   const units = unitsOf(disposition);
-  const ordered = [...group.slices].sort(compareAllocationOrder);
+  const ordered = [...group.slices].sort(compareSlicesForGreedyFill);
   const candidates = requested
     ? ordered.filter((s) => s.id === requested)
     : ordered;

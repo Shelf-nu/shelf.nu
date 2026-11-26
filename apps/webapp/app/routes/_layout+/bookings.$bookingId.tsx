@@ -25,6 +25,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useRecordNavigation } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -33,6 +34,10 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import type { RouteHandleWithName } from "~/modules/types";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  isBookingApprovalEnabled,
+  isBookingPendingApproval,
+} from "~/utils/bookings";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -145,6 +150,11 @@ export default function AssetDetailsPage() {
     "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
+  const isPendingApproval = isBookingPendingApproval({
+    status: booking.status,
+    approvedAt: booking.approvedAt,
+    requireBookingApproval: isBookingApprovalEnabled(useBookingSettings()),
+  });
   const recordNavigation = useRecordNavigation({
     entity: "booking",
     id: booking.id,
@@ -166,6 +176,7 @@ export default function AssetDetailsPage() {
                   status={booking.status}
                   custodianUserId={booking.custodianUserId || undefined}
                   to={booking.to}
+                  isPendingApproval={isPendingApproval}
                 />
                 <TimeRemaining
                   from={booking.from}

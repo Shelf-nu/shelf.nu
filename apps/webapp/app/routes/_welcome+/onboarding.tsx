@@ -52,6 +52,7 @@ import {
 import { resolveOnboardingDestination } from "~/modules/signup-intent/schema";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { setCookie } from "~/utils/cookies.server";
 import { ENABLE_PREMIUM_FEATURES, SMTP_FROM } from "~/utils/env";
 import { isZodValidationError, makeShelfError } from "~/utils/error";
@@ -468,7 +469,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
      */
     if (user && !metadata.userSignedUpWithPassword) {
       //making sure new session is created.
-      const authSession = await signInWithEmail(user.email, password as string);
+      const authSession = await signInWithEmail(
+        user.email,
+        password as string,
+        { clientIp: getClientIpFromHeaders(request.headers) }
+      );
       if (authSession) {
         context.setSession(authSession);
       }

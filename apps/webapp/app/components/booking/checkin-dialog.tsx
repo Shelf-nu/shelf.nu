@@ -9,12 +9,10 @@
  * @see {@link file://./bulk-partial-checkin-dialog.tsx} final partial check-in
  * @see {@link file://../scanner/drawer/uses/partial-checkin-drawer.tsx} scanner
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Booking } from "@prisma/client";
-import { Zap } from "lucide-react";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isBookingEarlyCheckin } from "~/modules/booking/helpers";
-import { tw } from "~/utils/tw";
 import { Button, type ButtonProps } from "../shared/button";
 import { DateS } from "../shared/date";
 import {
@@ -34,6 +32,13 @@ export enum CheckinIntentEnum {
 }
 
 type CheckinDialogProps = {
+  /**
+   * Shown above the dialog's buttons. A scanner passes its save-not-confirmed
+   * notice here, because the scanner's own copy sits behind this dialog's
+   * overlay and the operator would otherwise confirm again without seeing it.
+   */
+  notice?: ReactNode;
+
   disabled?: ButtonProps["disabled"];
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   /** A container to render the AlertContent inside */
@@ -49,8 +54,6 @@ type CheckinDialogProps = {
    */
   intent?: string;
 
-  /** Callback to close parent dropdown/menu */
-  onClose?: () => void;
   /** Custom label for the button */
   label?: string;
   /**
@@ -58,13 +61,29 @@ type CheckinDialogProps = {
    * button showing only `icon`, with `label` as its tooltip and accessible
    * name, for a list row's actions.
    */
-  variant?: "default" | "dropdown" | "primary" | "icon";
+  variant?: "default" | "primary" | "icon";
   /** The trigger's icon when `variant` is `"icon"`. */
   icon?: ReactNode;
   /** Specific asset IDs for enhanced completion messaging */
   specificAssetIds?: string[];
   /** Render the trigger button full-width to match a sibling full-width button. */
   fullWidth?: boolean;
+  /**
+   * Opens the dialog from outside. When set, the dialog renders no trigger of
+   * its own: the caller owns the control that opens it. Use this to open it
+   * from a menu row, and render the dialog beside the `DropdownMenu`, never
+   * inside a `DropdownMenuItem`: the menu closes when a row is picked, and a
+   * dialog inside it would close with it.
+   */
+  open?: boolean;
+  /** Called when a controlled dialog asks to open or close. Pair with `open`. */
+  onOpenChange?: (open: boolean) => void;
+  /**
+   * Where focus goes when a controlled dialog closes. A controlled dialog has
+   * no trigger of its own to hand focus back to, so without this it lands on
+   * the page body.
+   */
+  returnFocusTo?: () => HTMLElement | null;
 };
 
 /**
@@ -89,7 +108,19 @@ export default function CheckinDialog({
   icon,
   specificAssetIds,
   fullWidth = false,
+  open: controlledOpen,
+  onOpenChange: onControlledOpenChange,
+  returnFocusTo,
+  notice,
 }: CheckinDialogProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  /** A caller passing `open` drives the dialog and supplies its own trigger. */
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    onControlledOpenChange?.(next);
+  };
   const isEarlyCheckin = isBookingEarlyCheckin(booking.to);
   const isNavigating = useDisabled();
   const isDisabled = disabled || isNavigating;
@@ -110,45 +141,44 @@ export default function CheckinDialog({
       : "every asset";
 
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        {variant === "icon" ? (
-          <Button
-            type="button"
-            disabled={isDisabled}
-            size="sm"
-            variant="secondary"
-            className="p-2"
-            aria-label={label}
-            tooltip={label}
-          >
-            {icon}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            disabled={isDisabled}
-            className={tw(
-              "whitespace-nowrap",
-              variant === "dropdown"
-                ? "w-full justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                : ""
-            )}
-            variant={variant === "dropdown" ? "link" : "primary"}
-            width={variant === "dropdown" || fullWidth ? "full" : undefined}
-          >
-            {variant === "dropdown" ? (
-              <span className="flex items-center gap-2">
-                <Zap className="size-4" /> {label}
-              </span>
-            ) : (
-              label
-            )}
-          </Button>
-        )}
-      </AlertDialogTrigger>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      {isControlled ? null : (
+        <AlertDialogTrigger asChild>
+          {variant === "icon" ? (
+            <Button
+              type="button"
+              disabled={isDisabled}
+              size="sm"
+              variant="secondary"
+              className="p-2"
+              aria-label={label}
+              tooltip={label}
+            >
+              {icon}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              disabled={isDisabled}
+              className="whitespace-nowrap"
+              variant="primary"
+              width={fullWidth ? "full" : undefined}
+            >
+              {label}
+            </Button>
+          )}
+        </AlertDialogTrigger>
+      )}
 
-      <AlertDialogContent portalProps={{ container: portalContainer }}>
+      <AlertDialogContent
+        portalProps={{ container: portalContainer }}
+        onCloseAutoFocus={(event) => {
+          const target = isControlled ? returnFocusTo?.() : null;
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>Check in booking</AlertDialogTitle>
         </AlertDialogHeader>
@@ -187,6 +217,8 @@ export default function CheckinDialog({
             </>
           ) : null}
         </AlertDialogDescription>
+
+        {notice}
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>

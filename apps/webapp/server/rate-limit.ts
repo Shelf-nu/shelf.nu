@@ -1,16 +1,21 @@
-import type { Context } from "hono";
+import type { Context, Next } from "hono";
 import { rateLimiter } from "hono-rate-limiter";
 import { getSession } from "remix-hono/session";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { getClientIp } from "./client-ip";
+import { getClientIp, getVerifiedClientIp } from "./client-ip";
+import {
+  getContactOwnerQrId,
+  normalizeRequestPath,
+  normalizeRoutePath,
+} from "./request-path";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
 
 /**
  * How long one bucket stays silent after emitting a telemetry entry. Matches
- * every limiter's `windowMs`, so a bucket contributes at most one log per
- * limiter window.
+ * the shortest limiter `windowMs`, so a bucket contributes at most one log per
+ * minute however long its own window is.
  */
 const TELEMETRY_WINDOW_MS = 60_000;
 
@@ -206,6 +211,13 @@ function logRateLimitHit({
 }
 
 /**
+ * Longest QR id kept in a per-QR bucket key. Real ids are cuids, far shorter;
+ * the cap keeps a key small whatever id a caller puts in the path. Two ids
+ * that share this prefix share a bucket, which only makes the limit stricter.
+ */
+const CONTACT_OWNER_QR_KEY_MAX = 64;
+
+/**
  * Bucket-key builders, shared between each limiter's `keyGenerator` and its
  * 429 `handler`.
  *
@@ -215,10 +227,24 @@ function logRateLimitHit({
  */
 const bucketKeys = {
   mobileIp: (c: Context) => `mobile:ip:${getClientIp(c)}`,
+  // Paths are normalised so every spelling that reaches one route (case,
+  // trailing slash) counts against one bucket.
   appLoader: (c: Context) =>
-    `app:${resolveAppLoaderIdentity(c).identity}:${c.req.path}`,
-  calendarFeed: (c: Context) => `calendar:${c.req.path}`,
+    `app:${resolveAppLoaderIdentity(c).identity}:${normalizeRequestPath(
+      c.req.path
+    )}`,
+  // The route path also drops the single-fetch `.data` suffix, so a feed and
+  // its `.data` form share one bucket.
+  calendarFeed: (c: Context) => `calendar:${normalizeRoutePath(c.req.path)}`,
   sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
+  // The guard only runs on the contact-owner route, so the QR id is always
+  // present; the fallback keeps the key total if it is ever mounted wider.
+  // The id is capped (CONTACT_OWNER_QR_KEY_MAX) because the caller writes it.
+  contactOwnerQr: (c: Context) =>
+    `contact-owner:ip:${getVerifiedClientIp(c)}:qr:${(
+      getContactOwnerQrId(normalizeRoutePath(c.req.path)) ?? "none"
+    ).slice(0, CONTACT_OWNER_QR_KEY_MAX)}`,
+  contactOwnerIp: (c: Context) => `contact-owner:ip:${getVerifiedClientIp(c)}`,
 };
 
 /**
@@ -295,10 +321,10 @@ export const mobileIpRateLimit = () =>
  * The bucket key is `(userId | clientIP, path)`:
  * - Keying by `userId` (falling back to client IP for unauthenticated/edge
  *   cases) isolates one user's loop from everyone else.
- * - Keying by `c.req.path` (which excludes the query string — intentional)
- *   means a loop hammering ONE path is capped, while normal navigation across
- *   many varied paths is never throttled. Same-path/different-query
- *   revalidations deliberately share a bucket.
+ * - Keying by the normalised path (lower-case, no trailing slash, query
+ *   string excluded) means a loop hammering ONE path is capped, while normal
+ *   navigation across many varied paths is never throttled. Same-path and
+ *   different-query revalidations deliberately share a bucket.
  *
  * Backed by an in-memory MemoryStore, so counters are per-machine: with N Fly
  * machines the effective ceiling is ~`limit`×N/min worst-case. That's an
@@ -373,16 +399,14 @@ export const appLoaderRateLimit = (limit = 60) =>
  * many addresses; a Cloudflare edge rule is the hard ceiling, as with
  * {@link mobileIpRateLimit}.
  *
- * **The bucket is coarser than one caller.** `getClientIp` trusts the edge
- * header, which behind Cloudflare is the Cloudflare address rather than the end
- * user's, so in production one bucket covers everyone arriving through the same
- * edge. `client-ip.ts` calls that acceptable because IP is only a fallback
- * behind a signed-session key, and this limiter has no session to fall back
- * from, so the coarseness is load-bearing here: a tight ceiling would throttle
- * unrelated visitors. Self-hosted, where the proxy sets `X-Forwarded-For`, the
- * bucket is per client.
+ * **The bucket can be coarser than one caller.** `getClientIp` keys by the
+ * visitor's address when the request is from Cloudflare's edge or a trusted
+ * proxy, but falls back to the edge address it was given otherwise, and many
+ * visitors (an office, a mobile carrier) share one address anyway. This
+ * limiter has no session to key by instead, so a tight ceiling would throttle
+ * unrelated visitors.
  *
- * So the ceiling is set at "clearly abnormal for one edge address" rather than
+ * So the ceiling is set at "clearly abnormal for one address" rather than
  * tight, and the body bound
  * ({@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES}) is what protects memory. Clipping
  * during a genuine error storm costs duplicates rather than the signal, since
@@ -443,3 +467,106 @@ export const calendarFeedRateLimit = () =>
       return c.text("Too many requests. Please try again later.", 429);
     },
   });
+
+/**
+ * Context key the contact-owner limiters set on a submission that is over
+ * either limit. The request still reaches the route, whose action reads it
+ * (as `contactOwnerRateLimited` on the load context) and answers 429 before
+ * any query, so the form shows the error inline and keeps the typed message.
+ */
+export const CONTACT_OWNER_LIMITED_KEY = "shelf.contactOwnerLimited";
+
+declare module "hono" {
+  interface ContextVariableMap {
+    /** Set by the contact-owner limiters; see {@link CONTACT_OWNER_LIMITED_KEY} */
+    "shelf.contactOwnerLimited": boolean;
+  }
+}
+
+/**
+ * Builds the over-limit handler shared by the two contact-owner limiters: log
+ * the hit, mark the request, and let it through to the route's action.
+ */
+function contactOwnerLimitHandler(
+  scope: string,
+  bucket: (c: Context) => string
+) {
+  return (c: Context, next: Next) => {
+    // Anonymous route, so the bucket (address and QR id) is all there is to
+    // record. The form body carries an email address and is never logged.
+    logRateLimitHit({ scope, bucket: bucket(c), detail: c.req.path });
+    c.set(CONTACT_OWNER_LIMITED_KEY, true);
+    return next();
+  };
+}
+
+/** Whether an earlier contact-owner limiter already refused this request. */
+function isContactOwnerLimited(c: Context): boolean {
+  return c.get(CONTACT_OWNER_LIMITED_KEY) === true;
+}
+
+/**
+ * Rate limits for the public QR "contact owner" form
+ * (`/qr/<qrId>/contact-owner`).
+ *
+ * The form needs no account, and every submission writes a `ReportFound` row
+ * and sends two Shelf emails: one to the workspace owner carrying the caller's
+ * text, one to whatever address the caller typed. Unbounded, that makes Shelf a
+ * mail relay to any inbox and lets one caller flood an owner. Two buckets:
+ *
+ * - **Per (address, QR)**: {@link perQrLimit} submissions per 10 minutes. A
+ *   finder writes once or twice; this stops one caller flooding one owner.
+ * - **Per address, across every QR**: {@link perIpLimit} submissions per hour.
+ *   QR ids are printed on labels and anyone can claim QRs in a free workspace,
+ *   so without this a caller would rotate QR ids to keep mailing one address.
+ *
+ * The guard runs the per-address limiter first, and the per-QR limiter skips a
+ * request the per-address one refused, so a blocked address never creates a
+ * per-QR key. Every submission, including one the per-QR limiter then refuses,
+ * counts once toward the hourly per-address budget.
+ *
+ * An over-limit submission is marked with {@link CONTACT_OWNER_LIMITED_KEY}
+ * rather than answered here; the route's action refuses it with a 429 before
+ * any query.
+ *
+ * Keyed by `getVerifiedClientIp`, never by a client-written
+ * `X-Forwarded-For`: a caller able to choose its own key would get a fresh
+ * budget per request. The buckets are per visitor wherever a trusted source
+ * names the address. Where none does (a self-hosted instance without
+ * `TRUSTED_PROXY_HOPS`), every visitor shares the `unknown` bucket, which is
+ * coarse but cannot be escaped.
+ * Counters are per machine (in-memory store, as {@link mobileIpRateLimit}),
+ * and a caller with many addresses is not bounded here: the Cloudflare edge
+ * rule on `POST /qr/<qrId>/contact-owner` is the cross-machine ceiling.
+ *
+ * Only the per-address limiter sets the `RateLimit` headers, so a client sees
+ * one budget rather than the second limiter overwriting the first.
+ *
+ * @param perQrLimit - Submissions per (address, QR) per 10 minutes
+ * @param perIpLimit - Submissions per address per hour
+ * @returns The per-address and per-QR limiters, in the order the guard runs them
+ */
+export const contactOwnerRateLimits = (perQrLimit = 5, perIpLimit = 20) =>
+  [
+    rateLimiter({
+      windowMs: 60 * 60_000,
+      limit: perIpLimit,
+      standardHeaders: "draft-7",
+      keyGenerator: bucketKeys.contactOwnerIp,
+      handler: contactOwnerLimitHandler(
+        "contact-owner-ip",
+        bucketKeys.contactOwnerIp
+      ),
+    }),
+    rateLimiter({
+      windowMs: 10 * 60_000,
+      limit: perQrLimit,
+      standardHeaders: false,
+      skip: isContactOwnerLimited,
+      keyGenerator: bucketKeys.contactOwnerQr,
+      handler: contactOwnerLimitHandler(
+        "contact-owner-qr",
+        bucketKeys.contactOwnerQr
+      ),
+    }),
+  ] as const;

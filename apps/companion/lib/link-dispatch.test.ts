@@ -13,6 +13,7 @@ import { test } from "node:test";
 
 import {
   dispatchLinkOpening,
+  qrLinkRecordsScan,
   resolveQrOutcome,
   type LinkEffects,
   type QrLookupResult,
@@ -55,26 +56,44 @@ test("a tapped QR link looks the code up without recording a scan", async () => 
     "qr_1",
     CLOUD,
     CLOUD,
-    { recordScan: false, orgId: "org_1" },
+    { source: "tapped", orgId: "org_1" },
     lookups
   );
   assert.deepEqual(calls, ["lookup:qr_1:org_1"]);
 });
 
-test("a camera scan records the scan", async () => {
+test("an OS-delivered https QR link records the scan, like the web QR page", async () => {
   const { lookups, calls } = recordingLookups(ASSET_QR);
-  await resolveQrOutcome("qr_1", CLOUD, CLOUD, {}, lookups);
+  await resolveQrOutcome("qr_1", CLOUD, CLOUD, { source: "os-link" }, lookups);
   assert.deepEqual(calls, ["scan:qr_1"]);
 });
 
+test("a shelf:// QR link looks the code up without recording", async () => {
+  const { lookups, calls } = recordingLookups(ASSET_QR);
+  await resolveQrOutcome(
+    "qr_1",
+    undefined,
+    CLOUD,
+    { source: "os-link" },
+    lookups
+  );
+  assert.deepEqual(calls, ["lookup:qr_1:undefined"]);
+});
+
+test("only an OS-delivered https link records a scan", () => {
+  assert.equal(qrLinkRecordsScan("os-link", CLOUD), true);
+  assert.equal(qrLinkRecordsScan("os-link", undefined), false);
+  assert.equal(qrLinkRecordsScan("tapped", CLOUD), false);
+});
+
 test("a QR code on an asset or a kit opens its screen", async () => {
-  for (const recordScan of [true, false]) {
+  for (const source of ["os-link", "tapped"] as const) {
     assert.deepEqual(
       await resolveQrOutcome(
         "qr_1",
         CLOUD,
         CLOUD,
-        { recordScan },
+        { source },
         recordingLookups(ASSET_QR).lookups
       ),
       { kind: "screen", tabRoot: "/(tabs)/assets", href: "/(tabs)/assets/as_1" }
@@ -84,7 +103,7 @@ test("a QR code on an asset or a kit opens its screen", async () => {
         "qr_1",
         CLOUD,
         CLOUD,
-        { recordScan },
+        { source },
         recordingLookups(KIT_QR).lookups
       ),
       {
@@ -107,7 +126,7 @@ test("a tapped QR link that does not resolve gets the notice, never the browser"
         "qr_1",
         CLOUD,
         CLOUD,
-        { recordScan: false },
+        { source: "tapped" },
         recordingLookups(result).lookups
       ),
       { kind: "web-only", url: `${CLOUD}/qr/qr_1`, reason: "qr-unresolved" }
@@ -115,13 +134,13 @@ test("a tapped QR link that does not resolve gets the notice, never the browser"
   }
 });
 
-test("a camera scan that does not resolve opens the web QR page", async () => {
+test("an OS-delivered QR link that does not resolve opens the web QR page", async () => {
   assert.deepEqual(
     await resolveQrOutcome(
       "qr_1",
       undefined,
       CLOUD,
-      {},
+      { source: "os-link" },
       recordingLookups(UNRESOLVED).lookups
     ),
     { kind: "browser", url: `${CLOUD}/qr/qr_1` }
@@ -130,10 +149,10 @@ test("a camera scan that does not resolve opens the web QR page", async () => {
 
 test("a QR code from another Shelf server opens there without a lookup", async () => {
   const other = "https://assets.example.org";
-  for (const recordScan of [true, false]) {
+  for (const source of ["os-link", "tapped"] as const) {
     const { lookups, calls } = recordingLookups(ASSET_QR);
     assert.deepEqual(
-      await resolveQrOutcome("qr_1", other, CLOUD, { recordScan }, lookups),
+      await resolveQrOutcome("qr_1", other, CLOUD, { source }, lookups),
       { kind: "browser", url: `${other}/qr/qr_1` }
     );
     assert.deepEqual(calls, []);
@@ -270,7 +289,7 @@ test("a tapped QR code of another workspace gets the other-workspace notice", as
       "qr_1",
       CLOUD,
       CLOUD,
-      { recordScan: false, orgId: "org_a" },
+      { source: "tapped", orgId: "org_a" },
       recordingLookups(otherWorkspace).lookups
     ),
     { kind: "web-only", url: `${CLOUD}/qr/qr_1`, reason: "other-workspace" }
@@ -280,7 +299,7 @@ test("a tapped QR code of another workspace gets the other-workspace notice", as
       "qr_1",
       CLOUD,
       CLOUD,
-      { recordScan: false, orgId: "org_b" },
+      { source: "tapped", orgId: "org_b" },
       recordingLookups(otherWorkspace).lookups
     ),
     { kind: "screen", tabRoot: "/(tabs)/assets", href: "/(tabs)/assets/as_1" }

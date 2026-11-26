@@ -32,7 +32,8 @@ export type TabRoot =
  * same-stack list→detail navigation.
  *
  * Every cross-surface navigation into a tab's nested route MUST go through
- * this helper. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
+ * this helper, or through `openLinkedRoute` for the route an incoming link
+ * (`https://` or `shelf://`) maps to. Do not call `router.push("/(tabs)/<tab>/<id>")` directly
  * from outside that tab's own stack.
  *
  * @param tabRoot - the target tab's index route
@@ -41,30 +42,65 @@ export type TabRoot =
  * @throws Propagates any navigation error thrown by expo-router's `router`
  */
 export function pushIntoTab(tabRoot: TabRoot, nestedHref?: Href) {
-  // `withAnchor` tells expo-router to include the target stack's anchor
-  // screen (its `unstable_settings.initialRouteName`, set to "index" in
-  // each tab's _layout) beneath the navigated route, so the list sits
-  // under the detail and "back" works — even when the tab was never
-  // mounted (e.g. the app launched straight onto the Scanner tab). This
-  // is the documented in-app mechanism; a bare push or a push("/tab")
-  // then push(detail) does NOT anchor the list and strands the user.
-  router.navigate(nestedHref ?? tabRoot, { withAnchor: true });
+  navigateAnchored(nestedHref ?? tabRoot);
 }
 
 /**
- * Open a booking's detail screen from an alert button.
+ * Open the in-app route a link maps to (`nativeRouteForLink`, for `https://`
+ * and `shelf://` links alike), anchored the same way as `pushIntoTab` so
+ * "back" returns to that tab's list.
+ *
+ * @param route - an in-app path such as `/assets/as_1` or `/assets/new?qrId=q`
+ */
+export function openLinkedRoute(route: string) {
+  // why: routes from nativeRouteForLink are runtime strings that the
+  // typed-routes `Href` union cannot describe statically.
+  navigateAnchored(route as Href);
+}
+
+/**
+ * The one anchored navigation call behind `pushIntoTab` and
+ * `openLinkedRoute`, so a change to how tabs are anchored reaches both.
+ *
+ * @param href - the route to open
+ */
+function navigateAnchored(href: Href) {
+  // `withAnchor` tells expo-router to include the target stack's anchor
+  // screen (its `unstable_settings.initialRouteName`, set to "index" in
+  // each tab's _layout) beneath the navigated route, so the list sits
+  // under the detail and "back" works, even when the tab was never
+  // mounted (e.g. the app launched straight onto the Scanner tab). This
+  // is the documented in-app mechanism; a bare push or a push("/tab")
+  // then push(detail) does NOT anchor the list and strands the user.
+  router.navigate(href, { withAnchor: true });
+}
+
+/**
+ * Leave the booking scanner for the booking it serves.
+ *
+ * The booking scanner (`app/(tabs)/bookings/scan.tsx`) only runs directly on
+ * top of its own booking in the Bookings stack (`sitsOnItsBooking`), so going
+ * back lands on that booking. It is the same back as the back swipe and the
+ * Android back button, so the scanner's discard guard sees all of them.
+ *
+ * It goes back through the scanner screen's own `navigation`, never the
+ * global router: a screen's `goBack()` names that screen, so the Bookings
+ * stack removes exactly the scanner even when another tab is showing (the
+ * operator switched tabs while a request was pending). The global
+ * `router.back()` would act on whatever tab is in front.
  *
  * Navigating synchronously inside an `Alert` button's `onPress` wedges the
  * navigation transition into an endless render-commit loop (the JS thread
- * stays busy and network callbacks starve). The push therefore runs on the
- * next frame, outside the button handler. It goes through `pushIntoTab`, so
- * "back" returns to the bookings list.
+ * stays busy and network callbacks starve). The navigation therefore runs on
+ * the next frame, outside the button handler, from alerts and buttons alike.
  *
- * @param bookingId - the booking to open
+ * @param scannerNavigation - the booking scanner screen's `useNavigation()`
  */
-export function openBookingAfterAlert(bookingId: string): void {
+export function returnToBooking(scannerNavigation: {
+  goBack: () => void;
+}): void {
   requestAnimationFrame(() => {
-    pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
+    scannerNavigation.goBack();
   });
 }
 

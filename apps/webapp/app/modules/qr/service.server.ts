@@ -24,33 +24,63 @@ import { generateRandomCode } from "../invite/helpers";
 
 const label: ErrorLabel = "QR";
 
-export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
+/**
+ * Finds the QR code linked to an asset in the given workspace.
+ *
+ * @param args.assetId - The asset the code is linked to
+ * @param args.organizationId - The caller's workspace. The asset must be in it,
+ *   and the code must be unclaimed or claimed by it.
+ * @returns The code, or null when the asset has none in this workspace
+ */
+export async function getQrByAssetId({
+  assetId,
+  organizationId,
+}: Pick<Qr, "assetId"> & { organizationId: Organization["id"] }) {
   try {
     return await db.qr.findFirst({
-      where: { assetId },
+      where: {
+        assetId,
+        asset: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while fetching the QR. Please try again or contact support.",
-      additionalData: { assetId },
+      additionalData: { assetId, organizationId },
       label,
     });
   }
 }
 
-export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
+/**
+ * Finds the QR code linked to a kit in the given workspace.
+ *
+ * @param args.kitId - The kit the code is linked to
+ * @param args.organizationId - The caller's workspace. The kit must be in it,
+ *   and the code must be unclaimed or claimed by it.
+ * @returns The code, or null when the kit has none in this workspace
+ */
+export async function getQrByKitId({
+  kitId,
+  organizationId,
+}: Pick<Qr, "kitId"> & { organizationId: Organization["id"] }) {
   try {
     return await db.qr.findFirst({
-      where: { kitId },
+      where: {
+        kitId,
+        kit: { organizationId },
+        OR: [{ organizationId: null }, { organizationId }],
+      },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
         "Something went wrong while fetching the QR. Please try again or contact support.",
-      additionalData: { kitId },
+      additionalData: { kitId, organizationId },
       label,
     });
   }
@@ -74,15 +104,20 @@ export async function getQr<T extends Prisma.QrInclude | undefined>({
 
     return qr as QrWithInclude<T>;
   } catch (cause) {
+    const notFound = isNotFoundError(cause);
     throw new ShelfError({
       cause,
-      message:
-        "This code doesn't exist or it doesn't belong to your current organization.",
-      title: "QR code not found",
-      status: 404,
+      message: notFound
+        ? "This code doesn't exist or it doesn't belong to your current organization."
+        : "Something went wrong while looking up this code. Please try again.",
+      title: notFound ? "QR code not found" : "QR code lookup failed",
+      // Only a missing row is a 404. Anything else (the database did not
+      // answer) is a server failure, and scanners keep a code that got one
+      // to look it up again later instead of dropping it as unknown.
+      status: notFound ? 404 : 500,
       additionalData: { id },
       label,
-      shouldBeCaptured: !isNotFoundError(cause),
+      shouldBeCaptured: !notFound,
     });
   }
 }

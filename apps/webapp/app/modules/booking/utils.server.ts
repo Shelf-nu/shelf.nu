@@ -2,6 +2,7 @@ import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import type { Asset, Booking, Prisma, User } from "@prisma/client";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
+import { isBookingPendingApproval } from "~/utils/bookings";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -971,6 +972,46 @@ export function assertBookingIsOpen({
 }
 
 /**
+ * Refuses a checkout of a reservation request that has not been approved.
+ *
+ * Same doctrine as {@link assertBookingIsOpen}: the guard lives in the
+ * SERVICE layer so every entry point (web dialog, the three mobile checkout
+ * routes, a stale tab, a direct POST) hits it, instead of relying on which
+ * buttons a UI chose to render.
+ *
+ * @throws {ShelfError} 400 when the booking is pending approval
+ */
+export function assertBookingIsApproved({
+  status,
+  approvedAt,
+  requireBookingApproval,
+  bookingId,
+}: {
+  status: BookingStatus;
+  approvedAt: Date | null;
+  requireBookingApproval: boolean;
+  bookingId: Booking["id"];
+}): void {
+  if (
+    isBookingPendingApproval({ status, approvedAt, requireBookingApproval })
+  ) {
+    throw new ShelfError({
+      cause: null,
+      title: "Approval required",
+      message:
+        "This booking request has not been approved yet. Approve the request first, then check it out. Only an owner, administrator or manager can approve it.",
+      additionalData: { bookingId, status },
+      label,
+      status: 400,
+      // Business-rule refusal, not a server fault: approving and checking out
+      // are two steps for everyone, and the UI offers Approve instead of
+      // check-out, so this fires on stale tabs and direct calls.
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Refuses a check-in against a booking that was never checked out.
  *
  * `checkinBooking` writes `status: COMPLETE` unconditionally, so without this
@@ -1111,4 +1152,38 @@ export async function lockBookingWithWindow(
 
   const [row] = rows;
   return { status: row.status, from: row.from, to: row.to };
+}
+
+/**
+ * Moves a booking's version (`updatedAt`) inside a transaction that changes
+ * what the booking holds: its slices, booked amounts or model reservations.
+ * An approver approves the version they saw (`readBookingRequestVersion`), so
+ * a request that changed since must not match it.
+ *
+ * The write also takes the booking row lock, so call it first in the
+ * transaction: the booking row is then locked before any asset, model or
+ * reservation row, the order a check-out takes them in.
+ *
+ * Org-scoped like {@link lockBookingForStatusCheck}: a foreign booking id
+ * matches no row and moves nothing.
+ *
+ * @param tx - The transaction changing the booking's contents
+ * @param args.bookingId - The booking
+ * @param args.organizationId - Its workspace
+ */
+export async function touchBookingVersion(
+  tx: {
+    booking: {
+      updateMany: (args: {
+        where: { id: string; organizationId: string };
+        data: { updatedAt: Date };
+      }) => Promise<unknown>;
+    };
+  },
+  { bookingId, organizationId }: { bookingId: string; organizationId: string }
+): Promise<void> {
+  await tx.booking.updateMany({
+    where: { id: bookingId, organizationId },
+    data: { updatedAt: new Date() },
+  });
 }

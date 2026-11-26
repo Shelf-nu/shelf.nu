@@ -2,8 +2,11 @@
  * Resolution of an untagged check-in over the slices and rows of a group.
  *
  * A quantity-level disposition that names no slice is attributed to the rows
- * with units out: most out first, then by slice allocation order, then by row
- * id. Each (slice, row) used becomes one share.
+ * with units out: slice by slice in allocation order (the caller passes
+ * `compareSlicesForGreedyFill` order, standalone first, the order the LEGACY
+ * check-in uses), and within a slice most out first, then by row id. A slice
+ * takes at most what its rows have out. Each (slice, row) used becomes one
+ * share.
  *
  * @see {@link file://./types.ts}
  */
@@ -78,8 +81,8 @@ export function resolveUntaggedDisposition(args: {
   }
   candidates.sort(
     (a, b) =>
-      b.out - a.out ||
       a.order - b.order ||
+      b.out - a.out ||
       (a.rowId < b.rowId ? -1 : a.rowId > b.rowId ? 1 : 0)
   );
   const shares: ResolvedShare[] = [];

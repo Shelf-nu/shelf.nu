@@ -48,6 +48,7 @@ import type { UpdateUserContactPayload } from "~/modules/user-contact/service.se
 import { updateUserContact } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getClientIpFromHeaders } from "~/utils/client-ip.server";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ADMIN_EMAIL, SERVER_URL } from "~/utils/env";
@@ -421,7 +422,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         // Attempt to verify the OTP
-        const { error: verifyError } = await getSupabaseAdmin().auth.verifyOtp({
+        const { error: verifyError } = await getSupabaseAdmin({
+          clientIp: getClientIpFromHeaders(request.headers),
+        }).auth.verifyOtp({
           email: newEmail,
           token: otp,
           type: "email_change",
@@ -441,7 +444,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         /** Refresh the session so it has the up-to-date email */
         const { refreshToken } = authSession;
-        const newSession = await refreshAccessToken(refreshToken);
+        const newSession = await refreshAccessToken(refreshToken, {
+          clientIp: getClientIpFromHeaders(request.headers),
+        });
         context.setSession(newSession);
         /** Destroy all other sessions */
         await getSupabaseAdmin().auth.admin.signOut(

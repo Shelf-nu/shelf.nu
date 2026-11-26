@@ -12,10 +12,12 @@
  * the login page through `logged_out=1` in the URL. A visitor who never had a
  * session is not.
  *
+ * The refresh token is checked against the user the same cookie names.
+ *
  * @see {@link file://./middleware.ts}
  */
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   refreshAccessToken,
   validateSession,
@@ -138,11 +140,76 @@ describe("protect: sending a signed-out request to login", () => {
   });
 
   it("lets a valid session through", async () => {
-    session.get.mockReturnValue({ refreshToken: "valid", expiresAt: FRESH });
+    session.get.mockReturnValue({
+      refreshToken: "valid",
+      userId: "user-1",
+      expiresAt: FRESH,
+    });
     vi.mocked(validateSession).mockResolvedValue(true);
 
     const res = await app().request("/kits.data");
 
     expect(res.status).toBe(200);
+  });
+
+  it("checks the refresh token against the user the cookie names", async () => {
+    session.get.mockReturnValue({
+      refreshToken: "valid",
+      userId: "user-1",
+      expiresAt: FRESH,
+    });
+    vi.mocked(validateSession).mockResolvedValue(true);
+
+    await app().request("/kits");
+
+    expect(validateSession).toHaveBeenCalledWith("valid", "user-1");
+  });
+});
+
+describe("refreshSession: the visitor IP reaches Supabase", () => {
+  /** An access token past its expiry, so the request goes through a refresh. */
+  const EXPIRED = { refreshToken: "refresh-token", expiresAt: 1 };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    session.get.mockImplementation((key: string) =>
+      key === authSessionKey ? EXPIRED : undefined
+    );
+    vi.mocked(refreshAccessToken).mockResolvedValue({
+      ...EXPIRED,
+      expiresAt: FRESH,
+    } as Awaited<ReturnType<typeof refreshAccessToken>>);
+    vi.mocked(validateSession).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("passes the address the Fly edge reported", async () => {
+    // why: on Fly, Fly-Client-IP is the trusted source of the visitor IP
+    vi.stubEnv("FLY_APP_NAME", "shelf-webapp");
+
+    await app().request("/kits", {
+      headers: { "Fly-Client-IP": "203.0.113.7" },
+    });
+
+    expect(refreshAccessToken).toHaveBeenCalledWith("refresh-token", {
+      clientIp: "203.0.113.7",
+    });
+  });
+
+  it("never passes a client-written X-Forwarded-For on an instance without trusted proxies", async () => {
+    // why: off Fly with no TRUSTED_PROXY_HOPS, nothing in the request is trusted
+    vi.stubEnv("FLY_APP_NAME", "");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", undefined);
+
+    await app().request("/kits", {
+      headers: { "X-Forwarded-For": "198.51.100.99" },
+    });
+
+    expect(refreshAccessToken).toHaveBeenCalledWith("refresh-token", {
+      clientIp: null,
+    });
   });
 });

@@ -56,6 +56,8 @@ vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckoutData: vi.fn(),
   getPartiallyCheckedInAssetIds: vi.fn(),
   findKitsBookedElsewhere: findKitsBookedElsewhereMock,
+  // why: the pending-request refusal has its own suite; not pending here.
+  assertRequestMayBeCheckedOut: vi.fn().mockResolvedValue(undefined),
 }));
 
 // why: loader-only; the source-location question is not under test

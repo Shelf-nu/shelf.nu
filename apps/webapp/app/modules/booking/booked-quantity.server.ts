@@ -15,6 +15,7 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import type { RoleAccess } from "~/utils/permissions/role-access";
+import { applyRequestGrowthRule } from "./request-change.server";
 import {
   bookingSourcesInPlay,
   resizeSlices,
@@ -23,7 +24,7 @@ import {
 } from "./sources/booking-sources.server";
 import type { BookingSourcesInput } from "./sources/sources-input";
 import type { Window } from "./sources/types";
-import { lockBookingWithWindow } from "./utils.server";
+import { lockBookingWithWindow, touchBookingVersion } from "./utils.server";
 
 /**
  * Booked Quantity Service
@@ -55,6 +56,10 @@ import { lockBookingWithWindow } from "./utils.server";
  *   guard. The availability guard and every source write measure the booking
  *   window read in that same locked statement, never a window the caller read
  *   before the lock (an extension committed in between would be missed).
+ * - Every change moves the booking's version (`touchBookingVersion`), and a
+ *   raised amount runs the approval growth rule (`applyRequestGrowthRule`):
+ *   an approved request becomes pending again, or a started booking refuses
+ *   the raise, when the actor's own reservations need approval.
  * - A set of changes lands together: in a transaction of its own, or inside
  *   the caller's when it must commit with other writes (the mobile re-add).
  *
@@ -93,6 +98,11 @@ export type BookedQuantityChange = {
 type BookingScope = {
   bookingId: string;
   organizationId: string;
+  /**
+   * Who makes the change. Raising an amount on an approved request clears
+   * its approval unless this member may approve (`applyRequestGrowthRule`).
+   */
+  actorUserId: string | null;
 };
 
 /** What a change did, for the activity notes. */
@@ -277,6 +287,7 @@ async function applyChangesUnderBookingLock(
   {
     bookingId,
     organizationId,
+    actorUserId,
     lockedWindow,
     changes,
     bookingStatus,
@@ -290,6 +301,13 @@ async function applyChangesUnderBookingLock(
     sourcesInPlay?: boolean;
   }
 ): Promise<AppliedBookedQuantityChange[]> {
+  // A changed amount changes the booking: move its version, so an approver
+  // looking at the request from before cannot approve it unseen. The caller
+  // already holds the booking row lock; this runs before the asset locks all
+  // the same, keeping the booking-then-assets order a check-out takes.
+  if (changes.length > 0) {
+    await touchBookingVersion(tx, { bookingId, organizationId });
+  }
   const ordered = [...changes].sort((a, b) =>
     a.assetId.localeCompare(b.assetId)
   );
@@ -343,6 +361,14 @@ async function applyChangesUnderBookingLock(
     await tx.bookingAsset.update({
       where: { id: change.bookingAssetId },
       data: { quantity: change.quantity },
+    });
+  }
+  // A raised amount asks for more than an approval covered.
+  if (applied.some((a) => a.quantity > a.previousQuantity)) {
+    await applyRequestGrowthRule(tx, {
+      bookingId,
+      organizationId,
+      actorUserId,
     });
   }
   return applied;
@@ -631,6 +657,7 @@ async function applySourcesUnderBookingLock(
 export async function setStandaloneBookedQuantity({
   bookingId,
   organizationId,
+  actorUserId,
   sources,
   access,
   ...change
@@ -663,6 +690,7 @@ export async function setStandaloneBookedQuantity({
     const [applied] = await applyChangesUnderBookingLock(tx, {
       bookingId,
       organizationId,
+      actorUserId,
       lockedWindow,
       changes: [change],
       bookingStatus,

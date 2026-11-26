@@ -33,6 +33,7 @@ vi.mock("~/database/db.server", () => ({
 // why: code verification is a Supabase call the loader never makes.
 vi.mock("~/modules/auth/service.server", () => ({
   verifyOtpAndSignin: vi.fn(),
+  endSessionByRefreshToken: vi.fn(),
 }));
 
 // why: the action's account creation and workspace selection reach the

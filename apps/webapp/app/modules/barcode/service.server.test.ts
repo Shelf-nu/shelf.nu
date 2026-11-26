@@ -23,7 +23,7 @@ import {
 // why: testing barcode service logic without executing actual database operations
 vitest.mock("~/database/db.server", () => ({
   db: {
-    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    $transaction: vitest.fn(),
     // The org guards look the target up by id + organizationId. Default:
     // every requested id is found, i.e. it belongs to the caller's workspace.
     asset: {
@@ -52,6 +52,10 @@ function findAllRequestedIds({ where }: { where: { id: { in: string[] } } }) {
 }
 
 beforeEach(() => {
+  // Suites below replace this per test; each test starts from the default.
+  mockTransaction.mockImplementation((work) =>
+    typeof work === "function" ? work(db) : Promise.all(work)
+  );
   //@ts-expect-error missing vitest type
   db.asset.findMany.mockImplementation(findAllRequestedIds);
   //@ts-expect-error missing vitest type
@@ -569,7 +573,7 @@ describe("getBarcodeByValue", () => {
     vitest.clearAllMocks();
   });
 
-  it("should find barcode by value", async () => {
+  it("should find barcode by value, only when its linked item is in the workspace", async () => {
     expect.assertions(2);
     //@ts-expect-error missing vitest type
     db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
@@ -583,6 +587,10 @@ describe("getBarcodeByValue", () => {
       where: {
         OR: [{ value: "test123" }, { value: "TEST123" }],
         organizationId: "org-1",
+        AND: [
+          { OR: [{ assetId: null }, { asset: { organizationId: "org-1" } }] },
+          { OR: [{ kitId: null }, { kit: { organizationId: "org-1" } }] },
+        ],
       },
       include: {
         asset: true,
@@ -633,6 +641,10 @@ describe("getBarcodeByValue", () => {
       where: {
         OR: [{ value: "test123" }, { value: "TEST123" }],
         organizationId: "org-1",
+        AND: [
+          { OR: [{ assetId: null }, { asset: { organizationId: "org-1" } }] },
+          { OR: [{ kitId: null }, { kit: { organizationId: "org-1" } }] },
+        ],
       },
       include: customInclude,
     });
@@ -724,23 +736,48 @@ describe("updateBarcodes", () => {
       },
     });
 
-    // Should create one update operation and one create operation
-    expect(db.$transaction).toHaveBeenCalledWith([
-      expect.objectContaining({
-        // This would be the update operation for existing barcode
-      }),
-      expect.objectContaining({
-        // This would be the create operation for new barcode
-      }),
-    ]);
-
+    // The release of unattached rows, one update and one create
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     const transactionOperations = mockTransaction.mock.calls[0][0];
-    expect(transactionOperations).toHaveLength(2); // One update, one create
+    expect(transactionOperations).toHaveLength(3);
+    expect(db.barcode.deleteMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        value: { in: ["UPDATED123", "NEW123"], mode: "insensitive" },
+        assetId: null,
+        kitId: null,
+        id: { notIn: ["barcode-1"] },
+      },
+    });
+  });
+
+  it("frees no unattached barcodes when the edit takes no new value", async () => {
+    expect.assertions(2);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([
+      { id: "barcode-1", type: BarcodeType.Code128, value: "SAME123" },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.barcode.update.mockResolvedValue({});
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((operations) => Promise.all(operations));
+
+    await updateBarcodes({
+      // Same value, typed in lower case: it normalizes to the value held.
+      barcodes: [
+        { id: "barcode-1", type: BarcodeType.Code128, value: "same123" },
+      ],
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(db.barcode.update).toHaveBeenCalledTimes(1);
+    expect(db.barcode.deleteMany).not.toHaveBeenCalled();
   });
 
   it("should delete barcodes not in new list", async () => {
-    expect.assertions(2);
+    expect.assertions(4);
     const existingBarcodes = [
       { id: "barcode-1", type: BarcodeType.Code128, value: "OLD123" },
       { id: "barcode-2", type: BarcodeType.Code39, value: "OLD456" },
@@ -766,7 +803,21 @@ describe("updateBarcodes", () => {
 
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     const transactionOperations = mockTransaction.mock.calls[0][0];
-    expect(transactionOperations).toHaveLength(2); // One update, one deleteMany
+    // The release of unattached rows, one update, one deleteMany
+    expect(transactionOperations).toHaveLength(3);
+    // The release frees only the value taken, never the removed barcode.
+    expect(db.barcode.deleteMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        organizationId: "org-1",
+        value: { in: ["UPDATED123"], mode: "insensitive" },
+        assetId: null,
+        kitId: null,
+        id: { notIn: ["barcode-1"] },
+      },
+    });
+    expect(db.barcode.deleteMany).toHaveBeenNthCalledWith(2, {
+      where: { id: { in: ["barcode-2"] }, organizationId: "org-1" },
+    });
   });
 
   it("should validate all barcodes before processing", async () => {

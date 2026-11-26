@@ -64,13 +64,15 @@ import {
   type BulkCreateSuccess,
 } from "./bulk-create-success-modal";
 import AssetCustomFields from "./custom-fields-inputs";
-import type { ModelPrefill, PrefillModel } from "./model-default-prefill";
+import type { ModelPrefill } from "./model-default-prefill";
 import {
   EMPTY_MODEL_PREFILL,
   VALUATION_PREFILL_KEY,
   planModelPrefill,
   prefillVersion,
 } from "./model-default-prefill";
+import type { FormAssetModel } from "./picked-asset-model";
+import { findFormModel, resolveModelPick } from "./picked-asset-model";
 import { PreferredBarcodeFormRow } from "./preferred-barcode-form-row";
 import { UnlockBarcodesBanner } from "../barcode/unlock-barcodes-banner";
 import { Form } from "../custom-form";
@@ -597,16 +599,16 @@ const AssetFormInner = ({
 
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<
-      PrefillModel & {
-        id: string;
-        name?: string;
-        defaultCategoryId?: string | null;
-        image?: string | null;
-        thumbnailImage?: string | null;
-      }
-    >;
+    assetModels?: FormAssetModel[];
   }>()?.assetModels;
+
+  /**
+   * Rows of models picked from search results outside the loader's page. The
+   * picker hands over the row (with its defaults) at the moment of the pick.
+   */
+  const [pickedModels, setPickedModels] = useState<
+    Record<string, FormAssetModel>
+  >({});
 
   /**
    * Valuation and custom field values the picked model filled into empty
@@ -617,9 +619,11 @@ const AssetFormInner = ({
     useState<ModelPrefill>(EMPTY_MODEL_PREFILL);
 
   /** The chosen model's row, used for the inherited-image preview + copy. */
-  const selectedAssetModel = selectedAssetModelId
-    ? assetModelsData?.find((m) => m.id === selectedAssetModelId)
-    : undefined;
+  const selectedAssetModel = findFormModel(
+    selectedAssetModelId,
+    assetModelsData,
+    pickedModels
+  );
 
   /**
    * Intent to drop this asset's own image so it falls back down the cascade —
@@ -677,7 +681,10 @@ const AssetFormInner = ({
    * there. The server fills every empty field the same way on save (see
    * `fillAssetFormDataFromModel`).
    */
-  const handleAssetModelChange = (modelId: string | undefined) => {
+  const handleAssetModelChange = (
+    modelId: string | undefined,
+    picked?: FormAssetModel
+  ) => {
     // Mirror the DynamicSelect's current selection so the row's error
     // display can suppress the Zorm "required" message once the user
     // picks something. Zorm only re-validates on submit by default,
@@ -687,19 +694,23 @@ const AssetFormInner = ({
     setHasPickedAssetModel(Boolean(modelId));
     setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
-    const previousModel = assetModelsData?.find(
-      (m) => m.id === selectedAssetModelId
-    );
+    const pick = resolveModelPick({
+      pickedId: modelId,
+      pickedRow: picked,
+      previousId: selectedAssetModelId,
+      loaded: assetModelsData,
+      pickedModels,
+    });
+    const { previousModel, model } = pick;
+    if (pick.pickedModels !== pickedModels) {
+      setPickedModels(pick.pickedModels);
+    }
     if (
       previousModel?.defaultCategoryId &&
       params.get("category") === previousModel.defaultCategoryId
     ) {
       params.delete("category");
     }
-
-    const model = modelId
-      ? assetModelsData?.find((m) => m.id === modelId)
-      : undefined;
 
     // Fill the empty valuation and custom field inputs with the model's
     // defaults, and take back the untouched ones the previous model filled.

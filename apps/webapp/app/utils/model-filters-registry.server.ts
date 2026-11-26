@@ -17,6 +17,7 @@
  *
  * @see {@link file://./../routes/api+/model-filters.ts}
  */
+import type { Prisma } from "@prisma/client";
 
 /** Models the picker search endpoint will serve. */
 export type RegisteredModelName =
@@ -73,7 +74,7 @@ export const MODEL_FILTER_REGISTRY: Record<
   },
   assetModel: {
     searchable: ["name"],
-    select: { id: true, name: true, image: true },
+    select: { id: true, name: true, image: true, thumbnailImage: true },
   },
   booking: {
     searchable: ["name"],
@@ -139,3 +140,19 @@ export function getModelFilterConfig(
 export function isSearchableKey(name: RegisteredModelName, key: string) {
   return MODEL_FILTER_REGISTRY[name].searchable.includes(key);
 }
+
+/**
+ * Extra `assetModel` fields for the asset create and edit form, which
+ * pre-fills from a model picked from search results exactly as from one in
+ * its loader's page (`components/assets/picked-asset-model.ts`).
+ *
+ * `/api/model-filters` adds these only when the request asks for them
+ * (`withDefaults`) and the caller may create or edit assets, then keeps only
+ * the defaults of active, undeleted custom fields (a default holds a plain
+ * `customFieldId`, with no relation to filter on in this select).
+ */
+export const ASSET_MODEL_FORM_DEFAULTS_SELECT = {
+  defaultCategoryId: true,
+  defaultValuation: true,
+  customFieldDefaults: { select: { customFieldId: true, value: true } },
+} as const satisfies Prisma.AssetModelSelect;

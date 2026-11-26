@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 import type { Mock } from "vitest";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { db } from "~/database/db.server";
+import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
@@ -41,6 +42,12 @@ import {
   upsertBookingModelRequests,
 } from "./service.server";
 import type { ModelPoolClaim } from "./service.server";
+
+// why: whether a grown request clears its approval is decided by the approval
+// helper, which has its own suite; here only when it is asked.
+vitest.mock("~/modules/booking/request-change.server", () => ({
+  applyRequestGrowthRule: vitest.fn().mockResolvedValue(false),
+}));
 
 vitest.mock("~/database/db.server", () => ({
   db: {
@@ -81,6 +88,9 @@ vitest.mock("~/database/db.server", () => ({
     },
     booking: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: a transaction changing a booking's model reservations moves the
+      // booking's version (`updatedAt`) before it takes any lock.
+      updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
       // why: the pool reads the OTHER bookings that touch the window, each
       // with the units it names and the reservations it is owed, so the
       // pool can be measured at the instant demand peaks.
@@ -1412,7 +1422,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("creates the row when quantity is within availability", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     stageTotal(5);
 
     await upsertBookingModelRequest({
@@ -1440,6 +1450,37 @@ describe("upsertBookingModelRequest", () => {
       // row — existing is undefined, so existingFulfilled defaults to 0).
       update: { quantity: 3, fulfilledAt: null },
     });
+    // A new model reservation asks for more than an approval covered.
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(expect.anything(), {
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      actorUserId: USER_ID,
+    });
+  });
+
+  it("refuses the whole write when the growth rule refuses it", async () => {
+    // why: a requester asking for more on a booking already out is refused
+    // inside the transaction, so no extra reservation exists to check out.
+    stageTotal(5);
+    vitest.mocked(applyRequestGrowthRule).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Booking",
+        status: 400,
+        message:
+          "Ask someone who can approve bookings to add it, or make a new booking request for the extra items.",
+      })
+    );
+
+    await expect(
+      upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(/make a new booking request/);
   });
 
   it("rejects over-reservation when quantity > available", async () => {
@@ -1535,7 +1576,7 @@ describe("upsertBookingModelRequest", () => {
   });
 
   it("lets a reservation come down even when the pool no longer covers it", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
@@ -1578,6 +1619,8 @@ describe("upsertBookingModelRequest", () => {
         update: expect.objectContaining({ quantity: 8 }),
       })
     );
+    // Asking for less keeps any approval.
+    expect(applyRequestGrowthRule).not.toHaveBeenCalled();
   });
 
   it("refuses to drop a live booking's reservation below the units already assigned", async () => {
@@ -2733,7 +2776,7 @@ describe("removeBookingModelRequest", () => {
   });
 
   it("deletes the row on a DRAFT booking", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
@@ -2761,6 +2804,12 @@ describe("removeBookingModelRequest", () => {
         assetModelId: MODEL_ID,
         fulfilledQuantity: 0,
       },
+    });
+    // The booking's version moves, so a pending request cannot be approved
+    // from a page that still showed this reservation.
+    expect(db.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, organizationId: ORG_ID },
+      data: { updatedAt: expect.any(Date) },
     });
   });
 
@@ -3558,7 +3607,7 @@ describe("getBookingModelTabData", () => {
   };
 
   it("hides the Models tab and returns empty lists when the org has no models", async () => {
-    expect.assertions(5);
+    expect.assertions(4);
     // @ts-expect-error mocked
     db.assetModel.count.mockResolvedValue(0);
 
@@ -3569,7 +3618,6 @@ describe("getBookingModelTabData", () => {
 
     expect(result.showModelsTab).toBe(false);
     expect(result.assetModels).toEqual([]);
-    expect(result.initialAssetModels).toEqual([]);
     expect(result.totalAssetModels).toBe(0);
     // `booking.modelRequests` is still projected even with no models —
     // the two are independent (a model could be deleted after a request
@@ -3592,14 +3640,27 @@ describe("getBookingModelTabData", () => {
     expect(db.assetModel.findMany).not.toHaveBeenCalled();
   });
 
-  it("carries per-model availability into assetModels + initialAssetModels", async () => {
-    expect.assertions(4);
+  it("carries image, default category and per-model availability into assetModels", async () => {
+    expect.assertions(5);
+    const category = { id: "cat-1", name: "Laptops", color: "#123456" };
     // @ts-expect-error mocked
     db.assetModel.count.mockResolvedValue(2);
     // @ts-expect-error mocked
     db.assetModel.findMany.mockResolvedValue([
-      { id: "model-1", name: "Dell Latitude 5550" },
-      { id: "model-2", name: "MacBook Pro 16" },
+      {
+        id: "model-1",
+        name: "Dell Latitude 5550",
+        image: "https://cdn.example/dell.jpg",
+        thumbnailImage: "https://cdn.example/dell-thumb.jpg",
+        defaultCategory: category,
+      },
+      {
+        id: "model-2",
+        name: "MacBook Pro 16",
+        image: null,
+        thumbnailImage: null,
+        defaultCategory: null,
+      },
     ]);
     stageTotal(10);
     stageInCustody(1);
@@ -3612,11 +3673,15 @@ describe("getBookingModelTabData", () => {
     });
 
     expect(result.showModelsTab).toBe(true);
-    // 10 total − 1 custody − 2 concrete − 3 via request = 4 available
+    // 10 total - 1 custody - 2 concrete - 3 via request = 4 available
     expect(result.assetModels).toEqual([
       {
         id: "model-1",
         name: "Dell Latitude 5550",
+        image: "https://cdn.example/dell.jpg",
+        thumbnailImage: "https://cdn.example/dell-thumb.jpg",
+        defaultCategory: category,
+        namedNotInCustody: 0,
         total: 10,
         available: 4,
         reservedConcrete: 2,
@@ -3626,6 +3691,10 @@ describe("getBookingModelTabData", () => {
       {
         id: "model-2",
         name: "MacBook Pro 16",
+        image: null,
+        thumbnailImage: null,
+        defaultCategory: null,
+        namedNotInCustody: 0,
         total: 10,
         available: 4,
         reservedConcrete: 2,
@@ -3633,33 +3702,309 @@ describe("getBookingModelTabData", () => {
         inCustody: 1,
       },
     ]);
-    // `initialAssetModels` mirrors `assetModels` with fields nested under
-    // `metadata`, shaped for the `DynamicSelect` picker.
-    expect(result.initialAssetModels).toEqual([
-      {
-        id: "model-1",
-        name: "Dell Latitude 5550",
-        metadata: {
-          total: 10,
-          available: 4,
-          reservedConcrete: 2,
-          reservedViaRequest: 3,
-          inCustody: 1,
-        },
-      },
-      {
-        id: "model-2",
-        name: "MacBook Pro 16",
-        metadata: {
-          total: 10,
-          available: 4,
-          reservedConcrete: 2,
-          reservedViaRequest: 3,
-          inCustody: 1,
-        },
-      },
-    ]);
+    // The Models tab renders the image and category from this select.
+    const findManyCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(findManyCall?.select).toEqual({
+      id: true,
+      name: true,
+      image: true,
+      thumbnailImage: true,
+      defaultCategory: { select: { id: true, name: true, color: true } },
+    });
     expect(result.totalAssetModels).toBe(2);
+    expect(result).toMatchObject({ modelsPage: 1, modelsPerPage: 50 });
+  });
+
+  it("reads the requested page of models and reports it back", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(120);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+      page: 3,
+    });
+
+    const findManyCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(findManyCall?.skip).toBe(100);
+    expect(findManyCall?.take).toBe(50);
+    expect(result).toMatchObject({ modelsPage: 3, modelsPerPage: 50 });
+  });
+
+  it("lists every model by default, without an asset filter", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(3);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    const findManyCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(findManyCall?.where).toEqual({ organizationId: ORG_ID });
+    // No filter and no search: the full-org count is reused, not re-queried.
+    expect(result.matchedAssetModels).toBe(3);
+  });
+
+  it("hides models without assets, keeping ones this booking reserves", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValueOnce(17).mockResolvedValueOnce(4);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: {
+        ...emptyBooking,
+        modelRequests: [
+          {
+            assetModelId: "model-reserved",
+            quantity: 1,
+            fulfilledQuantity: 0,
+            fulfilledAt: null,
+            assetModel: { name: "Reserved model" },
+          },
+        ],
+      },
+      showModelsWithoutAssets: false,
+    });
+
+    const expectedWhere = {
+      organizationId: ORG_ID,
+      OR: [
+        { assets: { some: { type: "INDIVIDUAL", archivedAt: null } } },
+        { id: { in: ["model-reserved"] } },
+      ],
+    };
+    // Without pinning the list is one read under the filter.
+    const findManyCalls = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.map((call) => call[0]?.where);
+    expect(findManyCalls).toEqual([expectedWhere]);
+    // The page count follows the filtered list, not the full-org count.
+    expect(db.assetModel.count).toHaveBeenLastCalledWith({
+      where: expectedWhere,
+    });
+    expect(result.matchedAssetModels).toBe(4);
+  });
+
+  /** One `AssetModel` row in the shape the tab selects. */
+  const modelRow = (id: string) => ({
+    id,
+    name: id,
+    image: null,
+    thumbnailImage: null,
+    defaultCategory: null,
+  });
+
+  /** A booking reserving the given models, one unit each. */
+  const bookingReserving = (...assetModelIds: string[]) => ({
+    ...emptyBooking,
+    modelRequests: assetModelIds.map((assetModelId) => ({
+      assetModelId,
+      quantity: 1,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: assetModelId },
+    })),
+  });
+
+  it("leads with the models this booking reserves", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(5);
+    (db.assetModel.findMany as unknown as Mock)
+      .mockResolvedValueOnce([modelRow("zebra-camera")])
+      .mockResolvedValueOnce([modelRow("alpha"), modelRow("beta")]);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+      pinReservedModels: true,
+    });
+
+    expect(result.assetModels.map((m) => m.id)).toEqual([
+      "zebra-camera",
+      "alpha",
+      "beta",
+    ]);
+    // The rest fill what the reserved model leaves of the first page.
+    const restCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[1]?.[0];
+    expect(restCall?.skip).toBe(0);
+    expect(restCall?.take).toBe(49);
+  });
+
+  it("offsets later pages by the reserved models already shown", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(120);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValueOnce([modelRow("zebra-camera")]);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+      page: 2,
+      pinReservedModels: true,
+    });
+
+    // Page 1 showed the reserved model and 49 others, so page 2 starts at the
+    // 50th of the others.
+    const restCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[1]?.[0];
+    expect(restCall?.skip).toBe(49);
+    expect(restCall?.take).toBe(50);
+  });
+
+  it("orders purely by name unless pinning is asked for", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(5);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+    });
+
+    // One read, not split around the reservation: a client appending pages
+    // (the mobile picker) needs an order reservations cannot shift.
+    const calls = (db.assetModel.findMany as ReturnType<typeof vitest.fn>).mock
+      .calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]?.where).toEqual({ organizationId: ORG_ID });
+  });
+
+  it("fills a page with reserved models alone when they cover it", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(80);
+    const reservedIds = Array.from({ length: 60 }, (_, i) => `r${i}`);
+    (db.assetModel.findMany as unknown as Mock).mockResolvedValueOnce(
+      reservedIds.map(modelRow)
+    );
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving(...reservedIds),
+      pinReservedModels: true,
+    });
+
+    expect(result.assetModels.map((m) => m.id)).toEqual(
+      reservedIds.slice(0, 50)
+    );
+    // No room left, so the rest are not read at all.
+    expect(db.assetModel.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("pages through the reserved block before the rest", async () => {
+    expect.assertions(3);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(80);
+    const reservedIds = Array.from({ length: 60 }, (_, i) => `r${i}`);
+    (db.assetModel.findMany as unknown as Mock)
+      .mockResolvedValueOnce(reservedIds.map(modelRow))
+      .mockResolvedValueOnce([modelRow("alpha")]);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving(...reservedIds),
+      page: 2,
+      pinReservedModels: true,
+    });
+
+    // Page 2 shows the last 10 reserved models, then 40 of the rest from
+    // the first of them.
+    expect(result.assetModels.slice(0, 10).map((m) => m.id)).toEqual(
+      reservedIds.slice(50)
+    );
+    const restCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[1]?.[0];
+    expect(restCall?.skip).toBe(0);
+    expect(restCall?.take).toBe(40);
+  });
+
+  it("narrows the pinned models by the search too", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(5);
+
+    await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: bookingReserving("zebra-camera"),
+      search: "dell",
+      pinReservedModels: true,
+    });
+
+    const reservedCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[0]?.[0];
+    expect(reservedCall?.where).toEqual({
+      AND: [
+        {
+          organizationId: ORG_ID,
+          name: { contains: "dell", mode: "insensitive" },
+        },
+        { id: { in: ["zebra-camera"] } },
+      ],
+    });
+  });
+
+  it("clamps a page past the end only when asked to", async () => {
+    expect.assertions(4);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(3);
+
+    const clamped = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+      page: 5,
+      clampPageToResults: true,
+    });
+    const clampedCall = (db.assetModel.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[0]?.[0];
+    expect(clamped.modelsPage).toBe(1);
+    expect(clampedCall?.skip).toBe(0);
+
+    // A client that stops on an empty page keeps the page it asked for.
+    const unclamped = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+      page: 5,
+    });
+    const unclampedCall = (
+      db.assetModel.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls[1]?.[0];
+    expect(unclamped.modelsPage).toBe(5);
+    expect(unclampedCall?.skip).toBe(200);
+  });
+
+  it("reports the units the booking holds by name outside custody", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.assetModel.count.mockResolvedValue(1);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValue([modelRow("model-1")]);
+    // why: `readOwnNamedUnits` reads this booking's units of the page's models;
+    // one is free, one is with a custodian and already off the pool.
+    (db.asset.findMany as unknown as Mock).mockResolvedValueOnce([
+      { id: "unit-1", assetModelId: "model-1", custody: [] },
+      { id: "unit-2", assetModelId: "model-1", custody: [{ id: "c-1" }] },
+    ]);
+
+    const result = await getBookingModelTabData({
+      organizationId: ORG_ID,
+      booking: emptyBooking,
+    });
+
+    expect(result.assetModels[0]?.namedNotInCustody).toBe(1);
   });
 
   it("projects modelRequests: assetModelName, ISO date, and null pass-through", async () => {

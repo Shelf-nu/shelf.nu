@@ -25,7 +25,6 @@ import { useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   ScrollView,
   Switch,
   Text,
@@ -41,6 +40,7 @@ import type {
   NotificationPreferenceKey,
   NotificationPreferences,
 } from "@/lib/push/preferences";
+import { openAppSettings } from "@/lib/open-app-settings";
 import { PUSH_CATEGORIES, type PushCategory } from "@/lib/push/routing";
 import { useTheme } from "@/lib/theme-context";
 
@@ -97,11 +97,10 @@ export default function NotificationsScreen() {
   };
 
   const handleOpenSettings = () => {
-    void Linking.openSettings().catch(() => {
-      Alert.alert(
-        "Couldn't open Settings",
-        "Open your phone's Settings, find Shelf, and allow notifications there."
-      );
+    void openAppSettings({
+      title: "Couldn't open Settings",
+      message:
+        "Open your phone's Settings, find Shelf, and allow notifications there.",
     });
   };
 

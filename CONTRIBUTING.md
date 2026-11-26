@@ -13,7 +13,7 @@ If you get stuck, open an issue or join us on
 
 ## Set up
 
-**Prerequisites:** Node.js 24.22.1 or newer and pnpm 9.15 or newer.
+**Prerequisites:** Node.js 24.22.3 or newer and pnpm 9.15 or newer.
 
 1. Fork the [repository](https://github.com/Shelf-nu/shelf.nu), clone your
    fork, and add Shelf's repository as `upstream`:
@@ -101,6 +101,14 @@ When the list above is done:
 
 A PR that is still a draft, or has no review request, is not in the review
 queue and will not be reviewed.
+
+Every review request runs the **PR readiness** check. It looks for open
+threads you still have to handle: any unresolved thread from a review bot
+(CodeRabbit, Codex, Copilot), and any reviewer's thread you have not replied
+to yet. If it finds one, the check fails, removes the review request (so the
+PR leaves the queue) and posts a review comment that lists those threads.
+Handle them, then request the review again: that runs the check again, and
+once nothing is left it passes and marks its comment as resolved.
 
 You can keep pushing after this point. Each push gets a new CodeRabbit review,
 so the "Get it ready" list still applies to every new commit.

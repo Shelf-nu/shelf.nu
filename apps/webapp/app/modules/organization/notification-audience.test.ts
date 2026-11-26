@@ -43,6 +43,7 @@ describe("getOrganizationNotificationAudience", () => {
     // The Manager receives booking broadcasts but not low-stock alerts.
     ["orgBookingBroadcasts", ["OWNER", "ADMIN", "MANAGER"]],
     ["inventoryAlerts", ["OWNER", "ADMIN"]],
+    ["problemReports", ["OWNER", "ADMIN", "MANAGER"]],
   ] as const)(
     "the %s audience is the roles whose policy grants it (%j)",
     async (audience, roles) => {

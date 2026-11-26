@@ -65,6 +65,7 @@ import {
   buildActiveBookingWhere,
   overCommittedWindows,
   RESERVATION_REDUCING_CATEGORIES,
+  reservedUnitsStillHeld,
   resolveIntervalTo,
 } from "~/modules/asset/availability.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -231,6 +232,7 @@ export async function flagBookingStockConflicts({
             bookingId: true,
             quantity: true,
             sourceAllocation: true,
+            checkedOutQuantity: true,
             booking: { select: { from: true, to: true, status: true } },
           },
         }),
@@ -316,14 +318,17 @@ export async function flagBookingStockConflicts({
         // practice — skip rather than fabricate a fallback window.
         if (!row.booking) continue;
 
-        // Clamp at 0 per row, same defence-in-depth as the availability
-        // primitives: an over-logged booking can't push demand negative.
+        // Converted slices read their source rows; LEGACY slices are never
+        // negative and never below the units they have out right now, same
+        // as the availability primitives.
         const remaining = isConvertedSlice(row.sourceAllocation)
           ? convertedRemaining.get(row.id ?? "") ?? 0
-          : Math.max(
-              0,
-              row.quantity -
-                (loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0)
+          : reservedUnitsStillHeld(
+              {
+                quantity: row.quantity,
+                checkedOutQuantity: row.checkedOutQuantity ?? null,
+              },
+              loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0
             );
         if (remaining === 0) continue;
 

@@ -58,8 +58,14 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 // why: the loader's booking read; each loader case supplies the booking.
+const { assertRequestMayBeCheckedOutMock } = vi.hoisted(() => ({
+  assertRequestMayBeCheckedOutMock: vi.fn(),
+}));
 vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
+  // why: the pending-request refusal has its own suite; here it answers per
+  // test (default: not pending).
+  assertRequestMayBeCheckedOut: assertRequestMayBeCheckedOutMock,
 }));
 
 // why: the sink we assert is never reached on a refused request. The
@@ -360,5 +366,27 @@ describe("fulfil-and-checkout loader", () => {
     }).catch((response: Response) => response);
 
     expect((thrown as Response).status).toBe(400);
+  });
+
+  it("does not open the scanner on a pending request, for an approver either", async () => {
+    assertRequestMayBeCheckedOutMock.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message: "This booking request has not been approved yet.",
+        shouldBeCaptured: false,
+      })
+    );
+    const thrown = await load({
+      roles: [OrganizationRoles.ADMIN],
+      status: "RESERVED",
+    }).catch((response: Response) => response);
+
+    expect((thrown as Response).status).toBe(400);
+    expect(assertRequestMayBeCheckedOutMock).toHaveBeenCalledWith({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
   });
 });

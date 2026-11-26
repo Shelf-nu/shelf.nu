@@ -188,6 +188,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetId,
       bookingId,
       organizationId,
+      actorUserId: user.id,
       quantity,
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,

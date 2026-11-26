@@ -23,6 +23,7 @@ import { db } from "~/database/db.server";
 import {
   buildAssetSearchUnion,
   type AssetSearchIdRow,
+  type CustodySearchScope,
 } from "./search-union.server";
 import { assertAssetSearchIdCeiling } from "./search.server";
 
@@ -44,15 +45,19 @@ import { assertAssetSearchIdCeiling } from "./search.server";
  * @param params.terms - Non-empty list of trimmed, lowercased search terms.
  *   Callers must guard the empty case themselves (an empty search means "match
  *   nothing", expressed as `id: { in: [] }`, not "run the UNION").
+ * @param params.custodySearchScope - Whose custody the custodian-name branch
+ *   may match (see `custodySearchScopeFor`).
  * @returns The matching asset ids (may be empty).
  * @throws {ShelfError} 400 when the match set exceeds the bind-param ceiling.
  */
 export async function resolveAssetSearchIds({
   organizationId,
   terms,
+  custodySearchScope,
 }: {
   organizationId: string;
   terms: string[];
+  custodySearchScope: CustodySearchScope;
 }): Promise<string[]> {
   const rows = await withPrismaRetry(
     () =>
@@ -60,6 +65,7 @@ export async function resolveAssetSearchIds({
         Prisma.sql`SELECT "id" FROM ${buildAssetSearchUnion({
           organizationId,
           terms,
+          custodySearchScope,
         })} AS "search_ids"`
       ),
     { operationIsRead: true }

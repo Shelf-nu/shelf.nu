@@ -73,8 +73,10 @@ from the short source.
 
 Check-in charges returned and used-up units to the sources they left from. A
 return is never refused for capacity. A request that names no slice (older
-phones, quick check-in) is spread over the slices and sources that have units
-out, most out first.
+phones, quick check-in) is spread over the slices that have units out in the
+same order as a booking without sources: the standalone slice first, then kit
+slices. Each slice takes at most what it has out, and every log is tagged with
+the slice it came back to.
 
 ### Location page
 

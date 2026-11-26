@@ -1,5 +1,5 @@
 /**
- * Sentry tunnel route — SSRF regression coverage.
+ * Sentry tunnel route: SSRF coverage, and the rate-limit headers it passes back.
  *
  * The tunnel built its upstream URL from the DSN inside the client's own
  * envelope, so the destination host was fully attacker-controlled and the
@@ -30,6 +30,7 @@ vi.mock("~/utils/env", () => ({
 }));
 
 import { action } from "~/routes/api+/sentry-tunnel";
+import { SENTRY_TUNNEL_MAX_ENVELOPE_BYTES } from "~/utils/constants";
 
 // @vitest-environment node
 
@@ -43,11 +44,20 @@ function envelope(dsn: string) {
   })}\n{"type":"event"}\n{}`;
 }
 
-/** Invokes the route action with a raw envelope body. */
-function post(body: string) {
+/**
+ * Invokes the route action with a raw envelope body.
+ *
+ * @param body - The envelope
+ * @param init - Method and headers; defaults to a plain POST
+ */
+function post(
+  body: string,
+  init: { method?: string; headers?: Record<string, string> } = {}
+) {
   return action({
     request: new Request("https://app.shelf.nu/api/sentry-tunnel", {
-      method: "POST",
+      method: init.method ?? "POST",
+      headers: init.headers,
       body,
     }),
     params: {},
@@ -142,6 +152,110 @@ describe("sentry-tunnel action", () => {
   it("rejects a malformed envelope header", () => {
     return post("not json\n{}").then((response) => {
       expect(response.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("rate limits", () => {
+    /**
+     * Makes Sentry answer the forwarded envelope with `status` and `headers`.
+     *
+     * @param status - The upstream HTTP status
+     * @param headers - The upstream response headers
+     */
+    function sentryAnswers(status: number, headers: Record<string, string>) {
+      fetchMock.mockResolvedValue(new Response("", { status, headers }));
+    }
+
+    it("passes Sentry's per-category limits back to the browser", async () => {
+      // A spent span quota limits spans and transactions only. The browser
+      // SDK reads this header to pause just those categories; without it, a
+      // bare 429 pauses every category, errors included, for 60 seconds.
+      const limits = "60:transaction;span:organization:span_usage_exceeded";
+      sentryAnswers(429, { "X-Sentry-Rate-Limits": limits });
+
+      const response = await post(
+        envelope("https://pubkey@o123.ingest.sentry.io/456")
+      );
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get("X-Sentry-Rate-Limits")).toBe(limits);
+    });
+
+    it("passes Retry-After back to the browser", async () => {
+      sentryAnswers(429, { "Retry-After": "30" });
+
+      const response = await post(
+        envelope("https://pubkey@o123.ingest.sentry.io/456")
+      );
+
+      expect(response.headers.get("Retry-After")).toBe("30");
+    });
+
+    it("forwards a limits header on an accepted envelope too", async () => {
+      // Sentry accepts a mixed envelope and drops only the limited items,
+      // announcing the limit on a 200.
+      const limits = "60:span:organization:span_usage_exceeded";
+      sentryAnswers(200, { "X-Sentry-Rate-Limits": limits });
+
+      const response = await post(
+        envelope("https://pubkey@o123.ingest.sentry.io/456")
+      );
+
+      expect(response.headers.get("X-Sentry-Rate-Limits")).toBe(limits);
+    });
+
+    it("adds no rate-limit headers Sentry did not send", async () => {
+      const response = await post(
+        envelope("https://pubkey@o123.ingest.sentry.io/456")
+      );
+
+      expect(response.headers.has("X-Sentry-Rate-Limits")).toBe(false);
+      expect(response.headers.has("Retry-After")).toBe(false);
+    });
+  });
+
+  describe("body size cap", () => {
+    /** A genuine envelope padded to exactly `size` bytes. */
+    function paddedEnvelope(size: number) {
+      const base = envelope("https://pubkey@o123.ingest.sentry.io/456");
+      return base + " ".repeat(size - base.length);
+    }
+
+    it("forwards an envelope at the cap", async () => {
+      const response = await post(
+        paddedEnvelope(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES)
+      );
+
+      expect(response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["POST", "PUT", "PATCH"])(
+      "refuses a %s body that grows past the cap, without forwarding it",
+      async (method) => {
+        // No Content-Length header: the cap is enforced while reading.
+        const response = await post(
+          paddedEnvelope(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES + 1),
+          { method }
+        );
+
+        expect(response.status).toBe(413);
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
+
+    it("refuses a declared Content-Length above the cap before reading", async () => {
+      const response = await post(
+        envelope("https://pubkey@o123.ingest.sentry.io/456"),
+        {
+          headers: {
+            "content-length": String(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES + 1),
+          },
+        }
+      );
+
+      expect(response.status).toBe(413);
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });

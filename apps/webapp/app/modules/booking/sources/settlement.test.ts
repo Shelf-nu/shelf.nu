@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { ShelfError } from "~/utils/error";
 
+import { spreadUntaggedCheckin } from "../checkout-source-location";
 import type { WorkingGroup, WorkingSlice } from "./conversion.server";
 import {
   destroyedUnitsBySlice,
@@ -113,23 +114,73 @@ describe("settleUnits", () => {
     ]);
   });
 
-  it("spreads one untagged 8-unit return over two slices: most out first, then standalone first", () => {
-    const loose = row("r-u", "UNPLACED", { quantity: 5, out: 5 });
-    const kit = row("r-k", "KIT", { quantity: 5, out: 5 });
+  it("spreads an untagged return over the slices standalone first, even when a kit slice has more out", () => {
+    const loose = row("r-u", "UNPLACED", { quantity: 3, out: 3 });
+    const kit = row("r-k", "KIT", { quantity: 6, out: 6 });
     const settlement = settlementOf([
       slice("s-kit", [kit], { assetKitId: "ak-1", mode: "KIT" }),
       slice("s-loose", [loose]),
     ]);
 
-    const settled = settleUnits(settlement, { assetId: POOL, returned: 8 });
+    const settled = settleUnits(settlement, { assetId: POOL, returned: 5 });
 
     expect(settled.bookingAssetId).toBeNull();
     expect(settled.shares).toEqual([
-      { sliceId: "s-loose", sourceRowId: "r-u", units: 5 },
-      { sliceId: "s-kit", sourceRowId: "r-k", units: 3 },
+      { sliceId: "s-loose", sourceRowId: "r-u", units: 3 },
+      { sliceId: "s-kit", sourceRowId: "r-k", units: 2 },
     ]);
-    expect(kit.outQuantity).toBe(2);
     expect(loose.outQuantity).toBe(0);
+    expect(kit.outQuantity).toBe(4);
+  });
+
+  it("splits an untagged check-in over the same slices as the LEGACY spread", () => {
+    // The same booking read two ways: as a converted group (rows with units
+    // out) and as LEGACY slices (units sent, nothing logged back yet).
+    const settlement = settlementOf([
+      slice("s-kit", [row("r-k", "KIT", { quantity: 6, out: 6 })], {
+        assetKitId: "ak-1",
+        mode: "KIT",
+      }),
+      slice("s-loose", [row("r-u", "UNPLACED", { quantity: 3, out: 3 })]),
+    ]);
+    const legacy = spreadUntaggedCheckin({
+      slices: [
+        {
+          id: "s-kit",
+          assetKitId: "ak-1",
+          sourceKitId: "kit-1",
+          sourceLocationId: null,
+          quantity: 6,
+          checkedOutQuantity: 6,
+          checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
+        },
+        {
+          id: "s-loose",
+          assetKitId: null,
+          sourceKitId: null,
+          sourceLocationId: null,
+          quantity: 3,
+          checkedOutQuantity: 3,
+          checkedOutAt: new Date("2026-01-05T09:00:00.000Z"),
+        },
+      ],
+      priorLogs: [],
+      returned: 5,
+    });
+
+    settleUnits(settlement, { assetId: POOL, returned: 5 });
+
+    const convertedBySlice = settlement.planned.map((p) => [
+      p.sliceId,
+      p.units,
+    ]);
+    expect(convertedBySlice).toEqual(
+      legacy.map((share) => [share.bookingAssetId, share.returned])
+    );
+    expect(convertedBySlice).toEqual([
+      ["s-loose", 3],
+      ["s-kit", 2],
+    ]);
   });
 
   it("tags the logs with the only slice an untagged request settled on", () => {

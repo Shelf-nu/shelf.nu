@@ -30,6 +30,7 @@ import {
   setStandaloneBookedQuantity,
   type BookedQuantityChange,
 } from "./booked-quantity.server";
+import { applyRequestGrowthRule } from "./request-change.server";
 import {
   bookingSourcesInPlay,
   resizeSlices,
@@ -46,7 +47,15 @@ const tx = {
   bookingAsset: { findUnique: vi.fn(), update: vi.fn() },
   bookingAssetSource: { findMany: vi.fn() },
   location: { findMany: vi.fn() },
+  // why: a changed amount moves the booking's version (`updatedAt`) first.
+  booking: { updateMany: vi.fn() },
 };
+
+// why: whether a raised amount clears an approval is decided by the
+// approval helper, which has its own suite; here only when it is asked.
+vi.mock("./request-change.server", () => ({
+  applyRequestGrowthRule: vi.fn().mockResolvedValue(false),
+}));
 
 // why: the database is the integration boundary. `$transaction` hands the
 // service a recording client so reads and writes inside it are observable.
@@ -101,6 +110,7 @@ const ADMIN_ACCESS = accessFor([OrganizationRoles.ADMIN]);
 const SCOPE = {
   bookingId: "booking-1",
   organizationId: "org-1",
+  actorUserId: "user-1",
 };
 
 /** The booking's window as the booking lock reads it, unless a case moves it. */
@@ -204,6 +214,48 @@ describe("setStandaloneBookedQuantities", () => {
     expect(applied).toEqual([
       { assetId: "a", assetTitle: "Asset a", previousQuantity: 2, quantity: 5 },
     ]);
+    // The booking's version moves, so a pending request cannot be approved
+    // from a page that showed the old amount.
+    expect(tx.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: SCOPE.bookingId, organizationId: SCOPE.organizationId },
+      data: { updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("asks the approval helper when an amount is raised, never when lowered", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+    expect(applyRequestGrowthRule).toHaveBeenCalledWith(tx, {
+      bookingId: SCOPE.bookingId,
+      organizationId: SCOPE.organizationId,
+      actorUserId: SCOPE.actorUserId,
+    });
+
+    vi.mocked(applyRequestGrowthRule).mockClear();
+    slicesHold({ "slice-a": { quantity: 5 } });
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 2)],
+    });
+    expect(applyRequestGrowthRule).not.toHaveBeenCalled();
+  });
+
+  it("locks the booking before any asset, the order a check-out uses", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+
+    expect(
+      vi.mocked(tx.booking.updateMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vi.mocked(lockAssetForQuantityUpdate).mock.invocationCallOrder[0]
+    );
   });
 
   it("measures against the amount read under the lock, not a caller snapshot", async () => {

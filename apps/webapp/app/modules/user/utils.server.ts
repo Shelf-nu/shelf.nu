@@ -315,31 +315,11 @@ export async function resolveUserAction(
       });
 
       /**
-       * Invalidate every earlier invite for this person in this organization
-       * before creating the new one. The two steps run in order: the new
-       * invite matches the same email, so an invalidation that finishes later
-       * would close it too, and `createInvite` refuses while another pending
-       * invite for the person exists.
+       * `createInvite` invalidates the person's earlier pending invites in the
+       * same transaction that creates this one, so a refused resend (for
+       * example a team member deleted or claimed since) leaves the existing
+       * invite pending.
        */
-      await db.invite
-        .updateMany({
-          where: {
-            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
-            organizationId,
-          },
-          data: {
-            status: InviteStatuses.INVALIDATED,
-          },
-        })
-        .catch((cause) => {
-          throw new ShelfError({
-            cause,
-            message: "Failed to invalidate previous invites",
-            additionalData: { userId, organizationId, inviteeEmail },
-            label: "Team",
-          });
-        });
-
       /** Create a new invite, based on the prev invite's role */
       const invite = await createInvite({
         organizationId,

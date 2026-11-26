@@ -67,6 +67,9 @@ vi.mock("react-router", async () => {
     useActionData: vi.fn(() => undefined),
     useRouteLoaderData: vi.fn(),
     useNavigation: vi.fn(() => ({ state: "idle" })),
+    // why: the shared drawer reads the route's action data for its
+    // save-not-confirmed notice, which needs a mounted data router.
+    useActionData: vi.fn(() => undefined),
     useLocation: vi.fn(() => ({
       pathname: "/bookings/booking-1/overview/checkout-assets",
       search: "",
@@ -510,22 +513,26 @@ describe("PartialCheckoutDrawer", () => {
 
     renderDrawer(store);
 
-    const select = screen.getByLabelText(
-      "From location for Battery pack"
-    ) as HTMLSelectElement;
-    expect(select.name).toBe("");
-    expect(select.value).toBe("loc-studio");
-    expect([...select.options].map((option) => option.text)).toEqual([
-      "Store Room · 5 pcs",
-      "Studio · 20 pcs",
-      "Unplaced · 3 pcs",
-    ]);
+    const picker = screen.getByRole("button", {
+      name: "From location for Battery pack",
+    });
+    expect(picker).toHaveTextContent("Studio · 20 pcs");
+    // Unchanged, it posts nothing and the server records its own default.
+    expect(document.querySelector('input[name^="sourceLocation."]')).toBeNull();
+
+    fireEvent.click(picker);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent)
+    ).toEqual(["Store Room · 5 pcs", "Studio · 20 pcs", "Unplaced · 3 pcs"]);
+    fireEvent.click(screen.getByRole("option", { name: "Store Room · 5 pcs" }));
+
+    // Once the operator picks, the answer is posted under the slice's key.
     // The row sits outside the footer form; `form=` joins it to the submit.
-    expect(select.getAttribute("form")).toBe("partial-checkout-form");
-    // Unchanged, it posts nothing and the server records its own default;
-    // once the operator picks, the answer is posted under the slice's key.
-    fireEvent.change(select, { target: { value: "loc-store" } });
-    expect(select.name).toBe("sourceLocation.ba-asset-qty-a");
+    const answer = document.querySelector<HTMLInputElement>(
+      'input[name="sourceLocation.ba-asset-qty-a"]'
+    );
+    expect(answer?.value).toBe("loc-store");
+    expect(answer?.getAttribute("form")).toBe("partial-checkout-form");
   });
 
   it("does NOT show a qty input for INDIVIDUAL scanned assets", () => {

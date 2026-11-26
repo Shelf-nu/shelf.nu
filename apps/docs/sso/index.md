@@ -82,6 +82,15 @@ If users on your domain already have standard (email/password) Shelf accounts, f
 
 Keeping SSO and standard (password) users side by side on the same domain for good, apart from the workspace owner described above, is not currently supported: the temporary relaxation described above is meant for setup and testing, and new accounts on the domain can only join through SSO. If you need a permanent mix, contact support.
 
+### Signing in from your identity provider's dashboard [#](#idp-dashboard-sign-in)
+
+People can open Shelf from your identity provider's app dashboard (for example the Shelf tile in Okta or in Microsoft My Apps), as well as from Shelf's own **Log in with SSO** page.
+
+- **Started from Shelf** (the SSO page, or a link to it): the sign-in completes only in the browser that started it, with no extra step.
+- **Started from the dashboard tile**: Shelf did not start this sign-in, so before signing in it shows **Continue to Shelf?** with the account's email, and signs in once the person clicks **Continue**, so people always see which account they are signing in to.
+
+To skip the confirmation, have the tile start the sign-in at Shelf instead. In Microsoft Entra, set **Sign on URL** in the Basic SAML Configuration to `https://app.shelf.nu/sso-login`. In Okta, hide the SAML app's tile and add a **Bookmark App** that points to `https://app.shelf.nu/sso-login`. Either way, your users then enter your company domain once, or not at all when your Shelf instance has a default SSO domain.
+
 ### Disable SSO for your team [#](#disable-sso-for-your-team)
 
 - You can prevent a user's account from further access to Shelf by removing or disabling their account in your identity provider.
@@ -90,6 +99,8 @@ Keeping SSO and standard (password) users side by side on the same domain for go
 ## Developers [#](#developers)
 
 If you are self-hosting shelf and want to setup SSO, please refer to the supabase documentation for adding providers: [https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml](https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml)
+
+SSO sign-ins started at `/sso-login` use the PKCE flow (Supabase Auth returns a one-time `?code=` that the callback exchanges with a verifier kept in an HttpOnly cookie). A self-hosted Supabase Auth must support PKCE for SSO, which it has since April 2023. The callback URLs to allow in Supabase stay the same: `/oauth/callback` and `/oauth/callback/mobile`.
 
 ### Attribute mapping [#](#attribute-mapping)
 

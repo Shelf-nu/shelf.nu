@@ -23,10 +23,10 @@ docker run -d \
   --name "shelf" \
   -e "DATABASE_URL=postgres://USER:PASSWORD@HOST:6543/DB_NAME?pgbouncer=true" \
   -e "DIRECT_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME" \
-  -e 'SUPABASE_ANON_PUBLIC=your-anon-public-key' \
-  -e 'SUPABASE_SERVICE_ROLE=your-service-role-key' \
+  -e 'SUPABASE_ANON_PUBLIC=sb_publishable_your-publishable-key' \
+  -e 'SUPABASE_SECRET_KEY=sb_secret_your-secret-key' \
   -e 'SUPABASE_URL=https://your-instance-name.supabase.co' \
-  -e 'SESSION_SECRET=super-duper-s3cret' \
+  -e 'SESSION_SECRET=generate-with-openssl-rand-hex-32' \
   -e 'SERVER_URL=http://localhost:3000' \
   -e 'MAPTILER_TOKEN=your-maptiler-token' \
   -e 'SMTP_HOST=mail.example.com' \
@@ -34,19 +34,24 @@ docker run -d \
   -e 'SMTP_USER=some-email@example.com' \
   -e 'SMTP_FROM="Your Name from shelf.nu" <your-email@shelf.nu>' \
   -e 'SMTP_PWD=super-safe-passw0rd' \
-  -e 'INVITE_TOKEN_SECRET=another-super-duper-s3cret' \
+  -e 'INVITE_TOKEN_SECRET=generate-with-openssl-rand-hex-32' \
   -p 3000:8080 \
   --restart unless-stopped \
   ghcr.io/shelf-nu/shelf.nu:latest
 ```
 
+> Upgrading from `SUPABASE_SERVICE_ROLE` and the legacy `anon` key? See
+> [Upgrade to Supabase's new API keys](./upgrading/supabase-api-keys.md).
+
 > [!NOTE]
 > Replace the placeholder values with your actual configuration:
 >
 > - `USER`, `PASSWORD`, `HOST`, `DB_NAME` - Your Supabase database details
-> - `your-anon-public-key`, `your-service-role-key` - From Supabase API settings
+> - `sb_publishable_your-publishable-key`, `sb_secret_your-secret-key` - From **Project Settings** → **API Keys** in Supabase
 > - `your-instance-name` - Your Supabase project reference
 > - Other tokens and secrets as needed
+>
+> `SESSION_SECRET` and `INVITE_TOKEN_SECRET` sign session cookies and invite links. Generate each one once with `openssl rand -hex 32` and keep it: changing `SESSION_SECRET` signs everyone out, and changing `INVITE_TOKEN_SECRET` breaks invite links already sent. In production the server logs a loud `INSECURE CONFIGURATION` error at boot when either one is an example value from these docs.
 
 `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in the [Supabase Setup Guide](./supabase-setup.md).
 

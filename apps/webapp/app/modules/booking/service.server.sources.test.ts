@@ -174,6 +174,9 @@ vitest.mock("~/database/db.server", () => {
         findFirst: vitest.fn(),
         create: vitest.fn(),
         update: vitest.fn(),
+        // why: `touchBookingVersion` moves the booking's version (and takes
+        // its row lock) with an `updateMany`.
+        updateMany: vitest.fn(),
       },
       bookingAsset: {
         // Served by `fakeSliceFindMany`, installed in `beforeEach`.
@@ -366,6 +369,7 @@ vitest.mock("~/modules/booking-note/service.server", () => ({
 }));
 vitest.mock("~/modules/note/service.server", () => ({
   createNotes: vitest.fn().mockResolvedValue({}),
+  createNotesPerAsset: vitest.fn().mockResolvedValue(undefined),
 }));
 vitest.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vitest.fn().mockResolvedValue(undefined),
@@ -502,6 +506,7 @@ beforeEach(() => {
   for (const spy of Object.values(db.booking)) {
     vitest.mocked(spy as ReturnType<typeof vitest.fn>).mockReset();
   }
+  vitest.mocked(db.booking.updateMany).mockResolvedValue({ count: 1 } as never);
   vitest.mocked(admitWindowChange).mockResolvedValue(undefined);
   vitest.mocked(allocateNewSlices).mockResolvedValue(undefined);
   vitest.mocked(resizeSlices).mockResolvedValue(undefined);
@@ -655,15 +660,17 @@ describe("updateBasicBooking", () => {
     store.slices = [
       { id: "ba-qt-1", assetId: "qt-1", assetKitId: null, quantity: 3 },
     ];
-    openTx();
+    const tx = openTx();
     vitest
-      .mocked(db.booking.update)
+      .mocked(tx.booking.update)
       .mockResolvedValue({ id: BOOKING_ID } as never);
 
     await updateBasicBooking({ ...params, from: oldFrom, to: oldTo });
 
+    // The draft write still runs under the booking lock; with no date change
+    // nothing reaches the sources.
     expect(admitWindowChange).not.toHaveBeenCalled();
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(bookingSourcesInPlay).not.toHaveBeenCalled();
   });
 
   it("refuses new dates when the booking stopped being a draft before the lock", async () => {
@@ -677,7 +684,7 @@ describe("updateBasicBooking", () => {
 
     await expect(
       updateBasicBooking({ ...params, from, to })
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ status: 409 });
     expect(tx.booking.update).not.toHaveBeenCalled();
     expect(admitWindowChange).not.toHaveBeenCalled();
   });
@@ -2049,7 +2056,7 @@ describe("removeAssets", () => {
     expect(tx.bookingAsset.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("takes no booking lock for a removal of INDIVIDUAL assets only", async () => {
+  it("takes no status lock for a removal of INDIVIDUAL assets only, only the version write's row lock", async () => {
     store.lockedStatus = BookingStatus.ONGOING;
     store.slices = [
       { id: "ba-ind", assetId: "ind-1", assetKitId: null, quantity: 1 },
@@ -2072,5 +2079,9 @@ describe("removeAssets", () => {
     expect(tx.bookingAsset.deleteMany).toHaveBeenCalledTimes(1);
     expect(db.$queryRaw).not.toHaveBeenCalled();
     expect(lockEveryAssetForQuantityUpdate).not.toHaveBeenCalled();
+    // The version write is the transaction's first statement.
+    expect(firstCallOrder(tx.booking.updateMany)).toBeLessThan(
+      firstCallOrder(tx.bookingAsset.deleteMany)
+    );
   });
 });

@@ -110,8 +110,8 @@ fly secrets set FINGERPRINT=$(openssl rand -hex 32)
 
 # Supabase configuration
 fly secrets set SUPABASE_URL="https://your-production-project.supabase.co"
-fly secrets set SUPABASE_SERVICE_ROLE="your-production-service-role-key"
-fly secrets set SUPABASE_ANON_PUBLIC="your-production-anon-key"
+fly secrets set SUPABASE_SECRET_KEY="sb_secret_your-production-secret-key"
+fly secrets set SUPABASE_ANON_PUBLIC="sb_publishable_your-production-key"
 fly secrets set DATABASE_URL="postgres://user:pass@host:6543/db?pgbouncer=true&connection_limit=1"
 fly secrets set DIRECT_URL="postgres://user:pass@host:5432/db"  # migrations + toasts across machines
 
@@ -138,6 +138,9 @@ fly secrets set STRIPE_SECRET_KEY="your-stripe-secret-key"
 fly secrets set STRIPE_PUBLIC_KEY="your-stripe-public-key"
 fly secrets set STRIPE_WEBHOOK_ENDPOINT_SECRET="your-stripe-webhook-secret"
 ```
+
+> Upgrading from `SUPABASE_SERVICE_ROLE` and the legacy `anon` key? See
+> [Upgrade to Supabase's new API keys](./upgrading/supabase-api-keys.md).
 
 ### Staging Secrets (Optional)
 
@@ -183,8 +186,8 @@ Add these secrets for testing in GitHub Actions:
 DATABASE_URL=your-test-database-url
 DIRECT_URL=your-test-direct-url
 SUPABASE_URL=your-test-supabase-url
-SUPABASE_SERVICE_ROLE=your-test-service-role
-SUPABASE_ANON_PUBLIC=your-test-anon-key
+SUPABASE_SECRET_KEY=sb_secret_your-test-secret-key
+SUPABASE_ANON_PUBLIC=sb_publishable_your-test-publishable-key
 SESSION_SECRET=test-session-secret
 SERVER_URL=http://localhost:3000  # Important for tests!
 ```

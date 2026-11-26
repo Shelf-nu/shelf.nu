@@ -65,8 +65,11 @@ env:
     timeout: 30000
 - tapOn:
     text: "Booking: ${BOOKING_NAME}.*"
+# The check-in group leads the booking screen, so its first explicit entry
+# point marks that the panel rendered. Waiting on it (rather than scrolling to
+# a lower button) keeps the top of the panel on screen for the checks below.
 - extendedWaitUntil:
-    visible: "More booking actions"
+    visible: "Scan assets to check in"
     timeout: 20000
 
 # CORE: the one-tap quick check-in must be ABSENT when enforcement is ON...
