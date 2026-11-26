@@ -56,6 +56,7 @@ import {
 } from "@shelf/quantity-control";
 import type {
   BookingSourcePart,
+  SourceFree,
   SourceHold,
   SourceRowState,
 } from "@shelf/quantity-control";
@@ -83,6 +84,7 @@ import {
   buildSessionPlan,
   buildSourceRefusal,
   lockGroupAssets,
+  manualSourceKeys,
   openGroupSession,
   ownHoldBySource,
   sliceOf,
@@ -421,15 +423,26 @@ function hasPendingAt(slice: WorkingSlice, keys: Set<string>): boolean {
  * Tries to move all pending units of an AUTO slice to sources that fit them,
  * by the allocation rule. Leaves the slice as it was when nothing fits.
  *
+ * @param group - The slice's group
+ * @param slice - The AUTO slice
+ * @param moveFree - Free units to fit the moved units into, when they must
+ *   fit a window other than the session's (an extension moves units that
+ *   are held over the whole remaining window); defaults to `group.free`
  * @returns True when the slice was re-allocated
  */
-function tryReallocate(group: WorkingGroup, slice: WorkingSlice): boolean {
+function tryReallocate(
+  group: WorkingGroup,
+  slice: WorkingSlice,
+  moveFree?: SourceFree[]
+): boolean {
   const snapshot = slice.rows.map((r) => ({ ...r }));
   const pending = stripLoosePending(slice);
   if (pending === 0) return false;
   const result = allocateSources({
     quantity: pending,
-    sources: availableForBooking(group),
+    sources: availableForBooking(
+      moveFree ? { ...group, free: moveFree } : group
+    ),
   });
   if (!result.ok) {
     slice.rows = snapshot;
@@ -440,29 +453,87 @@ function tryReallocate(group: WorkingGroup, slice: WorkingSlice): boolean {
 }
 
 /**
- * Step 4: every AUTO slice of the session whose holds no longer fit (pending
- * on UNASSIGNED, or pending at a source where the booking holds more than is
- * free) is re-allocated when another set of sources fits. Every short slice
- * is among them: a slice the short sweep flags always holds more at its
- * source than the free units there. MANUAL slices are never moved.
+ * True when an AUTO slice no longer fits its group's session free units:
+ * pending on UNASSIGNED, or pending at a source where the booking holds more
+ * than is free.
+ */
+function autoSliceConflicts(group: WorkingGroup, slice: WorkingSlice) {
+  if (slice.mode !== "AUTO") return false;
+  return (
+    unassignedPending(slice) > 0 ||
+    hasPendingAt(slice, overcommittedKeys(group))
+  );
+}
+
+/**
+ * Step 4: every AUTO slice of the session whose holds no longer fit (see
+ * {@link autoSliceConflicts}) is re-allocated when another set of sources
+ * fits. Every short slice is among them: a slice the short sweep flags always
+ * holds more at its source than the free units there. MANUAL slices are
+ * never moved.
  *
  * @param session - The session
  * @param skip - Slices the call just allocated
+ * @param moveFreeByGroup - Free units the moved units must fit, per group,
+ *   when that differs from the session window (see {@link tryReallocate});
+ *   a group absent from it uses its session free units
  */
 function reallocateConflictingAutoSlices(
   session: GroupSession,
-  skip: ReadonlySet<string> = new Set()
+  skip: ReadonlySet<string> = new Set(),
+  moveFreeByGroup: ReadonlyMap<WorkingGroup, SourceFree[]> = new Map()
 ) {
   for (const group of session.groups.values()) {
     if (group.status !== "converted") continue;
     for (const slice of group.slices) {
-      if (slice.mode !== "AUTO" || skip.has(slice.id)) continue;
-      const over = overcommittedKeys(group);
-      if (unassignedPending(slice) > 0 || hasPendingAt(slice, over)) {
-        tryReallocate(group, slice);
+      if (skip.has(slice.id)) continue;
+      if (autoSliceConflicts(group, slice)) {
+        tryReallocate(group, slice, moveFreeByGroup.get(group));
       }
     }
   }
+}
+
+/**
+ * Free units over an extension's whole remaining window, for every converted
+ * group with an AUTO slice to move.
+ *
+ * An extension measures the added interval, but units an AUTO slice already
+ * holds are held over the whole remaining window `[max(from, now), to)`, so
+ * moving them must fit that window, not only the added time: a source free
+ * in the added hour may be full before the old end. One batched free read,
+ * only when some converted group has a conflicting AUTO slice; free units
+ * over the longer window never exceed those over the added interval, so a
+ * move that fits them also fits the admission.
+ *
+ * @param tx - The caller's transaction
+ * @param ctx - The open call, its groups' free units over the added interval
+ * @param args.bookingId - The booking, excluded from competing holds
+ * @param args.window - The remaining window
+ * @param args.skip - Slices that are not moved
+ * @returns The group -> free units over the remaining window; empty when no
+ *   slice is to move
+ */
+async function loadRemainingFreeForMoves(
+  tx: BookingSourcesTx,
+  ctx: CallContext,
+  args: { bookingId: string; window: Window; skip: ReadonlySet<string> }
+): Promise<Map<WorkingGroup, SourceFree[]>> {
+  const groups = [...ctx.session.groups.values()].filter(
+    (group) =>
+      group.status === "converted" &&
+      group.slices.some(
+        (slice) => !args.skip.has(slice.id) && autoSliceConflicts(group, slice)
+      )
+  );
+  if (groups.length === 0) return new Map();
+  const freeByPool = await computeFreeBySourceForPools(tx, {
+    organizationId: ctx.session.organizationId,
+    assetIds: groups.map((g) => g.key.assetId),
+    window: args.window,
+    excludeBookingId: args.bookingId,
+  });
+  return new Map(groups.map((g) => [g, freeByPool.get(g.key.assetId) ?? []]));
 }
 
 /**
@@ -626,11 +697,8 @@ export async function resizeSlices(
       // The sources call that follows places and admits these units.
       addToRow(slice, "UNASSIGNED", null, delta);
     } else if (delta > 0) {
-      const own = new Set(
-        slice.rows.filter((r) => LOOSE_KINDS.has(r.kind)).map(sourceKey)
-      );
-      const onlyKeys =
-        slice.mode === "MANUAL" && own.size > 0 ? own : undefined;
+      // A MANUAL slice keeps to the sources it uses now; see manualSourceKeys
+      // for the unrestricted fallback.
       await allocateToSlice(
         tx,
         ctx.session,
@@ -638,7 +706,7 @@ export async function resizeSlices(
         slice,
         delta,
         how,
-        onlyKeys
+        manualSourceKeys(slice)
       );
     } else {
       const out = slice.rows.reduce((sum, r) => sum + r.outQuantity, 0);
@@ -960,7 +1028,10 @@ async function allocateSeededOverRemainingWindow(
  * for the old window under legacy rules, so they are allocated over the
  * whole remaining window `[max(from, now), to)` without refusing (the rest
  * on UNASSIGNED); that costs one extra batched free read, only when a group
- * converts. Admission still measures only the added interval.
+ * converts. Pending units an AUTO slice already holds are moved only to
+ * sources that fit that same remaining window (one more batched free read,
+ * only when a slice is to move). Admission still measures only the added
+ * interval.
  *
  * AUTO slices that do not fit (or have pending on UNASSIGNED) are first moved
  * to sources that fit when there are any. Pending units still on UNASSIGNED
@@ -971,7 +1042,8 @@ async function allocateSeededOverRemainingWindow(
  * is. LEGACY groups convert first when adoption is enabled.
  *
  * Queries beyond {@link openCall}: one batched free read over the previous
- * window for `dates`, location names on a refusal, and the write.
+ * window for `dates`, the remaining-window reads of `extend` above, location
+ * names on a refusal, and the write.
  *
  * @param tx - The caller's transaction; the caller holds the booking lock
  * @param args.from - The new start
@@ -1022,13 +1094,14 @@ export async function admitWindowChange(
   // over the whole remaining window without refusing, so a source full
   // before the old end never refuses the extension.
   const seededSliceIds = new Set(ctx.session.pending.map((p) => p.sliceId));
-  if (kind === "extend" && measured && ctx.session.pending.length > 0) {
+  const remainingWindow: Window | null =
+    kind === "extend" && measured
+      ? { from: new Date(Math.max(from.getTime(), now.getTime())), to }
+      : null;
+  if (remainingWindow && ctx.session.pending.length > 0) {
     await allocateSeededOverRemainingWindow(tx, ctx, {
       bookingId,
-      window: {
-        from: new Date(Math.max(from.getTime(), now.getTime())),
-        to,
-      },
+      window: remainingWindow,
     });
   }
   await allocateSessionPending(
@@ -1038,7 +1111,14 @@ export async function admitWindowChange(
   );
 
   if (!voluntary || !measured) {
-    reallocateConflictingAutoSlices(ctx.session);
+    const moveFree = remainingWindow
+      ? await loadRemainingFreeForMoves(tx, ctx, {
+          bookingId,
+          window: remainingWindow,
+          skip: new Set(),
+        })
+      : new Map<WorkingGroup, SourceFree[]>();
+    reallocateConflictingAutoSlices(ctx.session, new Set(), moveFree);
     await finishCall(tx, ctx);
     return;
   }
@@ -1067,15 +1147,24 @@ export async function admitWindowChange(
     }
   }
 
-  // AUTO slices move to sources that fit the measured window. Slices an
+  // AUTO slices move to sources that fit the measured window; on an
+  // extension, to sources that fit the whole remaining window. Slices an
   // extension just converted were placed over the whole remaining window.
+  const skipMoves: ReadonlySet<string> =
+    kind === "extend" ? seededSliceIds : new Set();
+  const moveFree = remainingWindow
+    ? await loadRemainingFreeForMoves(tx, ctx, {
+        bookingId,
+        window: remainingWindow,
+        skip: skipMoves,
+      })
+    : new Map<WorkingGroup, SourceFree[]>();
   for (const group of converted) {
     const over = overcommittedKeys(group);
     for (const slice of group.slices) {
-      if (slice.mode !== "AUTO") continue;
-      if (kind === "extend" && seededSliceIds.has(slice.id)) continue;
+      if (slice.mode !== "AUTO" || skipMoves.has(slice.id)) continue;
       if (unassignedPending(slice) > 0 || hasPendingAt(slice, over)) {
-        tryReallocate(group, slice);
+        tryReallocate(group, slice, moveFree.get(group));
       }
     }
   }
@@ -1121,6 +1210,35 @@ export type DispatchPick = {
    */
   fromLocationId?: string | null;
 };
+
+/**
+ * Merges dispatch picks that name the same slice into one pick with the
+ * summed units, in first-seen order, so every later step (the physical-now
+ * check, the KIT cap) sees one total per slice. Picks of one slice must agree
+ * on `fromLocationId` (an omitted choice counts as its own value).
+ *
+ * @param picks - Picks with positive units
+ * @returns One pick per slice
+ * @throws {ShelfError} 400 when picks of one slice name different sources
+ */
+function mergePicksBySlice(picks: DispatchPick[]): DispatchPick[] {
+  const bySlice = new Map<string, DispatchPick>();
+  for (const pick of picks) {
+    const seen = bySlice.get(pick.sliceId);
+    if (!seen) {
+      bySlice.set(pick.sliceId, { ...pick });
+      continue;
+    }
+    if (seen.fromLocationId !== pick.fromLocationId) {
+      throw userError(
+        "Units of one booking item cannot leave from different sources in one check-out.",
+        { sliceId: pick.sliceId }
+      );
+    }
+    seen.units += pick.units;
+  }
+  return [...bySlice.values()];
+}
 
 /** Units of one slice that left from one loose source in a dispatch. */
 export type DispatchedSource = {
@@ -1549,7 +1667,8 @@ function shortKeysBySlice(
  *   locked every picked slice's asset in its first sorted asset lock
  * @param args.organizationId - The trusted workspace id
  * @param args.bookingId - The booking
- * @param args.picks - Units per slice leaving now, quantity-tracked slices
+ * @param args.picks - Units per slice leaving now, quantity-tracked slices;
+ *   picks of one slice are summed and must name the same source
  * @param args.window - The booking window the check-out commits
  * @param args.clientSupportsSources - False for a client without the
  *   `booking-sources` capability; defaults to true
@@ -1577,7 +1696,7 @@ export async function dispatchUnits(
   }
 ): Promise<DispatchResult> {
   const { organizationId, bookingId } = args;
-  const picks = args.picks.filter((p) => p.units > 0);
+  const picks = mergePicksBySlice(args.picks.filter((p) => p.units > 0));
   if (picks.length === 0) return { dispatched: [], legacySliceIds: [] };
   const clientSupportsSources = args.clientSupportsSources ?? true;
   const now = args.now ?? new Date();

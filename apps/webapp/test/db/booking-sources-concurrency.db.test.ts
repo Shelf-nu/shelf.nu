@@ -8,9 +8,17 @@
  * asserts who committed and the final invariants, through the deferred
  * contract checks run by hand on the committed state.
  *
- * Postgres deadlock aborts (40P01) are never accepted here: the one lock
- * order (booking rows, then asset rows; kit and placement paths asset rows
- * only) is what these tests show prevents them.
+ * The races covered: two reservations for the last units, check-out against
+ * a placement rehome, a source edit against check-in, a location delete
+ * against allocation, conversion against check-in, and a kit quantity change
+ * against a booking check-out. Postgres deadlock aborts (40P01) are never
+ * accepted in them: each path keeps the one lock order (booking rows, then
+ * asset rows; kit and placement paths asset rows only).
+ *
+ * Paths outside these races are not covered. In particular, the model-request
+ * lock order (reserving locks assets before model rows, while fulfil and
+ * check-out rescheduling lock model rows first) is a known limit and can
+ * still deadlock; no case here exercises it.
  *
  * Runs only under `vitest.db.config.ts` (CI "Database tests" job).
  *

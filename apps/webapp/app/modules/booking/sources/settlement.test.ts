@@ -374,13 +374,13 @@ describe("matchSharesToLogs", () => {
 
 describe("remainingInSettlement", () => {
   it("is zero once every planned unit is settled, whatever was re-dispatched", () => {
-    // 10 planned at A: all went out and came back, then 5 went out again.
-    const rowA = row(
-      "r-a",
-      "LOCATION",
-      { quantity: 10, out: 5, released: 5 },
-      "loc-a"
-    );
+    // 10 planned at A: all went out and came back (10 shared), then 5 went
+    // out again, so 15 were dispatched over the row's lifetime.
+    const rowA = {
+      ...row("r-a", "LOCATION", { quantity: 10, out: 5, released: 5 }, "loc-a"),
+      dispatchedTotal: 15,
+      sharedQuantity: 10,
+    };
     const settlement = settlementOf([slice("s1", [rowA])]);
 
     expect(remainingInSettlement(settlement, POOL)).toBe(5);

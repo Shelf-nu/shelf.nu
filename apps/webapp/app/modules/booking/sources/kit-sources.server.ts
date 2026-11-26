@@ -49,6 +49,7 @@ import {
   allocateToSlice,
   buildSessionPlan,
   lockGroupAssets,
+  manualSourceKeys,
   openGroupSession,
 } from "./conversion.server";
 import type {
@@ -78,12 +79,6 @@ export const KIT_PROPAGATION_STATUSES: BookingStatus[] = [
 
 /** Modes of a converted slice; anything else (LEGACY, unread) is legacy. */
 const CONVERTED_MODES: ReadonlySet<string> = new Set(["KIT", "AUTO", "MANUAL"]);
-
-/** Source kinds that hold location or Unplaced capacity. */
-const LOOSE_KINDS: ReadonlySet<SourceRowState["kind"]> = new Set([
-  "LOCATION",
-  "UNPLACED",
-]);
 
 /**
  * True when a slice belongs to a converted group, judged from its stored mode.
@@ -452,11 +447,8 @@ async function splitKitSlice(
     addToRow(target, "UNASSIGNED", null, pending);
     return;
   }
-  // A MANUAL sibling keeps to its own sources, as a resize of it would.
-  const own = new Set(
-    target.rows.filter((r) => LOOSE_KINDS.has(r.kind)).map(sourceKey)
-  );
-  const onlyKeys = target.mode === "MANUAL" && own.size > 0 ? own : undefined;
+  // A MANUAL sibling keeps to the sources it uses now, as a resize of it
+  // would; see manualSourceKeys for the unrestricted fallback.
   await allocateToSlice(
     tx,
     session,
@@ -464,7 +456,7 @@ async function splitKitSlice(
     target,
     pending,
     "involuntary",
-    onlyKeys
+    manualSourceKeys(target)
   );
 }
 

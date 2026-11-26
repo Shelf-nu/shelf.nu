@@ -483,6 +483,43 @@ export function availableForBooking(
   }));
 }
 
+/**
+ * The loose sources a slice uses now: its LOCATION and UNPLACED rows that
+ * still have units out or pending. A row that only keeps released units is
+ * history, not a source the slice draws from.
+ *
+ * @param slice - The slice
+ * @returns The `sourceKey` of each current loose source
+ */
+export function currentSourceKeys(slice: WorkingSlice): Set<string> {
+  const keys = new Set<string>();
+  for (const row of slice.rows) {
+    if (!LOOSE_KINDS.has(row.kind)) continue;
+    if (row.outQuantity + Math.max(0, pendingOf(row)) === 0) continue;
+    keys.add(sourceKey(row));
+  }
+  return keys;
+}
+
+/**
+ * The candidate sources for more units on a slice: a MANUAL slice keeps to
+ * its current sources ({@link currentSourceKeys}). Any other mode, or a
+ * MANUAL slice with no current source (everything returned or still on
+ * UNASSIGNED), is unrestricted, so the units follow the allocation rule
+ * instead of being refused against an empty set.
+ *
+ * @param slice - The slice receiving units
+ * @returns The allowed source keys for {@link allocateToSlice}, or undefined
+ *   for no restriction
+ */
+export function manualSourceKeys(
+  slice: WorkingSlice
+): ReadonlySet<string> | undefined {
+  if (slice.mode !== "MANUAL") return undefined;
+  const keys = currentSourceKeys(slice);
+  return keys.size > 0 ? keys : undefined;
+}
+
 /** Finds a slice of a group, or fails loudly: a bug in the caller. */
 export function sliceOf(group: WorkingGroup, sliceId: string): WorkingSlice {
   const slice = group.slices.find((s) => s.id === sliceId);

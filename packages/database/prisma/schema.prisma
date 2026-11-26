@@ -1944,11 +1944,12 @@ model BookingAsset {
   // when the slice is first checked out (`checkedOutQuantity` goes from 0).
   // A slice sent out again keeps it.
   //
-  // Check-in reads it: units reported consumed, lost or damaged come off this
-  // location's manual placement, so a pool placed at several locations loses
-  // them where they actually came from. NULL = the pool's unplaced units, a
-  // pool with no placements, or a slice checked out before this column
-  // existed; check-in then lets the unplaced units absorb the drop, as before.
+  // On a LEGACY slice (`sourceAllocationMode = LEGACY`) check-in reads it:
+  // units reported consumed, lost or damaged come off this location's manual
+  // placement. NULL = the pool's unplaced units or a pool with no placements;
+  // check-in then lets the unplaced units absorb the drop. A converted slice
+  // can dispatch from several locations: check-in settles its units against
+  // its `BookingAssetSource` rows, and this column is display only.
   //
   // A kit-driven slice records its kit's location (`Kit.locationId`, may be
   // NULL). That is for display only: kit units never come off a manual

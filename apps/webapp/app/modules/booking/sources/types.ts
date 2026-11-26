@@ -15,7 +15,8 @@ export type GroupKey = { bookingId: string; assetId: string };
 
 /**
  * How a slice holds its units.
- * - `LEGACY`: unconverted group, today's behaviour, no shares and no sources.
+ * - `LEGACY`: unconverted group with no shares and no source rows; check-in
+ *   reads the slice's `sourceLocationId`.
  * - `KIT`: live kit slice of a converted group, one KIT source row.
  * - `AUTO` / `MANUAL`: standalone slice of a converted group, loose source rows.
  */

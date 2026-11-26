@@ -19,6 +19,7 @@ import {
   probeKitDetachPools,
   resizeKitSourceRows,
 } from "./kit-sources.server";
+import { loadGroupStates } from "./repository.server";
 import type * as RepositoryModule from "./repository.server";
 import type {
   GroupState,
@@ -116,8 +117,9 @@ function fakeTx(
       }),
     },
     bookingAssetSource: {
-      findMany: vi.fn(() =>
-        (args.kitRows ?? []).map((r) => ({
+      findMany: vi.fn(() => {
+        h.order.push("kit-rows");
+        return (args.kitRows ?? []).map((r) => ({
           id: `${r.bookingAssetId}-KIT`,
           kind: "KIT",
           locationId: null,
@@ -126,8 +128,8 @@ function fakeTx(
           releasedQuantity: 0,
           dispatchedTotal: 0,
           ...r,
-        }))
-      ),
+        }));
+      }),
     },
     location: { findMany: vi.fn(() => []) },
   } as unknown as BookingSourcesTx & {
@@ -231,6 +233,7 @@ function kitSlice(
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   h.order = [];
   h.states = new Map();
   h.writes = [];
@@ -270,8 +273,9 @@ describe("resizeKitSourceRows", () => {
         dispatchedTotal: 10,
       },
     ]);
-    // The pool is locked before the rows are read.
+    // The pool is locked, once, before the KIT rows are read.
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(h.order).toEqual(["lock", "kit-rows"]);
   });
 
   it("lowering back to 5 removes that pending unit, never a released one first", async () => {
@@ -655,6 +659,14 @@ describe("detachKitSliceSources", () => {
   });
 
   it("with adoption on, a LEGACY slice on a finished booking stays LEGACY", async () => {
+    // The same convertible group as the active-booking case, so a finished
+    // booking that wrongly entered conversion would load and write it.
+    seedGroups([
+      {
+        converted: false,
+        slices: [slice({ id: "ba-kit", quantity: 5, assetKitId: "ak-1" })],
+      },
+    ]);
     const tx = fakeTx({ status: "COMPLETE" });
 
     const result = await detachKitSliceSources(tx, {
@@ -673,6 +685,7 @@ describe("detachKitSliceSources", () => {
 
     expect(result.convertedSliceIds.size).toBe(0);
     expect(h.writes).toHaveLength(0);
+    expect(loadGroupStates).not.toHaveBeenCalled();
   });
 
   it("locks the pools before it reads the booking statuses, and reads only the acting workspace", async () => {

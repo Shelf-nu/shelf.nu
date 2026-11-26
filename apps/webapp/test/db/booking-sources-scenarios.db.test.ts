@@ -31,6 +31,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { db as appDb } from "~/database/db.server";
 import {
+  admitWindowChange,
   allocateNewSlices,
   dispatchUnits,
   getSliceSourceSummaries,
@@ -1143,7 +1144,7 @@ describe("booking sources scenarios", () => {
     }
   });
 
-  it("One return log with shares from rows A and B of one slice; remove the slice (remove-assets): both shares orphaned with identical tuples, delete succeeds, log fully shared and kept as stock history", async () => {
+  it("One return log with shares from rows A and B of one slice; delete the slice row directly: both shares orphaned with identical tuples, delete succeeds, log fully shared and kept as stock history", async () => {
     const created: SeededOrgWithPool[] = [];
     try {
       const seed = await seedReturnedSplitSlice(created);
@@ -1871,6 +1872,84 @@ describe("booking sources scenarios", () => {
       );
       expect(shape(await readRows(seed.sliceId))).toEqual([
         ["UNPLACED", null, 4, 0, 4, 4],
+      ]);
+    } finally {
+      await cleanupPools(created);
+    }
+  });
+
+  it("Extend an AUTO slice pending 5 at A, A full in the added time, B full before the old end: refused, the units stay at A, never moved to B", async () => {
+    const created: SeededOrgWithPool[] = [];
+    const xFrom = hoursFromNow(1);
+    const xTo = hoursFromNow(24);
+    const newTo = hoursFromNow(30);
+    try {
+      const seed = await commitTx(async (tx) => {
+        const pool = await seedOrgWithPool(tx, {
+          total: 10,
+          placements: [
+            { name: "Shelf A", quantity: 5 },
+            { name: "Shelf B", quantity: 5 },
+          ],
+        });
+        created.push(pool);
+        const locationA = nth(pool.locationIds, 0);
+        const locationB = nth(pool.locationIds, 1);
+
+        /** A RESERVED booking with one slice of 5 pending at one location. */
+        const holdAt = async (
+          window: TestWindow,
+          mode: "AUTO" | "MANUAL",
+          locationId: string
+        ) => {
+          const booking = await seedBooking(tx, {
+            organizationId: pool.organizationId,
+            userId: pool.userId,
+            status: "RESERVED",
+            from: window.from,
+            to: window.to,
+            slices: [{ assetId: pool.assetId, quantity: 5 }],
+          });
+          const sliceId = nth(booking.sliceIds, 0);
+          await setSliceMode(tx, sliceId, mode);
+          await insertSource(tx, {
+            organizationId: pool.organizationId,
+            sliceId,
+            kind: "LOCATION",
+            locationId,
+            quantity: 5,
+          });
+          return { bookingId: booking.bookingId, sliceId };
+        };
+
+        const x = await holdAt({ from: xFrom, to: xTo }, "AUTO", locationA);
+        // Shelf B is full until X's old end, free in the added time.
+        await holdAt({ from: hoursFromNow(2), to: xTo }, "MANUAL", locationB);
+        // Shelf A is full in the added time.
+        await holdAt({ from: xTo, to: newTo }, "MANUAL", locationA);
+        return { ...pool, locationA, x };
+      });
+
+      await expect(
+        withRollback(async (tx) => {
+          await lockBooking(tx, seed.x.bookingId);
+          await admitWindowChange(tx, {
+            organizationId: seed.organizationId,
+            bookingId: seed.x.bookingId,
+            from: xFrom,
+            to: newTo,
+            previous: { from: xFrom, to: xTo },
+            kind: "extend",
+            adoptionEnabled: true,
+          });
+        })
+      ).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("Shelf A"),
+      });
+
+      expect(shape(await readRows(seed.x.sliceId))).toEqual([
+        ["LOCATION", seed.locationA, 5, 0, 0, 0],
       ]);
     } finally {
       await cleanupPools(created);

@@ -1,11 +1,13 @@
 /**
  * Booking sources repository.
  *
- * The only module that reads and writes `BookingAssetSource` and
- * `BookingDispositionShare`. Callers plan in memory with the pure helpers
- * (`@shelf/quantity-control`, `./conversion`, `./rehome`) and persist through
- * {@link writeSourcePlan}; they read a group's slices, rows, shares and
- * disposition logs through {@link loadGroupStates}.
+ * The only module that writes `BookingAssetSource` and
+ * `BookingDispositionShare`, and the reader of a group's full state. Callers
+ * plan in memory with the pure helpers (`@shelf/quantity-control`,
+ * `./conversion`, `./rehome`) and persist through {@link writeSourcePlan};
+ * they read a group's slices, rows, shares and disposition logs through
+ * {@link loadGroupStates}. Other modules read the two tables directly for
+ * narrower questions (units out by source, reserved summaries, capacity).
  *
  * Every query is scoped by the caller's trusted `organizationId`: on the new
  * tables through their own `organizationId` column, on `BookingAsset` and

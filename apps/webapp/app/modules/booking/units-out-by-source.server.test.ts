@@ -245,14 +245,22 @@ describe("countUnitsOnBookingsFromLocation", () => {
     { id: "ba-kit", assetId: "pool-1", status: "ONGOING", mode: "KIT" },
   ];
 
+  /** A LEGACY slice out from the location, as the LEGACY read returns it. */
+  type LegacySlice = typeof slice & {
+    checkedOutQuantity: number;
+    sourceLocationId: string;
+  };
+
   /**
    * Seeds the stubs: `sourceRows` answer the source-row read; the slice read
    * applies the `id`, `assetId`, `sourceAllocation` and `booking.status`
-   * filters the reader sends,
-   * and the LEGACY read (it filters on `sourceLocationId`) finds nothing.
+   * filters the reader sends. The LEGACY read (it filters on
+   * `sourceLocationId`) returns `legacySlices`, and the LEGACY sibling read
+   * (it filters on `bookingId`) returns them without their source.
    */
   function seed(
-    sourceRows: Array<{ bookingAssetId: string; outQuantity: number }>
+    sourceRows: Array<{ bookingAssetId: string; outQuantity: number }>,
+    legacySlices: LegacySlice[] = []
   ) {
     dbMock.bookingAssetSource.findMany.mockResolvedValue(sourceRows);
     dbMock.consumptionLog.findMany.mockResolvedValue([]);
@@ -260,6 +268,7 @@ describe("countUnitsOnBookingsFromLocation", () => {
       (args: {
         where: {
           sourceLocationId?: unknown;
+          bookingId?: { in: string[] };
           id?: { in: string[] };
           assetId?: { in: string[] };
           sourceAllocation?: { in: string[] };
@@ -267,7 +276,12 @@ describe("countUnitsOnBookingsFromLocation", () => {
         };
       }) => {
         if (args.where.sourceLocationId !== undefined) {
-          return Promise.resolve([]);
+          return Promise.resolve(legacySlices);
+        }
+        if (args.where.bookingId !== undefined) {
+          return Promise.resolve(
+            legacySlices.map(({ sourceLocationId: _source, ...row }) => row)
+          );
         }
         const { id, assetId, sourceAllocation, booking } = args.where;
         return Promise.resolve(
@@ -308,6 +322,36 @@ describe("countUnitsOnBookingsFromLocation", () => {
           kind: "LOCATION",
           outQuantity: { gt: 0 },
         },
+      })
+    );
+  });
+
+  it("adds LEGACY units out from the location to converted rows out from it", async () => {
+    // 2 units out on a LEGACY slice that recorded loc-a, and 3 on a converted
+    // LOCATION row at loc-a.
+    seed(
+      [{ bookingAssetId: "ba-on", outQuantity: 3 }],
+      [
+        {
+          ...slice,
+          id: "ba-legacy",
+          bookingId: "b-legacy",
+          quantity: 2,
+          checkedOutQuantity: 2,
+          sourceLocationId: "loc-a",
+        },
+      ]
+    );
+
+    const counts = await countUnitsOnBookingsFromLocation(args);
+
+    expect(counts.get("pool-1")).toBe(5);
+    expect(dbMock.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceAllocation: "LEGACY",
+          sourceLocationId: "loc-a",
+        }),
       })
     );
   });

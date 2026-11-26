@@ -1272,6 +1272,12 @@ describe("batched update statements", () => {
     expect(rows.sql).toContain('UPDATE "BookingAssetSource"');
     expect(rows.sql).toContain(`"updatedAt" = now() AT TIME ZONE 'UTC'`);
     expect(rows.sql).toContain('s."organizationId" =');
+    // Each counter column takes the VALUES column of its tuple position.
+    expect(rows.sql).toContain("AS v(id, q, o, r, d)");
+    expect(rows.sql).toContain('"quantity" = v.q');
+    expect(rows.sql).toContain('"outQuantity" = v.o');
+    expect(rows.sql).toContain('"releasedQuantity" = v.r');
+    expect(rows.sql).toContain('"dispatchedTotal" = v.d');
     expect(rows.values).toEqual(["r1", 5, 1, 2, 3, ORG]);
 
     const moves = buildShareRepointSql(ORG, [
@@ -1279,6 +1285,10 @@ describe("batched update statements", () => {
     ]);
     expect(moves.sql).toContain('UPDATE "BookingDispositionShare"');
     expect(moves.sql).toContain('sh."bookingAssetSourceId" = v.from_row');
+    expect(moves.sql).toContain("AS v(from_row, to_slice, to_row)");
+    expect(moves.sql).toContain('SET "bookingAssetId" = v.to_slice');
+    expect(moves.sql).toContain('"bookingAssetSourceId" = v.to_row');
+    expect(moves.sql).toContain('sh."organizationId" =');
     expect(moves.values).toEqual(["r1", null, null, ORG]);
   });
 });

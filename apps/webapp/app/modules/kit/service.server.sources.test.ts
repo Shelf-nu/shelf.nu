@@ -108,9 +108,10 @@ vitest.mock("~/database/db.server", () => ({
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      // why: the kit-location cascade trims overflowing manual placements
-      // per-row, and the detach guard converts/merges kit-driven rows
-      // one at a time; both need single-row `update` / `delete`.
+      // why: the detach guard (`preserveKitDrivenPlacements`) converts each
+      // INDIVIDUAL member's kit-driven row to a manual placement, or drops it
+      // when one already exists, one row at a time with single-row
+      // `update` / `delete`.
       update: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
       // why: `removeDestroyedUnitsFromKits` sums the hand-placed units of an

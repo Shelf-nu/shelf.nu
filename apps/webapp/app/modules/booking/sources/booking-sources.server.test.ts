@@ -33,7 +33,8 @@ import {
   loadCompetingHoldsByPool,
   loadSourceCapacity,
 } from "./capacity.server";
-import type { BookingSourcesTx } from "./conversion.server";
+import { manualSourceKeys } from "./conversion.server";
+import type { BookingSourcesTx, WorkingSlice } from "./conversion.server";
 import type * as RepositoryModule from "./repository.server";
 import type {
   GroupState,
@@ -633,6 +634,174 @@ describe("resizeSlices", () => {
       "The quantity cannot go below the 3 units already out."
     );
   });
+
+  describe("a MANUAL slice keeps to the sources it uses now", () => {
+    const LOC_B_KEY = {
+      kind: "LOCATION",
+      locationId: "loc-b",
+      createdOrder: 1,
+    };
+
+    /**
+     * A MANUAL slice of 5: Demo Warehouse (loc-a) only keeps 2 released
+     * units (nothing out, nothing pending), Back Room (loc-b) holds 3
+     * pending. Demo Warehouse has room; Back Room is full with this
+     * booking's 3.
+     */
+    function seedManualWithHistoryRow() {
+      h.freeFor = () => [
+        { ...UNPLACED_KEY, free: 0 },
+        { ...LOC_A_KEY, free: 10 },
+        { ...LOC_B_KEY, free: 3 },
+      ];
+      seedGroup({
+        converted: true,
+        slices: [
+          slice({
+            id: "s1",
+            mode: "MANUAL",
+            quantity: 5,
+            checkedOutQuantity: 2,
+            rows: [
+              row("s1", {
+                id: "s1-loc-a",
+                kind: "LOCATION",
+                locationId: "loc-a",
+                quantity: 2,
+                releasedQuantity: 2,
+                dispatchedTotal: 2,
+              }),
+              row("s1", {
+                id: "s1-loc-b",
+                kind: "LOCATION",
+                locationId: "loc-b",
+                quantity: 3,
+              }),
+            ],
+          }),
+        ],
+      });
+    }
+
+    it("refuses an increase rather than placing it at a source that only keeps released units", async () => {
+      seedManualWithHistoryRow();
+
+      const error = await refusal(
+        resizeSlices(fakeTx({ slices: [{ id: "s1" }] }), {
+          organizationId: ORG,
+          bookingId: BOOKING,
+          changes: [{ sliceId: "s1", quantity: 6 }],
+          window: WINDOW,
+          adoptionEnabled: true,
+        })
+      );
+
+      expect(error.message).toContain("Back Room");
+      expect(error.message).not.toContain("Demo Warehouse");
+      expect(h.writes).toHaveLength(0);
+    });
+
+    it("puts a draft's increase on UNASSIGNED, never at the released-only source", async () => {
+      seedManualWithHistoryRow();
+
+      await resizeSlices(fakeTx({ slices: [{ id: "s1" }], status: "DRAFT" }), {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        changes: [{ sliceId: "s1", quantity: 6 }],
+        window: WINDOW,
+        adoptionEnabled: true,
+      });
+
+      const plan = writtenPlan();
+      expect(plan.upsertRows).toContainEqual(
+        expect.objectContaining({ kind: "UNASSIGNED", quantity: 1 })
+      );
+      expect(
+        plan.upsertRows.filter(
+          (r) => r.locationId === "loc-a" && r.quantity !== 2
+        )
+      ).toEqual([]);
+    });
+  });
+});
+
+describe("manualSourceKeys", () => {
+  /** A working slice with the given rows and mode. */
+  function workingSlice(
+    mode: WorkingSlice["mode"],
+    rows: Array<Partial<WorkingSlice["rows"][number]>>
+  ): WorkingSlice {
+    return {
+      id: "s1",
+      assetKitId: null,
+      quantity: 0,
+      checkedOutQuantity: 0,
+      originalMode: mode,
+      mode,
+      rows: rows.map((r) => ({
+        kind: "UNPLACED",
+        locationId: null,
+        quantity: 0,
+        outQuantity: 0,
+        releasedQuantity: 0,
+        dispatchedTotal: 0,
+        sharedQuantity: 0,
+        ...r,
+      })),
+      originalRows: new Map(),
+    };
+  }
+
+  it("keeps a MANUAL slice to the loose sources with units out or pending", () => {
+    const keys = manualSourceKeys(
+      workingSlice("MANUAL", [
+        // Released only: history, not a current source.
+        {
+          kind: "LOCATION",
+          locationId: "loc-a",
+          quantity: 2,
+          releasedQuantity: 2,
+          dispatchedTotal: 2,
+        },
+        // Out only.
+        {
+          kind: "LOCATION",
+          locationId: "loc-b",
+          quantity: 1,
+          outQuantity: 1,
+          dispatchedTotal: 1,
+        },
+        // Pending only.
+        { kind: "UNPLACED", quantity: 3 },
+      ])
+    );
+
+    expect(keys && [...keys].sort()).toEqual(
+      ["LOCATION:loc-b", "UNPLACED:"].sort()
+    );
+  });
+
+  it("is unrestricted for a MANUAL slice with no current source, and for AUTO", () => {
+    const historyOnly = [
+      {
+        kind: "LOCATION" as const,
+        locationId: "loc-a",
+        quantity: 2,
+        releasedQuantity: 2,
+        dispatchedTotal: 2,
+      },
+      { kind: "UNASSIGNED" as const, quantity: 1 },
+    ];
+
+    expect(manualSourceKeys(workingSlice("MANUAL", historyOnly))).toBe(
+      undefined
+    );
+    expect(
+      manualSourceKeys(
+        workingSlice("AUTO", [{ kind: "UNPLACED", quantity: 3 }])
+      )
+    ).toBe(undefined);
+  });
 });
 
 describe("admitWindowChange", () => {
@@ -812,6 +981,108 @@ describe("admitWindowChange", () => {
     expect(writtenPlan().upsertRows).toContainEqual(
       expect.objectContaining({ kind: "UNPLACED", quantity: 5 })
     );
+  });
+
+  describe("an extension moving an AUTO slice's pending units", () => {
+    const measured = { from: PREVIOUS.to, to: NEW_TO };
+    const remaining = { from: NOW, to: NEW_TO };
+
+    /** A RESERVED booking with one AUTO slice of 5 pending at Demo Warehouse. */
+    function seedAutoAtA() {
+      seedGroup({
+        converted: true,
+        slices: [
+          slice({
+            id: "s1",
+            mode: "AUTO",
+            rows: [
+              row("s1", { kind: "LOCATION", locationId: "loc-a", quantity: 5 }),
+            ],
+          }),
+        ],
+      });
+    }
+
+    /** Extends the booking from PREVIOUS to NEW_TO at NOW. */
+    function extend() {
+      return admitWindowChange(fakeTx({ slices: [{ id: "s1" }] }), {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        from: WINDOW.from,
+        to: NEW_TO,
+        previous: PREVIOUS,
+        kind: "extend",
+        now: NOW,
+        adoptionEnabled: true,
+      });
+    }
+
+    it("never moves them to a source free in the added time but full before the old end", async () => {
+      // Demo Warehouse is full in the added time. Unplaced is free there but
+      // full before the old end, so over the remaining window it has nothing.
+      h.freeFor = ({ window }) =>
+        window.from.getTime() === NOW.getTime() ? free(0, 0) : free(5, 0);
+      seedAutoAtA();
+
+      const error = await refusal(extend());
+
+      expect(error.message).toBe(
+        "Not enough units at Demo Warehouse (0 free) for these dates."
+      );
+      expect(h.windows).toEqual([measured, remaining]);
+      expect(h.writes).toHaveLength(0);
+    });
+
+    it("moves them to a source that fits the whole remaining window", async () => {
+      h.freeFor = () => free(5, 0);
+      seedAutoAtA();
+
+      await extend();
+
+      expect(h.windows).toEqual([measured, remaining]);
+      expect(writtenPlan().upsertRows).toContainEqual(
+        expect.objectContaining({ kind: "UNPLACED", quantity: 5 })
+      );
+    });
+
+    it("reads no remaining-window free units when no AUTO slice has to move", async () => {
+      h.freeFor = () => free(0, 5);
+      seedAutoAtA();
+
+      await extend();
+
+      expect(h.windows).toEqual([measured]);
+    });
+
+    it("on a draft, moves them only to a source that fits the whole remaining window", async () => {
+      h.freeFor = ({ window }) =>
+        window.from.getTime() === NOW.getTime() ? free(0, 0) : free(5, 0);
+      seedAutoAtA();
+
+      await admitWindowChange(
+        fakeTx({ slices: [{ id: "s1" }], status: "DRAFT" }),
+        {
+          organizationId: ORG,
+          bookingId: BOOKING,
+          from: WINDOW.from,
+          to: NEW_TO,
+          previous: PREVIOUS,
+          kind: "extend",
+          now: NOW,
+          adoptionEnabled: true,
+        }
+      );
+
+      expect(h.windows).toEqual([measured, remaining]);
+      // Nothing fits the remaining window, so the slice keeps its plan.
+      expect(
+        h.writes.flatMap((w) =>
+          (w as SourcePlanWrite).upsertRows.filter(
+            (r) => r.kind === "UNPLACED" && r.quantity > 0
+          )
+        )
+      ).toEqual([]);
+    });
   });
 
   it("lets a booking already short from lost stock shorten its dates", async () => {
@@ -1959,6 +2230,77 @@ describe("dispatchUnits", () => {
     ]);
   });
 
+  describe("several picks of one slice", () => {
+    /** Dispatches slice s1 with the given picks. */
+    function dispatchPicks(
+      picks: Array<{ units: number; fromLocationId?: string | null }>
+    ) {
+      return dispatchUnits(fakeTx({ slices: [{ id: "s1" }] }), {
+        organizationId: ORG,
+        bookingId: BOOKING,
+        picks: picks.map((p) => ({ sliceId: "s1", ...p })),
+        window: WINDOW,
+        now: NOW,
+        adoptionEnabled: true,
+      });
+    }
+
+    it("are summed into one dispatch: 2 and 3 leave with 5 on hand", async () => {
+      h.freeFor = () => free3(20, 20, 20);
+      stageShelf({ "LOCATION:loc-a": 5 });
+      seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 5 }]);
+
+      const result = await dispatchPicks([{ units: 2 }, { units: 3 }]);
+
+      expect(writtenRow("LOCATION", "loc-a")).toMatchObject({
+        outQuantity: 5,
+        dispatchedTotal: 5,
+      });
+      expect(result.dispatched).toEqual([
+        {
+          sliceId: "s1",
+          assetId: POOL,
+          sources: [
+            {
+              kind: "LOCATION",
+              locationId: "loc-a",
+              name: "Demo Warehouse",
+              quantity: 5,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("are checked against the units on hand as one total", async () => {
+      h.freeFor = () => free3(20, 20, 20);
+      stageShelf({ "LOCATION:loc-a": 5 });
+      seedConverted([{ kind: "LOCATION", locationId: "loc-a", quantity: 6 }]);
+
+      await dispatchRefusal(dispatchPicks([{ units: 3 }, { units: 3 }]));
+
+      expect(h.writes).toHaveLength(0);
+    });
+
+    it("refuses picks of one slice that name different sources", async () => {
+      h.freeFor = () => free3(20, 20, 20);
+      stageShelf({ "UNPLACED:": 5, "LOCATION:loc-a": 5 });
+      seedConverted([
+        { kind: "LOCATION", locationId: "loc-a", quantity: 2 },
+        { kind: "UNPLACED", quantity: 3 },
+      ]);
+
+      await dispatchRefusal(
+        dispatchPicks([
+          { units: 2, fromLocationId: "loc-a" },
+          { units: 3, fromLocationId: null },
+        ])
+      );
+
+      expect(h.writes).toHaveLength(0);
+    });
+  });
+
   it("leaves a slice whose group stays LEGACY to the caller", async () => {
     seedGroup({ slices: [slice({ id: "s1", quantity: 5 })] });
 
@@ -2595,8 +2937,13 @@ describe("extension admission", () => {
     expect(error.message).toBe(
       "Not enough units at Demo Warehouse (0 free) for these dates."
     );
-    // Only the added interval is measured.
-    expect(h.windows).toEqual([{ from: xTo, to: newTo }]);
+    // Admission measures only the added interval. The second read is the
+    // remaining window, which the AUTO slice's pending units would have to
+    // fit to move elsewhere.
+    expect(h.windows).toEqual([
+      { from: xTo, to: newTo },
+      { from: now, to: newTo },
+    ]);
     expect(h.writes).toHaveLength(0);
   });
 });

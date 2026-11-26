@@ -518,8 +518,8 @@ vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
-  // Every picked slice is reported LEGACY, so check-outs record their source
-  // through `recordCheckoutSourceLocations` exactly as they did before.
+  // Every pick is reported LEGACY and nothing is dispatched, so check-outs
+  // record their source through `recordCheckoutSourceLocations`.
   dispatchUnits: vitest
     .fn()
     .mockImplementation(
@@ -529,8 +529,8 @@ vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
           legacySliceIds: args.picks.map((pick) => pick.sliceId),
         })
     ),
-  // Every group stays LEGACY, so check-ins write their logs exactly as they
-  // did before and the commit writes nothing.
+  // The settlement holds no converted group, so check-ins write their logs
+  // on the LEGACY path and the commit writes nothing.
   openSettlement: vitest.fn().mockImplementation(() =>
     Promise.resolve({
       organizationId: "",
@@ -570,6 +570,32 @@ vitest.mock("~/modules/consumption-log/stock-ledger.server", () => ({
   readStockStates: vitest.fn().mockResolvedValue(new Map()),
   recordStockChanges: vitest.fn().mockResolvedValue(undefined),
 }));
+
+/**
+ * The ids of every slice a `bookingAsset.updateMany` stamped with a
+ * `checkedInAt` date, across all calls, sorted. A stamp that names no ids
+ * reads as `"(every slice)"`, so a broad write cannot slip past the check.
+ */
+function slicesStampedCheckedIn(): string[] {
+  const calls = (
+    db.bookingAsset.updateMany as unknown as {
+      mock: {
+        calls: Array<
+          [
+            {
+              where?: { id?: { in?: string[] } };
+              data?: { checkedInAt?: Date | null };
+            },
+          ]
+        >;
+      };
+    }
+  ).mock.calls;
+  return calls
+    .filter(([call]) => call?.data?.checkedInAt instanceof Date)
+    .flatMap(([call]) => call.where?.id?.in ?? ["(every slice)"])
+    .sort();
+}
 
 /** Every ledger event the mocked `recordStockChanges` was handed, with its asset. */
 function recordedStockEvents() {
@@ -5848,7 +5874,7 @@ describe("checkoutBooking", () => {
   });
 
   it("dispatches each pool slice by the units its counter grows by: whole slices by quantity, partly-sent ones by residue, once each", async () => {
-    expect.assertions(1);
+    expect.assertions(3);
 
     // Three kit-driven pool slices (kit-driven keeps the free-pool sweep out):
     // - ba-whole never left: departs whole, 6 units;
@@ -5977,15 +6003,44 @@ describe("checkoutBooking", () => {
 
     await checkoutBooking(mockCheckoutParams);
 
-    // The same units the counters grow by, so the rows' dispatched totals
-    // keep summing to `checkedOutQuantity`.
-    expect(
-      vitest.mocked(bookingSources.dispatchUnits).mock.calls[0][1].picks
-    ).toEqual([
+    // One dispatch call, carrying every slice once.
+    const dispatchCalls = vitest.mocked(bookingSources.dispatchUnits).mock
+      .calls;
+    expect(dispatchCalls).toHaveLength(1);
+    const picks = dispatchCalls[0][1].picks;
+    expect(picks).toEqual([
       { sliceId: "ba-whole", units: 6 },
       { sliceId: "ba-both", units: 4 },
       { sliceId: "ba-part", units: 5 },
     ]);
+
+    // The same units the counters grow by, so the rows' dispatched totals
+    // keep summing to `checkedOutQuantity`.
+    const counterIncrements = new Map<string, number>();
+    const updateManyCalls = (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: { id?: { in?: string[] } };
+                data?: { checkedOutQuantity?: { increment?: number } };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls;
+    for (const [call] of updateManyCalls) {
+      const increment = call?.data?.checkedOutQuantity?.increment;
+      if (increment === undefined) continue;
+      for (const id of call.where?.id?.in ?? []) {
+        counterIncrements.set(id, (counterIncrements.get(id) ?? 0) + increment);
+      }
+    }
+    expect(counterIncrements).toEqual(
+      new Map(picks.map((pick) => [pick.sliceId, pick.units]))
+    );
   });
 
   it("clears the stale check-in marker on a slice that departs a second time", async () => {
@@ -23482,12 +23537,8 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       db,
       settlement
     );
-    // Only the kit slice has nothing left out.
-    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ id: { in: ["ba-kit"] } }),
-      })
-    );
+    // Only the kit slice has nothing left out; the loose slice keeps 1 out.
+    expect(slicesStampedCheckedIn()).toEqual(["ba-kit"]);
   });
 
   it("finishes a converted slice the read before the locks did not see", async () => {
@@ -23526,13 +23577,7 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
     );
 
     // Both slices have nothing left out, the late one included.
-    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: { in: expect.arrayContaining(["ba-loose", "ba-late-kit"]) },
-        }),
-      })
-    );
+    expect(slicesStampedCheckedIn()).toEqual(["ba-late-kit", "ba-loose"]);
     // Its used-up units leave its kit.
     expect(removeDestroyedUnitsFromKits).toHaveBeenCalledWith(
       db,
@@ -23617,11 +23662,7 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
     expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "RETURN", quantity: 5 })
     );
-    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ id: { in: ["ba-loose"] } }),
-      })
-    );
+    expect(slicesStampedCheckedIn()).toEqual(["ba-loose"]);
   });
 });
 

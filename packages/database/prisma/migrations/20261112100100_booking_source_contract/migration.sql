@@ -13,7 +13,9 @@
 --     the affected slice ids and group keys from OLD and NEW, ignore NULL
 --     keys, and add each key to pg_temp.booking_source_checked. Only the call
 --     that adds a key runs its check, so each slice and each group is checked
---     once per transaction, on the final state.
+--     once per transaction, on the final state. Because of that, never run
+--     SET CONSTRAINTS ALL IMMEDIATE in a transaction that writes these
+--     tables: a check fired early is not repeated for later writes.
 --   * LEGACY fast path: a "BookingAsset" write that is LEGACY before and
 --     after, or a booking "ConsumptionLog" write, whose group is unconverted
 --     at commit (no non-LEGACY slice, no share row) returns after
@@ -50,7 +52,8 @@
 --       UNASSIGNED: "outQuantity" = 0, "dispatchedTotal" = 0, no shares
 --    9  converted group: every disposition log (RETURN, CONSUME, LOSS,
 --       DAMAGE) is fully shared, sum(share quantity) = log quantity
---   10  share binding: a share's booking and asset are its log's; its slice,
+--   10  share binding: a share's log is a disposition log (RETURN, CONSUME,
+--       LOSS, DAMAGE); a share's booking and asset are its log's; its slice,
 --       when set, is in that group; its source row, when set, belongs to its
 --       slice (so a share with no slice names no row); a share on a
 --       non-LEGACY slice names a row
@@ -159,6 +162,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+-- Whether a "ConsumptionLog" category is a disposition: the categories that
+-- settle units a booking took out. Checks 9 and 10 both read this list, so a
+-- log is fully shared (check 9) exactly when it is a log a share may name
+-- (check 10).
+CREATE OR REPLACE FUNCTION booking_source_is_disposition(p_category text)
+RETURNS boolean AS $$
+  SELECT p_category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE');
+$$ LANGUAGE sql IMMUTABLE;
+
 -- Check 10 and the share half of check 6 for a set of shares.
 CREATE OR REPLACE FUNCTION check_booking_source_shares(p_share_ids text[])
 RETURNS void AS $$
@@ -169,13 +181,15 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Check 10: the share is bound to its log's group, to a slice of that
-  -- group, and to a source row of that slice.
+  -- Check 10: the share names a disposition log, is bound to its log's
+  -- group, to a slice of that group, and to a source row of that slice.
   SELECT v.share_id, v.problem INTO bad
   FROM (
     SELECT
       d.id AS share_id,
       CASE
+        WHEN NOT booking_source_is_disposition(l.category::text)
+          THEN 'its log is not a disposition (RETURN, CONSUME, LOSS, DAMAGE)'
         WHEN d."bookingId" IS DISTINCT FROM l."bookingId"
           OR d."assetId" <> l."assetId"
           THEN 'its booking or asset differs from its log'
@@ -424,7 +438,7 @@ BEGIN
   LEFT JOIN "BookingDispositionShare" d ON d."consumptionLogId" = l.id
   WHERE l."bookingId" = p_booking_id
     AND l."assetId" = p_asset_id
-    AND l.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')
+    AND booking_source_is_disposition(l.category::text)
   GROUP BY l.id, l.quantity
   HAVING COALESCE(sum(d.quantity), 0) <> l.quantity
   LIMIT 1;

@@ -7126,10 +7126,10 @@ export async function updateKitAssets({
           });
         }
 
-        // No mirrored `AssetLocation` update — kit slice quantity lives on
-        // `AssetKit` alone (and propagates to kit-driven `BookingAsset` rows
-        // above). The `AssetLocation` axis is orthogonal and isn't touched
-        // by kit-membership writes.
+        // Kit slice quantity lives on `AssetKit` and propagates to the
+        // kit-driven `BookingAsset` rows above. The kit-driven `AssetLocation`
+        // row follows the membership quantity in the same transaction; manual
+        // placements stay unchanged.
       }
     });
 

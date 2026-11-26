@@ -273,8 +273,8 @@ vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
   allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
   resizeSlices: vitest.fn().mockResolvedValue(undefined),
   admitWindowChange: vitest.fn().mockResolvedValue(undefined),
-  // Every picked slice is reported LEGACY: the LEGACY source path runs as it
-  // did before dispatch existed.
+  // Every picked slice is reported LEGACY, so check-outs exercise the LEGACY
+  // source recorder (`recordCheckoutSourceLocations`).
   dispatchUnits: vitest
     .fn()
     .mockImplementation(

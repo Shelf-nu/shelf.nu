@@ -419,10 +419,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               organizationId
             );
             // `AssetLocation.assetKit` is `onDelete: Cascade`, so the
-            // `assetKits: { deleteMany }` below would take the kit-driven
-            // placement with it and silently unplace the asset. Every sibling
-            // detach path already converts those rows to manual placements
-            // first; this one was missing the call.
+            // `assetKits: { deleteMany }` below takes the kit-driven placement
+            // with it. An INDIVIDUAL member keeps its placement: this call
+            // converts its kit-driven row to a manual placement first. A
+            // QUANTITY_TRACKED member's kit-driven row goes by the cascade, and
+            // those units become unplaced.
             await preserveKitDrivenPlacements(tx, assetKitIds);
 
             const updatedKit = await tx.kit.update({

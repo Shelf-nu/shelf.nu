@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, describe, expect, it } from "vitest";
 
+import { cleanupPools } from "./booking-sources-helpers";
 import type { CommitResult, TxClient } from "./client";
 import { commitAndExpect, disconnectTestDb, getTestDb } from "./client";
 import type { SeededOrgWithPool } from "./fixtures";
@@ -274,24 +275,6 @@ function commitSeed<T>(fn: (tx: TxClient) => Promise<T>): Promise<T> {
 }
 
 /**
- * Removes committed workspaces and their owners. Best effort: a leftover row
- * from a failed cleanup is harmless to other tests.
- *
- * @param pools - Workspaces seeded by `seedOrgWithPool`.
- */
-async function cleanup(pools: SeededOrgWithPool[]): Promise<void> {
-  const db = getTestDb();
-  for (const pool of pools) {
-    await db.$executeRaw`
-      DELETE FROM "Organization" WHERE "id" = ${pool.organizationId}
-    `.catch(() => undefined);
-    await db.$executeRaw`
-      DELETE FROM "User" WHERE "id" = ${pool.userId}
-    `.catch(() => undefined);
-  }
-}
-
-/**
  * Asserts a transaction failed on the given contract check.
  *
  * @param result - Outcome of `commitAndExpect`.
@@ -316,7 +299,7 @@ describe("booking source contract", () => {
       });
       expectCheckFailure(result, 1);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -413,7 +396,7 @@ describe("booking source contract", () => {
       });
       expect(result).toEqual({ ok: true });
     } finally {
-      await cleanup(created);
+      await cleanupPools(created);
     }
   });
 
@@ -463,7 +446,7 @@ describe("booking source contract", () => {
       });
       expect(result).toEqual({ ok: true });
     } finally {
-      await cleanup(created);
+      await cleanupPools(created);
     }
   });
 
@@ -724,6 +707,61 @@ describe("booking source contract", () => {
     expectCheckFailure(result, 10);
   });
 
+  it("check 10 a shared RETURN log changed to CHECKOUT fails", async () => {
+    // Check 9 no longer reads the log (CHECKOUT is not a disposition) and the
+    // row still reconciles (dispatched 4 - shared 2 = out 2), so only check 10
+    // sees the share pointing at a non-disposition log.
+    const result = await commitAndExpect(async (tx) => {
+      const seeded = await seedConvertedGroup(tx);
+      await tx.$executeRaw`
+        UPDATE "ConsumptionLog" SET "category" = 'CHECKOUT'
+        WHERE "id" = ${seeded.logId}
+      `;
+    });
+    expectCheckFailure(result, 10);
+  });
+
+  it("check 10 a share inserted on a CHECKOUT log fails", async () => {
+    const result = await commitAndExpect(async (tx) => {
+      const seeded = await seedConvertedGroup(tx);
+      const checkoutLogId = randomUUID();
+      await tx.$executeRaw`
+        INSERT INTO "ConsumptionLog" (
+          "id", "assetId", "category", "quantity", "userId", "bookingId"
+        ) VALUES (
+          ${checkoutLogId}, ${seeded.assetId}, 'CHECKOUT', 1,
+          ${seeded.userId}, ${seeded.bookingId}
+        )
+      `;
+      // Orphaned, so no row counters change and checks 5 to 8 still hold.
+      await insertShare(tx, {
+        organizationId: seeded.organizationId,
+        logId: checkoutLogId,
+        bookingId: seeded.bookingId,
+        assetId: seeded.assetId,
+        sliceId: null,
+        sourceId: null,
+        quantity: 1,
+      });
+    });
+    expectCheckFailure(result, 10);
+  });
+
+  it("check 10 a shared RETURN log changed to LOSS commits", async () => {
+    const seeded = await commitSeed(seedConvertedGroup);
+    try {
+      const result = await commitAndExpect(async (tx) => {
+        await tx.$executeRaw`
+          UPDATE "ConsumptionLog" SET "category" = 'LOSS'
+          WHERE "id" = ${seeded.logId}
+        `;
+      });
+      expect(result).toEqual({ ok: true });
+    } finally {
+      await cleanupPools([seeded]);
+    }
+  });
+
   it("orphaned shares with identical tuples are allowed", async () => {
     // One AUTO slice whose 4 returned units are split over two shares with
     // the same (log, slice, row) tuple. Deleting the slice orphans both into
@@ -793,7 +831,7 @@ describe("booking source contract", () => {
         { bookingAssetId: null, bookingAssetSourceId: null, quantity: 2 },
       ]);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -845,7 +883,7 @@ describe("booking source contract", () => {
       });
       expect(result).toEqual({ ok: true });
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -928,7 +966,7 @@ describe("booking source contract", () => {
         })
       ).toBe(LOGS);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -987,7 +1025,7 @@ describe("booking source contract", () => {
         })
       ).toBe(0);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -1039,7 +1077,7 @@ describe("booking source contract", () => {
       expect(result).toEqual({ ok: true });
       expect(tempTables).toEqual([{ checked: null, firstMode: null }]);
     } finally {
-      await cleanup(created);
+      await cleanupPools(created);
     }
   });
 
@@ -1068,7 +1106,7 @@ describe("booking source contract", () => {
       expect(result).toEqual({ ok: true });
       expect(tempTables).toEqual([{ checked: null }]);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -1084,7 +1122,7 @@ describe("booking source contract", () => {
       });
       expectCheckFailure(result, 9);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 
@@ -1129,7 +1167,7 @@ describe("booking source contract", () => {
       });
       expectCheckFailure(result, 2);
     } finally {
-      await cleanup([seeded]);
+      await cleanupPools([seeded]);
     }
   });
 });
