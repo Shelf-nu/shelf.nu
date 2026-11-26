@@ -216,6 +216,23 @@ describe("AuditTeamMemberSelector", () => {
     ]);
   });
 
+  it("freezes the member rows too while the form is submitting", () => {
+    const { container } = render(
+      <AuditTeamMemberSelector
+        disabled
+        defaultSelected={[{ id: "tm-2", userId: "user-2", name: "Ben Scan" }]}
+      />
+    );
+
+    fireEvent.click(row("Cy Count"));
+    fireEvent.click(row("Ben Scan"));
+
+    expect(hiddenInputs(container).map((i) => i.value.userId)).toEqual([
+      "user-2",
+    ]);
+    expect(row("Cy Count").getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("still submits a selected member when the search filter hides their row", () => {
     const { container } = render(<AuditTeamMemberSelector />);
 

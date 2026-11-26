@@ -33,7 +33,7 @@ type AuditTeamMemberSelectorProps = {
    */
   defaultSelected?: AuditAssigneeDefault[];
   /**
-   * Freezes the self toggle while the enclosing form submits. A fetcher form
+   * Freezes the selection while the enclosing form submits. A fetcher form
    * must pass its own submitting state: the picker itself can only see route
    * navigation, which a fetcher submit never starts.
    */
@@ -79,9 +79,9 @@ export default function AuditTeamMemberSelector({
   );
 
   const user = useUserData();
-  // The picker lives inside a form; while that form submits, the self toggle
-  // must not change the selection under the request. `useDisabled()` covers a
-  // route form, the `disabled` prop covers a fetcher form.
+  // The picker lives inside a form; while that form submits, the selection
+  // must not change under the request. `useDisabled()` covers a route form,
+  // the `disabled` prop covers a fetcher form.
   const isNavigating = useDisabled();
   const isSubmitting = disabled || isNavigating;
 
@@ -105,6 +105,9 @@ export default function AuditTeamMemberSelector({
 
   const handleTeamMemberSelect = useCallback(
     (teamMember: AuditTeamMember) => {
+      // The request already carries the selection; a change now would only
+      // make the list disagree with what is being saved.
+      if (isSubmitting) return;
       remember(teamMember);
       setSelectedIds((prev) =>
         prev.includes(teamMember.id)
@@ -112,7 +115,7 @@ export default function AuditTeamMemberSelector({
           : [...prev, teamMember.id]
       );
     },
-    [remember]
+    [remember, isSubmitting]
   );
 
   const isSelfSelected =
@@ -246,6 +249,7 @@ export default function AuditTeamMemberSelector({
                 )}
                 role="checkbox"
                 aria-checked={isTeamMemberSelected}
+                aria-disabled={isSubmitting || undefined}
                 tabIndex={0}
                 onClick={() => handleTeamMemberSelect(teamMember)}
                 onKeyDown={handleActivationKeyPress(() =>
