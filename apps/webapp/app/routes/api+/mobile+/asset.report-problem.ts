@@ -1,0 +1,79 @@
+/**
+ * POST /api/mobile/asset/report-problem
+ *
+ * The mobile twin of the web "Report a problem" action. Same grant
+ * (`problemReport: create`), same text rule and same service, so the phone
+ * accepts and refuses exactly what the web does.
+ *
+ * Body: `{ assetId: string, content: string }`
+ * Returns: `{ emailed: boolean }`, whether the email went to anyone, or
+ * `{ error: { message } }` with the
+ * refusal's status.
+ *
+ * @see {@link file://../../../modules/problem-report/service.server.ts}
+ * @see {@link file://../../_layout+/assets.$assetId.report-problem.tsx}
+ */
+import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
+import {
+  requireMobileAuth,
+  requireMobilePermission,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { problemReportContentSchema } from "~/modules/problem-report/schema";
+import { reportAssetProblem } from "~/modules/problem-report/service.server";
+import { makeShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+
+/**
+ * Saves a problem report sent from the phone and emails the workspace's
+ * problem-report audience. See the file header for the body and the answer.
+ */
+export async function action({ request }: ActionFunctionArgs) {
+  // Known once the caller is authenticated, so a refusal's log names them.
+  let userId: string | undefined;
+  try {
+    const { user } = await requireMobileAuth(request);
+    userId = user.id;
+    await enforceUserRateLimit(user.id, "write");
+    const organizationId = await requireOrganizationAccess(request, user.id);
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.problemReport,
+      action: PermissionAction.create,
+    });
+
+    const { assetId, content } = await parseMobileBody(
+      z.object({
+        assetId: z.string().min(1),
+        content: problemReportContentSchema,
+      }),
+      request,
+      "Assets"
+    );
+
+    // Only whether anyone was emailed: how many would tell a member without
+    // access to the team list how many people run the workspace.
+    const { emailed } = await reportAssetProblem({
+      assetId,
+      organizationId,
+      userId: user.id,
+      content,
+    });
+
+    return data({ emailed });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return data(
+      { error: { message: reason.message } },
+      { status: reason.status }
+    );
+  }
+}

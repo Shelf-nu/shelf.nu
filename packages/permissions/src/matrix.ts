@@ -83,6 +83,9 @@ export const Role2PermissionMap: {
     ],
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+    // Every member may report a problem with an asset they can open. It is
+    // separate from `note: create`, which would open the general comment box.
+    [PermissionEntity.problemReport]: [PermissionAction.create],
   },
   SELF_SERVICE: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
@@ -140,6 +143,7 @@ export const Role2PermissionMap: {
     ],
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+    [PermissionEntity.problemReport]: [PermissionAction.create],
   },
   ADMIN: {
     [PermissionEntity.reports]: [
@@ -297,6 +301,7 @@ export const Role2PermissionMap: {
     ],
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+    [PermissionEntity.problemReport]: [PermissionAction.create],
   },
   /**
    * The Manager holds no allow-all shortcut: every grant is listed.
@@ -389,6 +394,7 @@ export const Role2PermissionMap: {
     ],
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+    [PermissionEntity.problemReport]: [PermissionAction.create],
   },
   OWNER: {
     [PermissionEntity.reports]: [
@@ -548,5 +554,6 @@ export const Role2PermissionMap: {
     ],
     [PermissionEntity.update]: [PermissionAction.read],
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+    [PermissionEntity.problemReport]: [PermissionAction.create],
   },
 };

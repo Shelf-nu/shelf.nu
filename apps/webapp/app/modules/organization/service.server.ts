@@ -565,7 +565,10 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
 }
 
 /** A workspace-wide notification audience, named after its policy field. */
-export type NotificationAudience = "orgBookingBroadcasts" | "inventoryAlerts";
+export type NotificationAudience =
+  | "orgBookingBroadcasts"
+  | "inventoryAlerts"
+  | "problemReports";
 
 /**
  * The users of an organization who receive one kind of workspace-wide
@@ -579,7 +582,8 @@ export type NotificationAudience = "orgBookingBroadcasts" | "inventoryAlerts";
  *
  * @param args.organizationId - The organization
  * @param args.audience - `orgBookingBroadcasts` (new-reservation "pickup"
- *   alerts) or `inventoryAlerts` (low stock)
+ *   alerts), `inventoryAlerts` (low stock) or `problemReports` (a member
+ *   reported a problem with an asset)
  * @returns The audience's users
  * @throws {ShelfError} when the query fails
  */
