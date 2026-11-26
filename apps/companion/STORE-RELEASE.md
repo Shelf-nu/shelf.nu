@@ -50,6 +50,30 @@ node apps/companion/scripts/check-version-sync.mjs
 EAS holds the iOS build number and the Android version code and increments them
 itself. Do not edit `CFBundleVersion` or add `android.versionCode`.
 
+### The icon font folder of the new runtime
+
+The same release PR adds the new runtime to `STORE_BUILD_ICON_FONT_FOLDERS` in
+`scripts/check-bundle-env.mjs`. A companion test requires an entry for the
+`runtimeVersion` in `app.json`, so the bump fails CI without it. The export gate
+uses the entry before every over-the-air update; see
+[Embedded assets after a store upgrade](./EAS-UPDATE.md#embedded-assets-after-a-store-upgrade).
+
+1. **In the bump PR**, run `pnpm install` on the PR's head and, from the
+   repository root, read the name of the folder the package is installed in:
+
+   ```bash
+   ls node_modules/.pnpm | grep '^@expo+vector-icons@'
+   ```
+
+   Add `"<new runtime>": "<that folder name>"`. Keep the entries of runtimes
+   that are still live in a store.
+
+2. **After the build is cut** (step 3), confirm it against the build. Download
+   the Android artifact, open `base/assets/app.manifest` inside the `.aab`, and
+   read `subdirectory` of the asset named `Ionicons`: the folder is the path
+   segment after `.pnpm/`. If it differs from the entry, correct the entry in a
+   follow-up PR before the first over-the-air update to that runtime.
+
 ## 2. Write the release notes
 
 Add `RELEASE-NOTES-<version>.md` beside the previous one. It carries the App
