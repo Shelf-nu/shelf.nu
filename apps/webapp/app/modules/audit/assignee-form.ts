@@ -57,3 +57,39 @@ export function resolveAssigneeUserIds(
     .filter((id): id is string => !!id);
   return Array.from(new Set(ids));
 }
+
+/** One selectable team member, as the audit loaders list them. */
+type AssignableTeamMember = { id: string; name: string; userId: string | null };
+
+/**
+ * Maps an audit's current assignments to the picker's pre-selected members.
+ *
+ * The picker toggles on team member ids while the server stores user ids, so
+ * each assignment is matched to the team member with the same user id. An
+ * assignee with no team member in the list cannot be shown or re-submitted,
+ * so they are left out; the edit form submits the full set, which means saving
+ * then removes that assignment.
+ *
+ * @param assignments - The audit's current assignments (only `userId` is read).
+ * @param teamMembers - The team members the picker can show.
+ * @returns One `{ id, userId, name }` per assignee who has a team member.
+ */
+export function toAssigneeDefaults(
+  assignments: ReadonlyArray<{ userId: string }>,
+  teamMembers: ReadonlyArray<AssignableTeamMember>
+): Array<{ id: string; userId: string; name: string }> {
+  return assignments.flatMap((assignment) => {
+    const teamMember = teamMembers.find(
+      (tm) => tm.userId === assignment.userId
+    );
+    return teamMember
+      ? [
+          {
+            id: teamMember.id,
+            userId: assignment.userId,
+            name: teamMember.name,
+          },
+        ]
+      : [];
+  });
+}

@@ -14,6 +14,7 @@ import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { toAssigneeDefaults } from "~/modules/audit/assignee-form";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 
@@ -85,27 +86,15 @@ export function EditAuditDialog({
     );
   }, [audit.dueDate, timeZone]);
 
-  // Pre-select every current assignee (convert user ids to team member ids).
-  // An assignee whose team member row is gone cannot be rendered or re-saved,
-  // so they drop out of the selection; saving then removes that assignment.
+  // Pre-select every current assignee (user ids mapped to team member ids).
   const defaultAssignees = useMemo(
-    () =>
-      audit.assignments.flatMap((assignment) => {
-        const teamMember = teamMembers.find(
-          (tm) => tm.userId === assignment.userId
-        );
-        return teamMember
-          ? [
-              {
-                id: teamMember.id,
-                userId: assignment.userId,
-                name: teamMember.name,
-              },
-            ]
-          : [];
-      }),
+    () => toAssigneeDefaults(audit.assignments, teamMembers),
     [teamMembers, audit.assignments]
   );
+
+  // The action answers a refusal with an error object; the fields below take
+  // its message, the fallback for anything client-side validation let through.
+  const serverError: string | undefined = actionData?.error?.message;
 
   const isActiveAudit = audit.status === "ACTIVE";
 
@@ -144,7 +133,7 @@ export function EditAuditDialog({
                 label="Audit name"
                 placeholder="Quarterly warehouse audit"
                 defaultValue={audit.name}
-                error={nameError || actionData?.error}
+                error={nameError || serverError}
                 required
                 disabled={disabled}
                 className="mb-4"

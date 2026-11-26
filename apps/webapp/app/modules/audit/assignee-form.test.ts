@@ -10,7 +10,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { parseAssigneeUserId, resolveAssigneeUserIds } from "./assignee-form";
+import {
+  parseAssigneeUserId,
+  resolveAssigneeUserIds,
+  toAssigneeDefaults,
+} from "./assignee-form";
 
 const blob = (userId: string, id = `tm-${userId}`) =>
   JSON.stringify({ id, name: `Member ${userId}`, userId });
@@ -69,5 +73,39 @@ describe("resolveAssigneeUserIds", () => {
     expect(
       resolveAssigneeUserIds([JSON.stringify({ id: "tm-1", userId: "" })])
     ).toEqual([]);
+  });
+});
+
+describe("toAssigneeDefaults", () => {
+  const teamMembers = [
+    { id: "tm-1", name: "Ana Lead", userId: "user-1" },
+    { id: "tm-2", name: "Ben Scan", userId: "user-2" },
+    // A non-registered member: no user account, so never an assignee.
+    { id: "tm-nrm", name: "Loan Desk", userId: null },
+  ];
+
+  it("maps each assignment to its team member, in assignment order", () => {
+    expect(
+      toAssigneeDefaults(
+        [{ userId: "user-2" }, { userId: "user-1" }],
+        teamMembers
+      )
+    ).toEqual([
+      { id: "tm-2", userId: "user-2", name: "Ben Scan" },
+      { id: "tm-1", userId: "user-1", name: "Ana Lead" },
+    ]);
+  });
+
+  it("leaves out an assignee who has no team member in the list", () => {
+    expect(
+      toAssigneeDefaults(
+        [{ userId: "user-1" }, { userId: "user-gone" }, { userId: "user-2" }],
+        teamMembers
+      ).map((member) => member.userId)
+    ).toEqual(["user-1", "user-2"]);
+  });
+
+  it("returns nothing for an audit with no assignees", () => {
+    expect(toAssigneeDefaults([], teamMembers)).toEqual([]);
   });
 });
