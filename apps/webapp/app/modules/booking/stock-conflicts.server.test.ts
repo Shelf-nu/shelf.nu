@@ -488,6 +488,80 @@ describe("flagBookingStockConflicts", () => {
     expect(smallClient.assetKit.groupBy.mock.calls.length).toBe(1);
   });
 
+  it("does not let a return on a booking's kit slice free its standalone slice", async () => {
+    const client = createMockClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    // b1 holds the pool loose (6, out) and through a kit (6, out). b2 wants 6
+    // over the same days.
+    client.bookingAsset.findMany.mockResolvedValue([
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-01-10T00:00:00Z",
+          status: "ONGOING",
+        }),
+        id: "ba-loose",
+        assetKitId: null,
+        checkedOutQuantity: 6,
+      },
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-01-10T00:00:00Z",
+          status: "ONGOING",
+        }),
+        id: "ba-kit",
+        assetKitId: "ak-1",
+        checkedOutQuantity: 6,
+      },
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b2",
+        quantity: 6,
+        from: "2026-01-05T00:00:00Z",
+        to: "2026-01-15T00:00:00Z",
+      }),
+    ]);
+    // The kit came back: 6 units logged on the kit slice. The loose 6 are
+    // still out, so 6 (b1) + 6 (b2) = 12 over a pool of 10.
+    client.consumptionLog.groupBy.mockResolvedValue([
+      {
+        bookingAssetId: "ba-kit",
+        bookingId: "b1",
+        assetId: "a1",
+        _sum: { quantity: 6 },
+      },
+    ]);
+
+    const result = await flagBookingStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings: [
+        booking({
+          id: "b1",
+          status: "ONGOING",
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-10T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+        booking({
+          id: "b2",
+          from: new Date("2026-01-05T00:00:00Z"),
+          to: new Date("2026-01-15T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+      ],
+    });
+
+    expect(result).toEqual(new Set(["b1", "b2"]));
+  });
+
   it("subtracts logged dispositions before sweeping, same as the availability primitives", async () => {
     const client = createMockClient();
     client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);

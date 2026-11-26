@@ -58,6 +58,7 @@ import type {
 import {
   ACTIVE_BOOKING_STATUSES,
   buildActiveBookingWhere,
+  loggedUnitsByReservationRow,
   overCommittedWindows,
   RESERVATION_REDUCING_CATEGORIES,
   reservedUnitsStillHeld,
@@ -136,8 +137,9 @@ function overlapsHalfOpen(
  *    batch-fetch, in ONE `Promise.all` (four queries total, still constant
  *    in the number of assets/bookings):
  *    - each asset's `quantity` (org-scoped) — the raw total;
- *    - every ACTIVE standalone (`assetKitId: null`) `BookingAsset` row for
- *      those assets, org-wide (via {@link buildActiveBookingWhere} with
+ *    - every ACTIVE `BookingAsset` row for those assets, org-wide. Only
+ *      standalone rows enter the sweep; kit-driven ones are read so a unit
+ *      logged on one is not taken off the standalone slice (via {@link buildActiveBookingWhere} with
  *      `window: null` — every active reservation regardless of date, NOT
  *      just ones overlapping any single booking's window, because the sweep
  *      below needs the asset's FULL reservation timeline);
@@ -202,9 +204,10 @@ export async function flagBookingStockConflicts({
           where: {
             assetId: { in: assetIds },
             // Kit-driven slices don't compete for the standalone pool this
-            // detector measures against — mirrors the `assetKitId: null`
-            // filter every availability read uses.
-            assetKitId: null,
+            // detector measures against. They are fetched for attribution
+            // only (a unit logged on one must not be taken off the standalone
+            // slice) and skipped when the intervals are built, as in every
+            // availability read.
             // `window: null` — the FULL active-reservation timeline for
             // these assets, org-wide. Unlike `getAssetAvailabilityBatch`
             // (windowed around ONE target booking), this sweep needs every
@@ -213,9 +216,12 @@ export async function flagBookingStockConflicts({
             booking: buildActiveBookingWhere(organizationId, null),
           },
           select: {
+            id: true,
             assetId: true,
             bookingId: true,
             quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
             checkedOutQuantity: true,
             booking: { select: { from: true, to: true, status: true } },
           },
@@ -259,9 +265,9 @@ export async function flagBookingStockConflicts({
       const bookingIds = [...new Set(reservedRows.map((r) => r.bookingId))];
 
       // Mirrors `getAssetAvailabilityBatch`'s logged-dispositions read:
-      // grouped by (bookingId, assetId) since this spans many assets.
+      // grouped by slice, booking and asset.
       const loggedGroups = await client.consumptionLog.groupBy({
-        by: ["bookingId", "assetId"],
+        by: ["bookingAssetId", "bookingId", "assetId"],
         where: {
           assetId: { in: assetIds },
           bookingId: { in: bookingIds },
@@ -270,23 +276,20 @@ export async function flagBookingStockConflicts({
         _sum: { quantity: true },
       });
 
-      const loggedByKey = new Map<string, number>();
-      for (const group of loggedGroups) {
-        if (group.bookingId) {
-          loggedByKey.set(
-            `${group.bookingId}:${group.assetId}`,
-            group._sum.quantity ?? 0
-          );
-        }
-      }
+      const loggedByRow = loggedUnitsByReservationRow(
+        reservedRows,
+        loggedGroups
+      );
 
       for (const row of reservedRows) {
+        // Kit-driven: fetched for attribution only.
+        if (row.assetKitId) continue;
         // Defensive only: `Booking` is a required (non-nullable) relation on
         // `BookingAsset`, so a row with no `booking` should never occur in
         // practice — skip rather than fabricate a fallback window.
         if (!row.booking) continue;
 
-        const logged = loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0;
+        const logged = loggedByRow.get(row) ?? 0;
         // Never negative, and never below the units the row has out right
         // now, same as the availability primitives.
         const remaining = reservedUnitsStillHeld(

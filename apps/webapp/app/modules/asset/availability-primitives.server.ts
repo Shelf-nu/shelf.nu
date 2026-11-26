@@ -188,6 +188,129 @@ export function reservedUnitsStillHeld(
   return Math.max(notYetGivenBack, outRightNow);
 }
 
+/** A `BookingAsset` row as {@link loggedUnitsByReservationRow} reads it. */
+export type ReservationRowForAttribution = {
+  /** Optional only so a read that cannot name its rows still type-checks. */
+  id?: string;
+  bookingId: string;
+  /** Left out by a read that is already scoped to one asset. */
+  assetId?: string;
+  /** `null` or absent for a standalone slice, set for a kit-driven one. */
+  assetKitId?: string | null;
+  quantity: number;
+  checkedOutAt?: Date | null;
+  checkedOutQuantity?: number | null;
+};
+
+/** One `consumptionLog.groupBy` group, as the availability reads fetch it. */
+export type LoggedUnitsGroup = {
+  /** The slice the units were logged on; `null` or absent when none was named. */
+  bookingAssetId?: string | null;
+  bookingId: string | null;
+  /** Left out by a read that is already scoped to one asset. */
+  assetId?: string;
+  _sum: { quantity: number | null };
+};
+
+/**
+ * The {@link RESERVATION_REDUCING_CATEGORIES} units each reservation row has
+ * given back, attributed per `BookingAsset` row.
+ *
+ * One (booking, asset) pair can hold a standalone slice and kit-driven ones at
+ * once. Summing the pair's logs and taking them off every row would let a
+ * return on the kit slice free the standalone slice while its units are out,
+ * so every availability read sizes its rows through this.
+ *
+ * - A pair with ONE row: every log of the pair is that row's.
+ * - A pair with several: a log naming its row counts for that row. One naming
+ *   none is placed by {@link attributeDispositionsByBookingAsset}: standalone
+ *   slice first, then kit-driven ones, each taking at most the units it sent
+ *   out (the cumulative counter, or the whole booked quantity of a row that is
+ *   marked out with no counter). That is the order and the capacity the
+ *   check-in writer and every booking surface use.
+ *
+ * Callers must pass EVERY row of each pair, kit-driven ones included, or an
+ * untagged log has nowhere to go but the standalone slice. Kit-driven rows are
+ * for attribution only: callers that count kit units through
+ * `AssetKit.quantity` skip them when summing.
+ *
+ * @param rows - Reservation rows, all slices of each (booking, asset) pair
+ * @param loggedGroups - Logged units grouped by slice, booking and asset
+ * @returns Logged units per row, keyed by the row object passed in
+ */
+export function loggedUnitsByReservationRow<
+  Row extends ReservationRowForAttribution,
+>(rows: readonly Row[], loggedGroups: readonly LoggedUnitsGroup[]) {
+  const pairKey = (bookingId: string, assetId: string | undefined) =>
+    `${bookingId}:${assetId ?? ""}`;
+
+  const rowsByPair = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = pairKey(row.bookingId, row.assetId);
+    const pairRows = rowsByPair.get(key) ?? [];
+    pairRows.push(row);
+    rowsByPair.set(key, pairRows);
+  }
+
+  const logsByPair = new Map<string, CheckoutAttributionLog[]>();
+  for (const group of loggedGroups) {
+    const quantity = group._sum.quantity ?? 0;
+    if (quantity === 0 || !group.bookingId) continue;
+    const key = pairKey(group.bookingId, group.assetId);
+    const logs = logsByPair.get(key) ?? [];
+    logs.push({ bookingAssetId: group.bookingAssetId ?? null, quantity });
+    logsByPair.set(key, logs);
+  }
+
+  const loggedByRow = new Map<Row, number>();
+  for (const [key, pairRows] of rowsByPair) {
+    const logs = logsByPair.get(key) ?? [];
+    if (pairRows.length === 1) {
+      loggedByRow.set(
+        pairRows[0],
+        logs.reduce((sum, log) => sum + log.quantity, 0)
+      );
+      continue;
+    }
+
+    // Rows are keyed by position, so a read that selects no `id` still
+    // attributes; a tagged log finds its row through the id when there is one.
+    const positionById = new Map<string, string>();
+    pairRows.forEach((row, position) => {
+      if (row.id) positionById.set(row.id, String(position));
+    });
+    const attributed = attributeDispositionsByBookingAsset({
+      bookingAssetRows: pairRows.map((row, position) => ({
+        id: String(position),
+        assetKitId: row.assetKitId ?? null,
+        quantity: unitsSentOut(row),
+      })),
+      consumptionLogs: logs.map((log) => ({
+        bookingAssetId: log.bookingAssetId
+          ? positionById.get(log.bookingAssetId) ?? log.bookingAssetId
+          : null,
+        quantity: log.quantity,
+      })),
+    });
+    pairRows.forEach((row, position) => {
+      loggedByRow.set(row, attributed.get(String(position)) ?? 0);
+    });
+  }
+  return loggedByRow;
+}
+
+/**
+ * Units a reservation row has sent out: its cumulative counter when that
+ * holds anything, else its whole booked quantity when it is marked out, else
+ * none. The same reading as `resolveSentUnits` in the booking module, kept
+ * here because this module must stay free of that module's imports.
+ */
+function unitsSentOut(row: ReservationRowForAttribution): number {
+  const counted = row.checkedOutQuantity ?? 0;
+  if (counted > 0) return counted;
+  return row.checkedOutAt ? row.quantity : 0;
+}
+
 /**
  * The two reads {@link getPeakReservedUnitsByAsset} issues.
  *
@@ -206,6 +329,7 @@ export type PeakReservedTxClient = {
         bookingId: true;
         quantity: true;
         assetKitId: true;
+        checkedOutAt: true;
         checkedOutQuantity: true;
         booking: { select: { from: true; to: true; status: true } };
       };
@@ -216,6 +340,7 @@ export type PeakReservedTxClient = {
         bookingId: string;
         quantity: number;
         assetKitId: string | null;
+        checkedOutAt?: Date | null;
         checkedOutQuantity: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
@@ -304,6 +429,7 @@ export async function getPeakReservedUnitsByAsset({
       bookingId: true,
       quantity: true,
       assetKitId: true,
+      checkedOutAt: true,
       checkedOutQuantity: true,
       booking: { select: { from: true, to: true, status: true } },
     },
@@ -321,43 +447,7 @@ export async function getPeakReservedUnitsByAsset({
     _sum: { quantity: true },
   });
 
-  // Dispositions of each (booking, asset) pair, tagged with the row they were
-  // logged on, or `null` when the writer did not name one.
-  const dispositionsByPair = new Map<string, CheckoutAttributionLog[]>();
-  for (const group of loggedGroups) {
-    const quantity = group._sum.quantity ?? 0;
-    if (quantity === 0 || !group.bookingId) continue;
-
-    const pair = `${group.bookingId}:${group.assetId}`;
-    const dispositions = dispositionsByPair.get(pair) ?? [];
-    dispositions.push({ bookingAssetId: group.bookingAssetId, quantity });
-    dispositionsByPair.set(pair, dispositions);
-  }
-
-  const rowsByPair = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const pair = `${row.bookingId}:${row.assetId}`;
-    const pairRows = rowsByPair.get(pair) ?? [];
-    pairRows.push(row);
-    rowsByPair.set(pair, pairRows);
-  }
-
-  /** Dispositions attributed to each `BookingAsset` row, by row id. */
-  const loggedByRowId = new Map<string, number>();
-  for (const [pair, pairRows] of rowsByPair) {
-    const attributed = attributeDispositionsByBookingAsset({
-      // A row's room for untagged dispositions is what it has sent out, not
-      // what it booked: a slice that never left has nothing to give back, and
-      // one sent out twice can take two trips' worth.
-      bookingAssetRows: pairRows.map((row) => ({
-        id: row.id,
-        assetKitId: row.assetKitId,
-        quantity: row.checkedOutQuantity ?? 0,
-      })),
-      consumptionLogs: dispositionsByPair.get(pair) ?? [],
-    });
-    for (const [rowId, logged] of attributed) loggedByRowId.set(rowId, logged);
-  }
+  const loggedByRow = loggedUnitsByReservationRow(rows, loggedGroups);
 
   const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
   for (const row of rows) {
@@ -366,10 +456,7 @@ export async function getPeakReservedUnitsByAsset({
     if (row.assetKitId !== null) continue;
     if (!row.booking) continue;
 
-    const remaining = reservedUnitsStillHeld(
-      row,
-      loggedByRowId.get(row.id) ?? 0
-    );
+    const remaining = reservedUnitsStillHeld(row, loggedByRow.get(row) ?? 0);
     if (remaining === 0) continue;
 
     const to = resolveIntervalTo(

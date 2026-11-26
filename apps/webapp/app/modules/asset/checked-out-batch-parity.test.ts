@@ -275,8 +275,8 @@ function createFakeClient(fixture: {
             .filter((row) => {
               if (!matchesFilter(row.assetId, where.assetId)) return false;
               if (!matchesFilter(row.bookingId, where.bookingId)) return false;
-              // The reserved-rows read filters `assetKitId: null` (standalone
-              // only); the checked-out reads omit it (all slices).
+              // Applied when a read asks for standalone slices only. The
+              // availability reads ask for every slice.
               if (where.assetKitId === null && row.assetKitId !== null) {
                 return false;
               }

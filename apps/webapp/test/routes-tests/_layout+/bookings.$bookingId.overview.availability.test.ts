@@ -53,6 +53,8 @@ type ReservedRowFixture = {
   assetId: string;
   bookingId: string;
   quantity: number;
+  /** Set for a kit-driven slice; left out for a standalone one. */
+  assetKitId?: string;
   booking: { from: Date; to: Date };
 };
 
@@ -73,9 +75,9 @@ function mockedDb() {
 /**
  * Wires `bookingAsset.findMany` to behave like a real Postgres call for the
  * two shapes `getAssetAvailabilityBatch` issues against it:
- *  - `computeCheckedOutBatch`'s ONGOING/OVERDUE pivots read (no `assetKitId`
- *    key on `where` at all) — always empty in these tests (no checkouts).
- *  - The standalone reserved-rows read (`assetKitId: null` present) — here
+ *  - `computeCheckedOutBatch`'s ONGOING/OVERDUE pivots read (its status
+ *    filter leaves RESERVED out) — always empty in these tests (no checkouts).
+ *  - The reservation-rows read (its status filter includes RESERVED) — here
  *    we actually APPLY the `where.booking.OR` filter to `candidateRows`,
  *    exactly like Postgres would. Since the windowed-occupancy fix
  *    (`buildActiveBookingWhere`), that `OR` has TWO branches: an unconditional
@@ -92,12 +94,9 @@ function wireReservedRows(
   client.bookingAsset.findMany.mockImplementation(
     (args: { where?: Record<string, unknown> }) => {
       const where = args?.where ?? {};
-      if (!("assetKitId" in where)) {
-        // computeCheckedOutBatch pivots — no checked-out rows in these tests.
-        return Promise.resolve([]);
-      }
       const bookingWhere = where.booking as
         | {
+            status?: { in?: string[] };
             OR?: Array<
               | { status: string }
               | { AND: [{ from: { lt: Date } }, { to: { gt: Date } }] }
@@ -111,6 +110,10 @@ function wireReservedRows(
           AND: [{ from: { lt: Date } }, { to: { gt: Date } }];
         } => "AND" in branch
       );
+      if (!bookingWhere?.status?.in?.includes("RESERVED")) {
+        // computeCheckedOutBatch pivots — no checked-out rows in these tests.
+        return Promise.resolve([]);
+      }
       if (!dateBranch) {
         // Un-windowed read — every candidate row is a plain-total contributor.
         return Promise.resolve(candidateRows);
@@ -184,7 +187,7 @@ describe("buildAvailableUnitsByAsset", () => {
     // return date, so it must be considered for every window) plus the
     // date-overlap `AND` branch for RESERVED/ONGOING.
     const reservedCall = client.bookingAsset.findMany.mock.calls.find(
-      (call) => "assetKitId" in (call[0]?.where ?? {})
+      (call) => call[0]?.where?.booking?.status?.in?.includes("RESERVED")
     )?.[0];
     expect(reservedCall?.where?.booking?.OR).toEqual([
       { status: "OVERDUE" },
@@ -238,9 +241,9 @@ describe("buildAvailableUnitsByAsset", () => {
   it("(c) does not double-count kit-driven competing rows against inKits", async () => {
     // Asset total 20, with 5 units allocated into a kit (`inKits`). A
     // standalone 3-unit reservation on another (overlapping) booking is the
-    // ONLY thing that should further reduce availability — kit-driven rows
-    // are never returned by the real `assetKitId: null` filter, so they
-    // can't also be summed into `reserved` on top of `inKits`.
+    // ONLY thing that should further reduce availability. The read returns
+    // kit-driven rows too (it needs them to place logged units), and they
+    // must not be summed into `reserved` on top of `inKits`.
     const client = mockedDb();
     client.asset.findMany.mockResolvedValue([{ id: "asset-c", quantity: 20 }]);
     client.assetKit.groupBy.mockResolvedValue([
@@ -251,6 +254,16 @@ describe("buildAvailableUnitsByAsset", () => {
         assetId: "asset-c",
         bookingId: "other-standalone",
         quantity: 3,
+        booking: {
+          from: new Date("2026-02-03T00:00:00Z"),
+          to: new Date("2026-02-05T00:00:00Z"),
+        },
+      },
+      {
+        assetId: "asset-c",
+        bookingId: "other-kit",
+        quantity: 5,
+        assetKitId: "ak-1",
         booking: {
           from: new Date("2026-02-03T00:00:00Z"),
           to: new Date("2026-02-05T00:00:00Z"),
@@ -274,11 +287,6 @@ describe("buildAvailableUnitsByAsset", () => {
     // query never filtered out at all) were present, this would
     // double-count and under-report availability.
     expect(result["asset-c"].bookable).toBe(12);
-
-    const reservedCall = client.bookingAsset.findMany.mock.calls.find(
-      (call) => "assetKitId" in (call[0]?.where ?? {})
-    )?.[0];
-    expect(reservedCall?.where?.assetKitId).toBeNull();
   });
 
   it("clamps a negative bookable figure to 0 for display", async () => {
@@ -347,7 +355,7 @@ describe("buildAvailableUnitsByAsset", () => {
     // No window → plain (non-peaked) total is subtracted: 10 - 4 = 6.
     expect(result["asset-e"].bookable).toBe(6);
     const reservedCall = client.bookingAsset.findMany.mock.calls.find(
-      (call) => "assetKitId" in (call[0]?.where ?? {})
+      (call) => call[0]?.where?.booking?.status?.in?.includes("RESERVED")
     )?.[0];
     expect(reservedCall?.where?.booking?.OR).toBeUndefined();
   });
