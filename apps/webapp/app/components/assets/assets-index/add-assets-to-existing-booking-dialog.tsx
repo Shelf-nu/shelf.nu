@@ -310,7 +310,14 @@ export default function AddAssetsToExistingBookingDialog() {
                 available until you check them out.
               </div>
 
-              <QuantityTrackedOneUnitNotice selectedItems={selectedAssets} />
+              <QuantityTrackedOneUnitNotice
+                selectedItems={selectedAssets}
+                // Assets the server found already on the chosen booking are
+                // not booked again, so they keep the amount they have.
+                excludeIds={fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
+                  (asset: Pick<Asset, "id" | "title">) => asset.id
+                )}
+              />
 
               <When truthy={!isFetchingBookings && bookings.length === 0}>
                 <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">

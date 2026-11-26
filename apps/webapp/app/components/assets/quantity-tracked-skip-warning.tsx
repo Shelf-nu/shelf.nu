@@ -19,46 +19,8 @@
  * @see {@link file://./bulk-add-to-kit-dialog.tsx}
  */
 import type { ListItemData } from "~/components/list/list-item";
-import { isQuantityTracked } from "~/modules/asset/utils";
-import { isSelectingAllItems } from "~/utils/list";
+import { quantityTrackedSelectionMessage } from "./quantity-tracked-selection-message";
 import { WarningBox } from "../shared/warning-box";
-
-/**
- * A sentence about the quantity-tracked assets in a selection, or `null` when
- * it holds none to speak of.
- *
- * Shared by every dialog that treats those assets differently from the rest,
- * so they all count the selection the same way.
- *
- * @param selectedItems - The selected rows, with the select-all marker when
- *   "select all" is active
- * @param outcome - What happens to those assets, as a verb phrase
- *   ("will be skipped")
- * @param then - What the user can do about it, as a full sentence
- * @returns The sentence to show, or `null` when no selected row is
- *   quantity-tracked and the selection is not "select all"
- */
-export function quantityTrackedSelectionMessage(
-  selectedItems: ListItemData[],
-  outcome: string,
-  then: string
-): string | null {
-  const onThisPage = selectedItems.filter((item) =>
-    isQuantityTracked(item)
-  ).length;
-
-  if (isSelectingAllItems(selectedItems)) {
-    // The rows in memory are one page of a larger selection, so their count
-    // is a floor, never the total. With none in sight the selection may hold
-    // none at all, so the sentence says "any".
-    return onThisPage > 0
-      ? `Quantity-tracked assets in your selection ${outcome} (${onThisPage} on this page, and any on others). ${then}`
-      : `Any quantity-tracked assets in your selection ${outcome}. ${then}`;
-  }
-
-  if (onThisPage === 0) return null;
-  return `${onThisPage} quantity-tracked asset(s) in your selection ${outcome}. ${then}`;
-}
 
 /**
  * The warning text for a selection, or `null` when it needs none.

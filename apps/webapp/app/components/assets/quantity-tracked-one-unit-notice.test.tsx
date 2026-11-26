@@ -6,6 +6,7 @@
  */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { createAsset } from "@factories";
 
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
@@ -13,30 +14,42 @@ import {
   quantityTrackedOneUnitMessage,
 } from "./quantity-tracked-one-unit-notice";
 
-const individual = { id: "a1", type: "INDIVIDUAL" };
-const pool = { id: "p1", type: "QUANTITY_TRACKED" };
+/** A selected asset index row of the given type. */
+const row = (id: string, type: "INDIVIDUAL" | "QUANTITY_TRACKED") => ({
+  ...createAsset({ id, type }),
+  id,
+});
+const individual = row("a1", "INDIVIDUAL");
+const pool = row("p1", "QUANTITY_TRACKED");
+const otherPool = row("p2", "QUANTITY_TRACKED");
 const selectAll = { id: ALL_SELECTED_KEY };
 
 describe("quantityTrackedOneUnitMessage", () => {
-  it("says nothing when no hand-picked row is quantity-tracked", () => {
+  it("says nothing when no selected row is quantity-tracked", () => {
     expect(quantityTrackedOneUnitMessage([individual])).toBeNull();
   });
 
-  it("gives the exact count for hand-picked rows", () => {
-    expect(
-      quantityTrackedOneUnitMessage([individual, pool, { ...pool, id: "p2" }])
-    ).toBe(
+  it("gives the exact count of quantity-tracked rows", () => {
+    expect(quantityTrackedOneUnitMessage([individual, pool, otherPool])).toBe(
       "2 quantity-tracked asset(s) in your selection will be booked at 1 unit each. You can change the amount on the booking."
     );
   });
 
-  it("speaks in general terms under select all, where other pages are not loaded", () => {
-    expect(quantityTrackedOneUnitMessage([individual, selectAll])).toBe(
-      "Any quantity-tracked assets in your selection will be booked at 1 unit each. You can change the amount on the booking."
-    );
+  it("counts only the rows it holds under select all", () => {
+    // Neither booking route expands select all, so nothing on other pages is
+    // booked and the notice must not speak for it.
+    expect(quantityTrackedOneUnitMessage([selectAll])).toBeNull();
     expect(quantityTrackedOneUnitMessage([individual, pool, selectAll])).toBe(
-      "Quantity-tracked assets in your selection will be booked at 1 unit each (1 on this page, and any on others). You can change the amount on the booking."
+      "1 quantity-tracked asset(s) in your selection will be booked at 1 unit each. You can change the amount on the booking."
     );
+  });
+
+  it("leaves out assets that will not be booked", () => {
+    // `p1` is already on the chosen booking: it keeps the amount it has.
+    expect(quantityTrackedOneUnitMessage([pool, otherPool], ["p1"])).toBe(
+      "1 quantity-tracked asset(s) in your selection will be booked at 1 unit each. You can change the amount on the booking."
+    );
+    expect(quantityTrackedOneUnitMessage([pool], ["p1"])).toBeNull();
   });
 });
 
