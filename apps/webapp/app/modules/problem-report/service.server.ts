@@ -4,7 +4,7 @@
  * "Report a problem" on an asset: a member says what is wrong, the report is
  * saved as a `ProblemReport` row, the asset's history gets a system note (type
  * UPDATE) and an activity event, and the people who run the workspace get an
- * email. The web action and the mobile route both call
+ * email. The activity events are also what the hourly limit counts. The web action and the mobile route both call
  * {@link reportAssetProblem}, so they accept and refuse the same requests.
  *
  * The row is the record of the report; the note is its line in the asset's
@@ -403,25 +403,37 @@ async function lockMemberProblemReports(
 /**
  * Refuses a report when the member has already sent
  * {@link PROBLEM_REPORT_LIMIT} in this workspace within the last
- * {@link PROBLEM_REPORT_WINDOW_MS}. Counted from their `ProblemReport` rows,
- * plus their report notes that have no row, so the limit holds across
- * servers, covers the web form and the mobile route alike, and still sees a
- * report saved as a note only (by a version of the app that did not write
- * rows) until the backfill gives it its row. Run it inside the transaction that writes the report, after
+ * {@link PROBLEM_REPORT_WINDOW_MS}.
+ *
+ * Counted from the `ASSET_PROBLEM_REPORTED` activity events they are the
+ * actor of, never from the report rows or their history notes: an event is
+ * written with every report, holds no report text, and stays when the note,
+ * the report or the asset is deleted, so the count does not depend on
+ * anything a member can remove. Report notes that have no row are added: a
+ * report saved as a note only (by a version of the app that wrote neither
+ * row nor event) counts until the backfill gives it both.
+ *
+ * The count holds across servers and covers the web form and the mobile
+ * route alike. Run it inside the transaction that writes the report, after
  * {@link lockMemberProblemReports}, or two reports can both pass.
  *
  * @throws {ShelfError} 429 when the member is over the limit
  */
 async function assertUnderProblemReportLimit(
   { userId, organizationId }: { userId: string; organizationId: string },
-  tx: Pick<typeof db, "problemReport" | "note">
+  tx: Pick<typeof db, "activityEvent" | "note">
 ) {
   const since = new Date(Date.now() - PROBLEM_REPORT_WINDOW_MS);
   // One after the other: both run on the transaction's single connection.
-  const rows = await tx.problemReport.count({
-    where: { organizationId, reporterId: userId, createdAt: { gte: since } },
+  const events = await tx.activityEvent.count({
+    where: {
+      organizationId,
+      action: "ASSET_PROBLEM_REPORTED",
+      actorUserId: userId,
+      occurredAt: { gte: since },
+    },
   });
-  // A note that has its row is counted above, never twice.
+  // A note that has its row has its event, counted above, never twice.
   const notesWithoutRow = await tx.note.count({
     where: {
       userId,
@@ -432,7 +444,7 @@ async function assertUnderProblemReportLimit(
       problemReport: { is: null },
     },
   });
-  const sent = rows + notesWithoutRow;
+  const sent = events + notesWithoutRow;
 
   if (sent >= PROBLEM_REPORT_LIMIT) {
     throw new ShelfError({

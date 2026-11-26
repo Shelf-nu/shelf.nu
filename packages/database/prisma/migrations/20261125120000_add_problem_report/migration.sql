@@ -28,7 +28,7 @@ CREATE INDEX "ProblemReport_assetId_idx" ON "ProblemReport"("assetId");
 CREATE INDEX "ProblemReport_reporterId_idx" ON "ProblemReport"("reporterId");
 
 -- CreateIndex
-CREATE INDEX "ProblemReport_organizationId_reporterId_createdAt_idx" ON "ProblemReport"("organizationId", "reporterId", "createdAt");
+CREATE INDEX "ProblemReport_organizationId_idx" ON "ProblemReport"("organizationId");
 
 -- AddForeignKey
 ALTER TABLE "ProblemReport" ADD CONSTRAINT "ProblemReport_assetId_fkey" FOREIGN KEY ("assetId") REFERENCES "Asset"("id") ON DELETE CASCADE ON UPDATE CASCADE;

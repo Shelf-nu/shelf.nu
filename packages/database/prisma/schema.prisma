@@ -871,10 +871,8 @@ model ProblemReport {
 
   // Indexes for foreign keys
   @@index([assetId])
+  @@index([organizationId])
   @@index([reporterId])
-  // The hourly limit counts one member's reports in one workspace; its
-  // leading column also serves the organization foreign key.
-  @@index([organizationId, reporterId, createdAt])
 }
 
 enum ErrorCorrection {
@@ -3180,6 +3178,7 @@ enum ActivityAction {
   ASSET_DELETED
   // A member reported a problem on the asset; `meta.problemReportId` names
   // the `ProblemReport` row. The report text is never copied into the event.
+  // The hourly report limit counts these events per actor and workspace.
   ASSET_PROBLEM_REPORTED
 
   // Custody

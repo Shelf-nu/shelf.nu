@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   sendEmail: vi.fn(),
   findUser: vi.fn(),
   findOrganization: vi.fn(),
-  countReports: vi.fn(),
+  countEvents: vi.fn(),
   countNotes: vi.fn(),
   createReport: vi.fn(),
   createEvent: vi.fn(),
@@ -80,10 +80,10 @@ vi.mock("~/utils/logger", () => ({ Logger: { error: mocks.loggerError } }));
 vi.mock("~/database/db.server", () => {
   const tx = {
     $queryRaw: mocks.lock,
-    problemReport: { count: mocks.countReports, create: mocks.createReport },
+    problemReport: { create: mocks.createReport },
     note: { count: mocks.countNotes },
     // `recordEvent` is the real one; its insert is the output under test
-    activityEvent: { create: mocks.createEvent },
+    activityEvent: { create: mocks.createEvent, count: mocks.countEvents },
   };
   return {
     db: {
@@ -179,7 +179,7 @@ describe("reportAssetProblem", () => {
       title: "ZZ Camera",
       archivedAt: null,
     });
-    mocks.countReports.mockResolvedValue(0);
+    mocks.countEvents.mockResolvedValue(0);
     mocks.countNotes.mockResolvedValue(0);
     mocks.lock.mockResolvedValue([{ locked: true }]);
     mocks.assertAssetsAreNotArchived.mockResolvedValue(undefined);
@@ -239,9 +239,9 @@ describe("reportAssetProblem", () => {
 
     expect(mocks.lock).toHaveBeenCalledTimes(1);
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.countReports.mock.invocationCallOrder[0]
+      mocks.countEvents.mock.invocationCallOrder[0]
     );
-    expect(mocks.countReports.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.countEvents.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createNote.mock.invocationCallOrder[0]
     );
   });
@@ -261,7 +261,7 @@ describe("reportAssetProblem", () => {
       status: 429,
       title: "Too many reports",
     });
-    expect(mocks.countReports).not.toHaveBeenCalled();
+    expect(mocks.countEvents).not.toHaveBeenCalled();
     expect(mocks.createNote).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
@@ -278,14 +278,15 @@ describe("reportAssetProblem", () => {
       vi.useRealTimers();
     });
 
-    it("counts only this member's report rows in this workspace from the last hour", async () => {
+    it("counts only the report events this member is the actor of in this workspace from the last hour", async () => {
       await report();
 
-      expect(mocks.countReports).toHaveBeenCalledWith({
+      expect(mocks.countEvents).toHaveBeenCalledWith({
         where: {
           organizationId: "org-1",
-          reporterId: reporter.id,
-          createdAt: {
+          action: "ASSET_PROBLEM_REPORTED",
+          actorUserId: reporter.id,
+          occurredAt: {
             gte: new Date(now.getTime() - PROBLEM_REPORT_WINDOW_MS),
           },
         },
@@ -311,15 +312,15 @@ describe("reportAssetProblem", () => {
   });
 
   it("admits the report that reaches the hourly limit", async () => {
-    mocks.countReports.mockResolvedValue(PROBLEM_REPORT_LIMIT - 1);
+    mocks.countEvents.mockResolvedValue(PROBLEM_REPORT_LIMIT - 1);
 
     await expect(report()).resolves.toMatchObject({
       report: { id: "report-1" },
     });
   });
 
-  it("adds rows and notes without a row: refuses when together they reach the limit", async () => {
-    mocks.countReports.mockResolvedValue(PROBLEM_REPORT_LIMIT - 4);
+  it("adds events and notes without a row: refuses when together they reach the limit", async () => {
+    mocks.countEvents.mockResolvedValue(PROBLEM_REPORT_LIMIT - 4);
     mocks.countNotes.mockResolvedValue(4);
 
     await expect(report()).rejects.toMatchObject({ status: 429 });
@@ -328,7 +329,7 @@ describe("reportAssetProblem", () => {
   });
 
   it("refuses a member over the hourly report limit and writes nothing", async () => {
-    mocks.countReports.mockResolvedValue(PROBLEM_REPORT_LIMIT);
+    mocks.countEvents.mockResolvedValue(PROBLEM_REPORT_LIMIT);
 
     await expect(report()).rejects.toMatchObject({ status: 429 });
     expect(mocks.createNote).not.toHaveBeenCalled();
@@ -356,7 +357,7 @@ describe("reportAssetProblem", () => {
         organizationId: "org-1",
         actorUserId: reporter.id,
       },
-      expect.objectContaining({ problemReport: expect.anything() })
+      expect.objectContaining({ activityEvent: expect.anything() })
     );
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.assertAssetsAreNotArchived.mock.invocationCallOrder[0]
@@ -376,7 +377,7 @@ describe("reportAssetProblem", () => {
         assetId: "asset-1",
         organizationId: "org-1",
       },
-      expect.objectContaining({ problemReport: expect.anything() })
+      expect.objectContaining({ activityEvent: expect.anything() })
     );
     expect(result).toMatchObject({ note: { id: "note-1" }, emailed: true });
     await result.emailsDone;

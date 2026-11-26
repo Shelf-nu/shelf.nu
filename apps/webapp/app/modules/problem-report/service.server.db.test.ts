@@ -213,23 +213,62 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     await Promise.all(emailWork.splice(0));
   }
 
-  /** How many reports the member has in the main workspace. */
+  /** How many report rows the member has in the main workspace. */
   function reportsBy(role: string) {
     return db.problemReport.count({
       where: { organizationId, reporterId: userIds[role] },
     });
   }
 
-  /** Adds report rows until the member has `total` in the main workspace. */
-  async function fillReports(role: string, total: number) {
-    const sent = await reportsBy(role);
-    await db.problemReport.createMany({
-      data: Array.from({ length: total - sent }, () => ({
-        content: "Earlier report",
-        assetId: assets.bookable,
+  /** How many report events count toward the member's limit right now. */
+  function countedFor(role: string) {
+    return db.activityEvent.count({
+      where: {
         organizationId,
-        reporterId: userIds[role],
-      })),
+        action: "ASSET_PROBLEM_REPORTED",
+        actorUserId: userIds[role],
+      },
+    });
+  }
+
+  /** A report event as the service records it, for seeding the count. */
+  function reportEvent(
+    role: string,
+    data: { organizationId?: string; assetId?: string; occurredAt?: Date } = {}
+  ) {
+    return {
+      organizationId,
+      action: "ASSET_PROBLEM_REPORTED" as const,
+      entityType: "ASSET" as const,
+      entityId: data.assetId ?? assets.bookable,
+      assetId: assets.bookable,
+      actorUserId: userIds[role],
+      ...data,
+    };
+  }
+
+  /** Adds report events until `total` count toward the member's limit. */
+  async function fillReports(role: string, total: number) {
+    const sent = await countedFor(role);
+    await db.activityEvent.createMany({
+      data: Array.from({ length: total - sent }, () => reportEvent(role)),
+    });
+  }
+
+  /** Removes everything that counts toward the member's limit. */
+  async function clearReports(role: string) {
+    await db.note.deleteMany({
+      where: {
+        userId: userIds[role],
+        content: { contains: service.PROBLEM_REPORT_PHRASE },
+      },
+    });
+    await db.activityEvent.deleteMany({
+      where: {
+        organizationId,
+        action: "ASSET_PROBLEM_REPORTED",
+        actorUserId: userIds[role],
+      },
     });
   }
 
@@ -488,17 +527,52 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     await expect(report("MANAGER", assets.bookable)).rejects.toMatchObject({
       status: 429,
     });
-    expect(await reportsBy("MANAGER")).toBe(service.PROBLEM_REPORT_LIMIT);
+    expect(await countedFor("MANAGER")).toBe(service.PROBLEM_REPORT_LIMIT);
     expect(sendEmail).not.toHaveBeenCalled();
   });
+
+  it("still refuses the next report after the member's ten reports have had their history lines deleted", async () => {
+    await clearReports("MANAGER");
+    for (let sent = 0; sent < service.PROBLEM_REPORT_LIMIT; sent++) {
+      await report("MANAGER", assets.bookable, `Report ${sent + 1}`);
+    }
+    expect(await reportsBy("MANAGER")).toBe(service.PROBLEM_REPORT_LIMIT);
+
+    // What deleting a line does: the note goes, and its report with it.
+    await db.note.deleteMany({
+      where: {
+        userId: userIds.MANAGER,
+        content: { contains: service.PROBLEM_REPORT_PHRASE },
+      },
+    });
+    expect(await reportsBy("MANAGER")).toBe(0);
+
+    await expect(report("MANAGER", assets.bookable)).rejects.toMatchObject({
+      status: 429,
+    });
+  }, 60_000);
+
+  it("still refuses the next report after the reported asset is deleted", async () => {
+    await clearReports("MANAGER");
+    const assetId = await createAsset(organizationId, "ZZ Short-lived lamp");
+    for (let sent = 0; sent < service.PROBLEM_REPORT_LIMIT; sent++) {
+      await report("MANAGER", assetId, `Report ${sent + 1}`);
+    }
+
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the test's own asset
+    await db.asset.delete({ where: { id: assetId } });
+    expect(await db.problemReport.count({ where: { assetId } })).toBe(0);
+
+    await expect(report("MANAGER", assets.bookable)).rejects.toMatchObject({
+      status: 429,
+    });
+  }, 60_000);
 
   it("counts report notes that have no row: ten of them in the last hour refuse the next report", async () => {
     const owner = await db.user.findUniqueOrThrow({
       where: { id: userIds.OWNER },
     });
-    await db.problemReport.deleteMany({
-      where: { organizationId, reporterId: owner.id },
-    });
+    await clearReports("OWNER");
     await db.note.createMany({
       data: Array.from({ length: service.PROBLEM_REPORT_LIMIT }, () => ({
         content: service.buildProblemReportNote(owner, "Line without a row"),
@@ -507,27 +581,19 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
         assetId: assets.bookable,
       })),
     });
-    expect(await reportsBy("OWNER")).toBe(0);
+    expect(await countedFor("OWNER")).toBe(0);
 
     await expect(report("OWNER", assets.bookable)).rejects.toMatchObject({
       status: 429,
     });
-    expect(await reportsBy("OWNER")).toBe(0);
+    expect(await countedFor("OWNER")).toBe(0);
   });
 
   it("does not count a note twice once it has its row, and ignores old notes without one", async () => {
     const admin = await db.user.findUniqueOrThrow({
       where: { id: userIds.ADMIN },
     });
-    await db.problemReport.deleteMany({
-      where: { organizationId, reporterId: admin.id },
-    });
-    await db.note.deleteMany({
-      where: {
-        userId: admin.id,
-        content: { contains: service.PROBLEM_REPORT_PHRASE },
-      },
-    });
+    await clearReports("ADMIN");
     // Nine reports saved the usual way: nine notes, each with its row.
     for (let sent = 0; sent < service.PROBLEM_REPORT_LIMIT - 1; sent++) {
       await report("ADMIN", assets.bookable, `Report ${sent + 1}`);
@@ -554,33 +620,25 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     });
 
     // Leave the administrator under the limit for the tests that follow.
-    await db.note.deleteMany({
-      where: {
-        userId: admin.id,
-        content: { contains: service.PROBLEM_REPORT_PHRASE },
-      },
-    });
-    expect(await reportsBy("ADMIN")).toBe(0);
+    await clearReports("ADMIN");
+    expect(await countedFor("ADMIN")).toBe(0);
   }, 60_000);
 
-  it("does not count reports older than an hour or sent in another workspace", async () => {
-    await db.problemReport.createMany({
+  it("does not count report events older than an hour or from another workspace", async () => {
+    await db.activityEvent.createMany({
       data: [
-        ...Array.from({ length: service.PROBLEM_REPORT_LIMIT }, () => ({
-          content: "Old report",
-          assetId: assets.solo,
-          organizationId: soloOrganizationId,
-          reporterId: userIds.OUTSIDER,
-          createdAt: new Date(
-            Date.now() - service.PROBLEM_REPORT_WINDOW_MS - 60_000
-          ),
-        })),
-        ...Array.from({ length: service.PROBLEM_REPORT_LIMIT }, () => ({
-          content: "Report in another workspace",
-          assetId: assets.bookable,
-          organizationId,
-          reporterId: userIds.OUTSIDER,
-        })),
+        ...Array.from({ length: service.PROBLEM_REPORT_LIMIT }, () =>
+          reportEvent("OUTSIDER", {
+            organizationId: soloOrganizationId,
+            assetId: assets.solo,
+            occurredAt: new Date(
+              Date.now() - service.PROBLEM_REPORT_WINDOW_MS - 60_000
+            ),
+          })
+        ),
+        ...Array.from({ length: service.PROBLEM_REPORT_LIMIT }, () =>
+          reportEvent("OUTSIDER")
+        ),
       ],
     });
 
@@ -605,7 +663,7 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
     expect((refused as PromiseRejectedResult).reason).toMatchObject({
       status: 429,
     });
-    expect(await reportsBy("SELF_SERVICE")).toBe(service.PROBLEM_REPORT_LIMIT);
+    expect(await countedFor("SELF_SERVICE")).toBe(service.PROBLEM_REPORT_LIMIT);
 
     // Another member of the same workspace is not held back.
     await expect(report("ADMIN", assets.bookable)).resolves.toMatchObject({
@@ -623,13 +681,24 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
       ),
       "utf8"
     );
-    const insert = migration
-      .slice(migration.indexOf('INSERT INTO "ProblemReport"'))
-      .trim()
-      .replace(/;$/, "");
+    // The file's two statements, each without its closing semicolon so a
+    // filter can be added.
+    const statement = (start: string) => {
+      const from = migration.indexOf(start);
+      return migration.slice(from, migration.indexOf(";\n", from));
+    };
+    const insert = statement('INSERT INTO "ProblemReport"');
+    const insertEvents = statement('INSERT INTO "ActivityEvent"');
 
     function copyNotesOf(assetId: string) {
       return db.$executeRawUnsafe(`${insert} AND n."assetId" = $1`, assetId);
+    }
+
+    function recordEventsOf(assetId: string) {
+      return db.$executeRawUnsafe(
+        `${insertEvents} AND pr."assetId" = $1`,
+        assetId
+      );
     }
 
     it("copies report lines that have no row, with their workspace, reporter, time and text, and skips everything else", async () => {
@@ -712,6 +781,43 @@ describe.skipIf(!DATABASE_URL)("reportAssetProblem (real database)", () => {
       // Running it again copies nothing.
       expect(await copyNotesOf(assetId)).toBe(0);
       expect(await db.problemReport.count({ where: { assetId } })).toBe(4);
+
+      // Each copied report gets one event, as the app would have written
+      // it; the report the app saved already has its own.
+      expect(await recordEventsOf(assetId)).toBe(3);
+      const events = await db.activityEvent.findMany({
+        where: { organizationId, assetId, action: "ASSET_PROBLEM_REPORTED" },
+      });
+      expect(events).toHaveLength(4);
+      const copied = rows.find((row) => row.noteId === plain.id);
+      const event = events.find(
+        (candidate) =>
+          (candidate.meta as { problemReportId?: string } | null)
+            ?.problemReportId === copied?.id
+      );
+      expect(event).toMatchObject({
+        actorUserId: base.id,
+        actorSnapshot: {
+          firstName: "ZZ BASE",
+          lastName: "Test",
+          displayName: null,
+        },
+        entityType: "ASSET",
+        entityId: assetId,
+        occurredAt: writtenAt,
+      });
+      expect(JSON.stringify(events)).not.toContain("zoom");
+      const orphanEvent = events.find(
+        (candidate) =>
+          (candidate.meta as { problemReportId?: string } | null)
+            ?.problemReportId ===
+          rows.find((row) => row.noteId === orphaned.id)?.id
+      );
+      expect(orphanEvent).toMatchObject({
+        actorUserId: null,
+        actorSnapshot: null,
+      });
+      expect(await recordEventsOf(assetId)).toBe(0);
     });
   });
 });
