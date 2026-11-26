@@ -608,6 +608,22 @@ export async function createAuditSession(
         })),
         skipDuplicates: true,
       });
+
+      // One event per assignee, the same shape updateAuditSession records, so
+      // a count of assignments reads one action whether the person was picked
+      // at creation or added by an edit.
+      await recordEvents(
+        uniqueAssigneeIds.map((targetUserId) => ({
+          organizationId,
+          actorUserId: createdById,
+          action: "AUDIT_ASSIGNEE_ADDED" as const,
+          entityType: "AUDIT" as const,
+          entityId: session.id,
+          auditSessionId: session.id,
+          targetUserId,
+        })),
+        tx
+      );
     }
 
     const sessionWithAssignments = await tx.auditSession.findFirst({

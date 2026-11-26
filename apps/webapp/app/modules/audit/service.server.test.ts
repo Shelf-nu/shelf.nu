@@ -2,7 +2,10 @@ import { AuditStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
-import { recordEvent } from "~/modules/activity-event/service.server";
+import {
+  recordEvent,
+  recordEvents,
+} from "~/modules/activity-event/service.server";
 import { recordAuditScanNonFatal } from "~/modules/scan/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -543,11 +546,36 @@ describe("audit service", () => {
     });
   });
 
-  it("creates no assignments and skips the membership check when nobody is assigned", async () => {
+  it("records one AUDIT_ASSIGNEE_ADDED event per assignee inside the transaction", async () => {
+    await createAuditSession({
+      ...defaultInput,
+      assigneeIds: ["user-2", "user-3", "user-2"],
+    });
+
+    const assigneeEvent = (targetUserId: string) => ({
+      organizationId: "org-1",
+      actorUserId: "user-1",
+      action: "AUDIT_ASSIGNEE_ADDED",
+      entityType: "AUDIT",
+      entityId: "audit-1",
+      auditSessionId: "audit-1",
+      targetUserId,
+    });
+    expect(recordEvents).toHaveBeenCalledTimes(1);
+    // The second argument is the transaction client: the events commit or
+    // roll back with the assignment rows.
+    expect(recordEvents).toHaveBeenCalledWith(
+      [assigneeEvent("user-2"), assigneeEvent("user-3")],
+      mockDb
+    );
+  });
+
+  it("creates no assignments, no assignee events and skips the membership check when nobody is assigned", async () => {
     await createAuditSession({ ...defaultInput, assigneeIds: [] });
 
     expect(mockDb.userOrganization.findMany).not.toHaveBeenCalled();
     expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+    expect(recordEvents).not.toHaveBeenCalled();
   });
 
   it("rejects an assignee who is not a member of the workspace with a 400", async () => {
@@ -2068,6 +2096,17 @@ describe("audit service", () => {
         },
         select: { userId: true },
       });
+      expect(recordEvents).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            action: "AUDIT_ASSIGNEE_ADDED",
+            auditSessionId: "audit-copy",
+            actorUserId: baseInput.userId,
+            targetUserId: "user-2",
+          }),
+        ],
+        mockDb
+      );
       expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
         data: [
           { auditSessionId: "audit-copy", userId: "user-2", role: undefined },
