@@ -26,8 +26,8 @@
  *
  * This leaf imports NEITHER `booking/service.server` NOR `consumption-log`
  * (only the dependency-free `@shelf/quantity-control` package, `@prisma/client`
- * enums, `~/utils/error`, the pure `booking/checkout-attribution` helpers, and
- * TYPE-only shapes from `availability.server`, which are erased at build
+ * enums, `~/utils/error`, the pure `booking/checkout-attribution` and
+ * `booking/checkin-receipt` helpers, and TYPE-only shapes from `availability.server`, which are erased at build
  * time), so `consumption-log` can import the guard
  * from here without forming a runtime cycle. `availability.server` re-exports
  * everything here, so every existing consumer keeps importing these symbols
@@ -47,6 +47,7 @@ import {
   resolveIntervalTo,
 } from "@shelf/quantity-control";
 import type { AvailabilityInterval } from "@shelf/quantity-control";
+import { resolveSentUnits } from "~/modules/booking/checkin-receipt";
 import {
   attributeDispositionsByBookingAsset,
   type CheckoutAttributionLog,
@@ -277,13 +278,112 @@ export function reservedUnitsStillHeld(
   return Math.max(notYetGivenBack, outRightNow);
 }
 
+/** A `BookingAsset` row as {@link loggedUnitsByReservationRow} reads it. */
+export type ReservationRowForAttribution = {
+  /** Optional only so a read that cannot name its rows still type-checks. */
+  id?: string;
+  bookingId: string;
+  /** Left out by a read that is already scoped to one asset. */
+  assetId?: string;
+  /** `null` or absent for a standalone slice, set for a kit-driven one. */
+  assetKitId?: string | null;
+  quantity: number;
+  checkedOutAt?: Date | null;
+  checkedOutQuantity?: number | null;
+};
+
+/** One `consumptionLog.groupBy` group, as the availability reads fetch it. */
+export type LoggedUnitsGroup = {
+  /** The slice the units were logged on; `null` or absent when none was named. */
+  bookingAssetId?: string | null;
+  bookingId: string | null;
+  /** Left out by a read that is already scoped to one asset. */
+  assetId?: string;
+  _sum: { quantity: number | null };
+};
+
+/**
+ * The {@link RESERVATION_REDUCING_CATEGORIES} units each reservation row has
+ * given back, attributed per `BookingAsset` row.
+ *
+ * One (booking, asset) pair can hold a standalone slice and kit-driven ones at
+ * once. Summing the pair's logs and taking them off every row would let a
+ * return on the kit slice free the standalone slice while its units are out,
+ * so every availability read sizes its rows through this.
+ *
+ * A log naming its row counts for that row. One naming none is placed by
+ * {@link attributeDispositionsByBookingAsset}: standalone slice first, then
+ * kit-driven ones in slice id order, each taking at most the units it sent
+ * out ({@link resolveSentUnits}). That is the order and the capacity the
+ * check-in writer and every booking surface use. A log loses its row when
+ * the slice it named is removed from the booking, so the cap applies to a
+ * booking's only row too: a row that never left takes none of them.
+ *
+ * Callers must pass EVERY row of each pair, kit-driven ones included, or an
+ * untagged log has nowhere to go but the standalone slice. Kit-driven rows are
+ * for attribution only: callers that count kit units through
+ * `AssetKit.quantity` skip them when summing.
+ *
+ * @param rows - Reservation rows, all slices of each (booking, asset) pair
+ * @param loggedGroups - Logged units grouped by slice, booking and asset
+ * @returns Logged units per row, keyed by the row object passed in
+ */
+export function loggedUnitsByReservationRow<
+  Row extends ReservationRowForAttribution,
+>(rows: readonly Row[], loggedGroups: readonly LoggedUnitsGroup[]) {
+  const pairKey = (bookingId: string, assetId: string | undefined) =>
+    `${bookingId}:${assetId ?? ""}`;
+
+  const rowsByPair = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = pairKey(row.bookingId, row.assetId);
+    const pairRows = rowsByPair.get(key) ?? [];
+    pairRows.push(row);
+    rowsByPair.set(key, pairRows);
+  }
+
+  const logsByPair = new Map<string, CheckoutAttributionLog[]>();
+  for (const group of loggedGroups) {
+    const quantity = group._sum.quantity ?? 0;
+    if (quantity === 0 || !group.bookingId) continue;
+    const key = pairKey(group.bookingId, group.assetId);
+    const logs = logsByPair.get(key) ?? [];
+    logs.push({ bookingAssetId: group.bookingAssetId ?? null, quantity });
+    logsByPair.set(key, logs);
+  }
+
+  const loggedByRow = new Map<Row, number>();
+  for (const [key, pairRows] of rowsByPair) {
+    // Each row keeps its own id as its key: the fill order among slices is
+    // defined on it (`compareSlicesForGreedyFill`), and it is how a log finds
+    // the row it names. A row read without an id gets a key no log can name.
+    const keyOf = (row: Row, position: number) => row.id ?? `#${position}`;
+    const attributed = attributeDispositionsByBookingAsset({
+      bookingAssetRows: pairRows.map((row, position) => ({
+        id: keyOf(row, position),
+        assetKitId: row.assetKitId ?? null,
+        quantity: resolveSentUnits({
+          quantity: row.quantity,
+          checkedOutAt: row.checkedOutAt ?? null,
+          checkedOutQuantity: row.checkedOutQuantity ?? null,
+        }),
+      })),
+      consumptionLogs: logsByPair.get(key) ?? [],
+    });
+    pairRows.forEach((row, position) => {
+      loggedByRow.set(row, attributed.get(keyOf(row, position)) ?? 0);
+    });
+  }
+  return loggedByRow;
+}
+
 /**
  * The reads {@link getPeakReservedUnitsByAsset} issues.
  *
- * Structural, and declared here rather than widened out of the shared
- * availability client: the `groupBy` needs `bookingAssetId` in its `by`, which
- * the shared client does not expose, and broadening that type reaches every
- * other availability read.
+ * Structural, and declared here rather than taken from the shared
+ * availability client: this read needs every column of its rows (`id`,
+ * `assetKitId` and `checkedOutQuantity` are optional on the shared client),
+ * so a caller that cannot supply them fails to compile.
  */
 export type PeakReservedTxClient = ConvertedSliceRowsClient & {
   bookingAsset: {
@@ -296,6 +396,7 @@ export type PeakReservedTxClient = ConvertedSliceRowsClient & {
         quantity: true;
         assetKitId: true;
         sourceAllocation: true;
+        checkedOutAt: true;
         checkedOutQuantity: true;
         booking: { select: { from: true; to: true; status: true } };
       };
@@ -307,6 +408,7 @@ export type PeakReservedTxClient = ConvertedSliceRowsClient & {
         quantity: number;
         assetKitId: string | null;
         sourceAllocation?: BookingSourceAllocation;
+        checkedOutAt?: Date | null;
         checkedOutQuantity: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
@@ -359,12 +461,10 @@ export type PeakReservedTxClient = ConvertedSliceRowsClient & {
  *   {@link RESERVATION_REDUCING_CATEGORIES} dispositions. They are attributed
  *   per `BookingAsset` ROW: one (booking, asset) pair can hold a standalone
  *   slice and kit-driven ones at once, so a return logged against a kit slice
- *   must not shrink the standalone reservation this guard is protecting. A
- *   disposition logged without a row id is placed by
- *   {@link attributeDispositionsByBookingAsset}: standalone slice first, then
- *   kit-driven ones, each taking up to the units it has sent out. That is the
- *   order the check-out markers and every booking surface use, so this read
- *   agrees with the units they show as out. A LEGACY row never counts for less
+ *   must not shrink the standalone reservation this guard is protecting. The
+ *   attribution is {@link loggedUnitsByReservationRow}, shared with every
+ *   availability read, so this read agrees with the units they show as out.
+ *   A LEGACY row never counts for less
  *   than the units it has out right now, so a slice returned in full and
  *   checked out again keeps its second trip in the peak (see
  *   {@link reservedUnitsStillHeld}).
@@ -407,6 +507,7 @@ export async function getPeakReservedUnitsByAsset({
       quantity: true,
       assetKitId: true,
       sourceAllocation: true,
+      checkedOutAt: true,
       checkedOutQuantity: true,
       booking: { select: { from: true, to: true, status: true } },
     },
@@ -445,45 +546,10 @@ export async function getPeakReservedUnitsByAsset({
     loadRemainingReservationBySlice(tx, organizationId, convertedSliceIds),
   ]);
 
-  // Dispositions of each (booking, asset) pair, tagged with the row they were
-  // logged on, or `null` when the writer did not name one.
-  const dispositionsByPair = new Map<string, CheckoutAttributionLog[]>();
-  for (const group of loggedGroups) {
-    const quantity = group._sum.quantity ?? 0;
-    if (quantity === 0 || !group.bookingId) continue;
-
-    const pair = pairOf({ bookingId: group.bookingId, assetId: group.assetId });
-    const dispositions = dispositionsByPair.get(pair) ?? [];
-    dispositions.push({ bookingAssetId: group.bookingAssetId, quantity });
-    dispositionsByPair.set(pair, dispositions);
-  }
-
   // Only LEGACY groups place dispositions: converted groups read their source
-  // rows instead, and their logs were never fetched.
-  const rowsByPair = new Map<string, typeof rows>();
-  for (const row of legacyRows) {
-    const pair = pairOf(row);
-    const pairRows = rowsByPair.get(pair) ?? [];
-    pairRows.push(row);
-    rowsByPair.set(pair, pairRows);
-  }
-
-  /** Dispositions attributed to each `BookingAsset` row, by row id. */
-  const loggedByRowId = new Map<string, number>();
-  for (const [pair, pairRows] of rowsByPair) {
-    const attributed = attributeDispositionsByBookingAsset({
-      // A row's room for untagged dispositions is what it has sent out, not
-      // what it booked: a slice that never left has nothing to give back, and
-      // one sent out twice can take two trips' worth.
-      bookingAssetRows: pairRows.map((row) => ({
-        id: row.id,
-        assetKitId: row.assetKitId,
-        quantity: row.checkedOutQuantity ?? 0,
-      })),
-      consumptionLogs: dispositionsByPair.get(pair) ?? [],
-    });
-    for (const [rowId, logged] of attributed) loggedByRowId.set(rowId, logged);
-  }
+  // rows instead, and their logs were never fetched. Every row of a LEGACY
+  // pair is passed, kit-driven ones included, so untagged logs can reach them.
+  const loggedByRow = loggedUnitsByReservationRow(legacyRows, loggedGroups);
 
   const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
   for (const row of rows) {
@@ -495,7 +561,7 @@ export async function getPeakReservedUnitsByAsset({
 
     const remaining = convertedPairs.has(pairOf(row))
       ? remainingBySlice.get(row.id) ?? 0
-      : reservedUnitsStillHeld(row, loggedByRowId.get(row.id) ?? 0);
+      : reservedUnitsStillHeld(row, loggedByRow.get(row) ?? 0);
     if (remaining === 0) continue;
 
     const to = resolveIntervalTo(

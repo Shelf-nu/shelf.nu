@@ -63,6 +63,7 @@ import type {
 import {
   ACTIVE_BOOKING_STATUSES,
   buildActiveBookingWhere,
+  loggedUnitsByReservationRow,
   overCommittedWindows,
   RESERVATION_REDUCING_CATEGORIES,
   reservedUnitsStillHeld,
@@ -147,8 +148,9 @@ function overlapsHalfOpen(
  *    batch-fetch, in ONE `Promise.all` (four queries total, still constant
  *    in the number of assets/bookings):
  *    - each asset's `quantity` (org-scoped) — the raw total;
- *    - every ACTIVE standalone (`assetKitId: null`) `BookingAsset` row for
- *      those assets, org-wide (via {@link buildActiveBookingWhere} with
+ *    - every ACTIVE `BookingAsset` row for those assets, org-wide. Only
+ *      standalone rows enter the sweep; kit-driven ones are read so a unit
+ *      logged on one is not taken off the standalone slice (via {@link buildActiveBookingWhere} with
  *      `window: null` — every active reservation regardless of date, NOT
  *      just ones overlapping any single booking's window, because the sweep
  *      below needs the asset's FULL reservation timeline);
@@ -216,9 +218,10 @@ export async function flagBookingStockConflicts({
           where: {
             assetId: { in: assetIds },
             // Kit-driven slices don't compete for the standalone pool this
-            // detector measures against — mirrors the `assetKitId: null`
-            // filter every availability read uses.
-            assetKitId: null,
+            // detector measures against. They are fetched for attribution
+            // only (a unit logged on one must not be taken off the standalone
+            // slice) and skipped when the intervals are built, as in every
+            // availability read.
             // `window: null` — the FULL active-reservation timeline for
             // these assets, org-wide. Unlike `getAssetAvailabilityBatch`
             // (windowed around ONE target booking), this sweep needs every
@@ -231,6 +234,8 @@ export async function flagBookingStockConflicts({
             assetId: true,
             bookingId: true,
             quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
             sourceAllocation: true,
             checkedOutQuantity: true,
             booking: { select: { from: true, to: true, status: true } },
@@ -272,22 +277,22 @@ export async function flagBookingStockConflicts({
     const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
 
     if (reservedRows.length > 0) {
-      const bookingIds = [
-        ...new Set(
-          reservedRows
-            .filter((r) => !isConvertedSlice(r.sourceAllocation))
-            .map((r) => r.bookingId)
-        ),
-      ];
+      // Same per-group split as `getAssetAvailabilityBatch`: LEGACY rows keep
+      // their kit-driven siblings for attribution, converted standalone rows
+      // read their source rows.
+      const legacyRows = reservedRows.filter(
+        (r) => !isConvertedSlice(r.sourceAllocation)
+      );
+      const bookingIds = [...new Set(legacyRows.map((r) => r.bookingId))];
 
       // Mirrors `getAssetAvailabilityBatch`: LEGACY rows read logged
-      // dispositions grouped by (bookingId, assetId) since this spans many
-      // assets; converted rows read their source rows.
+      // dispositions grouped by slice, booking and asset; converted rows read
+      // their source rows.
       const [loggedGroups, convertedRemaining] = await Promise.all([
         bookingIds.length === 0
           ? Promise.resolve([])
           : client.consumptionLog.groupBy({
-              by: ["bookingId", "assetId"],
+              by: ["bookingAssetId", "bookingId", "assetId"],
               where: {
                 assetId: { in: assetIds },
                 bookingId: { in: bookingIds },
@@ -298,21 +303,15 @@ export async function flagBookingStockConflicts({
         loadRemainingReservationBySlice(
           client,
           organizationId,
-          convertedStandaloneIds(reservedRows)
+          convertedStandaloneIds(reservedRows.filter((r) => !r.assetKitId))
         ),
       ]);
 
-      const loggedByKey = new Map<string, number>();
-      for (const group of loggedGroups) {
-        if (group.bookingId) {
-          loggedByKey.set(
-            `${group.bookingId}:${group.assetId}`,
-            group._sum.quantity ?? 0
-          );
-        }
-      }
+      const loggedByRow = loggedUnitsByReservationRow(legacyRows, loggedGroups);
 
       for (const row of reservedRows) {
+        // Kit-driven: fetched for attribution only.
+        if (row.assetKitId) continue;
         // Defensive only: `Booking` is a required (non-nullable) relation on
         // `BookingAsset`, so a row with no `booking` should never occur in
         // practice — skip rather than fabricate a fallback window.
@@ -328,7 +327,7 @@ export async function flagBookingStockConflicts({
                 quantity: row.quantity,
                 checkedOutQuantity: row.checkedOutQuantity ?? null,
               },
-              loggedByKey.get(`${row.bookingId}:${row.assetId}`) ?? 0
+              loggedByRow.get(row) ?? 0
             );
         if (remaining === 0) continue;
 
