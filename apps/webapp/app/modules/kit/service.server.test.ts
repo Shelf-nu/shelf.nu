@@ -188,6 +188,11 @@ vitest.mock("~/database/db.server", () => ({
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    // why: kit propagation's source seeding probes for groups converted only
+    // through disposition shares; no fixture here has any.
+    bookingDispositionShare: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     // why: the same helper re-opens any `BookingModelRequest` the deleted
     // slice was fulfilling, mirroring `removeAssets`.
     bookingModelRequest: {
