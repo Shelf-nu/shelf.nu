@@ -17,6 +17,8 @@ import {
   useLoaderData,
   useRouteLoaderData,
 } from "react-router";
+// Side effect: sets the app-wide default zod messages on server and client.
+import "./utils/zod-config";
 import { ErrorContent } from "./components/errors";
 import BlockInteractions from "./components/layout/maintenance-mode";
 import { SidebarTrigger } from "./components/layout/sidebar/sidebar";

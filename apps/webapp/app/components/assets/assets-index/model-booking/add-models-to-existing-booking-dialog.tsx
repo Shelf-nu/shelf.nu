@@ -57,6 +57,7 @@ import { getValidationErrors } from "~/utils/http";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { tw } from "~/utils/tw";
+import { requiredError } from "~/utils/zod";
 import type { ModelQuantityRow } from "./model-quantity-rows";
 import { ModelQuantityRows } from "./model-quantity-rows";
 
@@ -75,7 +76,7 @@ import { ModelQuantityRows } from "./model-quantity-rows";
  */
 export const addModelsToExistingBookingSchema = z.object({
   bookingId: z
-    .string({ required_error: "Please select a booking." })
+    .string(requiredError("Please select a booking."))
     .min(1, "Please select a booking."),
   models: modelReservationsField("Select at least one model to reserve."),
 });

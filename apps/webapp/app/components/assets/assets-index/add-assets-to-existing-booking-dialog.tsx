@@ -24,6 +24,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { sortPickerBookings } from "~/utils/booking-picker-order";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
+import { requiredError } from "~/utils/zod";
 
 /**
  * Slim booking shape returned by `/api/bookings/get-all` (see
@@ -35,7 +36,7 @@ type PickerBooking = Pick<Booking, "id" | "name" | "status" | "from" | "to">;
 
 export const addAssetsToExistingBookingSchema = z.object({
   id: z
-    .string({ required_error: "Please select booking." })
+    .string(requiredError("Please select booking."))
     .min(1, "Please select booking."),
   assetsIds: z.string().array().min(1, "Please select at least one asset."),
   addOnlyRestAssets: z.coerce.boolean().optional().nullable(),

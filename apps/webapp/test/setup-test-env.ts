@@ -1,3 +1,5 @@
+// Side effect: tests see the same default zod messages the app configures.
+import "~/utils/zod-config";
 import "@testing-library/jest-dom/vitest";
 import { server } from "./mocks";
 

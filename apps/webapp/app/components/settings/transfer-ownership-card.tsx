@@ -12,6 +12,7 @@ import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
 import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
+import { requiredError } from "~/utils/zod";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import {
@@ -85,9 +86,9 @@ function LearnMoreLink() {
 export const TransferOwnershipSchema = z.object({
   newOwner: z.string().min(1, "New owner is required"),
   agreeConditions: z
-    .string({
-      required_error: "You must agree to changing the owner of the workspace",
-    })
+    .string(
+      requiredError("You must agree to changing the owner of the workspace")
+    )
     .transform((value) => value === "on")
     .pipe(
       z.boolean().refine((value) => value, {

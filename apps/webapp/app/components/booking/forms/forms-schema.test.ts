@@ -81,7 +81,7 @@ describe("BookingFormSchema - time restrictions", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) => msg.includes("at least 24 hour"))
         ).toBe(true);
@@ -143,7 +143,7 @@ describe("BookingFormSchema - time restrictions", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) =>
             msg.includes("Booking duration cannot exceed 48 hours")
@@ -207,7 +207,7 @@ describe("BookingFormSchema - time restrictions", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) =>
             msg.includes("End date cannot be earlier than start date")
@@ -282,7 +282,7 @@ describe("ExtendBookingSchema - time restrictions", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) =>
             msg.includes("Booking duration cannot exceed 48 hours")
@@ -459,7 +459,7 @@ describe("BookingFormSchema - override timezone handling", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      const errorMessages = result.error.errors.map((e) => e.message);
+      const errorMessages = result.error.issues.map((e) => e.message);
       expect(
         errorMessages.some((msg) => msg.toLowerCase().includes("closed"))
       ).toBe(true);
@@ -547,7 +547,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
     if (!result.success) {
       // Surface the actual messages so a regression is debuggable.
       // eslint-disable-next-line no-console
-      console.error("Unexpected validation failure", result.error.errors);
+      console.error("Unexpected validation failure", result.error.issues);
     }
     expect(result.success).toBe(true);
   });
@@ -578,7 +578,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      const errorMessages = result.error.errors.map((e) => e.message);
+      const errorMessages = result.error.issues.map((e) => e.message);
       expect(
         errorMessages.some((msg) =>
           msg.toLowerCase().includes("must be in the future")
@@ -610,7 +610,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      const errorMessages = result.error.errors.map((e) => e.message);
+      const errorMessages = result.error.issues.map((e) => e.message);
       expect(
         errorMessages.some((msg) =>
           msg.toLowerCase().includes("invalid date format")
@@ -668,7 +668,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
 
     if (!result.success) {
       // eslint-disable-next-line no-console
-      console.error("Working-hours rejection", result.error.errors);
+      console.error("Working-hours rejection", result.error.issues);
     }
     expect(result.success).toBe(true);
   });
@@ -714,7 +714,7 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      const errorMessages = result.error.errors.map((e) => e.message);
+      const errorMessages = result.error.issues.map((e) => e.message);
       expect(
         errorMessages.some((msg) =>
           msg.toLowerCase().includes("must be between")
@@ -810,7 +810,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) => msg.includes("at least 24 hour"))
         ).toBe(true);
@@ -856,7 +856,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) => msg.toLowerCase().includes("closed"))
         ).toBe(true);
@@ -883,7 +883,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        const errorMessages = result.error.errors.map((e) => e.message);
+        const errorMessages = result.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) => msg.includes("not a working day"))
         ).toBe(true);
@@ -935,7 +935,7 @@ describe("DuplicateBookingSchema - date validation", () => {
       if (!result.success) {
         // The cross-field issue must land on the endDate path with the exact
         // message the form uses — guarding the shared `crossFieldDateValidation`.
-        const endDateIssue = result.error.errors.find(
+        const endDateIssue = result.error.issues.find(
           (e) => e.path.join(".") === "endDate"
         );
         expect(endDateIssue?.message).toBe(
@@ -960,7 +960,7 @@ describe("DuplicateBookingSchema - date validation", () => {
 
       expect(baseResult.success).toBe(false);
       if (!baseResult.success) {
-        const errorMessages = baseResult.error.errors.map((e) => e.message);
+        const errorMessages = baseResult.error.issues.map((e) => e.message);
         expect(
           errorMessages.some((msg) =>
             msg.includes("Booking duration cannot exceed 48 hours")
@@ -1115,7 +1115,7 @@ describe("BookingFormSchema - pref timezone drives the stored UTC (config date f
     if (!result.success) {
       throw new Error(
         `Unexpected validation failure: ${JSON.stringify(
-          result.error.errors.map((e) => e.message)
+          result.error.issues.map((e) => e.message)
         )}`
       );
     }
@@ -1244,7 +1244,7 @@ describe("BookingFormSchema - near-future start, user west of UTC", () => {
 
   /** Messages for a failed parse, or [] when it succeeded. */
   function messages(result: ReturnType<typeof parseWith>) {
-    return result.success ? [] : result.error.errors.map((e) => e.message);
+    return result.success ? [] : result.error.issues.map((e) => e.message);
   }
 
   it("accepts a start 2 hours ahead when the user's own zone is used", () => {

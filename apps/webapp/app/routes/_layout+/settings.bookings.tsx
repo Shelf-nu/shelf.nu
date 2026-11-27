@@ -472,7 +472,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             additionalData: {
               userId,
               organizationId,
-              validationErrors: validation.error.errors.reduce(
+              validationErrors: validation.error.issues.reduce(
                 (acc, error) => {
                   const field = error.path.join(".");
                   acc[field] = error.message;

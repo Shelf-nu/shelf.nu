@@ -1,7 +1,41 @@
-import type { ZodCustomIssue, ZodIssue } from "zod";
+import type { ZodIssue } from "zod";
 import { z } from "zod";
 
-type ZodCustomIssueWithMessage = ZodCustomIssue & { message: string };
+/** A custom issue in the shape react-zorm accepts as `customIssues`. */
+type ZodCustomIssueWithMessage = {
+  code: "custom";
+  message: string;
+  path: ZodIssue["path"];
+};
+
+/**
+ * Schema params that give a field its own message when no value is sent at
+ * all (the input is `undefined`), and leave every other failure to the checks
+ * chained after it.
+ *
+ * @param message - What to show when the field is missing
+ * @returns Params for a zod schema constructor, such as `z.string(...)`
+ */
+export function requiredError(message: string) {
+  return {
+    error: (issue: { input?: unknown }) =>
+      issue.input === undefined ? message : undefined,
+  };
+}
+
+/**
+ * Schema params that give a field its own message when a value is sent but has
+ * the wrong type, and leave a missing value to the default message.
+ *
+ * @param message - What to show when the value has the wrong type
+ * @returns Params for a zod schema constructor, such as `z.number(...)`
+ */
+export function invalidTypeError(message: string) {
+  return {
+    error: (issue: { input?: unknown }) =>
+      issue.input === undefined ? undefined : message,
+  };
+}
 
 export function createFormIssues(
   issues?: ZodIssue[]

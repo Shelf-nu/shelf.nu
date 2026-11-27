@@ -53,6 +53,7 @@ import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
+import { invalidTypeError } from "~/utils/zod";
 import {
   optionalNumberFromString,
   requiredNumberFromString,
@@ -168,7 +169,7 @@ export const NewAssetFormSchema = z.object({
     .transform((val) => (val === "" || val === undefined ? undefined : +val))
     .pipe(
       z
-        .number({ invalid_type_error: "Quantity must be a number" })
+        .number(invalidTypeError("Quantity must be a number"))
         .int("Quantity must be a whole number")
         .positive("Quantity is required and must be at least 1")
         .optional()
@@ -183,14 +184,14 @@ export const NewAssetFormSchema = z.object({
     fieldName: "Min quantity",
   }).pipe(
     z
-      .number({ invalid_type_error: "Min quantity must be a number" })
+      .number(invalidTypeError("Min quantity must be a number"))
       .int("Min quantity must be a whole number")
       .nonnegative("Min quantity cannot be negative")
       .nullable()
   ),
   consumptionType: z
     .nativeEnum(ConsumptionType, {
-      errorMap: () => ({ message: "Please select a consumption type" }),
+      error: "Please select a consumption type",
     })
     .optional(),
   unitOfMeasure: z
@@ -240,7 +241,7 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
     .transform((val) => val.trim()),
   count: requiredNumberFromString({ fieldName: "Count" }).pipe(
     z
-      .number({ invalid_type_error: "Count must be a number" })
+      .number(invalidTypeError("Count must be a number"))
       .int("Count must be a whole number")
       .min(2, "Count must be at least 2")
       .max(100, "Count must be at most 100")

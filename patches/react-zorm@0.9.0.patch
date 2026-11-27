@@ -1,0 +1,74 @@
+diff --git a/dist/chains.js b/dist/chains.js
+index b14b896fd5b8811a34eea0aafff51e5f4bbd3ab6..7bb412d03dfba78d59a5ea1bf5a6e94ad821c04b 100644
+--- a/dist/chains.js
++++ b/dist/chains.js
+@@ -12,8 +12,11 @@ function unwrapZodType(type) {
+     if (type instanceof zod_2.z.ZodObject || type instanceof zod_2.z.ZodArray) {
+         return type;
+     }
+-    if (type instanceof zod_2.z.ZodEffects) {
+-        return unwrapZodType(type.innerType());
++    if (type?._def?.type === "pipe") {
++      const inner = [type._def.in, type._def.out].find((t) => t && t._def?.type !== "transform");
++      if (inner) {
++        return unwrapZodType(inner);
++      }
+     }
+     const anyType = type;
+     if (anyType._def?.innerType) {
+diff --git a/dist/input-props.js b/dist/input-props.js
+index 8bb67101c9f9f310bb217824a21f734caaa2f114..6ad16ab09e5665a5f0b30ccb104647fa1647e84c 100644
+--- a/dist/input-props.js
++++ b/dist/input-props.js
+@@ -4,8 +4,11 @@ exports.inputProps = void 0;
+ const zod_1 = require("zod");
+ function removeZodEffects(type) {
+     // remove .refine() etc.
+-    if (type instanceof zod_1.ZodEffects) {
+-        return removeZodEffects(type.innerType());
++    if (type?._def?.type === "pipe") {
++      const inner = [type._def.in, type._def.out].find((t) => t && t._def?.type !== "transform");
++      if (inner) {
++        return removeZodEffects(inner);
++      }
+     }
+     return type;
+ }
+diff --git a/esm/react-zorm.mjs b/esm/react-zorm.mjs
+index 3d0ea2203284a0e2a192ab02e968d7e47df9ff50..0799a895c3e3be0b362e6bcaa984e0d8d8a14fef 100644
+--- a/esm/react-zorm.mjs
++++ b/esm/react-zorm.mjs
+@@ -1,4 +1,4 @@
+-import { ZodArray, ZodObject, z, ZodDefault, ZodOptional, ZodNullable, ZodString, ZodNumber, ZodDate, ZodEffects } from "zod";
++import { ZodArray, ZodObject, z, ZodDefault, ZodOptional, ZodNullable, ZodString, ZodNumber, ZodDate } from "zod";
+ import { useRef, useState, useCallback, useMemo, useEffect } from "react";
+ const charCodeOfDot = ".".charCodeAt(0);
+ const reEscapeChar = /\\(\\)?/g;
+@@ -186,8 +186,11 @@ function unwrapZodType(type) {
+   if (type instanceof z.ZodObject || type instanceof z.ZodArray) {
+     return type;
+   }
+-  if (type instanceof z.ZodEffects) {
+-    return unwrapZodType(type.innerType());
++  if (type?._def?.type === "pipe") {
++    const inner = [type._def.in, type._def.out].find((t) => t && t._def?.type !== "transform");
++    if (inner) {
++      return unwrapZodType(inner);
++    }
+   }
+   const anyType = type;
+   if (anyType._def?.innerType) {
+@@ -498,8 +501,11 @@ function Value(props) {
+   return props.children(value);
+ }
+ function removeZodEffects(type) {
+-  if (type instanceof ZodEffects) {
+-    return removeZodEffects(type.innerType());
++  if (type?._def?.type === "pipe") {
++    const inner = [type._def.in, type._def.out].find((t) => t && t._def?.type !== "transform");
++    if (inner) {
++      return removeZodEffects(inner);
++    }
+   }
+   return type;
+ }
