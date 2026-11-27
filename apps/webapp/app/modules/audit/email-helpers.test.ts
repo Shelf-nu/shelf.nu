@@ -1,14 +1,16 @@
 /**
- * Tests for the audit pushes sent beside the audit emails: who each one
+ * Tests for the audit emails and the pushes sent beside them: who each one
  * reaches and what it says.
  *
  * @see {@link file://./email-helpers.ts}
  */
-import { sendEmail } from "~/emails/mail.server";
+import { sendEmail, sendEmailAndWait } from "~/emails/mail.server";
 import { sendPush } from "~/modules/push/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { Logger } from "~/utils/logger";
 import {
   sendAuditAssignedEmail,
+  sendAuditAssignedPush,
   sendAuditOverdueEmail,
   sendAuditReminderEmail,
 } from "./email-helpers";
@@ -18,6 +20,8 @@ import {
 // why: sending mail is a network call; the test reads what would be sent
 vi.mock("~/emails/mail.server", () => ({
   sendEmail: vi.fn(),
+  // The assignment email is awaited so its sender can pace a fan-out.
+  sendEmailAndWait: vi.fn().mockResolvedValue(true),
 }));
 
 // why: sendPush queues a pg-boss job; the queue and delivery are the push
@@ -80,27 +84,19 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("sendAuditAssignedEmail", () => {
-  it("pushes to the assignee, with the due date in their format", async () => {
-    vi.mocked(resolveUserFormatPrefsById).mockResolvedValue({
-      dateFormat: "DD_MM_YYYY",
-      timeFormat: "H24",
-      weekStartsOn: 1,
-      timeZone: "Europe/Berlin",
-    });
-
-    await sendAuditAssignedEmail({
+describe("sendAuditAssignedPush", () => {
+  it("pushes to the assignee, with the due date in their format", () => {
+    sendAuditAssignedPush({
       audit,
-      assigneeEmail: "user-a@example.com",
-      assigneeName: "Ana",
       assigneeUserId: "user-a",
-      hints,
+      prefs: {
+        dateFormat: "DD_MM_YYYY",
+        timeFormat: "H24",
+        weekStartsOn: 1,
+        timeZone: "Europe/Berlin",
+      },
     });
 
-    expect(sendEmail).toHaveBeenCalledOnce();
-    expect(vi.mocked(sendEmail).mock.calls[0][0].subject).toBe(
-      `🔍 You've been assigned to audit: "Q4 count" - shelf.nu`
-    );
     expect(vi.mocked(sendPush).mock.calls).toEqual([
       [
         {
@@ -113,6 +109,86 @@ describe("sendAuditAssignedEmail", () => {
         },
       ],
     ]);
+  });
+});
+
+describe("sendAuditAssignedEmail", () => {
+  beforeEach(() => {
+    vi.mocked(resolveUserFormatPrefsById).mockResolvedValue({
+      dateFormat: "DD_MM_YYYY",
+      timeFormat: "H24",
+      weekStartsOn: 1,
+      timeZone: "UTC",
+    });
+  });
+
+  /** Sends the assignment email to user-a. */
+  const sendToAna = () =>
+    sendAuditAssignedEmail({
+      audit,
+      assigneeEmail: "user-a@example.com",
+      assigneeName: "Ana",
+      assigneeUserId: "user-a",
+      hints,
+    });
+
+  it("emails the assignee and leaves the push to sendAuditAssignedPush", async () => {
+    await sendToAna();
+
+    expect(sendEmailAndWait).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendEmailAndWait).mock.calls[0][0].subject).toBe(
+      `🔍 You've been assigned to audit: "Q4 count" - shelf.nu`
+    );
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
+  it("logs the hand-off when the email was sent or queued", async () => {
+    vi.mocked(sendEmailAndWait).mockResolvedValueOnce(true);
+
+    await sendToAna();
+
+    expect(Logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("Audit assignment email handed off for Ana")
+    );
+  });
+
+  it("logs no hand-off when both the send and the enqueue failed", async () => {
+    // sendEmailAndWait has already logged both failures as errors.
+    vi.mocked(sendEmailAndWait).mockResolvedValueOnce(false);
+
+    await sendToAna();
+
+    expect(Logger.info).not.toHaveBeenCalled();
+  });
+
+  it("logs a failure for that recipient, sends no push and does not throw", async () => {
+    const lookupDown = new Error("connection lost");
+    vi.mocked(resolveUserFormatPrefsById).mockRejectedValueOnce(lookupDown);
+
+    await expect(
+      sendAuditAssignedEmail({
+        audit,
+        assigneeEmail: "user-a@example.com",
+        assigneeName: "Ana",
+        assigneeUserId: "user-a",
+        hints,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(sendEmailAndWait).not.toHaveBeenCalled();
+    expect(sendPush).not.toHaveBeenCalled();
+    expect(Logger.error).toHaveBeenCalledTimes(1);
+    expect(Logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: lookupDown,
+        message: "Failed to send audit assignment email",
+        additionalData: {
+          auditId: "audit-1",
+          assigneeEmail: "user-a@example.com",
+          assigneeName: "Ana",
+        },
+      })
+    );
   });
 });
 

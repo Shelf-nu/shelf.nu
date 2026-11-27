@@ -19,8 +19,7 @@
  * @see {@link file://./bulk-add-to-kit-dialog.tsx}
  */
 import type { ListItemData } from "~/components/list/list-item";
-import { isQuantityTracked } from "~/modules/asset/utils";
-import { isSelectingAllItems } from "~/utils/list";
+import { quantityTrackedSelectionMessage } from "./quantity-tracked-selection-message";
 import { WarningBox } from "../shared/warning-box";
 
 /**
@@ -36,21 +35,11 @@ export function quantityTrackedSkipMessage(
   selectedItems: ListItemData[],
   instead: string
 ): string | null {
-  const onThisPage = selectedItems.filter((item) =>
-    isQuantityTracked(item)
-  ).length;
-
-  if (isSelectingAllItems(selectedItems)) {
-    // The rows in memory are one page of a larger selection, so their count
-    // is a floor, never the total. With none in sight the selection may hold
-    // none at all, so the sentence says "any".
-    return onThisPage > 0
-      ? `Quantity-tracked assets in your selection will be skipped (${onThisPage} on this page, and any on others). ${instead}`
-      : `Any quantity-tracked assets in your selection will be skipped. ${instead}`;
-  }
-
-  if (onThisPage === 0) return null;
-  return `${onThisPage} quantity-tracked asset(s) in your selection will be skipped. ${instead}`;
+  return quantityTrackedSelectionMessage(
+    selectedItems,
+    "will be skipped",
+    instead
+  );
 }
 
 /**

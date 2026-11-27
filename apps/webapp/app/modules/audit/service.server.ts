@@ -41,7 +41,8 @@ import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   assertAssetsBelongToOrg,
-  assertUserBelongsToOrg,
+  assertUsersBelongToOrg,
+  filterUsersInOrg,
 } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
@@ -61,8 +62,7 @@ import {
   createAuditCompletedNote,
   createAuditUpdateNote,
   createDueDateChangedNote,
-  createAssigneeAddedNote,
-  createAssigneeRemovedNote,
+  createAssigneesChangedNote,
   createAssetsAddedToAuditNote,
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
@@ -259,7 +259,15 @@ export type CreateAuditSessionInput = {
   assetIds: string[];
   organizationId: string;
   createdById: string;
-  assignee?: string;
+  /** User ids to assign. Every id must belong to a workspace member. */
+  assigneeIds?: string[];
+  /**
+   * What happens to an assignee who is not a workspace member. `"reject"`
+   * (the default) fails the create with a 400, for ids a person just picked.
+   * `"drop"` leaves them out, for a team carried over from an older audit
+   * whose members may have left since.
+   */
+  nonMemberAssignees?: "reject" | "drop";
   scopeMeta?: AuditScopeMeta | null;
   dueDate?: Date;
 };
@@ -513,7 +521,8 @@ export async function createAuditSession(
     assetIds,
     organizationId,
     createdById,
-    assignee,
+    assigneeIds,
+    nonMemberAssignees = "reject",
     scopeMeta,
     dueDate,
   } = input;
@@ -564,118 +573,151 @@ export async function createAuditSession(
 
   // Only add assignees who are explicitly selected
   // Creator is NOT automatically added as an assignee
-  const uniqueAssigneeIds = assignee ? [assignee] : [];
+  const requestedAssigneeIds = Array.from(new Set(assigneeIds ?? []));
 
-  const result = await db.$transaction(async (tx) => {
-    // The assignee arrives from the form: prove they are a workspace member
-    // before the assignment gives them access to the audit.
-    for (const assigneeId of uniqueAssigneeIds) {
-      await assertUserBelongsToOrg({ userId: assigneeId, organizationId }, tx);
-    }
+  const result = await db.$transaction(
+    async (tx) => {
+      // Only workspace members may be assigned: the assignment gives them
+      // access to the audit. Read inside the transaction, so a member removed
+      // a moment earlier is either refused or dropped, never assigned.
+      let uniqueAssigneeIds = requestedAssigneeIds;
+      if (nonMemberAssignees === "drop") {
+        uniqueAssigneeIds = await filterUsersInOrg(
+          { userIds: requestedAssigneeIds, organizationId },
+          tx
+        );
+      } else {
+        await assertUsersBelongToOrg(
+          { userIds: requestedAssigneeIds, organizationId },
+          tx
+        );
+      }
 
-    const session = await tx.auditSession.create({
-      data: {
-        name,
-        description,
-        organizationId,
+      const session = await tx.auditSession.create({
+        data: {
+          name,
+          description,
+          organizationId,
+          createdById,
+          expectedAssetCount: assets.length,
+          missingAssetCount: assets.length,
+          scopeMeta: scopeMeta ?? undefined,
+          dueDate,
+        },
+      });
+
+      if (assets.length > 0) {
+        await tx.auditAsset.createMany({
+          data: assets.map((asset) => ({
+            auditSessionId: session.id,
+            assetId: asset.id,
+            expected: true,
+            expectedQuantity: expectedQuantities.get(asset.id) ?? null,
+          })),
+        });
+      }
+
+      if (uniqueAssigneeIds.length > 0) {
+        await tx.auditAssignment.createMany({
+          data: uniqueAssigneeIds.map((userId) => ({
+            auditSessionId: session.id,
+            userId,
+            // LEAD/PARTICIPANT roles are reserved; every assignee is a peer today
+            role: undefined,
+          })),
+          skipDuplicates: true,
+        });
+
+        // One event per assignee, the same shape updateAuditSession records, so
+        // a count of assignments reads one action whether the person was picked
+        // at creation or added by an edit.
+        await recordEvents(
+          uniqueAssigneeIds.map((targetUserId) => ({
+            organizationId,
+            actorUserId: createdById,
+            action: "AUDIT_ASSIGNEE_ADDED" as const,
+            entityType: "AUDIT" as const,
+            entityId: session.id,
+            auditSessionId: session.id,
+            targetUserId,
+          })),
+          tx
+        );
+      }
+
+      const sessionWithAssignments = await tx.auditSession.findFirst({
+        where: { id: session.id, organizationId },
+        include: {
+          assignments: true,
+        },
+      });
+
+      if (!sessionWithAssignments) {
+        throw new ShelfError({
+          cause: null,
+          message: "Unable to load the newly created audit session.",
+          label,
+          additionalData: { sessionId: session.id },
+        });
+      }
+
+      // Create automatic note for audit creation
+      await createAuditCreationNote({
+        auditSessionId: session.id,
         createdById,
         expectedAssetCount: assets.length,
-        missingAssetCount: assets.length,
-        scopeMeta: scopeMeta ?? undefined,
-        dueDate,
-      },
-    });
+        tx,
+      });
 
-    if (assets.length > 0) {
-      await tx.auditAsset.createMany({
-        data: assets.map((asset) => ({
+      // Activity event: AUDIT_CREATED.
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: createdById,
+          action: "AUDIT_CREATED",
+          entityType: "AUDIT",
+          entityId: session.id,
           auditSessionId: session.id,
-          assetId: asset.id,
+          meta: { expectedAssetCount: assets.length },
+        },
+        tx
+      );
+
+      // Fetch the created audit assets to get their IDs
+      const createdAuditAssets = await tx.auditAsset.findMany({
+        where: {
+          auditSessionId: session.id,
           expected: true,
+        },
+        select: {
+          id: true,
+          assetId: true,
+        },
+      });
+
+      // Create a map for quick lookup
+      const auditAssetMap = new Map(
+        createdAuditAssets.map((aa) => [aa.assetId, aa.id])
+      );
+
+      return {
+        session: sessionWithAssignments,
+        expectedAssets: assets.map((asset) => ({
+          id: asset.id,
+          name: asset.title,
+          auditAssetId: auditAssetMap.get(asset.id) ?? "",
           expectedQuantity: expectedQuantities.get(asset.id) ?? null,
+          foundQuantity: null,
+          unitOfMeasure: asset.unitOfMeasure,
+          status: AuditAssetStatus.PENDING,
         })),
-      });
-    }
-
-    if (uniqueAssigneeIds.length > 0) {
-      await tx.auditAssignment.createMany({
-        data: uniqueAssigneeIds.map((userId) => ({
-          auditSessionId: session.id,
-          userId,
-          // LEAD role is reserved for future use (e.g., when we support multiple assignees)
-          role: undefined,
-        })),
-      });
-    }
-
-    const sessionWithAssignments = await tx.auditSession.findFirst({
-      where: { id: session.id, organizationId },
-      include: {
-        assignments: true,
-      },
-    });
-
-    if (!sessionWithAssignments) {
-      throw new ShelfError({
-        cause: null,
-        message: "Unable to load the newly created audit session.",
-        label,
-        additionalData: { sessionId: session.id },
-      });
-    }
-
-    // Create automatic note for audit creation
-    await createAuditCreationNote({
-      auditSessionId: session.id,
-      createdById,
-      expectedAssetCount: assets.length,
-      tx,
-    });
-
-    // Activity event — AUDIT_CREATED.
-    await recordEvent(
-      {
-        organizationId,
-        actorUserId: createdById,
-        action: "AUDIT_CREATED",
-        entityType: "AUDIT",
-        entityId: session.id,
-        auditSessionId: session.id,
-        meta: { expectedAssetCount: assets.length },
-      },
-      tx
-    );
-
-    // Fetch the created audit assets to get their IDs
-    const createdAuditAssets = await tx.auditAsset.findMany({
-      where: {
-        auditSessionId: session.id,
-        expected: true,
-      },
-      select: {
-        id: true,
-        assetId: true,
-      },
-    });
-
-    // Create a map for quick lookup
-    const auditAssetMap = new Map(
-      createdAuditAssets.map((aa) => [aa.assetId, aa.id])
-    );
-
-    return {
-      session: sessionWithAssignments,
-      expectedAssets: assets.map((asset) => ({
-        id: asset.id,
-        name: asset.title,
-        auditAssetId: auditAssetMap.get(asset.id) ?? "",
-        expectedQuantity: expectedQuantities.get(asset.id) ?? null,
-        foundQuantity: null,
-        unitOfMeasure: asset.unitOfMeasure,
-        status: AuditAssetStatus.PENDING,
-      })),
-    } satisfies CreateAuditSessionResult;
-  });
+      } satisfies CreateAuditSessionResult;
+    },
+    // The asset rows, the membership check, the assignee events and the
+    // creation note all share this transaction; a large audit outgrows the
+    // 5s default.
+    { timeout: 15_000 }
+  );
 
   // Create asset notes outside the transaction
   if (assets.length > 0) {
@@ -694,9 +736,13 @@ export async function createAuditSession(
 }
 
 /**
- * Updates an audit session's details (name, description, due date, and/or assignee).
+ * Updates an audit session's details (name, description, due date, and/or assignees).
  * Creates automatic notes for tracked changes.
  * Optimized to perform minimal database queries.
+ *
+ * `assigneeUserIds` is the FULL desired set: undefined leaves assignments
+ * untouched, an empty array removes everyone. Returns who was added and
+ * removed so the caller can notify the newcomers.
  */
 export async function updateAuditSession({
   id,
@@ -711,193 +757,239 @@ export async function updateAuditSession({
     name?: string;
     description?: string | null;
     dueDate?: Date | null;
-    assigneeUserId?: string | null;
+    assigneeUserIds?: string[];
   };
 }) {
   // Use transaction to ensure atomicity
-  return db.$transaction(async (tx) => {
-    // Fetch the current audit to track changes
-    const currentAudit = await tx.auditSession.findUnique({
-      where: { id, organizationId },
-      select: {
-        name: true,
-        description: true,
-        status: true,
-        dueDate: true,
-        assignments: {
-          select: {
-            userId: true,
+  return db.$transaction(
+    async (tx) => {
+      // Serialise concurrent edits of the same audit: a second editor waits
+      // here and then reads the list the first one committed, so a person
+      // both admins added is inserted, noted and emailed exactly once instead
+      // of the second insert failing on the unique assignment. Scoped to the
+      // workspace so an audit id from another one locks nothing before its 404.
+      await tx.$queryRaw`
+        SELECT id FROM "AuditSession"
+        WHERE id = ${id} AND "organizationId" = ${organizationId}
+        FOR UPDATE
+      `;
+
+      // Fetch the current audit to track changes
+      const currentAudit = await tx.auditSession.findUnique({
+        where: { id, organizationId },
+        select: {
+          name: true,
+          description: true,
+          status: true,
+          dueDate: true,
+          assignments: {
+            select: {
+              userId: true,
+            },
           },
         },
-      },
-    });
-
-    if (!currentAudit) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 404,
       });
-    }
 
-    assertAuditNotArchived(currentAudit.status, {
-      auditSessionId: id,
-      organizationId,
-    });
+      if (!currentAudit) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit not found",
+          additionalData: { id, organizationId },
+          label: "Audit",
+          status: 404,
+        });
+      }
 
-    if (currentAudit.status === AuditStatus.CANCELLED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Cancelled audits cannot be edited.",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 400,
+      assertAuditNotArchived(currentAudit.status, {
+        auditSessionId: id,
+        organizationId,
       });
-    }
 
-    if (currentAudit.status === AuditStatus.COMPLETED) {
-      throw new ShelfError({
-        cause: null,
-        message: "Completed audits cannot be edited.",
-        additionalData: { id, organizationId },
-        label: "Audit",
-        status: 400,
+      if (currentAudit.status === AuditStatus.CANCELLED) {
+        throw new ShelfError({
+          cause: null,
+          message: "Cancelled audits cannot be edited.",
+          additionalData: { id, organizationId },
+          label: "Audit",
+          status: 400,
+        });
+      }
+
+      if (currentAudit.status === AuditStatus.COMPLETED) {
+        throw new ShelfError({
+          cause: null,
+          message: "Completed audits cannot be edited.",
+          additionalData: { id, organizationId },
+          label: "Audit",
+          status: 400,
+        });
+      }
+
+      // Track what changed for activity logging
+      const changes: Array<{ field: string; from: string; to: string }> = [];
+
+      // Assignees are diffed as sets: whoever is in the new list but not the
+      // old is added, whoever is in the old list but not the new is removed.
+      const currentAssigneeIds = currentAudit.assignments.map(
+        (assignment) => assignment.userId
+      );
+      const nextAssigneeIds =
+        data.assigneeUserIds === undefined
+          ? undefined
+          : Array.from(new Set(data.assigneeUserIds));
+      const addedAssigneeIds = nextAssigneeIds
+        ? nextAssigneeIds.filter((id) => !currentAssigneeIds.includes(id))
+        : [];
+      const removedAssigneeIds = nextAssigneeIds
+        ? currentAssigneeIds.filter((id) => !nextAssigneeIds.includes(id))
+        : [];
+
+      // Added assignees arrive from the form: prove they are workspace
+      // members before the assignments give them access to the audit.
+      await assertUsersBelongToOrg(
+        { userIds: addedAssigneeIds, organizationId },
+        tx
+      );
+
+      // Track basic field changes
+      if (data.name !== undefined && data.name !== currentAudit.name) {
+        changes.push({
+          field: "name",
+          from: currentAudit.name,
+          to: data.name,
+        });
+      }
+
+      if (
+        data.description !== undefined &&
+        data.description !== currentAudit.description
+      ) {
+        changes.push({
+          field: "description",
+          from: currentAudit.description || "(empty)",
+          to: data.description || "(empty)",
+        });
+      }
+
+      // Check if due date changed
+      const dueDateChanged =
+        data.dueDate !== undefined &&
+        ((currentAudit.dueDate === null && data.dueDate !== null) ||
+          (currentAudit.dueDate !== null && data.dueDate === null) ||
+          (currentAudit.dueDate !== null &&
+            data.dueDate !== null &&
+            currentAudit.dueDate.getTime() !== data.dueDate.getTime()));
+
+      const assigneesChanged =
+        addedAssigneeIds.length > 0 || removedAssigneeIds.length > 0;
+
+      // Single update for all audit session fields
+      const updatedAudit = await tx.auditSession.update({
+        where: { id, organizationId },
+        data: {
+          name: data.name,
+          description: data.description,
+          dueDate: data.dueDate,
+        },
       });
-    }
 
-    // Track what changed for activity logging
-    const changes: Array<{ field: string; from: string; to: string }> = [];
-    const currentAssignee = currentAudit.assignments[0]?.userId || null;
-    const newAssignee =
-      data.assigneeUserId === undefined
-        ? undefined
-        : data.assigneeUserId || null;
-
-    // Track basic field changes
-    if (data.name !== undefined && data.name !== currentAudit.name) {
-      changes.push({
-        field: "name",
-        from: currentAudit.name,
-        to: data.name,
-      });
-    }
-
-    if (
-      data.description !== undefined &&
-      data.description !== currentAudit.description
-    ) {
-      changes.push({
-        field: "description",
-        from: currentAudit.description || "(empty)",
-        to: data.description || "(empty)",
-      });
-    }
-
-    // Check if due date changed
-    const dueDateChanged =
-      data.dueDate !== undefined &&
-      ((currentAudit.dueDate === null && data.dueDate !== null) ||
-        (currentAudit.dueDate !== null && data.dueDate === null) ||
-        (currentAudit.dueDate !== null &&
-          data.dueDate !== null &&
-          currentAudit.dueDate.getTime() !== data.dueDate.getTime()));
-
-    // Check if assignee changed
-    const assigneeChanged =
-      newAssignee !== undefined && newAssignee !== currentAssignee;
-
-    // Single update for all audit session fields
-    const updatedAudit = await tx.auditSession.update({
-      where: { id, organizationId },
-      data: {
-        name: data.name,
-        description: data.description,
-        dueDate: data.dueDate,
-      },
-    });
-
-    // Single batch operation for assignee changes
-    if (assigneeChanged) {
-      // Remove old assignee if exists
-      if (currentAssignee) {
+      // Two batch operations cover any size of assignee change
+      if (removedAssigneeIds.length > 0) {
         await tx.auditAssignment.deleteMany({
-          where: { auditSessionId: id, userId: currentAssignee },
+          where: { auditSessionId: id, userId: { in: removedAssigneeIds } },
         });
       }
-      // Add new assignee if provided. It arrives from the form, so prove
-      // they are a workspace member before the assignment grants access.
-      if (newAssignee) {
-        await assertUserBelongsToOrg(
-          { userId: newAssignee, organizationId },
-          tx
-        );
-        await tx.auditAssignment.create({
-          data: { auditSessionId: id, userId: newAssignee },
-        });
-      }
-    }
-
-    // Create all activity notes in batch (minimize DB round trips)
-    const notePromises: Promise<any>[] = [];
-
-    // Basic field changes note
-    if (changes.length > 0) {
-      notePromises.push(
-        createAuditUpdateNote({
-          auditSessionId: id,
-          userId,
-          changes,
-          tx,
-        })
-      );
-    }
-
-    // Due date change note
-    if (dueDateChanged) {
-      notePromises.push(
-        createDueDateChangedNote({
-          auditSessionId: id,
-          userId,
-          oldDate: currentAudit.dueDate,
-          newDate: data.dueDate!,
-          tx,
-        })
-      );
-    }
-
-    // Assignee change notes
-    if (assigneeChanged) {
-      if (currentAssignee) {
-        notePromises.push(
-          createAssigneeRemovedNote({
+      if (addedAssigneeIds.length > 0) {
+        await tx.auditAssignment.createMany({
+          data: addedAssigneeIds.map((userId) => ({
             auditSessionId: id,
             userId,
-            assigneeUserId: currentAssignee,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      // Create all activity notes in batch (minimize DB round trips)
+      const notePromises: Promise<any>[] = [];
+
+      // Basic field changes note
+      if (changes.length > 0) {
+        notePromises.push(
+          createAuditUpdateNote({
+            auditSessionId: id,
+            userId,
+            changes,
             tx,
           })
         );
       }
-      if (newAssignee) {
+
+      // Due date change note
+      if (dueDateChanged) {
         notePromises.push(
-          createAssigneeAddedNote({
+          createDueDateChangedNote({
             auditSessionId: id,
             userId,
-            assigneeUserId: newAssignee,
+            oldDate: currentAudit.dueDate,
+            newDate: data.dueDate!,
             tx,
           })
         );
       }
-    }
 
-    // Execute all note creations in parallel
-    if (notePromises.length > 0) {
-      await Promise.all(notePromises);
-    }
+      // One note for the whole assignee change, plus one event per person so
+      // reports can count assignments without parsing note text.
+      if (assigneesChanged) {
+        notePromises.push(
+          createAssigneesChangedNote({
+            auditSessionId: id,
+            userId,
+            addedUserIds: addedAssigneeIds,
+            removedUserIds: removedAssigneeIds,
+            tx,
+          })
+        );
+        // One batched write: recordEvents resolves the actor once and
+        // inserts every row together, so a large team change costs the
+        // transaction two statements, not two per person.
+        const assigneeEvent = (
+          action: "AUDIT_ASSIGNEE_ADDED" | "AUDIT_ASSIGNEE_REMOVED",
+          targetUserId: string
+        ) => ({
+          organizationId,
+          actorUserId: userId,
+          action,
+          entityType: "AUDIT" as const,
+          entityId: id,
+          auditSessionId: id,
+          targetUserId,
+        });
+        notePromises.push(
+          recordEvents(
+            [
+              ...addedAssigneeIds.map((targetUserId) =>
+                assigneeEvent("AUDIT_ASSIGNEE_ADDED", targetUserId)
+              ),
+              ...removedAssigneeIds.map((targetUserId) =>
+                assigneeEvent("AUDIT_ASSIGNEE_REMOVED", targetUserId)
+              ),
+            ],
+            tx
+          )
+        );
+      }
 
-    return updatedAudit;
-  });
+      // Execute all note creations in parallel
+      if (notePromises.length > 0) {
+        await Promise.all(notePromises);
+      }
+
+      return { audit: updatedAudit, addedAssigneeIds, removedAssigneeIds };
+    },
+    // A ten-person change is two lookups and a few inserts; the Prisma default
+    // 5s is tight when the pool is busy, so match recordAuditScan's budget.
+    { timeout: 15_000 }
+  );
 }
 
 export async function getAuditSessionDetails({
@@ -5005,6 +5097,8 @@ export type DuplicateAuditResult = {
   droppedAssetCount: number;
   /** Total number of assets in the original audit. */
   originalAssetCount: number;
+  /** Assignees carried over from the original (still workspace members). */
+  carriedOverAssigneeIds: string[];
 };
 
 /**
@@ -5022,8 +5116,9 @@ export type DuplicateAuditResult = {
  * gate is client-side, so the service owns the contract for any caller
  * (route action, background jobs, future internal callers).
  *
- * Assignments, notes, scans, images, and the due date are NOT copied — the
- * new audit starts clean. Creator is set to `userId`.
+ * Assignees carry over (those still in the workspace); notes, scans, images,
+ * and the due date are NOT copied: the new audit starts clean. Creator is set
+ * to `userId`.
  *
  * @param auditSessionId - ID of the audit to duplicate
  * @param organizationId - Workspace scoping
@@ -5049,6 +5144,9 @@ export async function duplicateAuditSession({
         // also include unexpected scans (`expected: false`) — those must
         // not be promoted to expected in the duplicate.
         assets: { where: { expected: true }, select: { assetId: true } },
+        // The team carries over: with several assignees, a copy without them
+        // locks every base member out until an admin re-picks each one.
+        assignments: { select: { userId: true } },
       },
     });
 
@@ -5108,6 +5206,12 @@ export async function duplicateAuditSession({
       assetIds: resolvedAssetIds,
       organizationId,
       createdById: userId,
+      // The original team: anyone who has left the workspace since is dropped
+      // inside the create transaction rather than failing the duplicate.
+      assigneeIds: originalAudit.assignments.map(
+        (assignment) => assignment.userId
+      ),
+      nonMemberAssignees: "drop",
       // PRD: scopeMeta copied as-is. The DB column is Json?, the typed surface
       // is AuditScopeMeta — cast through and let createAuditSession persist it.
       scopeMeta: (originalAudit.scopeMeta ?? null) as AuditScopeMeta | null,
@@ -5117,6 +5221,10 @@ export async function duplicateAuditSession({
       newSession,
       droppedAssetCount,
       originalAssetCount,
+      // Read from the rows written, so it names exactly who was assigned.
+      carriedOverAssigneeIds: newSession.assignments.map(
+        (assignment) => assignment.userId
+      ),
     };
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;
