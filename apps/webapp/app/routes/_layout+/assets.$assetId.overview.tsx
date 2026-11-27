@@ -90,6 +90,7 @@ import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assetAttachmentHref } from "~/utils/asset-attachment-href";
 import { assetDescriptionSchema } from "~/utils/asset-description";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
@@ -105,6 +106,7 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { formatBytes } from "~/utils/format-bytes";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import {
   userCanViewSpecificCustody,
@@ -1333,6 +1335,37 @@ export default function AssetOverview() {
                   />
                 )}
               />
+
+              {/* Attachment: read-only here, shown to every role that can see
+                  the asset. Uploading and removing happen on the Edit page.
+                  The link opens through the viewing route, which re-checks
+                  permission on each click. */}
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  Attachment
+                </span>
+                <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                  {asset.attachmentPath ? (
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={assetAttachmentHref(asset.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-primary-700 hover:text-primary-800"
+                      >
+                        {asset.attachmentOriginalName || "Attachment.pdf"}
+                      </a>
+                      {asset.attachmentSize ? (
+                        <span className="text-gray-500">
+                          {formatBytes(asset.attachmentSize)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="text-gray-600">No attachment</span>
+                  )}
+                </div>
+              </li>
 
               {/* QT-aware: shows total value (per-unit × quantity) below the
                   per-unit Value row. Hidden for INDIVIDUAL assets and QT with

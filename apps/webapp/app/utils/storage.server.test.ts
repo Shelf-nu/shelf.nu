@@ -7,6 +7,9 @@ import {
   findShelfErrorInCause,
   isSupabaseRateLimitError,
   isSupabaseServerError,
+  listFilesInFolder,
+  parsePdfFormData,
+  removeFilesAtPaths,
   MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFiles,
@@ -17,14 +20,27 @@ import {
 // why: the Supabase admin client talks to storage over HTTP; stub `remove` so
 // the tests stay offline and can assert the paths sent in each request
 const storageRemoveMock = vi.hoisted(() => vi.fn());
-// why: same client, for `upload`: a stored file's path is all the parser needs
+// why: same client, for `upload`. It answers like Storage does: the path it
+// stored at, and the full key (bucket included). Every upload in this file
+// goes to the `assets` bucket unless a test overrides the response.
 const storageUploadMock = vi.hoisted(() =>
-  vi.fn((path: string) => Promise.resolve({ data: { path }, error: null }))
+  vi.fn((path: string) =>
+    Promise.resolve({
+      data: { path, fullPath: `assets/${path}` },
+      error: null,
+    })
+  )
 );
+// why: same client, for `list`, which folder reads page through
+const storageListMock = vi.hoisted(() => vi.fn());
 vi.mock("~/integrations/supabase/client", () => ({
   getSupabaseAdmin: () => ({
     storage: {
-      from: () => ({ remove: storageRemoveMock, upload: storageUploadMock }),
+      from: () => ({
+        remove: storageRemoveMock,
+        upload: storageUploadMock,
+        list: storageListMock,
+      }),
     },
   }),
 }));
@@ -262,6 +278,269 @@ describe("findShelfErrorInCause", () => {
 
   it("returns null for undefined input", () => {
     expect(findShelfErrorInCause(undefined)).toBeNull();
+  });
+});
+
+describe("parsePdfFormData", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * Builds a raw multipart/form-data body by hand rather than relying on a
+   * FormData's automatic serialization - the happy-dom test environment
+   * doesn't reliably reproduce a real browser/undici multipart encoding,
+   * and the whole point of these tests is exercising the actual byte-level
+   * parsing this security fix protects.
+   */
+  function multipartRequest(
+    parts: {
+      name: string;
+      filename?: string;
+      contentType?: string;
+      body: string;
+    }[]
+  ) {
+    const boundary = "----vitestboundary123";
+    const segments = parts.map((part) => {
+      const disposition = part.filename
+        ? `Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"`
+        : `Content-Disposition: form-data; name="${part.name}"`;
+      const contentTypeLine = part.contentType
+        ? `Content-Type: ${part.contentType}\r\n`
+        : "";
+      return `--${boundary}\r\n${disposition}\r\n${contentTypeLine}\r\n${part.body}`;
+    });
+    const body = `${segments.join("\r\n")}\r\n--${boundary}--\r\n`;
+
+    return new Request("http://localhost/test", {
+      method: "POST",
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+    });
+  }
+
+  const PDF_BODY = "%PDF-1.4\nfake pdf content";
+
+  it("uploads a real PDF and returns its path/name/size directly - not via FormData", async () => {
+    const request = multipartRequest([
+      {
+        name: "file",
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        body: PDF_BODY,
+      },
+    ]);
+
+    const result = await parsePdfFormData({
+      request,
+      newFileName: "org-1/asset-1/attachment-123",
+    });
+
+    expect(result.path).toBe("org-1/asset-1/attachment-123.pdf");
+    expect(result.originalName).toBe("invoice.pdf");
+    expect(result.size).toBe(PDF_BODY.length);
+    expect(storageUploadMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a plain text 'file' field forging an upload result", async () => {
+    // No `filename` attribute - multipart text fields do not invoke the upload
+    // handler and therefore cannot provide stored attachment metadata.
+    const forgedPath = "other-org/other-asset/attachment-stolen.pdf";
+    const request = multipartRequest([
+      {
+        name: "file",
+        body: JSON.stringify({
+          path: forgedPath,
+          originalName: "not-really-uploaded.pdf",
+          size: 1,
+        }),
+      },
+    ]);
+
+    await expect(
+      parsePdfFormData({
+        request,
+        newFileName: "org-1/asset-1/attachment-999",
+      })
+    ).rejects.toThrow();
+
+    // Confirms the forged path never reached storage - Supabase's upload()
+    // must never have been called with attacker-supplied data.
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file whose declared type is application/pdf but whose bytes are not", async () => {
+    const request = multipartRequest([
+      {
+        name: "file",
+        filename: "fake.pdf",
+        contentType: "application/pdf",
+        body: "<html>not a pdf</html>",
+      },
+    ]);
+
+    await expect(
+      parsePdfFormData({
+        request,
+        newFileName: "org-1/asset-1/attachment-000",
+      })
+    ).rejects.toThrow(/not a valid PDF/);
+
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file part with no Content-Type header at all", async () => {
+    const request = multipartRequest([
+      { name: "file", filename: "no-type.pdf", body: PDF_BODY },
+    ]);
+
+    await expect(
+      parsePdfFormData({
+        request,
+        newFileName: "org-1/asset-1/attachment-111",
+      })
+    ).rejects.toThrow();
+
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["org-A/../org-B/asset-b/attachment-1"],
+    ["org-A/./attachment-1"],
+    ["org-A//attachment-1"],
+    ["org-A/asset%2F../attachment-1"],
+  ])("refuses the key %j before reading the body", async (newFileName) => {
+    const request = multipartRequest([
+      {
+        name: "file",
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        body: PDF_BODY,
+      },
+    ]);
+
+    await expect(
+      parsePdfFormData({ request, newFileName })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(storageUploadMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an upload Storage kept under a different key", async () => {
+    // Storage resolves dot segments, so the key it used can differ from the
+    // path it echoes back.
+    storageUploadMock.mockImplementationOnce((path: string) =>
+      Promise.resolve({
+        data: { path, fullPath: "assets/org-B/asset-b/attachment-1.pdf" },
+        error: null,
+      })
+    );
+    const request = multipartRequest([
+      {
+        name: "file",
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        body: PDF_BODY,
+      },
+    ]);
+
+    await expect(
+      parsePdfFormData({ request, newFileName: "org-1/asset-1/attachment-1" })
+    ).rejects.toThrow("Uploaded file was stored at an unexpected path");
+  });
+});
+
+describe("listFilesInFolder", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("pages through the folder and leaves subfolders out", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({
+      id: `id-${i}`,
+      name: `file-${i}.pdf`,
+      metadata: { size: i },
+    }));
+    storageListMock
+      .mockResolvedValueOnce({ data: firstPage, error: null })
+      .mockResolvedValueOnce({
+        data: [
+          { id: null, name: "subfolder", metadata: null },
+          { id: "id-last", name: "last.pdf", metadata: {} },
+        ],
+        error: null,
+      });
+
+    const files = await listFilesInFolder({
+      folder: "org-1/asset-1",
+      bucketName: "assets",
+    });
+
+    expect(storageListMock).toHaveBeenNthCalledWith(1, "org-1/asset-1", {
+      limit: 100,
+      offset: 0,
+    });
+    expect(storageListMock).toHaveBeenNthCalledWith(2, "org-1/asset-1", {
+      limit: 100,
+      offset: 100,
+    });
+    expect(files).toHaveLength(101);
+    expect(files[5]).toEqual({ name: "file-5.pdf", size: 5 });
+    expect(files[100]).toEqual({ name: "last.pdf", size: null });
+  });
+
+  it("refuses a folder key with a dot segment without calling Storage", async () => {
+    await expect(
+      listFilesInFolder({ folder: "org-1/..", bucketName: "assets" })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(storageListMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("removeFilesAtPaths", () => {
+  beforeEach(() => {
+    storageRemoveMock.mockReset();
+    storageRemoveMock.mockResolvedValue({ data: [], error: null });
+  });
+
+  it("removes exactly the given keys, split into requests Storage accepts", async () => {
+    const paths = Array.from(
+      { length: MAX_PUBLIC_FILES_PER_REMOVE + 2 },
+      (_, i) => `org-1/asset-1/file-${i}.pdf`
+    );
+
+    await removeFilesAtPaths({ paths, bucketName: "assets" });
+
+    expect(storageRemoveMock).toHaveBeenCalledTimes(2);
+    expect(storageRemoveMock).toHaveBeenNthCalledWith(
+      1,
+      paths.slice(0, MAX_PUBLIC_FILES_PER_REMOVE)
+    );
+    expect(storageRemoveMock).toHaveBeenNthCalledWith(
+      2,
+      paths.slice(MAX_PUBLIC_FILES_PER_REMOVE)
+    );
+  });
+
+  it("sends no request for an empty list", async () => {
+    await removeFilesAtPaths({ paths: [], bucketName: "assets" });
+
+    expect(storageRemoveMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when Storage refuses", async () => {
+    storageRemoveMock.mockResolvedValueOnce({
+      data: null,
+      error: new Error("Bad gateway"),
+    });
+
+    await expect(
+      removeFilesAtPaths({ paths: ["org-1/a.pdf"], bucketName: "assets" })
+    ).rejects.toThrow(ShelfError);
   });
 });
 

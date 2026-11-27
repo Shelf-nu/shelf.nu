@@ -231,22 +231,35 @@ model UserBusinessIntel {
 }
 
 model Asset {
-  id                  String      @id @default(cuid())
-  title               String
-  description         String?
-  mainImage           String?
-  thumbnailImage      String?
-  mainImageExpiration DateTime?
-  status              AssetStatus @default(AVAILABLE)
-  valuation           Float?      @map("value") // Field to store the monetary value of an asset
-  availableToBook     Boolean     @default(true)
-  sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  id                     String      @id @default(cuid())
+  title                  String
+  description            String?
+  mainImage              String?
+  thumbnailImage         String?
+  mainImageExpiration    DateTime?
+  // Single optional file attachment (purchase invoice, manual,
+  // calibration certificate, etc. - see issue #2660). A bare storage path
+  // in the private `assets` bucket, not a URL: these documents can carry
+  // real business detail, so access must follow the asset's own permission
+  // check rather than being a permanent public link. Pages open it through
+  // GET /api/asset/:assetId/attachment, which checks permission and signs
+  // it for a minute; never persist a signed URL here (it expires; the path
+  // doesn't). @unique closes the race between resolveStagedAttachment's
+  // not-already-claimed check and the insert. Every key rule lives in
+  // apps/webapp/app/modules/asset/attachment.server.ts.
+  attachmentPath         String?     @unique
+  attachmentOriginalName String?
+  attachmentSize         Int?
+  status                 AssetStatus @default(AVAILABLE)
+  valuation              Float?      @map("value") // Field to store the monetary value of an asset
+  availableToBook        Boolean     @default(true)
+  sequentialId           String? // Sequential identifier for the asset (e.g., "SAM-0001")
   // Soft "out of view" state, orthogonal to `status` (which stays the live
   // AVAILABLE/IN_CUSTODY/CHECKED_OUT custody/booking state). Null = active;
   // non-null = archived (hidden from default lists, not bookable/custody-able,
   // reinstatable). Kept as a timestamp (not a bool) for when-archived
   // provenance, mirroring `Booking.autoArchivedAt`.
-  archivedAt          DateTime?   @db.Timestamptz(3)
+  archivedAt             DateTime?   @db.Timestamptz(3)
 
   // Tracking method & model
   type            AssetType        @default(INDIVIDUAL)
@@ -1172,7 +1185,7 @@ model Organization {
   pdfTemplates       PdfTemplate[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
-  
+
   scimTokens      ScimToken[]
   scimExternalIds UserScimExternalId[]
   roleChangeLogs  RoleChangeLog[]

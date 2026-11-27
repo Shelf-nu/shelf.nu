@@ -2914,6 +2914,22 @@ describe("createAsset cross-org guards", () => {
     vitest.clearAllMocks();
   });
 
+  // A staged attachment key of the shape attachment.server builds.
+  const STAGED_FOLDER = "5f0c6a2e-1111-4222-8333-444455556666";
+  const STAGED_FILE =
+    "attachment-1760000000-0b7f1a2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c.pdf";
+
+  // Valid defaults for createAsset's required fields; each test overrides
+  // only the field its guard actually inspects.
+  const baseCreateAssetPayload: Parameters<typeof createAsset>[0] = {
+    title: "New asset",
+    description: null,
+    categoryId: null,
+    userId: "user-1",
+    valuation: null,
+    organizationId: "org-A",
+  };
+
   it("rejects a customFieldId from a different organization", async () => {
     expect.assertions(2);
     // Foreign-org custom field → org-scoped lookup returns nothing → the guard
@@ -2924,11 +2940,18 @@ describe("createAsset cross-org guards", () => {
 
     await expect(
       createAsset({
-        title: "New asset",
-        userId: "user-1",
-        organizationId: "org-A",
-        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
-      } as any)
+        ...baseCreateAssetPayload,
+        customFieldsValues: [
+          {
+            id: "cf-from-org-B",
+            value: { raw: "x" },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            assetId: "asset-new",
+            customFieldId: "cf-from-org-B",
+          },
+        ],
+      })
     ).rejects.toThrow(ShelfError);
 
     expect(db.customField.findMany).toHaveBeenCalledWith({
@@ -2949,11 +2972,9 @@ describe("createAsset cross-org guards", () => {
 
     await expect(
       createAsset({
-        title: "New asset",
-        userId: "user-1",
-        organizationId: "org-A",
+        ...baseCreateAssetPayload,
         categoryId: "cat-from-org-B",
-      } as any)
+      })
     ).rejects.toThrow(ShelfError);
 
     expect(db.category.findFirst).toHaveBeenCalledWith({
@@ -2969,16 +2990,50 @@ describe("createAsset cross-org guards", () => {
     // satisfy "findFirst was never called" without the guard ever being
     // reached, and the test would pass for the wrong reason.
     const created = await createAsset({
-      title: "New asset",
-      userId: "user-1",
-      organizationId: "org-A",
+      ...baseCreateAssetPayload,
       categoryId: "uncategorized",
-    } as any);
+    });
 
     expect(created).toEqual({ id: "asset-new" });
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["another workspace's folder", `org-B/${STAGED_FOLDER}/${STAGED_FILE}`],
+    ["a climb out of the workspace", `org-A/../org-B/asset-b/${STAGED_FILE}`],
+    ["a key that is not an attachment", "org-A/other-entity/photo.png"],
+  ])(
+    "rejects an attachmentPath in %s before reading anything",
+    async (_case, attachmentPath) => {
+      expect.assertions(3);
+
+      await expect(
+        createAsset({ ...baseCreateAssetPayload, attachmentPath })
+      ).rejects.toMatchObject({ status: 400 });
+
+      expect(db.asset.findFirst).not.toHaveBeenCalled();
+      expect(db.asset.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects an attachmentPath already claimed by another asset", async () => {
+    expect.assertions(2);
+    // why: a hit means some asset already stores this exact path, so a
+    // resubmission of it must not adopt that asset's file.
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValueOnce({
+      id: "asset-owning-it",
+    });
+
+    await expect(
+      createAsset({
+        ...baseCreateAssetPayload,
+        attachmentPath: `org-A/${STAGED_FOLDER}/${STAGED_FILE}`,
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(db.asset.create).not.toHaveBeenCalled();
   });
 
   it("rejects a tag from a different organization before writing", async () => {

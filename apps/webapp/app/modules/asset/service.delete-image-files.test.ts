@@ -1,9 +1,11 @@
 /**
- * Deleting an asset removes its stored photo files, whoever uploaded them:
- * the single delete (web and phone go through `deleteAsset`) and the bulk
- * delete. The cleanup runs after the delete commits and never fails it.
+ * Deleting an asset removes its stored photo files, whoever uploaded them,
+ * and its PDF attachment: the single delete (web and phone go through
+ * `deleteAsset`) and the bulk delete. The cleanup runs after the delete
+ * commits and never fails it.
  *
  * @see {@link file://./image-files.server.ts}
+ * @see {@link file://./attachment.server.ts} `removeAttachmentFilesOfDeletedAssets`
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -190,5 +192,74 @@ describe("bulkDeleteAssets", () => {
 
     expect(dbMocks.asset.deleteMany).toHaveBeenCalledTimes(1);
     expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("attachment files", () => {
+  // A PDF staged on the create form stays in its placeholder folder, which no
+  // asset id names, so only its stored path can find it.
+  const STAGED_ATTACHMENT =
+    "org-1/5f0c6a2e-1111-4222-8333-444455556666/attachment-1760000000-0b7f1a2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c.pdf";
+  const EDIT_PAGE_ATTACHMENT =
+    "org-1/asset-2/attachment-1760000001-1b7f1a2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c.pdf";
+
+  it("deleteAsset removes the attachment, wherever it was uploaded", async () => {
+    assetImageStorage.upload(STAGED_ATTACHMENT);
+    dbMocks.asset.delete.mockResolvedValueOnce({
+      reminders: [],
+      attachmentPath: STAGED_ATTACHMENT,
+    });
+
+    await deleteAsset({ id: "asset-1", organizationId: "org-1" });
+    await settleBackgroundWork();
+
+    expect(assetImageStorage.storedFiles()).toEqual([]);
+    expect(dbMocks.asset.delete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ attachmentPath: true }),
+      })
+    );
+  });
+
+  it("bulkDeleteAssets removes the attachments of every deleted asset", async () => {
+    assetImageStorage.upload(
+      STAGED_ATTACHMENT,
+      EDIT_PAGE_ATTACHMENT,
+      // Not selected, so not deleted.
+      "org-1/asset-9/attachment-1760000009-9b7f1a2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c.pdf"
+    );
+    dbMocks.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Drill", attachmentPath: STAGED_ATTACHMENT },
+      { id: "asset-2", title: "Saw", attachmentPath: EDIT_PAGE_ATTACHMENT },
+      { id: "asset-3", title: "Tape", attachmentPath: null },
+    ]);
+
+    await bulkDeleteAssets({
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      userId: "deleter-2",
+      confirmation: "3",
+      lastAuditDateAccess: "hidden",
+      bookableScope: null,
+      // why: only read by the mocked id resolution
+      settings: {} as never,
+    });
+    await settleBackgroundWork();
+
+    expect(assetImageStorage.storedFiles()).toEqual([
+      "org-1/asset-9/attachment-1760000009-9b7f1a2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c.pdf",
+    ]);
+  });
+
+  it("keeps the attachment when the delete itself fails", async () => {
+    assetImageStorage.upload(STAGED_ATTACHMENT);
+    dbMocks.asset.delete.mockRejectedValueOnce(new Error("Record not found"));
+
+    await expect(
+      deleteAsset({ id: "asset-1", organizationId: "org-1" })
+    ).rejects.toThrow();
+    await settleBackgroundWork();
+
+    expect(assetImageStorage.storedFiles()).toEqual([STAGED_ATTACHMENT]);
   });
 });

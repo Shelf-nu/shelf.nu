@@ -50,6 +50,7 @@ import {
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { generateClientId } from "~/utils/id/client-id";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { scrollToFirstErrorOnNextFrame } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
@@ -92,6 +93,10 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
+import {
+  AssetAttachmentUpload,
+  type StagedAttachment,
+} from "../shared/file-dropzone/asset-attachment-upload";
 import {
   Tooltip,
   TooltipContent,
@@ -200,6 +205,14 @@ export const NewAssetFormSchema = z.object({
       (v) => !v || !/{%|%}/.test(v),
       "Unit of measure may not contain Markdoc syntax (`{%` / `%}`)"
     ),
+
+  // Sent only by the create form, after a PDF was staged for the new asset
+  // (see AssetForm's pendingAttachment). A bare storage path, not a URL.
+  // createAsset checks the path against Storage and reads the size from
+  // there, so the client sends no size. The edit form never sends these:
+  // the attachment is written by its own endpoint.
+  attachmentPath: z.string().optional(),
+  attachmentOriginalName: z.string().optional(),
 });
 
 /**
@@ -274,6 +287,9 @@ type Props = Partial<
     | "thumbnailImage"
     | "mainImage"
     | "mainImageExpiration"
+    | "attachmentPath"
+    | "attachmentOriginalName"
+    | "attachmentSize"
     | "categoryId"
     | "assetModelId"
     | "description"
@@ -341,6 +357,9 @@ const AssetFormInner = ({
   thumbnailImage,
   mainImage,
   mainImageExpiration,
+  attachmentPath,
+  attachmentOriginalName,
+  attachmentSize,
   categoryId,
   assetModelId,
   locationId,
@@ -372,6 +391,25 @@ const AssetFormInner = ({
   // about silent fallback when this asset can't satisfy the workspace preference).
   const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  // The attachment widget always needs an id to scope its storage path by.
+  // Editing an existing asset uses its real id; creating a new one has none
+  // yet, so mint a client-side placeholder once per mount.
+  const [pendingAttachmentId] = useState(() => id ?? generateClientId());
+
+  // Lifted staged-attachment state for the create form only (see
+  // AssetAttachmentUpload's onUploaded/onRemoved doc comment) - null on the
+  // edit form, where the attachment comes from loader data instead.
+  // `attachmentPath` here is the raw storage path submitted on final create
+  // (see Asset.attachmentPath's schema comment).
+  const [pendingAttachment, setPendingAttachment] =
+    useState<StagedAttachment | null>(null);
+
+  // Mirrors AssetAttachmentUpload's own pending state (create mode only) so
+  // Save can stay disabled while a drop is still mid-upload/delete - without
+  // this, submitting before onUploaded fires would post a stale/empty
+  // attachmentPath even though a file is visibly staged in the widget.
+  const [attachmentPending, setAttachmentPending] = useState(false);
 
   // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
   // removing a barcode in the section above immediately removes the matching
@@ -416,6 +454,9 @@ const AssetFormInner = ({
   /** "Create new" shortcuts show only to members who may create that entity. */
   const canCreateInline = useInlineCreatePermissions();
   const disabled = isFormProcessing(navigation.state);
+  // Only the Save action needs to wait on the attachment widget - `disabled`
+  // above stays untouched since ~20 other fields in this form share it.
+  const submitDisabled = disabled || attachmentPending;
 
   /** The form element, shared by Zorm and the unsaved-changes tracking. */
   const { formRef, setFormRef } = useTrackedFormRef(zo.ref);
@@ -884,6 +925,7 @@ const AssetFormInner = ({
           <div className="hidden flex-1 justify-end gap-2 md:flex">
             <Actions
               disabled={disabled}
+              submitDisabled={submitDisabled}
               cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
@@ -1306,6 +1348,62 @@ const AssetFormInner = ({
           />
         </FormRow>
 
+        {/*
+          Bulk-create makes N assets from one submission - a single
+          attachment has no obvious asset to belong to, so the row is
+          hidden there. Editing and single (non-bulk) creation both show it.
+        */}
+        <When truthy={Boolean(id) || !bulkMode}>
+          <FormRow
+            rowLabel={"Attachment"}
+            subHeading={
+              <p>
+                A single PDF file for this asset - a purchase invoice, manual,
+                or calibration certificate.
+              </p>
+            }
+            className="pt-[10px]"
+          >
+            <AssetAttachmentUpload
+              assetId={id ?? pendingAttachmentId}
+              // Edit mode reads the asset's stored path; create mode, the
+              // file staged under the placeholder id. Either way the link
+              // opens through the viewing route, by that same id.
+              hasAttachment={
+                id ? Boolean(attachmentPath) : Boolean(pendingAttachment)
+              }
+              attachmentOriginalName={
+                id
+                  ? attachmentOriginalName
+                  : pendingAttachment?.attachmentOriginalName
+              }
+              attachmentSize={
+                id ? attachmentSize : pendingAttachment?.attachmentSize
+              }
+              onUploaded={id ? undefined : setPendingAttachment}
+              onRemoved={id ? undefined : () => setPendingAttachment(null)}
+              onPendingChange={id ? undefined : setAttachmentPending}
+            />
+            {/*
+              Only meaningful while creating - the edit route persists
+              directly via AssetAttachmentUpload's own dedicated endpoint,
+              so there is nothing for these to carry on that form.
+            */}
+            <When truthy={!id && Boolean(pendingAttachment)}>
+              <input
+                type="hidden"
+                name="attachmentPath"
+                value={pendingAttachment?.attachmentPath ?? ""}
+              />
+              <input
+                type="hidden"
+                name="attachmentOriginalName"
+                value={pendingAttachment?.attachmentOriginalName ?? ""}
+              />
+            </When>
+          </FormRow>
+        </When>
+
         <div>
           <FormRow
             rowLabel={"Description"}
@@ -1619,6 +1717,7 @@ const AssetFormInner = ({
           <div className="flex flex-1 justify-end gap-2">
             <Actions
               disabled={disabled}
+              submitDisabled={submitDisabled}
               cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
@@ -1631,10 +1730,15 @@ const AssetFormInner = ({
 
 const Actions = ({
   disabled,
+  submitDisabled,
   cancelTo,
   showAddAnother = true,
 }: {
   disabled: boolean;
+  /** Adds the attachment widget's own pending upload/delete state on top of
+   * `disabled` - Save alone must wait for it, since submitting while a file
+   * is still mid-upload would post a stale/empty attachmentPath. */
+  submitDisabled: boolean;
   /** Already-resolved Cancel destination. Must never be null/undefined —
    * the caller applies the fallback, because `<Button to>` degrades
    * silently (dead button on `undefined`, links to `/` on `null`). */
@@ -1647,7 +1751,7 @@ const Actions = ({
 }) => (
   <>
     {/* Save button is first in DOM order so Enter key triggers it by default */}
-    <Button type="submit" disabled={disabled} className="order-last">
+    <Button type="submit" disabled={submitDisabled} className="order-last">
       Save
     </Button>
 

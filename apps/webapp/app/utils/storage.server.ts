@@ -7,6 +7,7 @@ import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
+  ASSET_ATTACHMENT_MAX_SIZE,
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
@@ -54,12 +55,31 @@ export function getPublicFileURL({
   }
 }
 
+/**
+ * How long a signed URL lives by default: 72 hours. Must match
+ * `threeDaysFromNow()` in `refreshExpiredAssetImages`, which re-signs asset
+ * images on that schedule.
+ */
+const DEFAULT_SIGNED_URL_TTL_SECONDS = 3 * 24 * 60 * 60;
+
+/**
+ * Signs a private object so a browser can fetch it, retrying transient
+ * Storage failures.
+ *
+ * @param params.filename - The object's key; a leading `/` is ignored
+ * @param params.bucketName - The bucket, `assets` by default
+ * @param params.expiresIn - Seconds the URL stays valid; 72 hours by default
+ * @returns The signed URL
+ * @throws {ShelfError} When Storage refuses, or keeps failing after retries
+ */
 export async function createSignedUrl({
   filename,
   bucketName = "assets",
+  expiresIn = DEFAULT_SIGNED_URL_TTL_SECONDS,
 }: {
   filename: string;
   bucketName?: string;
+  expiresIn?: number;
 }): Promise<string> {
   const normalizedFilename = filename.startsWith("/")
     ? filename.substring(1)
@@ -70,7 +90,7 @@ export async function createSignedUrl({
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { data, error } = await getSupabaseAdmin()
         .storage.from(bucketName)
-        .createSignedUrl(normalizedFilename, 3 * 24 * 60 * 60); // 72h — must match threeDaysFromNow() in refreshExpiredAssetImages
+        .createSignedUrl(normalizedFilename, expiresIn);
 
       if (!error) {
         const signedUrl = data?.signedUrl;
@@ -405,6 +425,16 @@ export interface UploadOptions {
   contentType: string;
   resizeOptions?: ResizeOptions;
   upsert?: boolean;
+  /**
+   * When set, `uploadRawFile` rejects the upload unless the buffered file's
+   * leading bytes match this signature. The declared `contentType` is
+   * caller-supplied and unverified otherwise - this is the binary-level
+   * check that stands in for `uploadFile`'s Sharp-based image validation on
+   * paths that skip image processing entirely.
+   */
+  expectedMagicBytes?: Uint8Array;
+  /** User-facing message when `expectedMagicBytes` doesn't match. */
+  invalidSignatureMessage?: string;
 }
 
 /**
@@ -612,6 +642,281 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
   }
 
   return findShelfErrorInCause(cause);
+}
+
+/**
+ * Uploads a file to Supabase Storage as-is, with no image processing.
+ * Companion to `uploadFile()` above for non-image files (e.g. PDF asset
+ * attachments) - `uploadFile()` always runs `cropImage()`, which rejects
+ * anything that isn't a JPEG/PNG/GIF/WebP/BMP.
+ *
+ * Buffers the entire `fileData` stream into memory before uploading, since
+ * both the magic-byte check and the upload call need the full byte length
+ * up front.
+ *
+ * @param fileData - The file's bytes as an async iterable of chunks.
+ * @param options.filename - Destination path within the bucket.
+ * @param options.contentType - Declared MIME type stored as the object's
+ * Content-Type; not verified against the actual bytes unless
+ * `expectedMagicBytes` is also given.
+ * @param options.bucketName - Target Supabase Storage bucket.
+ * @param options.upsert - Overwrite an existing object at `filename`
+ * instead of failing. Defaults to `false`.
+ * @param options.expectedMagicBytes - When set, the upload is rejected
+ * unless the buffer's leading bytes match this signature exactly.
+ * @param options.invalidSignatureMessage - User-facing message used when
+ * `expectedMagicBytes` doesn't match.
+ * @returns The path the caller asked for (`path`), the key Storage actually
+ * stored the object under, bucket included (`fullPath`), and the size in
+ * bytes. The two can differ: Storage resolves `.` and `..` segments in the
+ * request URL, while `path` only echoes the request.
+ * @throws {ShelfError} When the magic-byte check fails, or the underlying
+ * Supabase Storage upload fails for any other reason.
+ */
+export async function uploadRawFile(
+  fileData: AsyncIterable<Uint8Array>,
+  {
+    filename,
+    contentType,
+    bucketName,
+    upsert = false,
+    expectedMagicBytes,
+    invalidSignatureMessage = "Uploaded file does not match its expected format",
+  }: UploadOptions
+): Promise<{ path: string; fullPath: string; size: number }> {
+  try {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of fileData) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    // The declared contentType comes from the client and is not proof of
+    // the actual bytes - a request can label anything "application/pdf".
+    // Checking the magic bytes here is what actually keeps non-PDF content
+    // out of a bucket that serves files back with that content type.
+    if (
+      expectedMagicBytes &&
+      !buffer
+        .subarray(0, expectedMagicBytes.length)
+        .equals(Buffer.from(expectedMagicBytes))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid file",
+        message: invalidSignatureMessage,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .upload(filename, buffer, { contentType, upsert });
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      path: data.path,
+      fullPath: data.fullPath,
+      size: buffer.byteLength,
+    };
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
+      additionalData: { filename, contentType, bucketName },
+      label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
+    });
+  }
+}
+
+/** ASCII "%PDF-" - every valid PDF starts with this, regardless of version. */
+const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+
+/** One segment of a storage key: letters, digits, `.`, `_` and `-`. */
+const SAFE_STORAGE_KEY_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Whether a storage key is safe to send to Storage as written.
+ *
+ * Storage puts the key in the request URL, and the URL parser resolves `.`
+ * and `..` segments before the request leaves, so `org-A/../org-B/file`
+ * reaches `org-B/file`. A safe key has only non-empty segments made of
+ * letters, digits, `.`, `_` and `-`, and none of them is `.` or `..`.
+ *
+ * @param key - The object key, without the bucket
+ * @returns `true` when every segment is safe
+ */
+export function isSafeStorageKey(key: string): boolean {
+  return key
+    .split("/")
+    .every(
+      (segment) =>
+        SAFE_STORAGE_KEY_SEGMENT.test(segment) &&
+        segment !== "." &&
+        segment !== ".."
+    );
+}
+
+/**
+ * Parses a single-PDF multipart upload (asset attachments - invoices,
+ * manuals, certificates; see issue #2660) and returns its storage metadata
+ * directly, rather than through the parsed FormData.
+ *
+ * We intentionally don't read the result back from FormData, since
+ * regular text fields can use the same "file" key and spoof the uploaded
+ * file metadata. Keeping the result inside the upload handler ensures the
+ * path can only come from a file actually processed by the server.
+ *
+ * @param request - The incoming multipart/form-data request.
+ * @param newFileName - Base filename (without extension) the PDF is
+ * stored under; `.pdf` is appended.
+ * @param bucketName - Target Supabase Storage bucket. Defaults to the
+ * private `"assets"` bucket.
+ * @param maxFileSize - Maximum accepted upload size in bytes.
+ * @returns The stored object's path, the client-supplied original
+ * filename (if any), and its size in bytes.
+ * @throws {ShelfError} 400 when `newFileName` is not a safe storage key
+ * (see {@link isSafeStorageKey}); otherwise when no upload matches the
+ * "file" field, the declared or actual content type isn't
+ * `application/pdf`, the upload exceeds `maxFileSize`, or Storage kept the
+ * file under a different key than the one asked for.
+ */
+export async function parsePdfFormData({
+  request,
+  newFileName,
+  // Private by default - a PDF attachment (invoice, calibration cert,
+  // warranty doc) can carry real business/financial detail, unlike the
+  // photos this bucket's other callers store. Access to it should follow
+  // access to the asset, not be a permanent public link - see
+  // createSignedUrl() for how a caller turns this back into a fetchable
+  // URL only after its own permission check.
+  bucketName = "assets",
+  maxFileSize = ASSET_ATTACHMENT_MAX_SIZE,
+}: {
+  request: Request;
+  newFileName: string;
+  bucketName?: string;
+  maxFileSize?: number;
+}): Promise<{ path: string; originalName?: string; size: number }> {
+  const targetFilename = `${newFileName}.pdf`;
+
+  // Checked before the body is read: an unsafe key must never reach Storage.
+  if (!isSafeStorageKey(targetFilename)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid file location",
+      message: "The file could not be stored. Please try again.",
+      additionalData: { targetFilename },
+      label,
+      status: 400,
+    });
+  }
+
+  try {
+    let uploaded: { path: string; originalName?: string; size: number } | null =
+      null;
+
+    const uploadHandler = async (upload: FileUpload) => {
+      // `upload.fieldName` is set by the multipart parser itself from the
+      // part's own Content-Disposition `name`, not from anything this
+      // handler trusts
+      if (upload.fieldName !== "file") {
+        return undefined;
+      }
+
+      const mimeType = upload.type;
+      const originalName = upload.name;
+
+      // Only process PDFs - anything else is left alone. A missing/empty
+      // Content-Type is rejected outright rather than assumed to be a PDF.
+      if (!mimeType || mimeType !== "application/pdf") {
+        return undefined;
+      }
+
+      const fileStream = await normalizeToAsyncIterable(upload);
+
+      if (!fileStream) {
+        return undefined;
+      }
+
+      const { path, fullPath, size } = await uploadRawFile(fileStream, {
+        filename: targetFilename,
+        contentType: mimeType,
+        bucketName,
+        expectedMagicBytes: PDF_MAGIC_BYTES,
+        invalidSignatureMessage: "Uploaded file is not a valid PDF",
+      });
+
+      // `path` only echoes the request; `fullPath` is the key Storage used.
+      if (
+        path !== targetFilename ||
+        fullPath !== `${bucketName}/${targetFilename}`
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: "Uploaded file was stored at an unexpected path",
+          additionalData: {
+            expected: `${bucketName}/${targetFilename}`,
+            actual: fullPath,
+          },
+          label,
+        });
+      }
+
+      uploaded = { path, originalName, size };
+      return undefined;
+    };
+
+    await parseFormData(request, { maxFileSize }, uploadHandler);
+
+    if (!uploaded) {
+      throw new ShelfError({
+        cause: null,
+        title: "No file uploaded",
+        message: "Please choose a PDF file to upload.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return uploaded;
+  } catch (cause) {
+    const sizeLimitError = getMaxFileSizeExceededError(cause);
+
+    if (sizeLimitError) {
+      throw new ShelfError({
+        cause,
+        title: "File too large",
+        message: `File size exceeds maximum allowed size of ${
+          maxFileSize / (1024 * 1024)
+        }MB`,
+        additionalData: { maxFileSize },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const nestedShelfError = findShelfErrorInCause(cause);
+
+    throw new ShelfError({
+      cause,
+      message: nestedShelfError
+        ? nestedShelfError.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
+      title: nestedShelfError?.title,
+      label,
+      shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
+    });
+  }
 }
 
 /**
@@ -998,10 +1303,162 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
 }
 
 /**
+ * Deletes a single, exactly-known object from a private bucket by its raw
+ * storage path. Companion to `removePublicFile()` for buckets that aren't
+ * served through a public URL - there is no URL to parse the path out of,
+ * so the caller passes the path it already has (e.g. a value it previously
+ * stored precisely because it's the private-bucket equivalent of a public
+ * URL for that row).
+ */
+export async function removeFileAtPath({
+  path,
+  bucketName,
+}: {
+  path: string;
+  bucketName: string;
+}) {
+  try {
+    const { error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove([path]);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to remove file. Please try again.",
+      additionalData: { path, bucketName },
+      label,
+    });
+  }
+}
+
+/** An object stored directly inside a folder, as {@link listFilesInFolder} reports it. */
+export type StoredFile = {
+  /** The object's name inside the folder, without the folder path */
+  name: string;
+  /** Size in bytes as Storage recorded it, or `null` when it reported none */
+  size: number | null;
+};
+
+/**
+ * Lists the objects stored directly inside a folder of a bucket. Subfolders
+ * are left out, and so is their content.
+ *
+ * Pages through `list()` until a short page comes back, so a folder of any
+ * size is read in full.
+ *
+ * @param params.folder - The folder's key, without a trailing `/`. Must be a
+ *   safe storage key (see {@link isSafeStorageKey}).
+ * @param params.bucketName - The bucket to read
+ * @returns The folder's files, in the order Storage lists them
+ * @throws {ShelfError} 400 for an unsafe folder key, or when Storage refuses
+ *   the listing
+ */
+export async function listFilesInFolder({
+  folder,
+  bucketName,
+}: {
+  folder: string;
+  bucketName: string;
+}): Promise<StoredFile[]> {
+  if (!isSafeStorageKey(folder)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Invalid storage folder",
+      additionalData: { folder, bucketName },
+      label,
+      status: 400,
+    });
+  }
+
+  try {
+    const PAGE_SIZE = 100;
+    const files: StoredFile[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: page, error } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .list(folder, { limit: PAGE_SIZE, offset });
+
+      if (error) {
+        throw error;
+      }
+
+      const entries = page ?? [];
+      for (const entry of entries) {
+        // Storage reports a subfolder as an entry with no id.
+        if (entry.id === null) continue;
+        const size = entry.metadata?.size;
+        files.push({
+          name: entry.name,
+          size: typeof size === "number" ? size : null,
+        });
+      }
+
+      offset += entries.length;
+      hasMore = entries.length === PAGE_SIZE;
+    }
+
+    return files;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to read stored files",
+      additionalData: { folder, bucketName },
+      label,
+    });
+  }
+}
+
+/**
  * Most objects Supabase Storage deletes in one `remove()` request. The API
  * rejects a larger list, so callers with more files must split them.
  */
 export const MAX_PUBLIC_FILES_PER_REMOVE = 1000;
+
+/**
+ * Deletes objects from a bucket by their exact keys, in requests of at most
+ * {@link MAX_PUBLIC_FILES_PER_REMOVE} keys. Removing a key that is already
+ * gone is not an error.
+ *
+ * @param params.paths - Object keys, without the bucket
+ * @param params.bucketName - The bucket to delete from
+ * @throws {ShelfError} When Storage refuses a request. Earlier requests may
+ *   already have removed their keys.
+ */
+export async function removeFilesAtPaths({
+  paths,
+  bucketName,
+}: {
+  paths: string[];
+  bucketName: string;
+}) {
+  try {
+    for (let i = 0; i < paths.length; i += MAX_PUBLIC_FILES_PER_REMOVE) {
+      const { error } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .remove(paths.slice(i, i + MAX_PUBLIC_FILES_PER_REMOVE));
+
+      if (error) {
+        throw error;
+      }
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove files. Please try again.",
+      additionalData: { pathCount: paths.length, bucketName },
+      label,
+    });
+  }
+}
 
 /**
  * Removes many files from the public `files` bucket in a single storage
