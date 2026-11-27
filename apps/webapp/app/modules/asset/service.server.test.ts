@@ -4,7 +4,15 @@ import {
   Prisma,
   type AssetIndexSettings,
 } from "@prisma/client";
-import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
+import {
+  describe,
+  expect,
+  it,
+  vi,
+  vitest,
+  beforeEach,
+  onTestFinished,
+} from "vitest";
 import { createCustomField } from "@factories";
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -158,6 +166,12 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
     },
     tag: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
+    // why: `createAsset` proves a kit id belongs to the org before attaching
+    // the asset to it. [] = no such kit; a test that creates into a kit
+    // overrides it.
+    kit: {
       findMany: vitest.fn().mockResolvedValue([]),
     },
     // why: the bulk paths write their per-asset system notes inside the same
@@ -2906,6 +2920,122 @@ describe("updateAsset cross-org guards", () => {
         }),
       })
     );
+  });
+});
+
+describe("createAsset custody for a custodian", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: createAsset proves the custodian belongs to the org before
+    // connecting it; a hit is how the org-scoped lookup says it does.
+    vi.mocked(db.teamMember.findFirst).mockResolvedValue({
+      id: "tm-sam",
+    } as never);
+  });
+
+  /** The custody `createAsset` asked Prisma to create with the asset. */
+  function createdCustody() {
+    const [{ data }] = vi.mocked(db.asset.create).mock.calls[0] as unknown as [
+      { data: { custody?: { create: Record<string, unknown> } } },
+    ];
+    return data.custody?.create;
+  }
+
+  it("gives the custodian every unit of a quantity-tracked asset", async () => {
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      custodian: "tm-sam",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    // Without a quantity the column default of 1 would apply, leaving 39 of
+    // the 40 units free.
+    expect(createdCustody()).toEqual({
+      custodian: { connect: { id: "tm-sam" } },
+      quantity: 40,
+    });
+  });
+
+  it("takes the units from the location the asset is created at", async () => {
+    // why: the location is org-checked before the asset is created; a hit is
+    // how the lookup says it belongs to the workspace.
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-store",
+    } as never);
+    onTestFinished(() => {
+      vi.mocked(db.location.findFirst).mockResolvedValue(null);
+    });
+
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      custodian: "tm-sam",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+      locationId: "loc-store",
+    });
+
+    expect(createdCustody()).toEqual({
+      custodian: { connect: { id: "tm-sam" } },
+      quantity: 40,
+      location: { connect: { id: "loc-store" } },
+    });
+  });
+
+  it("gives no direct custody to an asset created into a kit", async () => {
+    // why: the kit is org-checked before the asset is attached to it; a hit
+    // is how the lookup says it belongs to the workspace.
+    vi.mocked(db.kit.findMany).mockResolvedValue([{ id: "kit-1" }] as never);
+    onTestFinished(() => {
+      vi.mocked(db.kit.findMany).mockResolvedValue([]);
+    });
+
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      custodian: "tm-sam",
+      kitId: "kit-1",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    // The kit slice holds all 40 units; a second hold on them would leave
+    // the pool 40 units short.
+    expect(createdCustody()).toBeUndefined();
+  });
+
+  it("leaves an individual asset's custody at its one unit", async () => {
+    await createAsset({
+      title: "Sofa",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      custodian: "tm-sam",
+      type: "INDIVIDUAL",
+    });
+
+    expect(createdCustody()).toEqual({
+      custodian: { connect: { id: "tm-sam" } },
+    });
   });
 });
 

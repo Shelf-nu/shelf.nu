@@ -139,9 +139,9 @@ read-only  rows stored             claim QR,   100 rows     kit custody,
    writes assets, QR codes, tags, placement, kit pivots, direct custody, custom
    field values, barcodes and `ASSET_CREATED` events with one `createMany` per
    table in a single transaction. A `QUANTITY_TRACKED` row with a custodian and
-   no kit gets direct custody of one unit (the `Custody.quantity` default), not
-   the full CSV `quantity`, the same as creating the asset by hand. Each job
-   queues the next one.
+   no kit gives the custodian direct custody of the whole pool: the full CSV
+   `quantity`, as a custodian on an individual asset's row holds that asset.
+   `createAsset` applies the same rule. Each job queues the next one.
 5. **FINALIZE** (`finalize.server.ts`). Assigns kit custody for rows that name a
    kit and a custodian (through `bulkAssignKitCustody`), marks the import
    `COMPLETED`, clears the stored rows and emails the creator

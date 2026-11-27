@@ -220,9 +220,9 @@ function warningFor(row: StoredImportRow, message: string): ImportWarning {
 }
 
 /**
- * Units a placement or kit pivot holds: the full pool for a
+ * Units a placement, kit pivot or direct custody holds: the full pool for a
  * QUANTITY_TRACKED asset, otherwise 1. Same rule as `createAsset`'s
- * placement and `buildAssetKitCreateData`.
+ * placement and custody, and `buildAssetKitCreateData`.
  */
 function poolQuantity(prepared: PreparedRow): number {
   return prepared.type === AssetType.QUANTITY_TRACKED && prepared.quantity
@@ -338,11 +338,8 @@ function toAssetCreateManyInput(
     minQuantity: prepared.minQuantity,
     consumptionType: prepared.consumptionType,
     unitOfMeasure: prepared.unitOfMeasure,
-    // Kit rows get their custody from the kit in FINALIZE, so only a row with
-    // a custodian and no kit is in custody from the start.
-    ...(prepared.custodianId && !prepared.kitId
-      ? { status: AssetStatus.IN_CUSTODY }
-      : {}),
+    // Only a row that gets direct custody is in custody from the start.
+    ...(hasDirectCustody(prepared) ? { status: AssetStatus.IN_CUSTODY } : {}),
   };
 }
 
@@ -377,16 +374,34 @@ async function getCreatedAtStamps(
 }
 
 /**
- * Direct custody for a row with a custodian and no kit. A quantity-tracked
- * asset placed at a location takes its units from there.
+ * Whether the row is put in its custodian's custody by this chunk.
+ *
+ * Kit rows get their custody from the kit in FINALIZE, so only a row with a
+ * custodian and no kit qualifies.
+ */
+function hasDirectCustody(prepared: PreparedRow): boolean {
+  return Boolean(prepared.custodianId) && !prepared.kitId;
+}
+
+/**
+ * Direct custody for a row with a custodian and no kit (see
+ * {@link hasDirectCustody}).
+ *
+ * A quantity-tracked asset goes to its custodian whole: the row's quantity is
+ * the units held, as a custodian on an individual asset's row holds that
+ * asset. The quantity is at least 1 (`validateQtyTrackedFields` refuses less
+ * on create). Placed at a location, the asset takes its units from there. An
+ * individual asset's custody is its one unit, the column default.
  */
 function toCustodyCreateManyInput(
   prepared: PreparedRow
 ): Prisma.CustodyCreateManyInput {
+  const isPool = prepared.type === AssetType.QUANTITY_TRACKED;
   return {
     assetId: prepared.row.assetId,
     teamMemberId: prepared.custodianId!,
-    ...(prepared.type === AssetType.QUANTITY_TRACKED && prepared.locationId
+    ...(isPool ? { quantity: poolQuantity(prepared) } : {}),
+    ...(isPool && prepared.locationId
       ? { locationId: prepared.locationId }
       : {}),
   };
@@ -752,7 +767,7 @@ export async function writeImportChunk({
         const prepared = rows.map((row) => prepareRow(row, resolved));
         const withLocation = prepared.filter((p) => p.locationId);
         const withKit = prepared.filter((p) => p.kitId);
-        const withCustody = prepared.filter((p) => p.custodianId && !p.kitId);
+        const withCustody = prepared.filter(hasDirectCustody);
 
         // The ids come from PREPARE, but every id written still has to be
         // proven to belong to this workspace.

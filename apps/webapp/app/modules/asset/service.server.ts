@@ -1280,12 +1280,22 @@ export async function createAsset({
       /** If a custodian is passed, create a Custody relation with that asset
        * `custodian` represents the id of a {@link TeamMember}.
        *
+       * A quantity-tracked asset goes to its custodian whole: every unit it
+       * is created with, as a custodian on an individual asset holds that
+       * asset. Without this the `Custody.quantity` default of 1 would leave
+       * the rest of the pool free. The import writer applies the same rule
+       * (`toCustodyCreateManyInput` in `asset-import/chunk-writer.server.ts`).
+       *
        * A quantity-tracked asset created at a location is placed there in
        * full (see the placement below), so that location is where the
        * custody's units come from, the same source `checkOutQuantity` fills
        * in for a pool at one location. `locationId` is org-verified in the
-       * create transaction below, before this nested create runs. */
-      if (custodian) {
+       * create transaction below, before this nested create runs.
+       *
+       * An asset created into a kit gets no direct custody: the kit slice
+       * already holds its units, and a kit member's custody comes from the
+       * kit. Giving the custodian the same units would count them twice. */
+      if (custodian && !hasKit) {
         Object.assign(data, {
           custody: {
             create: {
@@ -1294,6 +1304,9 @@ export async function createAsset({
                   id: custodian,
                 },
               },
+              ...(type === AssetType.QUANTITY_TRACKED && quantity
+                ? { quantity }
+                : {}),
               ...(type === AssetType.QUANTITY_TRACKED && locationId
                 ? { location: { connect: { id: locationId } } }
                 : {}),
