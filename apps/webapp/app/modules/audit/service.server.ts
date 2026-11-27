@@ -768,10 +768,13 @@ export async function updateAuditSession({
       // both admins added is inserted, noted and emailed exactly once instead
       // of the second insert failing on the unique assignment. Scoped to the
       // workspace so an audit id from another one locks nothing before its 404.
+      // NO KEY UPDATE, not UPDATE: it still serialises edits, but lets a member
+      // removal write a note on this audit while this edit waits on that
+      // member's membership lock, instead of the two deadlocking.
       await tx.$queryRaw`
         SELECT id FROM "AuditSession"
         WHERE id = ${id} AND "organizationId" = ${organizationId}
-        FOR UPDATE
+        FOR NO KEY UPDATE
       `;
 
       // Fetch the current audit to track changes

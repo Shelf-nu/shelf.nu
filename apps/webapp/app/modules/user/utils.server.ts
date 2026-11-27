@@ -182,6 +182,8 @@ export async function resolveUserAction(
         userId: targetUserId,
         organizationId,
         actorOwnsWorkspace: callerAccess.ownsWorkspace,
+        // `userId` is the acting member here; `targetUserId` loses access.
+        actorUserId: userId,
       });
 
       const org = await db.organization

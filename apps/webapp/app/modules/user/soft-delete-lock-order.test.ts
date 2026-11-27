@@ -70,6 +70,12 @@ vi.mock("~/integrations/supabase/client", () => ({
 // why: the confirmation email is a side effect after the transaction
 vi.mock("~/emails/mail.server", () => ({ sendEmail: vi.fn() }));
 
+// why: taking a removed member off open audits is pinned by its own tests;
+// this suite's database mock has no audit tables.
+vi.mock("~/modules/audit/departed-assignees.server", () => ({
+  removeDepartedMemberFromOpenAudits: vi.fn().mockResolvedValue([]),
+}));
+
 const { db } = await import("~/database/db.server");
 const { lockMembership, softDeleteUser } = await import("./service.server");
 

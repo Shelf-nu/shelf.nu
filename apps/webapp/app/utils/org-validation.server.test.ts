@@ -69,6 +69,7 @@ function txWith(overrides: Record<string, any>) {
     assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
     auditAsset: { findFirst: vitest.fn().mockResolvedValue(null) },
     auditSession: { findFirst: vitest.fn().mockResolvedValue(null) },
+    $queryRaw: vitest.fn().mockResolvedValue([]),
     ...overrides,
   } as any;
 }
@@ -755,11 +756,10 @@ describe("assertUsersBelongToOrg", () => {
   /** A tx whose membership table answers with `memberIds`. */
   function membersTx(memberIds: string[]) {
     return txWith({
-      userOrganization: {
-        findMany: vitest
-          .fn()
-          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
-      },
+      // The locking statement is the read inside a transaction.
+      $queryRaw: vitest
+        .fn()
+        .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
     });
   }
 
@@ -769,7 +769,7 @@ describe("assertUsersBelongToOrg", () => {
     await expect(
       assertUsersBelongToOrg({ userIds: [], organizationId: ORG }, tx)
     ).resolves.toBeUndefined();
-    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 
   it("queries duplicate ids once, scoped to the org, and passes", async () => {
@@ -781,11 +781,10 @@ describe("assertUsersBelongToOrg", () => {
         tx
       )
     ).resolves.toBeUndefined();
-    expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
-    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, userId: { in: ["u-1", "u-2"] } },
-      select: { userId: true },
-    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const [, organizationId, ids] = tx.$queryRaw.mock.calls[0];
+    expect(organizationId).toBe(ORG);
+    expect(ids.values).toEqual(["u-1", "u-2"]);
   });
 
   it("throws 400 naming the unknown ids when only some are members", async () => {
@@ -809,7 +808,7 @@ describe("assertUsersBelongToOrg", () => {
 
     await assertUsersBelongToOrg({ userIds: ["u-1"], organizationId: ORG }, tx);
 
-    expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 });
@@ -818,11 +817,10 @@ describe("filterUsersInOrg", () => {
   /** A tx whose membership table answers with `memberIds`. */
   function membersTx(memberIds: string[]) {
     return txWith({
-      userOrganization: {
-        findMany: vitest
-          .fn()
-          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
-      },
+      // The locking statement is the read inside a transaction.
+      $queryRaw: vitest
+        .fn()
+        .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
     });
   }
 
@@ -832,7 +830,42 @@ describe("filterUsersInOrg", () => {
     await expect(
       filterUsersInOrg({ userIds: [], organizationId: ORG }, tx)
     ).resolves.toEqual([]);
-    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("reads the members from the share-locking statement itself", async () => {
+    const tx = membersTx(["u-1", "u-2"]);
+
+    await filterUsersInOrg(
+      { userIds: ["u-2", "u-1"], organizationId: ORG },
+      tx
+    );
+
+    // A removal locks the same row FOR UPDATE, so the two queue: an
+    // assignment either waits for the removal and reads the member as gone,
+    // or commits first and its rows are seen by the removal's cleanup.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const [strings, ...values] = tx.$queryRaw.mock.calls[0];
+    const sql = strings.join("?");
+    expect(sql).toContain('SELECT "userId" FROM "UserOrganization"');
+    expect(sql).toContain('"organizationId" = ?');
+    expect(sql).toContain('"userId" IN (?)');
+    expect(sql).toContain("FOR SHARE");
+    expect(values[0]).toBe(ORG);
+    expect(values[1].values).toEqual(["u-1", "u-2"]);
+    // No second read: another statement would take a new snapshot and could
+    // see a membership these locks do not hold.
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+
+  it("takes no lock outside a transaction", async () => {
+    vitest
+      .mocked(db.userOrganization.findMany)
+      .mockResolvedValueOnce([{ userId: "u-1" }] as never);
+
+    await expect(
+      filterUsersInOrg({ userIds: ["u-1"], organizationId: ORG })
+    ).resolves.toEqual(["u-1"]);
   });
 
   it("keeps the members in input order, once each, and drops the rest", async () => {
@@ -844,11 +877,11 @@ describe("filterUsersInOrg", () => {
         tx
       )
     ).resolves.toEqual(["u-1", "u-3"]);
-    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, userId: { in: ["u-1", "u-gone", "u-3"] } },
-      select: { userId: true },
-    });
-    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw.mock.calls[0][2].values).toEqual([
+      "u-1",
+      "u-3",
+      "u-gone",
+    ]);
   });
 });
 

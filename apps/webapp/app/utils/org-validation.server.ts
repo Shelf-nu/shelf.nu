@@ -32,7 +32,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { TagUseFor } from "@prisma/client";
+import { Prisma, TagUseFor } from "@prisma/client";
 import type { ArchivedAssetsFix } from "@shelf/labels";
 import { archivedAssetsRefusal } from "@shelf/labels";
 import { db } from "~/database/db.server";
@@ -128,10 +128,6 @@ export type OrgValidationTxClient = {
       where: { userId: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
-    findMany: (args: {
-      where: { organizationId: string; userId: { in: string[] } };
-      select: { userId: true };
-    }) => Promise<{ userId: string }[]>;
   };
   assetKit: {
     // `kitId` rides along so `assertAssetKitsBelongToOrg` can hand callers an
@@ -170,6 +166,11 @@ export type OrgValidationTxClient = {
       select: { id: true };
     }) => Promise<{ id: string } | null>;
   };
+  /** Row locks the guards take inside a transaction. */
+  $queryRaw: (
+    query: TemplateStringsArray | Prisma.Sql,
+    ...values: unknown[]
+  ) => Promise<unknown>;
 };
 
 /**
@@ -952,11 +953,26 @@ export async function assertUserBelongsToOrg(
   }
 }
 
+/** Narrows a raw `{ userId }` row returned by `$queryRaw`. */
+function isUserIdRow(row: unknown): row is { userId: string } {
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    typeof (row as { userId?: unknown }).userId === "string"
+  );
+}
+
 /**
  * Returns the users in `userIds` who are members of `organizationId`, in input
  * order and without duplicates, in one query. For callers that keep the
  * eligible members of a list instead of refusing it, such as an audit team
  * carried over to a duplicate.
+ *
+ * Inside a transaction it reads those membership rows with `FOR SHARE`, which
+ * holds them until the transaction ends. Removing a member locks the same row `FOR UPDATE`
+ * (`lockMembership`), so the two queue instead of crossing: whatever the
+ * caller writes for a member who is being removed is either refused here or
+ * committed before the removal runs, where its cleanup sees it.
  *
  * @param params.userIds - User IDs to check; an empty list returns [] without
  *   a query
@@ -976,19 +992,40 @@ export async function filterUsersInOrg(
     return [];
   }
 
-  const client = tx ?? db;
-  const members = await client.userOrganization.findMany({
-    where: { organizationId, userId: { in: uniqueIds } },
-    select: { userId: true },
-  });
-  const memberIds = new Set(members.map((member) => member.userId));
+  let memberIds: Set<string>;
+  if (tx) {
+    // The locking statement is also the read: a second query would take a new
+    // snapshot and could see a membership committed after these locks, which
+    // nothing then holds. Sorted so two callers locking overlapping sets take
+    // the rows in the same order.
+    const locked = await tx.$queryRaw`
+      SELECT "userId" FROM "UserOrganization"
+      WHERE "organizationId" = ${organizationId}
+        AND "userId" IN (${Prisma.join([...uniqueIds].sort())})
+      ORDER BY "userId"
+      FOR SHARE
+    `;
+    memberIds = new Set(
+      (Array.isArray(locked) ? locked : []).flatMap((row: unknown) =>
+        isUserIdRow(row) ? [row.userId] : []
+      )
+    );
+  } else {
+    const members = await db.userOrganization.findMany({
+      where: { organizationId, userId: { in: uniqueIds } },
+      select: { userId: true },
+    });
+    memberIds = new Set(members.map((member) => member.userId));
+  }
+
   return uniqueIds.filter((id) => memberIds.has(id));
 }
 
 /**
  * Asserts that every user in `userIds` is a member of `organizationId`, in one
  * query. The plural of `assertUserBelongsToOrg`, for forms that pick several
- * people at once (an audit's assignees).
+ * people at once (an audit's assignees). Inside a transaction it share-locks
+ * the membership rows, as {@link filterUsersInOrg} describes.
  *
  * @param params.userIds - User IDs sourced from request/form input; duplicates
  *   are ignored and an empty list passes without a query

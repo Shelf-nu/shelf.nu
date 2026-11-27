@@ -270,6 +270,28 @@ function expectRecorded(
   return result;
 }
 
+/**
+ * Inside a transaction the membership guards read members from their
+ * `SELECT "userId" ... FOR SHARE` statement. Route that statement to
+ * `mockDb.userOrganization.findMany`, the membership fixture these tests set
+ * per case, so one mock describes who is a member; every other raw query
+ * answers `[]`.
+ */
+function answerMembershipLockFromFixture() {
+  mockDb.$queryRaw.mockImplementation(
+    (strings: TemplateStringsArray, ...values: unknown[]) => {
+      if (!strings.join("").includes('FROM "UserOrganization"')) {
+        return Promise.resolve([]);
+      }
+      const [organizationId, ids] = values as [string, { values: string[] }];
+      return mockDb.userOrganization.findMany({
+        where: { organizationId, userId: { in: ids.values } },
+        select: { userId: true },
+      });
+    }
+  );
+}
+
 describe("audit service", () => {
   const defaultInput = {
     name: "Quarterly warehouse audit",
@@ -291,6 +313,7 @@ describe("audit service", () => {
       ({ where }: { where: { userId: { in: string[] } } }) =>
         Promise.resolve(where.userId.in.map((userId) => ({ userId })))
     );
+    answerMembershipLockFromFixture();
     mockDb.asset.findMany.mockResolvedValue([
       {
         id: "asset-1",
@@ -3876,6 +3899,7 @@ describe("updateAuditSession", () => {
       ({ where }: { where: { userId: { in: string[] } } }) =>
         Promise.resolve(where.userId.in.map((userId) => ({ userId })))
     );
+    answerMembershipLockFromFixture();
     mockDb.auditSession.findUnique.mockResolvedValue({
       name: "Warehouse audit",
       description: null,
@@ -3913,14 +3937,15 @@ describe("updateAuditSession", () => {
       data: { assigneeUserIds: ["user-2", "user-3"] },
     });
 
-    expect(mockDb.$queryRaw).toHaveBeenCalledTimes(1);
+    // The audit lock, then the share lock on the added members' memberships.
+    expect(mockDb.$queryRaw).toHaveBeenCalledTimes(2);
     const [sqlParts, ...values] = mockDb.$queryRaw.mock.calls[0] as [
       TemplateStringsArray,
       ...unknown[],
     ];
     const sql = sqlParts.join("?").replace(/\s+/g, " ").trim();
     expect(sql).toBe(
-      'SELECT id FROM "AuditSession" WHERE id = ? AND "organizationId" = ? FOR UPDATE'
+      'SELECT id FROM "AuditSession" WHERE id = ? AND "organizationId" = ? FOR NO KEY UPDATE'
     );
     expect(values).toEqual(["audit-1", "org-1"]);
     // The lock comes first: a second editor must wait before it reads the
