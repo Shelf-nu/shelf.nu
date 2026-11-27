@@ -1,10 +1,11 @@
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 export const BulkMarkAvailabilitySchema = z.object({
-  assetIds: z.string().array().min(1),
+  assetIds: z.string().array().max(MAX_LIST_ITEMS).min(1),
   type: z.enum(["available", "unavailable"]),
 });
 

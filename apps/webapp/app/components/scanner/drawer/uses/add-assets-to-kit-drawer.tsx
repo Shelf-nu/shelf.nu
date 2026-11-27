@@ -21,6 +21,7 @@ import type {
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   assetLabelPresets,
   createAvailabilityLabels,
@@ -34,7 +35,7 @@ import { buildAddToKitBlockers } from "./kit-scan-blockers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToKitSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   /**
    * JSON-encoded `Record<assetId, quantity>` mirroring the kit
    * picker's wire format. Missing entries fall back to "full pool"

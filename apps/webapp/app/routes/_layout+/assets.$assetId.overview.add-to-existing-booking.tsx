@@ -46,9 +46,14 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { intersected } from "~/utils/utils";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 const updateBookingSchema = z.object({
-  assetIds: z.string().array().min(1, "At least one asset is required."),
+  assetIds: z
+    .string()
+    .array()
+    .max(MAX_LIST_ITEMS)
+    .min(1, "At least one asset is required."),
   bookingId: z.string().min(1, "Please select a booking."),
   quantity: z.coerce.number().int().positive().optional(),
 });

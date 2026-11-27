@@ -49,6 +49,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/asset/update
@@ -111,7 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
         currentLocationId: z.string().optional(),
         // Full desired tag set (replace). Omit to leave tags unchanged; pass
         // [] to clear. Validated below against the caller's organization.
-        tags: z.array(z.string()).optional(),
+        tags: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
         valuation: z.number().nullable().optional(),
         customFields: z
           .array(
@@ -120,6 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
               value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
             })
           )
+          .max(MAX_LIST_ITEMS)
           .optional(),
       }),
       request,

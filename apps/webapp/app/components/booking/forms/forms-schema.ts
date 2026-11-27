@@ -11,6 +11,7 @@ import {
   normalizeWorkingHoursForValidation,
 } from "~/modules/working-hours/utils";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Parses a `datetime-local` wire string (e.g. `"2026-05-01T16:10"`) in the
@@ -501,7 +502,7 @@ export function BookingFormSchema({
   // Base schema - let TypeScript infer the complex Zod types
   const baseSchema = z.object({
     name: z.string().min(2, "Name is required"),
-    assetIds: z.array(z.string()).optional(),
+    assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
     description: z.string().optional(),
     custodian: z
       .string()

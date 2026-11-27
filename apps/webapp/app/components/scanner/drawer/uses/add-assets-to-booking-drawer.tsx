@@ -36,6 +36,7 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   assetLabelPresets,
   createAvailabilityLabels,
@@ -56,8 +57,8 @@ import { bookingSavedCheck } from "../scan-submit-failure-alert";
 // Export the schema so it can be reused
 export const addScannedAssetsToBookingSchema = z
   .object({
-    assetIds: z.array(z.string()),
-    kitIds: z.array(z.string()).optional().default([]),
+    assetIds: z.array(z.string()).max(MAX_LIST_ITEMS),
+    kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
     /**
      * JSON-encoded `Record<assetId, quantity>` matching the booking
      * picker's `quantities` wire format. Missing entries default

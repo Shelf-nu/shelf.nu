@@ -16,6 +16,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * GET /api/mobile/bookings/asset-availability
@@ -66,7 +67,7 @@ const QuerySchema = z.object({
     )
     // Judged after normalizing: ",," passes the raw length check but names
     // no asset.
-    .pipe(z.array(z.string()).min(1)),
+    .pipe(z.array(z.string()).max(MAX_LIST_ITEMS).min(1)),
 });
 
 /** Hard cap on ids per call: the scanner asks for one, the booking screen for one. */

@@ -44,6 +44,7 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   createAvailabilityLabels,
   kitLabelPresets,
@@ -113,7 +114,7 @@ export type CheckoutDispositionInput = z.infer<
  *   pattern the check-IN drawer uses for its `checkins` payload.
  */
 export const partialCheckoutAssetsSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   /**
    * Slices (`BookingAsset` ids) the operator checked "without scanning" rather
    * than scanning. The action records them as `"selected"` while the rest of
@@ -122,7 +123,7 @@ export const partialCheckoutAssetsSchema = z.object({
    * standalone slice and a kit slice of the same booking, one scanned and the
    * other ticked.
    */
-  selectedBookingAssetIds: z.array(z.string()).optional(),
+  selectedBookingAssetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   checkouts: z
     .string()
     .optional()
@@ -130,7 +131,10 @@ export const partialCheckoutAssetsSchema = z.object({
       if (value == null || value === "") return undefined;
       try {
         const parsed = JSON.parse(value);
-        const result = z.array(checkoutDispositionSchema).safeParse(parsed);
+        const result = z
+          .array(checkoutDispositionSchema)
+          .max(MAX_LIST_ITEMS)
+          .safeParse(parsed);
         if (!result.success) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,

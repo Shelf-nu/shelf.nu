@@ -1,5 +1,6 @@
 import { CustomFieldType } from "@prisma/client";
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { operatorsPerType } from "./operator-selector";
 
 // Define the base enum schemas
@@ -47,7 +48,7 @@ const numberValueSchema = z.union([numberValue, numberBetweenTuple]);
 
 const stringValueSchema = z.string();
 const booleanValueSchema = z.boolean();
-const arrayValueSchema = z.array(z.string());
+const arrayValueSchema = z.array(z.string()).max(MAX_LIST_ITEMS);
 
 // Define the main filter schema
 export const filterSchema = z

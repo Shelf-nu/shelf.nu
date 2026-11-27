@@ -51,6 +51,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const meta = () => [{ title: appendToMetaTitle("Add kit to booking") }];
 
@@ -65,7 +66,7 @@ const updateBookingSchema = z.object({
     }
     return val;
   }),
-  kitIds: z.array(z.string()).optional(),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
 });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

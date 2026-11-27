@@ -16,6 +16,7 @@ import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
 import useApiQuery from "~/hooks/use-api-query";
 import type { BulkSettableCustomField } from "~/modules/asset/bulk-custom-field.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import Input from "../forms/input";
 import {
@@ -30,7 +31,7 @@ import { DateTimePicker } from "../shared/date-time-picker";
 
 /** Form schema; the value itself is validated server-side against the field. */
 export const BulkCustomFieldUpdateSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   customFieldId: z.string().min(1, "Pick a custom field"),
   value: z.string(),
   mode: z.enum(["EMPTY_ONLY", "REPLACE"]).default("EMPTY_ONLY"),

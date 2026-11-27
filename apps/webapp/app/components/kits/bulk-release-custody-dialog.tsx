@@ -1,10 +1,11 @@
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 export const BulkReleaseKitCustodySchema = z.object({
-  kitIds: z.array(z.string()).min(1),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 export default function BulkReleaseCustodyDialog() {

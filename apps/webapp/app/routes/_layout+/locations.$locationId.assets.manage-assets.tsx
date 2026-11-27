@@ -65,6 +65,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
@@ -223,8 +224,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       parseData(
         await request.formData(),
         z.object({
-          assetIds: z.array(z.string()).optional().default([]),
-          removedAssetIds: z.array(z.string()).optional().default([]),
+          assetIds: z
+            .array(z.string())
+            .max(MAX_LIST_ITEMS)
+            .optional()
+            .default([]),
+          removedAssetIds: z
+            .array(z.string())
+            .max(MAX_LIST_ITEMS)
+            .optional()
+            .default([]),
           assetQuantities: AssetQuantitiesSchema,
           redirectTo: z.string().optional(),
         }),

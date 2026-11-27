@@ -19,6 +19,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { canPartialCheckInOut } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/bookings/partial-checkin
@@ -64,7 +65,7 @@ export async function action({ request }: ActionFunctionArgs) {
           // bare id still means "check in all remaining" (simple case); explicit
           // per-unit dispositions go in `checkins`. Optional so the picker can
           // send a QT-only, checkins-only payload.
-          assetIds: z.array(z.string().min(1)).optional(),
+          assetIds: z.array(z.string().min(1)).max(MAX_LIST_ITEMS).optional(),
           // Per-asset dispositions for QUANTITY_TRACKED assets: how many units
           // were returned / consumed / lost / damaged. Powers the mobile
           // check-in picker; mirrors the web drawer payload the service already
@@ -80,6 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 damaged: z.number().int().min(0).optional(),
               })
             )
+            .max(MAX_LIST_ITEMS)
             .optional(),
           /**
            * How the app collected the rows: Scan to Check In sends `"scanned"`,

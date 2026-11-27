@@ -3,6 +3,7 @@ import { z } from "zod";
 import { useAssetIndexSettingsOverrides } from "~/context/asset-index-settings-context";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Simplified schema for parsing form data during optimistic updates
@@ -18,7 +19,7 @@ const formParsingSchema = z.object({
   position: z.number().or(z.string().transform(Number)),
 });
 
-const columnsFormSchema = z.array(formParsingSchema);
+const columnsFormSchema = z.array(formParsingSchema).max(MAX_LIST_ITEMS);
 
 const parseColumnsFromFormData = (formData: FormData): Column[] => {
   const columns: Partial<Column>[] = [];

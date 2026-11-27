@@ -17,9 +17,10 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { assertCanUseBookings } from "~/utils/subscription.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const ExportBookingsSchema = z.object({
-  bookingIds: z.array(z.string()).min(1),
+  bookingIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 /** Exports the requested bookings as a CSV download. */

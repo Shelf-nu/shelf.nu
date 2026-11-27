@@ -33,6 +33,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Base schema with common audit fields shared across different entry points.
@@ -47,7 +48,7 @@ export const BaseAuditSchema = z.object({
   dueDate: z.string().optional(),
   // One `assignees[i]` entry per selected member, each a JSON blob from
   // AuditTeamMemberSelector; resolved to user ids by resolveAssigneeUserIds.
-  assignees: z.array(z.string()).optional(),
+  assignees: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   // Singular field, still accepted from older clients; merged into the list
   // by resolveAssigneeUserIds.
   assignee: z.string().optional(),
@@ -60,17 +61,17 @@ export const BaseAuditSchema = z.object({
  */
 export const StartAuditSchema = BaseAuditSchema.extend({
   // Asset IDs - required for bulk selection mode, optional for context mode
-  assetIds: z.array(z.string()).optional(),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   // Context parameters - for starting audit from location/kit/user pages
   contextType: z.enum(["location", "kit", "user"]).optional(),
   contextId: z.string().optional(),
   contextName: z.string().optional(),
   // Location IDs - for the bulk "Create audit" action on the Locations index
   // (multi-select). May contain ALL_SELECTED_KEY when "select all" is active.
-  locationIds: z.array(z.string()).optional(),
+  locationIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   // Kit IDs - for the bulk "Create audit" action on the Kits index
   // (multi-select). May contain ALL_SELECTED_KEY when "select all" is active.
-  kitIds: z.array(z.string()).optional(),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   includeChildLocations: z.coerce.boolean().default(false),
 }).refine(
   (data) => {

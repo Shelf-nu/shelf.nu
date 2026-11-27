@@ -5,11 +5,12 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/settings.custom-fields.index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 export const BulkDeactivateCustomFieldSchema = z.object({
-  customFieldIds: z.array(z.string()).min(1),
+  customFieldIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 export default function BulkDeactivateDialog() {

@@ -14,7 +14,7 @@
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { invalidTypeError } from "~/utils/zod";
+import { MAX_LIST_ITEMS, invalidTypeError } from "~/utils/zod";
 import { optionalNumberFromString } from "~/utils/zod-numeric";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import Input from "../forms/input";
@@ -30,7 +30,7 @@ const MAX_MIN_QUANTITY = 2_147_483_647;
  * as "no threshold set".
  */
 export const BulkSetReorderPointSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   minQuantity: optionalNumberFromString({
     blank: null,
     fieldName: "Min quantity",

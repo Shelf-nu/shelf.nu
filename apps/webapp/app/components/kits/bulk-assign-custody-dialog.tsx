@@ -6,12 +6,13 @@ import { createCustodianSchema } from "~/modules/custody/schema";
 import type { KitIndexLoaderData } from "~/routes/_layout+/kits._index";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
 export const BulkAssignKitCustodySchema = z.object({
-  kitIds: z.array(z.string()).min(1),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   custodian: createCustodianSchema(),
 });
 

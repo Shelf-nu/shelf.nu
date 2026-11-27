@@ -48,6 +48,7 @@ import { flattenSelectedBookingItems } from "~/utils/booking-assets";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import CheckoutDialog, {
   REVERT_TO_DRAFT_RESCHEDULE_HINT,
 } from "./checkout-dialog";
@@ -87,7 +88,10 @@ const checkoutsJsonField = z
     if (!raw) return [] as z.infer<typeof checkoutDispositionSchema>[];
     try {
       const parsed: unknown = JSON.parse(raw);
-      return z.array(checkoutDispositionSchema).parse(parsed);
+      return z
+        .array(checkoutDispositionSchema)
+        .max(MAX_LIST_ITEMS)
+        .parse(parsed);
     } catch {
       return [] as z.infer<typeof checkoutDispositionSchema>[];
     }
@@ -104,6 +108,7 @@ const checkoutsJsonField = z
 export const BulkPartialCheckoutSchema = z.object({
   assetIds: z
     .array(z.string())
+    .max(MAX_LIST_ITEMS)
     .min(1, "Please select at least one asset to check out."),
   checkouts: checkoutsJsonField,
 });

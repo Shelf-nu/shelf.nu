@@ -20,6 +20,7 @@ import type {
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   createAvailabilityLabels,
   assetLabelPresets,
@@ -32,8 +33,8 @@ import { buildAddToLocationBlockers } from "./location-scan-blockers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsOrKitsToLocationSchema = z.object({
-  assetIds: z.array(z.string()).optional().default([]),
-  kitIds: z.array(z.string()).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
   /**
    * JSON-encoded `Record<assetId, quantity>` mirroring the location
    * picker's wire format. Empty / missing entries fall back to the

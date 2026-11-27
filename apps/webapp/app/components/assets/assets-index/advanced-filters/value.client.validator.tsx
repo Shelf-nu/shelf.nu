@@ -1,5 +1,6 @@
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import type { Filter } from "./schema";
 
 /**
@@ -11,13 +12,16 @@ const filterValueSchema = {
   enum: z.string().min(1, "Please select a value"),
   date: z.union([
     z.string().min(1, "Date is required"),
-    z.array(z.string()).refine(
-      (dates) => {
-        if (dates.length !== 2) return true;
-        return new Date(dates[0]) <= new Date(dates[1]);
-      },
-      { message: "Start date must be before or equal to end date" }
-    ),
+    z
+      .array(z.string())
+      .max(MAX_LIST_ITEMS)
+      .refine(
+        (dates) => {
+          if (dates.length !== 2) return true;
+          return new Date(dates[0]) <= new Date(dates[1]);
+        },
+        { message: "Start date must be before or equal to end date" }
+      ),
   ]),
   amount: z.union([
     // Single amount validation (must be positive)
@@ -94,6 +98,7 @@ export function useFilterFormValidation(
           value: z.any(), // Use a specific schema if possible
         })
       )
+      .max(MAX_LIST_ITEMS)
       .min(1, "At least one filter is required"),
   });
 

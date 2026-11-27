@@ -2,15 +2,15 @@ import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { requiredError } from "~/utils/zod";
+import { MAX_LIST_ITEMS, requiredError } from "~/utils/zod";
 import { QuantityTrackedSkipWarning } from "./quantity-tracked-skip-warning";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared/button";
 
 export const BulkLocationUpdateSchema = z.object({
-  assetIds: z.array(z.string()).optional().default([]),
-  kitIds: z.array(z.string()).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
   newLocationId: z.string(requiredError("Please select a location")),
 });
 

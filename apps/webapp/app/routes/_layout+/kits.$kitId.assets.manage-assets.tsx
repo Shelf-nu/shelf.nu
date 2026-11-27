@@ -82,6 +82,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const meta = () => [{ title: appendToMetaTitle("Manage kit assets") }];
 
@@ -112,7 +113,7 @@ const KitParamsSchema = z.object({ kitId: z.string() });
  *    `AssetQuantitiesSchema`.
  */
 const ManageAssetsActionSchema = z.object({
-  assetIds: z.array(z.string()).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
   assetQuantities: AssetQuantitiesSchema,
 });
 

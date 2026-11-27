@@ -42,6 +42,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/asset/create
@@ -98,7 +99,7 @@ export async function action({ request }: ActionFunctionArgs) {
         locationId: z.string().optional(),
         // Tag ids to assign to the new asset. Validated below against the
         // caller's organization before they are connected.
-        tags: z.array(z.string()).optional(),
+        tags: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
         valuation: z.number().optional(),
         customFields: z
           .array(
@@ -107,6 +108,7 @@ export async function action({ request }: ActionFunctionArgs) {
               value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
             })
           )
+          .max(MAX_LIST_ITEMS)
           .optional(),
         qrId: z.string().optional(),
       }),

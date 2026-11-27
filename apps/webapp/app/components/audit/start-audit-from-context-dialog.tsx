@@ -16,6 +16,7 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import AuditTeamMemberSelector from "./audit-team-member-selector";
 
 /**
@@ -47,7 +48,7 @@ const StartAuditFromContextFormSchema = z.object({
       { message: "Due date must be in the future" }
     ),
   /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
-  assignees: z.array(z.string()).optional(),
+  assignees: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   /** Singular field, still accepted from older clients and parsed server-side. */
   assignee: z.string().optional(),
 });

@@ -23,7 +23,7 @@ import {
 } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { zodFieldIsRequired } from "~/utils/zod";
+import { MAX_LIST_ITEMS, zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
 import CategoriesInput from "../forms/categories-input";
 import FormRow from "../forms/form-row";
@@ -98,14 +98,16 @@ export const NewCustomFieldFormSchema = z.object({
   // (`options.includes(v)` in `getSchema`), so rewriting an option here would
   // orphan every asset already pointing at the old spelling. Normalising what an
   // operator types is `OptionBuilder`'s job, where it touches only new input.
-  options: z.array(z.string()).optional(),
+  options: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   // Saved spelling -> final option, for assets that follow a renamed or merged
   // option. `updateCustomField` checks each pair against the saved options.
   optionRenames: z
     .array(z.object({ from: z.string(), to: z.string() }))
+    .max(MAX_LIST_ITEMS)
     .optional(),
   categories: z
     .array(z.string().min(1, "Please select a category"))
+    .max(MAX_LIST_ITEMS)
     .optional()
     .default([]),
 });

@@ -18,6 +18,7 @@ import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
 } from "~/modules/asset/archive-shortfall";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
@@ -32,7 +33,7 @@ import { Button } from "../shared/button";
  *   it. The route branches on this to pick the service.
  */
 export const BulkArchiveSchema = z.object({
-  assetIds: z.string().array().min(1),
+  assetIds: z.string().array().max(MAX_LIST_ITEMS).min(1),
   type: z.enum(["archive", "reinstate"]),
 });
 

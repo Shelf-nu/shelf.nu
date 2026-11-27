@@ -22,13 +22,14 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BookingsListFields } from "./bookings-list-fields";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 /** What the bulk check-in form posts: the selected ids, or the select-all key. */
 export const BulkCheckinBookingsSchema = z.object({
-  bookingIds: z.array(z.string()).min(1),
+  bookingIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 /**

@@ -104,6 +104,7 @@ import type {
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
@@ -133,8 +134,8 @@ import { ScannedAssetIdentifiers } from "../scanned-asset-identifiers";
  * Exported so the route action can import and reuse it.
  */
 export const fulfilAndCheckoutSchema = z.object({
-  assetIds: z.array(z.string()),
-  kitIds: z.array(z.string()).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
   checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
 });
 

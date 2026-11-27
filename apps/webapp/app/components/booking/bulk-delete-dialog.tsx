@@ -5,6 +5,7 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BookingsListFields } from "./bookings-list-fields";
 import {
   BulkDeleteConfirmation,
@@ -13,7 +14,7 @@ import {
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteBookingSchema = z.object({
-  bookingIds: z.array(z.string()).min(1),
+  bookingIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   /** The typed count; checked by the server, see `assertBulkDeleteConfirmed`. */
   confirmation: z.string().optional(),
 });

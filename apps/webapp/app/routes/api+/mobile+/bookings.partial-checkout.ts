@@ -23,6 +23,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Mobile API — progressive (partial) check-out for a booking.
@@ -79,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // and seeded rows carry ids that no single format check describes),
         // and the id is proven against the booking downstream anyway. The
         // check-in twin takes the same shape.
-        assetIds: z.array(z.string().min(1)).optional(),
+        assetIds: z.array(z.string().min(1)).max(MAX_LIST_ITEMS).optional(),
         /**
          * Optional per-asset checkout payload mirroring the webapp check-in
          * JSON shape. When present, the service uses it to perform partial
@@ -95,6 +96,7 @@ export async function action({ request }: ActionFunctionArgs) {
               quantity: z.number().int().positive(),
             })
           )
+          .max(MAX_LIST_ITEMS)
           .optional(),
         /**
          * How the app collected the rows: the Scan to Check Out path sends

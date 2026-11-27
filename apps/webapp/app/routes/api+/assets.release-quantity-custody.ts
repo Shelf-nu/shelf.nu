@@ -40,6 +40,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * One source line of a per-location release, as the dialog posts it inside
@@ -88,7 +89,10 @@ export const ReleaseQuantityCustodySchema = z.object({
     .transform((val, ctx) => {
       if (!val) return undefined;
       try {
-        return z.array(ReleaseSourceLineSchema).parse(JSON.parse(val));
+        return z
+          .array(ReleaseSourceLineSchema)
+          .max(MAX_LIST_ITEMS)
+          .parse(JSON.parse(val));
       } catch {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

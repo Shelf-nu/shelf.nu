@@ -1,6 +1,22 @@
 import type { ZodIssue } from "zod";
 import { z } from "zod";
 
+/**
+ * The most entries any list in a request may hold: `.max(MAX_LIST_ITEMS)` on
+ * every `z.array()`.
+ *
+ * It is a safety bound, not a product limit. Zod checks a list's length before
+ * it looks at the entries, so a list over the cap is refused at once instead
+ * of being validated entry by entry. The number sits far above anything the
+ * app sends on purpose: the "manage assets" pages submit every member of a
+ * booking, kit or location in one list, which can run to thousands, while
+ * "select all" across pages sends a marker rather than the ids.
+ *
+ * A list that needs a tighter, user-facing limit sets its own `.max()` with a
+ * message, as the bulk asset count does.
+ */
+export const MAX_LIST_ITEMS = 10_000;
+
 /** A custom issue in the shape react-zorm accepts as `customIssues`. */
 type ZodCustomIssueWithMessage = {
   code: "custom";

@@ -20,11 +20,12 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 const BulkAssetModelRemoveSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 export default function BulkAssetModelRemoveDialog() {

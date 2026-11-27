@@ -149,6 +149,7 @@ import {
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export type AssetWithBooking = Asset & {
   /** Cover image of the asset's model, rendered when the asset has no image
@@ -719,8 +720,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     } = parseData(
       await request.formData(),
       z.object({
-        assetIds: z.array(z.string()).optional().default([]),
-        removedAssetIds: z.array(z.string()).optional().default([]),
+        assetIds: z
+          .array(z.string())
+          .max(MAX_LIST_ITEMS)
+          .optional()
+          .default([]),
+        removedAssetIds: z
+          .array(z.string())
+          .max(MAX_LIST_ITEMS)
+          .optional()
+          .default([]),
         redirectTo: z.string().optional().nullable(),
         /** JSON-encoded map of assetId → quantity for QUANTITY_TRACKED assets */
         quantities: z.string().optional().nullable(),

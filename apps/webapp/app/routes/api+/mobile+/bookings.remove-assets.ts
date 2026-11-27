@@ -19,6 +19,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/bookings/remove-assets
@@ -50,8 +51,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z
   .object({
     bookingId: z.string().min(1),
-    assetIds: z.array(z.string().min(1)).optional().default([]),
-    kitIds: z.array(z.string().min(1)).optional().default([]),
+    assetIds: z
+      .array(z.string().min(1))
+      .max(MAX_LIST_ITEMS)
+      .optional()
+      .default([]),
+    kitIds: z
+      .array(z.string().min(1))
+      .max(MAX_LIST_ITEMS)
+      .optional()
+      .default([]),
     /**
      * The subset of `assetIds` the caller ticked as rows of their own.
      *
@@ -59,7 +68,10 @@ const BodySchema = z
      * an explicitly empty one: absent means "infer the intent", empty means
      * "none of these ids names a loose row".
      */
-    standaloneAssetIds: z.array(z.string().min(1)).optional(),
+    standaloneAssetIds: z
+      .array(z.string().min(1))
+      .max(MAX_LIST_ITEMS)
+      .optional(),
   })
   .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
     message: "Select at least one asset or kit to remove.",
