@@ -43,13 +43,10 @@ export const NewTagFormSchema = z.object({
   useFor: z
     .string()
     .optional()
-    .transform(
-      (value) =>
-        // why: the pipe below checks every entry against the enum, so this
-        // cast only describes the input the pipe is about to validate
-        (value && value.length > 0 ? value.split(",") : []) as TagUseFor[]
-    )
-    .pipe(z.array(z.nativeEnum(TagUseFor)).optional().default([])),
+    // A blank or absent field becomes an empty list here, so the pipe always
+    // receives an array and needs no optional or default of its own.
+    .transform((value) => (value && value.length > 0 ? value.split(",") : []))
+    .pipe(z.array(z.nativeEnum(TagUseFor))),
 });
 
 const title = "New Tag";
