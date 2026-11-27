@@ -13,14 +13,15 @@
  */
 import { db } from "~/database/db.server";
 import type { ClientHint } from "~/utils/client-hints";
+import { resolveFormatPrefs } from "~/utils/date-format";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AUDIT_INCLUDE_FOR_EMAIL } from "./constants";
-import { sendAuditAssignedEmail } from "./email-helpers";
+import { sendAuditAssignedEmail, sendAuditAssignedPush } from "./email-helpers";
 
 /**
- * Sends the "You've been assigned to audit" email to each recipient.
+ * Tells each recipient they were assigned to an audit: a push, then an email.
  *
  * Shared by the create route and the edit action so a person added later gets
  * the same email as one picked at creation. Loads the audit once and fans out
@@ -56,11 +57,25 @@ export async function sendAuditAssignedEmails({
       return;
     }
 
-    // Sequential on purpose: each send resolves the recipient's format
-    // preferences and hands the mail to a single unpooled transport, so a
-    // large team must not burst N lookups and N connections at once.
-    for (const assignment of audit.assignments) {
-      if (!recipients.includes(assignment.userId) || !assignment.user.email) {
+    const recipientAssignments = audit.assignments.filter((assignment) =>
+      recipients.includes(assignment.userId)
+    );
+
+    // Every push first: each only queues a job, and none should wait behind
+    // another person's email. The loaded rows carry the format preferences.
+    for (const assignment of recipientAssignments) {
+      sendAuditAssignedPush({
+        audit,
+        assigneeUserId: assignment.userId,
+        prefs: resolveFormatPrefs(assignment.user, hints),
+      });
+    }
+
+    // Emails one at a time on purpose: each send resolves the recipient's
+    // format preferences and hands the mail to a single unpooled transport,
+    // so a large team must not burst N lookups and N connections at once.
+    for (const assignment of recipientAssignments) {
+      if (!assignment.user.email) {
         continue;
       }
       await sendAuditAssignedEmail({

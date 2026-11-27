@@ -51,7 +51,7 @@ describe("sendEmailAndWait", () => {
   it("resolves after a successful direct send without touching the queue", async () => {
     vi.mocked(triggerEmail).mockResolvedValue(undefined);
 
-    await sendEmailAndWait(payload);
+    await expect(sendEmailAndWait(payload)).resolves.toBe(true);
 
     expect(triggerEmail).toHaveBeenCalledWith(payload);
     expect(scheduler.send).not.toHaveBeenCalled();
@@ -67,8 +67,9 @@ describe("sendEmailAndWait", () => {
     );
 
     let settled = false;
-    const waiting = sendEmailAndWait(payload).then(() => {
+    const waiting = sendEmailAndWait(payload).then((handedOff) => {
       settled = true;
+      return handedOff;
     });
 
     await flush();
@@ -82,7 +83,15 @@ describe("sendEmailAndWait", () => {
     expect(settled).toBe(false);
 
     finishEnqueue("job-1");
-    await waiting;
+    // Queued for retry counts as handed off.
+    await expect(waiting).resolves.toBe(true);
     expect(settled).toBe(true);
+  });
+
+  it("resolves false, without rejecting, when the send and the enqueue both fail", async () => {
+    vi.mocked(triggerEmail).mockRejectedValue(new Error("SMTP unavailable"));
+    vi.mocked(scheduler.send).mockRejectedValue(new Error("queue down"));
+
+    await expect(sendEmailAndWait(payload)).resolves.toBe(false);
   });
 });

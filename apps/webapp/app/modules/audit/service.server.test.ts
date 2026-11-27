@@ -2112,6 +2112,12 @@ describe("audit service", () => {
       // transaction client): a departed member is dropped, not refused.
       expect(mockDb.userOrganization.findMany).toHaveBeenCalledTimes(1);
       expect(mockDb.$transaction).toHaveBeenCalledTimes(1);
+      // The mock runs the callback against mockDb, so only the call order
+      // tells a read inside the transaction from one before it.
+      const [transactionOrder] = mockDb.$transaction.mock.invocationCallOrder;
+      expect(
+        mockDb.userOrganization.findMany.mock.invocationCallOrder[0]
+      ).toBeGreaterThan(transactionOrder);
       expect(mockDb.userOrganization.findMany).toHaveBeenCalledWith({
         where: {
           organizationId: "org-1",

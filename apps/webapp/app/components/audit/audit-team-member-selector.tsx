@@ -1,3 +1,14 @@
+/**
+ * Audit Team Member Selector
+ *
+ * The multi-select picker for an audit's assignees, used by the create and
+ * edit dialogs. It lists the workspace members who have a user account and
+ * submits one bracket-indexed hidden input per selection under
+ * `AUDIT_ASSIGNEES_FIELD`, which the server reads as the full desired set.
+ *
+ * @see {@link file://./../../routes/api+/audits.team-members.ts} the member list
+ * @see {@link file://./../../modules/audit/assignee-form.ts} the form field contract
+ */
 import type { CSSProperties } from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { CheckIcon, UserIcon } from "lucide-react";

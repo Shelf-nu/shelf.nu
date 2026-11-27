@@ -1,5 +1,5 @@
 /**
- * Tests for the audit pushes sent beside the audit emails: who each one
+ * Tests for the audit emails and the pushes sent beside them: who each one
  * reaches and what it says.
  *
  * @see {@link file://./email-helpers.ts}
@@ -10,6 +10,7 @@ import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { Logger } from "~/utils/logger";
 import {
   sendAuditAssignedEmail,
+  sendAuditAssignedPush,
   sendAuditOverdueEmail,
   sendAuditReminderEmail,
 } from "./email-helpers";
@@ -20,7 +21,7 @@ import {
 vi.mock("~/emails/mail.server", () => ({
   sendEmail: vi.fn(),
   // The assignment email is awaited so its sender can pace a fan-out.
-  sendEmailAndWait: vi.fn().mockResolvedValue(undefined),
+  sendEmailAndWait: vi.fn().mockResolvedValue(true),
 }));
 
 // why: sendPush queues a pg-boss job; the queue and delivery are the push
@@ -83,27 +84,19 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("sendAuditAssignedEmail", () => {
-  it("pushes to the assignee, with the due date in their format", async () => {
-    vi.mocked(resolveUserFormatPrefsById).mockResolvedValue({
-      dateFormat: "DD_MM_YYYY",
-      timeFormat: "H24",
-      weekStartsOn: 1,
-      timeZone: "Europe/Berlin",
-    });
-
-    await sendAuditAssignedEmail({
+describe("sendAuditAssignedPush", () => {
+  it("pushes to the assignee, with the due date in their format", () => {
+    sendAuditAssignedPush({
       audit,
-      assigneeEmail: "user-a@example.com",
-      assigneeName: "Ana",
       assigneeUserId: "user-a",
-      hints,
+      prefs: {
+        dateFormat: "DD_MM_YYYY",
+        timeFormat: "H24",
+        weekStartsOn: 1,
+        timeZone: "Europe/Berlin",
+      },
     });
 
-    expect(sendEmailAndWait).toHaveBeenCalledOnce();
-    expect(vi.mocked(sendEmailAndWait).mock.calls[0][0].subject).toBe(
-      `🔍 You've been assigned to audit: "Q4 count" - shelf.nu`
-    );
     expect(vi.mocked(sendPush).mock.calls).toEqual([
       [
         {
@@ -117,36 +110,55 @@ describe("sendAuditAssignedEmail", () => {
       ],
     ]);
   });
+});
 
-  it("pushes without waiting for the email send to finish", async () => {
+describe("sendAuditAssignedEmail", () => {
+  beforeEach(() => {
     vi.mocked(resolveUserFormatPrefsById).mockResolvedValue({
       dateFormat: "DD_MM_YYYY",
       timeFormat: "H24",
       weekStartsOn: 1,
       timeZone: "UTC",
     });
-    // Hold the email send open, as a slow mail server would.
-    let finishSend: () => void = () => {};
-    vi.mocked(sendEmailAndWait).mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSend = resolve;
-        })
-    );
+  });
 
-    const sending = sendAuditAssignedEmail({
+  /** Sends the assignment email to user-a. */
+  const sendToAna = () =>
+    sendAuditAssignedEmail({
       audit,
       assigneeEmail: "user-a@example.com",
       assigneeName: "Ana",
       assigneeUserId: "user-a",
       hints,
     });
-    await vi.waitFor(() => expect(sendEmailAndWait).toHaveBeenCalledOnce());
 
-    expect(sendPush).toHaveBeenCalledOnce();
+  it("emails the assignee and leaves the push to sendAuditAssignedPush", async () => {
+    await sendToAna();
 
-    finishSend();
-    await sending;
+    expect(sendEmailAndWait).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendEmailAndWait).mock.calls[0][0].subject).toBe(
+      `🔍 You've been assigned to audit: "Q4 count" - shelf.nu`
+    );
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
+  it("logs the hand-off when the email was sent or queued", async () => {
+    vi.mocked(sendEmailAndWait).mockResolvedValueOnce(true);
+
+    await sendToAna();
+
+    expect(Logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("Audit assignment email handed off for Ana")
+    );
+  });
+
+  it("logs no hand-off when both the send and the enqueue failed", async () => {
+    // sendEmailAndWait has already logged both failures as errors.
+    vi.mocked(sendEmailAndWait).mockResolvedValueOnce(false);
+
+    await sendToAna();
+
+    expect(Logger.info).not.toHaveBeenCalled();
   });
 
   it("logs a failure for that recipient, sends no push and does not throw", async () => {

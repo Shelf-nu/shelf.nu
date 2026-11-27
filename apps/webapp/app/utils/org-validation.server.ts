@@ -953,6 +953,39 @@ export async function assertUserBelongsToOrg(
 }
 
 /**
+ * Returns the users in `userIds` who are members of `organizationId`, in input
+ * order and without duplicates, in one query. For callers that keep the
+ * eligible members of a list instead of refusing it, such as an audit team
+ * carried over to a duplicate.
+ *
+ * @param params.userIds - User IDs to check; an empty list returns [] without
+ *   a query
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @returns The members among `userIds`
+ */
+export async function filterUsersInOrg(
+  {
+    userIds,
+    organizationId,
+  }: { userIds: User["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<User["id"][]> {
+  const uniqueIds = Array.from(new Set(userIds));
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+
+  const client = tx ?? db;
+  const members = await client.userOrganization.findMany({
+    where: { organizationId, userId: { in: uniqueIds } },
+    select: { userId: true },
+  });
+  const memberIds = new Set(members.map((member) => member.userId));
+  return uniqueIds.filter((id) => memberIds.has(id));
+}
+
+/**
  * Asserts that every user in `userIds` is a member of `organizationId`, in one
  * query. The plural of `assertUserBelongsToOrg`, for forms that pick several
  * people at once (an audit's assignees).
@@ -971,18 +1004,11 @@ export async function assertUsersBelongToOrg(
   tx?: OrgValidationTxClient
 ): Promise<void> {
   const uniqueIds = Array.from(new Set(userIds));
-  if (uniqueIds.length === 0) {
-    return;
-  }
+  const memberIds = new Set(
+    await filterUsersInOrg({ userIds: uniqueIds, organizationId }, tx)
+  );
 
-  const client = tx ?? db;
-  const members = await client.userOrganization.findMany({
-    where: { organizationId, userId: { in: uniqueIds } },
-    select: { userId: true },
-  });
-
-  if (members.length !== uniqueIds.length) {
-    const memberIds = new Set(members.map((member) => member.userId));
+  if (memberIds.size !== uniqueIds.length) {
     throw new ShelfError({
       cause: null,
       title: "Invalid user",

@@ -15,7 +15,7 @@ import { db } from "~/database/db.server";
 import { Logger } from "~/utils/logger";
 import { sendAuditAssignedEmails } from "./assignment-emails.server";
 import { AUDIT_INCLUDE_FOR_EMAIL } from "./constants";
-import { sendAuditAssignedEmail } from "./email-helpers";
+import { sendAuditAssignedEmail, sendAuditAssignedPush } from "./email-helpers";
 
 // why: the helper loads the audit with its team through Prisma; the stub
 // stands in for the database and lets each test set who is assigned.
@@ -27,6 +27,7 @@ vi.mock("~/database/db.server", () => ({
 // records who would have been emailed.
 vi.mock("./email-helpers", () => ({
   sendAuditAssignedEmail: vi.fn(),
+  sendAuditAssignedPush: vi.fn(),
 }));
 
 // why: a failed send is reported through the logger and nowhere else, so the
@@ -93,6 +94,37 @@ describe("sendAuditAssignedEmails", () => {
       assigneeUserId: "user-2",
       hints,
     });
+  });
+
+  it("pushes to every recipient before any email has settled", async () => {
+    vi.mocked(db.auditSession.findFirst).mockResolvedValue(
+      auditWith([
+        assignment("user-2", "two@example.com"),
+        assignment("user-3", "three@example.com"),
+        assignment("user-4", null),
+      ]) as never
+    );
+    // The first email never settles, as with a mail server that hangs.
+    vi.mocked(sendAuditAssignedEmail).mockReturnValueOnce(
+      new Promise<void>(() => {})
+    );
+
+    void sendAuditAssignedEmails({
+      auditId: "audit-1",
+      organizationId: "org-1",
+      recipientUserIds: ["user-2", "user-3", "user-4"],
+      hints,
+    });
+    await vi.waitFor(() => expect(sendAuditAssignedEmail).toHaveBeenCalled());
+
+    // Everyone was pushed, including user-4 who has no email, while only the
+    // first email has started.
+    expect(
+      vi
+        .mocked(sendAuditAssignedPush)
+        .mock.calls.map(([args]) => args.assigneeUserId)
+    ).toEqual(["user-2", "user-3", "user-4"]);
+    expect(emailedUserIds()).toEqual(["user-2"]);
   });
 
   it("skips an assignee who has no email address", async () => {

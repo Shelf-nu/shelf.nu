@@ -33,6 +33,7 @@ import {
   assertTeamMembersBelongToOrg,
   assertUserBelongsToOrg,
   assertUsersBelongToOrg,
+  filterUsersInOrg,
 } from "./org-validation.server";
 import { hasPermission } from "./permissions/permission.validator.server";
 
@@ -809,6 +810,44 @@ describe("assertUsersBelongToOrg", () => {
     await assertUsersBelongToOrg({ userIds: ["u-1"], organizationId: ORG }, tx);
 
     expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("filterUsersInOrg", () => {
+  /** A tx whose membership table answers with `memberIds`. */
+  function membersTx(memberIds: string[]) {
+    return txWith({
+      userOrganization: {
+        findMany: vitest
+          .fn()
+          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
+      },
+    });
+  }
+
+  it("returns [] for an empty list without a query", async () => {
+    const tx = membersTx([]);
+
+    await expect(
+      filterUsersInOrg({ userIds: [], organizationId: ORG }, tx)
+    ).resolves.toEqual([]);
+    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the members in input order, once each, and drops the rest", async () => {
+    const tx = membersTx(["u-3", "u-1"]);
+
+    await expect(
+      filterUsersInOrg(
+        { userIds: ["u-1", "u-gone", "u-3", "u-1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toEqual(["u-1", "u-3"]);
+    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG, userId: { in: ["u-1", "u-gone", "u-3"] } },
+      select: { userId: true },
+    });
     expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 });

@@ -42,6 +42,7 @@ import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   assertAssetsBelongToOrg,
   assertUsersBelongToOrg,
+  filterUsersInOrg,
 } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
@@ -581,16 +582,9 @@ export async function createAuditSession(
       // a moment earlier is either refused or dropped, never assigned.
       let uniqueAssigneeIds = requestedAssigneeIds;
       if (nonMemberAssignees === "drop") {
-        const members =
-          requestedAssigneeIds.length > 0
-            ? await tx.userOrganization.findMany({
-                where: { organizationId, userId: { in: requestedAssigneeIds } },
-                select: { userId: true },
-              })
-            : [];
-        const memberIds = new Set(members.map((member) => member.userId));
-        uniqueAssigneeIds = requestedAssigneeIds.filter((id) =>
-          memberIds.has(id)
+        uniqueAssigneeIds = await filterUsersInOrg(
+          { userIds: requestedAssigneeIds, organizationId },
+          tx
         );
       } else {
         await assertUsersBelongToOrg(
@@ -720,7 +714,8 @@ export async function createAuditSession(
       } satisfies CreateAuditSessionResult;
     },
     // The asset rows, the membership check, the assignee events and the
-    // notes all share this transaction; a large audit outgrows the 5s default.
+    // creation note all share this transaction; a large audit outgrows the
+    // 5s default.
     { timeout: 15_000 }
   );
 
