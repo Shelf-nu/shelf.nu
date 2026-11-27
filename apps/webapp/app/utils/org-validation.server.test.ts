@@ -756,11 +756,10 @@ describe("assertUsersBelongToOrg", () => {
   /** A tx whose membership table answers with `memberIds`. */
   function membersTx(memberIds: string[]) {
     return txWith({
-      userOrganization: {
-        findMany: vitest
-          .fn()
-          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
-      },
+      // The locking statement is the read inside a transaction.
+      $queryRaw: vitest
+        .fn()
+        .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
     });
   }
 
@@ -770,7 +769,7 @@ describe("assertUsersBelongToOrg", () => {
     await expect(
       assertUsersBelongToOrg({ userIds: [], organizationId: ORG }, tx)
     ).resolves.toBeUndefined();
-    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 
   it("queries duplicate ids once, scoped to the org, and passes", async () => {
@@ -782,11 +781,10 @@ describe("assertUsersBelongToOrg", () => {
         tx
       )
     ).resolves.toBeUndefined();
-    expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
-    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, userId: { in: ["u-1", "u-2"] } },
-      select: { userId: true },
-    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const [, organizationId, ids] = tx.$queryRaw.mock.calls[0];
+    expect(organizationId).toBe(ORG);
+    expect(ids.values).toEqual(["u-1", "u-2"]);
   });
 
   it("throws 400 naming the unknown ids when only some are members", async () => {
@@ -810,7 +808,7 @@ describe("assertUsersBelongToOrg", () => {
 
     await assertUsersBelongToOrg({ userIds: ["u-1"], organizationId: ORG }, tx);
 
-    expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 });
@@ -819,11 +817,10 @@ describe("filterUsersInOrg", () => {
   /** A tx whose membership table answers with `memberIds`. */
   function membersTx(memberIds: string[]) {
     return txWith({
-      userOrganization: {
-        findMany: vitest
-          .fn()
-          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
-      },
+      // The locking statement is the read inside a transaction.
+      $queryRaw: vitest
+        .fn()
+        .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
     });
   }
 
@@ -833,10 +830,10 @@ describe("filterUsersInOrg", () => {
     await expect(
       filterUsersInOrg({ userIds: [], organizationId: ORG }, tx)
     ).resolves.toEqual([]);
-    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("share-locks the membership rows in the transaction before reading them", async () => {
+  it("reads the members from the share-locking statement itself", async () => {
     const tx = membersTx(["u-1", "u-2"]);
 
     await filterUsersInOrg(
@@ -850,15 +847,15 @@ describe("filterUsersInOrg", () => {
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     const [strings, ...values] = tx.$queryRaw.mock.calls[0];
     const sql = strings.join("?");
-    expect(sql).toContain('FROM "UserOrganization"');
+    expect(sql).toContain('SELECT "userId" FROM "UserOrganization"');
     expect(sql).toContain('"organizationId" = ?');
     expect(sql).toContain('"userId" IN (?)');
     expect(sql).toContain("FOR SHARE");
     expect(values[0]).toBe(ORG);
     expect(values[1].values).toEqual(["u-1", "u-2"]);
-    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      tx.userOrganization.findMany.mock.invocationCallOrder[0]
-    );
+    // No second read: another statement would take a new snapshot and could
+    // see a membership these locks do not hold.
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 
   it("takes no lock outside a transaction", async () => {
@@ -880,11 +877,11 @@ describe("filterUsersInOrg", () => {
         tx
       )
     ).resolves.toEqual(["u-1", "u-3"]);
-    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
-      where: { organizationId: ORG, userId: { in: ["u-1", "u-gone", "u-3"] } },
-      select: { userId: true },
-    });
-    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw.mock.calls[0][2].values).toEqual([
+      "u-1",
+      "u-3",
+      "u-gone",
+    ]);
   });
 });
 

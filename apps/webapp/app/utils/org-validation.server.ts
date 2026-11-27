@@ -128,10 +128,6 @@ export type OrgValidationTxClient = {
       where: { userId: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
-    findMany: (args: {
-      where: { organizationId: string; userId: { in: string[] } };
-      select: { userId: true };
-    }) => Promise<{ userId: string }[]>;
   };
   assetKit: {
     // `kitId` rides along so `assertAssetKitsBelongToOrg` can hand callers an
@@ -957,14 +953,23 @@ export async function assertUserBelongsToOrg(
   }
 }
 
+/** Narrows a raw `{ userId }` row returned by `$queryRaw`. */
+function isUserIdRow(row: unknown): row is { userId: string } {
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    typeof (row as { userId?: unknown }).userId === "string"
+  );
+}
+
 /**
  * Returns the users in `userIds` who are members of `organizationId`, in input
  * order and without duplicates, in one query. For callers that keep the
  * eligible members of a list instead of refusing it, such as an audit team
  * carried over to a duplicate.
  *
- * Inside a transaction it first locks those membership rows `FOR SHARE` until
- * the transaction ends. Removing a member locks the same row `FOR UPDATE`
+ * Inside a transaction it reads those membership rows with `FOR SHARE`, which
+ * holds them until the transaction ends. Removing a member locks the same row `FOR UPDATE`
  * (`lockMembership`), so the two queue instead of crossing: whatever the
  * caller writes for a member who is being removed is either refused here or
  * committed before the removal runs, where its cleanup sees it.
@@ -987,24 +992,32 @@ export async function filterUsersInOrg(
     return [];
   }
 
+  let memberIds: Set<string>;
   if (tx) {
-    // Sorted so two callers locking overlapping sets take the rows in the
-    // same order.
-    await tx.$queryRaw`
-      SELECT id FROM "UserOrganization"
+    // The locking statement is also the read: a second query would take a new
+    // snapshot and could see a membership committed after these locks, which
+    // nothing then holds. Sorted so two callers locking overlapping sets take
+    // the rows in the same order.
+    const locked = await tx.$queryRaw`
+      SELECT "userId" FROM "UserOrganization"
       WHERE "organizationId" = ${organizationId}
         AND "userId" IN (${Prisma.join([...uniqueIds].sort())})
       ORDER BY "userId"
       FOR SHARE
     `;
+    memberIds = new Set(
+      (Array.isArray(locked) ? locked : []).flatMap((row: unknown) =>
+        isUserIdRow(row) ? [row.userId] : []
+      )
+    );
+  } else {
+    const members = await db.userOrganization.findMany({
+      where: { organizationId, userId: { in: uniqueIds } },
+      select: { userId: true },
+    });
+    memberIds = new Set(members.map((member) => member.userId));
   }
 
-  const client = tx ?? db;
-  const members = await client.userOrganization.findMany({
-    where: { organizationId, userId: { in: uniqueIds } },
-    select: { userId: true },
-  });
-  const memberIds = new Set(members.map((member) => member.userId));
   return uniqueIds.filter((id) => memberIds.has(id));
 }
 
