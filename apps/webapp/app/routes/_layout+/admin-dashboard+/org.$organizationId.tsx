@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import {
   data,
@@ -28,6 +29,7 @@ import {
   toggleWorkspaceDisabled,
   toggleBarcodeEnabled,
   toggleAuditEnabled,
+  toggleAdvancedReportsEnabled,
   setRequireSsoLogin,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
@@ -120,6 +122,7 @@ export const action = async ({
           "disableWorkspace",
           "toggleBarcodes",
           "toggleAudits",
+          "toggleAdvancedReports",
           "toggleRequireSsoLogin",
         ]),
       })
@@ -187,6 +190,27 @@ export const action = async ({
 
         return payload({
           message: `Audits ${auditsEnabled ? "enabled" : "disabled"}`,
+        });
+      }
+      case "toggleAdvancedReports": {
+        const { advancedReportsEnabled } = parseData(
+          await request.formData(),
+          z.object({
+            advancedReportsEnabled: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        await toggleAdvancedReportsEnabled({
+          organizationId,
+          advancedReportsEnabled,
+        });
+
+        return payload({
+          message: `Advanced Reports ${
+            advancedReportsEnabled ? "enabled" : "disabled"
+          }`,
         });
       }
       case "toggleRequireSsoLogin": {
@@ -328,6 +352,31 @@ export const action = async ({
 export default function OrgPage() {
   const { organization } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  // The add-on switch has its own fetcher so its failure message never shows
+  // under another toggle, and the switch can fall back to the saved value.
+  const advancedReportsFetcher = useFetcher<typeof action>();
+  // Bumped when an update is refused, to put the switch back on the saved
+  // value: the switch is uncontrolled, and a refusal leaves that value
+  // unchanged, so nothing else would move it off the position the admin set.
+  const [advancedReportsResets, setAdvancedReportsResets] = useState(0);
+  const advancedReportsError =
+    advancedReportsFetcher.data &&
+    "error" in advancedReportsFetcher.data &&
+    advancedReportsFetcher.data.error
+      ? advancedReportsFetcher.data.error.message
+      : null;
+  // Driven off each finished submission, not off the message: two refusals in
+  // a row carry the same text, and the second one still has to put the switch
+  // back. `fetcher.data` survives a resubmission, so the transition out of a
+  // submit is the only reliable signal that an answer just arrived.
+  const advancedReportsSettling = advancedReportsFetcher.state !== "idle";
+  useEffect(() => {
+    if (advancedReportsSettling) return;
+    if (advancedReportsError) setAdvancedReportsResets((count) => count + 1);
+    // `advancedReportsError` is read when a submission finishes, which is what
+    // the dependency on `advancedReportsSettling` marks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advancedReportsSettling]);
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -449,6 +498,44 @@ export default function OrgPage() {
               <input type="hidden" value="toggleAudits" name="intent" />
             </div>
           </fetcher.Form>
+          <hr className="border-1 border-gray-700" />
+          <h4>Enable/Disable Advanced Reports</h4>
+          <p>
+            Enable or disable the report builder (Advanced Reports add-on) for
+            this workspace
+          </p>
+          <advancedReportsFetcher.Form
+            method="post"
+            onChange={(e) => advancedReportsFetcher.submit(e.currentTarget)}
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  Enable Advanced Reports
+                </p>
+              </div>
+              {/* Remounted whenever the saved value changes or an update is
+                  refused, so the switch always shows what the workspace has. */}
+              <Switch
+                key={`advanced-reports-${organization.advancedReportsEnabled}-${advancedReportsResets}`}
+                name={"advancedReportsEnabled"}
+                disabled={isFormProcessing(advancedReportsFetcher.state)}
+                defaultChecked={organization.advancedReportsEnabled}
+                required
+                title={"Toggle Advanced Reports"}
+              />
+              <input
+                type="hidden"
+                value="toggleAdvancedReports"
+                name="intent"
+              />
+            </div>
+            {advancedReportsError ? (
+              <p className="mt-2 text-sm text-error-500">
+                {advancedReportsError}
+              </p>
+            ) : null}
+          </advancedReportsFetcher.Form>
           <hr className="border-1 border-gray-700" />
           <h4>Enable/Disabled Workspace</h4>
           <fetcher.Form
