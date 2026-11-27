@@ -108,6 +108,7 @@ model User {
   auditsCreated      AuditSession[]
   assetImports       AssetImport[]
   auditAssignments   AuditAssignment[]
+  problemReports     ProblemReport[]
   auditAssetsScanned AuditAsset[]
   auditScans         AuditScan[]
   auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
@@ -290,6 +291,7 @@ model Asset {
   qrCodes      Qr[]
   barcodes     Barcode[]              @relation("AssetBarcodes")
   reports      ReportFound[]
+  problemReports ProblemReport[]
   tags         Tag[]
   customFields AssetCustomFieldValue[]
   bookingAssets   BookingAsset[]
@@ -655,6 +657,9 @@ model Note {
   asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 
+  // Set on the history line of a problem report
+  problemReport ProblemReport?
+
   // Indexes for foreign keys
   @@index([assetId])
   @@index([userId])
@@ -832,6 +837,42 @@ model ReportFound {
   // Indexes for foreign keys
   @@index([assetId])
   @@index([kitId])
+}
+
+// A problem a workspace member reported on an asset ("Report a problem").
+// The record of the report; the asset's history line is the linked note.
+// The report lives and dies with that line: deleting the note deletes the
+// report, so the text is never kept where its history line is gone.
+model ProblemReport {
+  id      String @id @default(cuid())
+  // The text as the member typed it, line breaks included
+  content String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  // The member who reported it. Null only if their user row is removed; a
+  // deleted account keeps its anonymised row, as it does for notes.
+  reporter   User?   @relation(fields: [reporterId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  reporterId String?
+
+  // The asset history line written with the report. Deleting it deletes
+  // the report.
+  note   Note?   @relation(fields: [noteId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  noteId String? @unique
+
+  // Indexes for foreign keys
+  @@index([assetId])
+  @@index([organizationId])
+  @@index([reporterId])
 }
 
 enum ErrorCorrection {
@@ -1178,6 +1219,7 @@ model Organization {
   roleChangeLogs  RoleChangeLog[]
   teamMemberNotes     TeamMemberNote[]
   activityEvents      ActivityEvent[]
+  problemReports      ProblemReport[]
 
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
@@ -3134,6 +3176,10 @@ enum ActivityAction {
   ASSET_ARCHIVED
   ASSET_UNARCHIVED
   ASSET_DELETED
+  // A member reported a problem on the asset; `meta.problemReportId` names
+  // the `ProblemReport` row. The report text is never copied into the event.
+  // The hourly report limit counts these events per actor and workspace.
+  ASSET_PROBLEM_REPORTED
 
   // Custody
   CUSTODY_ASSIGNED
