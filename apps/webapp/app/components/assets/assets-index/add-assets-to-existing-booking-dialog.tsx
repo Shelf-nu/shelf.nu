@@ -60,6 +60,7 @@ function BookingSelect({
   isLoading,
   disabled,
   errorMessage,
+  onSelectedIdChange,
 }: {
   /** All open bookings returned by `/api/bookings/get-all`. */
   bookings: PickerBooking[];
@@ -69,10 +70,21 @@ function BookingSelect({
   disabled?: boolean;
   /** Zorm/server validation message for the `id` field. */
   errorMessage?: string;
+  /** Told the picked booking's id, or `undefined` when cleared, so the dialog
+   * can tell which booking a server answer was about. */
+  onSelectedIdChange: (id: string | undefined) => void;
 }) {
+  // The pick lives here, so it starts empty each time the picker mounts
+  // (after "Add more", for one). The dialog is told of every change.
+  const [selectedId, setSelectedIdState] = useState<string | undefined>(
+    undefined
+  );
+  const setSelectedId = (id: string | undefined) => {
+    setSelectedIdState(id);
+    onSelectedIdChange(id);
+  };
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const triggerRef = useRef<HTMLDivElement>(null);
   // Focus the search box when the popover opens (Radix portal mounts a frame
   // late, which the hook accounts for).
@@ -242,6 +254,9 @@ export default function AddAssetsToExistingBookingDialog() {
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
+  const [selectedBookingId, setSelectedBookingId] = useState<
+    string | undefined
+  >(undefined);
 
   const isDialogOpen = bulkDialogOpenState["booking-exist"] === true;
 
@@ -300,6 +315,7 @@ export default function AddAssetsToExistingBookingDialog() {
                 isLoading={isFetchingBookings}
                 disabled={disabled}
                 errorMessage={zo.errors.id()?.message}
+                onSelectedIdChange={setSelectedBookingId}
               />
               <div className="mb-4 mt-2 text-gray-500">
                 <span className="font-medium text-gray-600">Draft</span>,{" "}
@@ -313,10 +329,16 @@ export default function AddAssetsToExistingBookingDialog() {
               <QuantityTrackedOneUnitNotice
                 selectedItems={selectedAssets}
                 // Assets the server found already on the chosen booking are
-                // not booked again, so they keep the amount they have.
-                excludeIds={fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
-                  (asset: Pick<Asset, "id" | "title">) => asset.id
-                )}
+                // not booked again, so they keep the amount they have. The
+                // answer stays on screen while another booking is picked, so
+                // it only counts for the booking it was about.
+                excludeIds={
+                  fetcherErrorAdditionalData?.bookingId === selectedBookingId
+                    ? fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
+                        (asset: Pick<Asset, "id" | "title">) => asset.id
+                      )
+                    : undefined
+                }
               />
 
               <When truthy={!isFetchingBookings && bookings.length === 0}>

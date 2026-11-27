@@ -149,6 +149,7 @@ describe("add assets to an existing booking", () => {
     // titles, never booking-row ids.
     expect(error.additionalData).toEqual(
       expect.objectContaining({
+        bookingId: "booking-1",
         alreadyAddedAssets: [{ id: "asset-1", title: "Cable ties" }],
         allAssetsInBooking: false,
       })
