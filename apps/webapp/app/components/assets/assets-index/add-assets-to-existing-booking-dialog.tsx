@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import type { Asset, Booking } from "@prisma/client";
+import type { Booking } from "@prisma/client";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -25,6 +25,10 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { sortPickerBookings } from "~/utils/booking-picker-order";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
+import {
+  isAnswerAboutAnotherBooking,
+  overlapForPickedBooking,
+} from "./booking-overlap-answer";
 
 /**
  * Slim booking shape returned by `/api/bookings/get-all` (see
@@ -305,153 +309,156 @@ export default function AddAssetsToExistingBookingDialog() {
         fetcherData,
         fetcherError,
         fetcherErrorAdditionalData,
-      }) => (
-        <>
-          {/* Handling the initial state of the dialog */}
-          <When truthy={!fetcherData?.success}>
-            <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
-              <BookingSelect
-                bookings={bookings}
-                isLoading={isFetchingBookings}
-                disabled={disabled}
-                errorMessage={zo.errors.id()?.message}
-                onSelectedIdChange={setSelectedBookingId}
-              />
-              <div className="mb-4 mt-2 text-gray-500">
-                <span className="font-medium text-gray-600">Draft</span>,{" "}
-                <span className="font-medium text-gray-600">Reserved</span>,{" "}
-                <span className="font-medium text-gray-600">Ongoing</span> and{" "}
-                <span className="font-medium text-gray-600">Overdue</span>{" "}
-                bookings are shown. Assets added to an ongoing booking stay
-                available until you check them out.
+      }) => {
+        // The server's last answer stays on screen while another booking is
+        // picked. What it says about already-added assets only holds for the
+        // booking it was about.
+        const overlap = overlapForPickedBooking(
+          fetcherErrorAdditionalData,
+          selectedBookingId
+        );
+        const answerIsStale = isAnswerAboutAnotherBooking(
+          fetcherErrorAdditionalData,
+          selectedBookingId
+        );
+        return (
+          <>
+            {/* Handling the initial state of the dialog */}
+            <When truthy={!fetcherData?.success}>
+              <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
+                <BookingSelect
+                  bookings={bookings}
+                  isLoading={isFetchingBookings}
+                  disabled={disabled}
+                  errorMessage={zo.errors.id()?.message}
+                  onSelectedIdChange={setSelectedBookingId}
+                />
+                <div className="mb-4 mt-2 text-gray-500">
+                  <span className="font-medium text-gray-600">Draft</span>,{" "}
+                  <span className="font-medium text-gray-600">Reserved</span>,{" "}
+                  <span className="font-medium text-gray-600">Ongoing</span> and{" "}
+                  <span className="font-medium text-gray-600">Overdue</span>{" "}
+                  bookings are shown. Assets added to an ongoing booking stay
+                  available until you check them out.
+                </div>
+
+                <QuantityTrackedOneUnitNotice
+                  selectedItems={selectedAssets}
+                  // Assets the server found already on the chosen booking are
+                  // not booked again, so they keep the amount they have.
+                  excludeIds={overlap?.alreadyAddedAssets.map(
+                    (asset) => asset.id
+                  )}
+                />
+
+                <When truthy={!isFetchingBookings && bookings.length === 0}>
+                  <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
+                    <p className="text-sm text-gray-600">
+                      No open bookings found. Create a new booking first to add
+                      assets to it.
+                    </p>
+                  </div>
+                </When>
+
+                <When
+                  truthy={
+                    !answerIsStale &&
+                    (!!fetcherError || !!fetcherErrorAdditionalData)
+                  }
+                >
+                  <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
+                    <When truthy={!!fetcherError}>
+                      <p>{fetcherError}</p>
+                    </When>
+                    <When truthy={overlap !== null}>
+                      <div className="mt-4">
+                        <p>Already added assets are : </p>
+                        <ul className="mb-2 list-inside list-disc">
+                          {overlap?.alreadyAddedAssets.map((asset) => (
+                            <li key={asset.id}>{asset.title}</li>
+                          ))}
+                        </ul>
+
+                        <input
+                          type="hidden"
+                          name="addOnlyRestAssets"
+                          value="true"
+                        />
+
+                        <When truthy={!overlap?.allAssetsInBooking}>
+                          <Button
+                            type="submit"
+                            className="w-full"
+                            variant="secondary"
+                          >
+                            Add only the rest of the assets
+                          </Button>
+                        </When>
+                      </div>
+                    </When>
+                  </div>
+                </When>
+
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    width="full"
+                    disabled={disabled}
+                    onClick={handleCloseDialog}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    width="full"
+                    disabled={disabled}
+                  >
+                    Confirm
+                  </Button>
+                </div>
               </div>
+            </When>
 
-              <QuantityTrackedOneUnitNotice
-                selectedItems={selectedAssets}
-                // Assets the server found already on the chosen booking are
-                // not booked again, so they keep the amount they have. The
-                // answer stays on screen while another booking is picked, so
-                // it only counts for the booking it was about.
-                excludeIds={
-                  fetcherErrorAdditionalData?.bookingId === selectedBookingId
-                    ? fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
-                        (asset: Pick<Asset, "id" | "title">) => asset.id
-                      )
-                    : undefined
-                }
-              />
-
-              <When truthy={!isFetchingBookings && bookings.length === 0}>
-                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
-                  <p className="text-sm text-gray-600">
-                    No open bookings found. Create a new booking first to add
-                    assets to it.
+            {/* Handling the after success state of the dialog */}
+            <When truthy={!!fetcherData?.success}>
+              <div>
+                <div className="mb-4 rounded-md border border-success-500 p-2 text-success-500">
+                  <h5 className="text-success-500">Booking updated</h5>
+                  <p>
+                    The assets you selected have been added to the booking. Do
+                    you want to add more or view the booking?
                   </p>
                 </div>
-              </When>
 
-              <When truthy={!!fetcherError || !!fetcherErrorAdditionalData}>
-                <div className="mb-4 rounded-md border border-gray-300 bg-gray-25 p-2">
-                  <When truthy={!!fetcherError}>
-                    <p>{fetcherError}</p>
-                  </When>
-                  <When
-                    truthy={
-                      !!fetcherErrorAdditionalData &&
-                      fetcherErrorAdditionalData?.alreadyAddedAssets?.length
-                    }
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    width="full"
+                    disabled={disabled}
+                    onClick={handleCloseDialog}
                   >
-                    <div className="mt-4">
-                      <p>Already added assets are : </p>
-                      <ul className="mb-2 list-inside list-disc">
-                        {fetcherErrorAdditionalData?.alreadyAddedAssets?.map(
-                          (asset: Pick<Asset, "id" | "title">) => (
-                            <li key={asset.id}>{asset.title}</li>
-                          )
-                        )}
-                      </ul>
-
-                      <input
-                        type="hidden"
-                        name="addOnlyRestAssets"
-                        value="true"
-                      />
-
-                      <When
-                        truthy={!fetcherErrorAdditionalData?.allAssetsInBooking}
-                      >
-                        <Button
-                          type="submit"
-                          className="w-full"
-                          variant="secondary"
-                        >
-                          Add only the rest of the assets
-                        </Button>
-                      </When>
-                    </div>
-                  </When>
+                    Add more
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    width="full"
+                    disabled={disabled}
+                    onClick={() => {
+                      void navigate(`/bookings/${fetcherData?.bookingId}`);
+                    }}
+                  >
+                    View booking
+                  </Button>
                 </div>
-              </When>
-
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  width="full"
-                  disabled={disabled}
-                  onClick={handleCloseDialog}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  width="full"
-                  disabled={disabled}
-                >
-                  Confirm
-                </Button>
               </div>
-            </div>
-          </When>
-
-          {/* Handling the after success state of the dialog */}
-          <When truthy={!!fetcherData?.success}>
-            <div>
-              <div className="mb-4 rounded-md border border-success-500 p-2 text-success-500">
-                <h5 className="text-success-500">Booking updated</h5>
-                <p>
-                  The assets you selected have been added to the booking. Do you
-                  want to add more or view the booking?
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  width="full"
-                  disabled={disabled}
-                  onClick={handleCloseDialog}
-                >
-                  Add more
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  width="full"
-                  disabled={disabled}
-                  onClick={() => {
-                    void navigate(`/bookings/${fetcherData?.bookingId}`);
-                  }}
-                >
-                  View booking
-                </Button>
-              </div>
-            </div>
-          </When>
-        </>
-      )}
+            </When>
+          </>
+        );
+      }}
     </BulkUpdateDialogContent>
   );
 }
