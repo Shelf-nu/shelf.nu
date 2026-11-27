@@ -125,6 +125,12 @@ vi.mock("~/database/db.server", () => {
 
 // why: the SSO org set comes from the organization module; the test decides
 // which workspace (and which group mappings) the login reconciles against
+// why: taking a removed member off open audits is pinned by its own tests;
+// this suite's database mock has no audit tables.
+vi.mock("~/modules/audit/departed-assignees.server", () => ({
+  removeDepartedMemberFromOpenAudits: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("../organization/service.server", () => ({
   getOrganizationsBySsoDomain: vi.fn(),
 }));

@@ -277,6 +277,7 @@ describe("resolveUserAction — revoke access role hierarchy", () => {
       userId: "some-admin",
       organizationId: "org-1",
       actorOwnsWorkspace: true,
+      actorUserId: "owner-user",
     });
   });
 
@@ -327,6 +328,7 @@ describe("resolveUserAction — revoke access role hierarchy", () => {
       userId: "base-user",
       organizationId: "org-1",
       actorOwnsWorkspace: false,
+      actorUserId: "admin-user",
     });
   });
 });

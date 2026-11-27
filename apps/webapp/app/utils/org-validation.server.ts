@@ -32,7 +32,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { TagUseFor } from "@prisma/client";
+import { Prisma, TagUseFor } from "@prisma/client";
 import type { ArchivedAssetsFix } from "@shelf/labels";
 import { archivedAssetsRefusal } from "@shelf/labels";
 import { db } from "~/database/db.server";
@@ -170,6 +170,11 @@ export type OrgValidationTxClient = {
       select: { id: true };
     }) => Promise<{ id: string } | null>;
   };
+  /** Row locks the guards take inside a transaction. */
+  $queryRaw: (
+    query: TemplateStringsArray | Prisma.Sql,
+    ...values: unknown[]
+  ) => Promise<unknown>;
 };
 
 /**
@@ -958,6 +963,12 @@ export async function assertUserBelongsToOrg(
  * eligible members of a list instead of refusing it, such as an audit team
  * carried over to a duplicate.
  *
+ * Inside a transaction it first locks those membership rows `FOR SHARE` until
+ * the transaction ends. Removing a member locks the same row `FOR UPDATE`
+ * (`lockMembership`), so the two queue instead of crossing: whatever the
+ * caller writes for a member who is being removed is either refused here or
+ * committed before the removal runs, where its cleanup sees it.
+ *
  * @param params.userIds - User IDs to check; an empty list returns [] without
  *   a query
  * @param params.organizationId - The caller's (validated) organization ID
@@ -976,6 +987,18 @@ export async function filterUsersInOrg(
     return [];
   }
 
+  if (tx) {
+    // Sorted so two callers locking overlapping sets take the rows in the
+    // same order.
+    await tx.$queryRaw`
+      SELECT id FROM "UserOrganization"
+      WHERE "organizationId" = ${organizationId}
+        AND "userId" IN (${Prisma.join([...uniqueIds].sort())})
+      ORDER BY "userId"
+      FOR SHARE
+    `;
+  }
+
   const client = tx ?? db;
   const members = await client.userOrganization.findMany({
     where: { organizationId, userId: { in: uniqueIds } },
@@ -988,7 +1011,8 @@ export async function filterUsersInOrg(
 /**
  * Asserts that every user in `userIds` is a member of `organizationId`, in one
  * query. The plural of `assertUserBelongsToOrg`, for forms that pick several
- * people at once (an audit's assignees).
+ * people at once (an audit's assignees). Inside a transaction it share-locks
+ * the membership rows, as {@link filterUsersInOrg} describes.
  *
  * @param params.userIds - User IDs sourced from request/form input; duplicates
  *   are ignored and an empty list passes without a query

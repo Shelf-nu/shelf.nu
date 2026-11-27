@@ -3913,14 +3913,15 @@ describe("updateAuditSession", () => {
       data: { assigneeUserIds: ["user-2", "user-3"] },
     });
 
-    expect(mockDb.$queryRaw).toHaveBeenCalledTimes(1);
+    // The audit lock, then the share lock on the added members' memberships.
+    expect(mockDb.$queryRaw).toHaveBeenCalledTimes(2);
     const [sqlParts, ...values] = mockDb.$queryRaw.mock.calls[0] as [
       TemplateStringsArray,
       ...unknown[],
     ];
     const sql = sqlParts.join("?").replace(/\s+/g, " ").trim();
     expect(sql).toBe(
-      'SELECT id FROM "AuditSession" WHERE id = ? AND "organizationId" = ? FOR UPDATE'
+      'SELECT id FROM "AuditSession" WHERE id = ? AND "organizationId" = ? FOR NO KEY UPDATE'
     );
     expect(values).toEqual(["audit-1", "org-1"]);
     // The lock comes first: a second editor must wait before it reads the

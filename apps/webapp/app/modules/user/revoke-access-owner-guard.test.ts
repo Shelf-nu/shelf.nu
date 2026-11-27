@@ -22,6 +22,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { removeDepartedMemberFromOpenAudits } from "~/modules/audit/departed-assignees.server";
 import { revokeAccessToOrganization } from "./service.server";
 
 // @vitest-environment node
@@ -50,6 +51,12 @@ const dbMock = vi.hoisted(() => {
 // why: isolating the guard from the database; the assertion is that the
 // destructive write never happens
 vi.mock("~/database/db.server", () => ({ db: dbMock }));
+
+// why: taking a removed member off open audits is pinned by its own tests;
+// this suite's database mock has no audit tables.
+vi.mock("~/modules/audit/departed-assignees.server", () => ({
+  removeDepartedMemberFromOpenAudits: vi.fn().mockResolvedValue([]),
+}));
 
 describe("revokeAccessToOrganization — owner protection", () => {
   beforeEach(() => {
@@ -238,5 +245,45 @@ describe("revokeAccessToOrganization — owner protection", () => {
       select: { id: true },
     });
     expect(dbMock.user.update).toHaveBeenCalled();
+  });
+  it("takes the member off open audits inside the revoking transaction, naming the actor", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue({
+      roles: [OrganizationRoles.BASE],
+    });
+
+    await revokeAccessToOrganization({
+      userId: "user-1",
+      organizationId: "org-1",
+      actorUserId: "admin-1",
+    });
+
+    // dbMock is the transaction client here.
+    expect(removeDepartedMemberFromOpenAudits).toHaveBeenCalledWith(dbMock, {
+      userId: "user-1",
+      organizationId: "org-1",
+      actorUserId: "admin-1",
+    });
+    // After the membership is gone, so the cleanup sees the final state.
+    expect(
+      vi.mocked(removeDepartedMemberFromOpenAudits).mock.invocationCallOrder[0]
+    ).toBeGreaterThan(
+      dbMock.userOrganization.deleteMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("records a system revocation with no actor", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue({
+      roles: [OrganizationRoles.BASE],
+    });
+
+    await revokeAccessToOrganization({
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(removeDepartedMemberFromOpenAudits).toHaveBeenCalledWith(
+      dbMock,
+      expect.objectContaining({ actorUserId: null })
+    );
   });
 });

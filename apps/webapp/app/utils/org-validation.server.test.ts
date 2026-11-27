@@ -69,6 +69,7 @@ function txWith(overrides: Record<string, any>) {
     assetModel: { findFirst: vitest.fn().mockResolvedValue(null) },
     auditAsset: { findFirst: vitest.fn().mockResolvedValue(null) },
     auditSession: { findFirst: vitest.fn().mockResolvedValue(null) },
+    $queryRaw: vitest.fn().mockResolvedValue([]),
     ...overrides,
   } as any;
 }
@@ -833,6 +834,41 @@ describe("filterUsersInOrg", () => {
       filterUsersInOrg({ userIds: [], organizationId: ORG }, tx)
     ).resolves.toEqual([]);
     expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+
+  it("share-locks the membership rows in the transaction before reading them", async () => {
+    const tx = membersTx(["u-1", "u-2"]);
+
+    await filterUsersInOrg(
+      { userIds: ["u-2", "u-1"], organizationId: ORG },
+      tx
+    );
+
+    // A removal locks the same row FOR UPDATE, so the two queue: an
+    // assignment either waits for the removal and reads the member as gone,
+    // or commits first and its rows are seen by the removal's cleanup.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const [strings, ...values] = tx.$queryRaw.mock.calls[0];
+    const sql = strings.join("?");
+    expect(sql).toContain('FROM "UserOrganization"');
+    expect(sql).toContain('"organizationId" = ?');
+    expect(sql).toContain('"userId" IN (?)');
+    expect(sql).toContain("FOR SHARE");
+    expect(values[0]).toBe(ORG);
+    expect(values[1].values).toEqual(["u-1", "u-2"]);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.userOrganization.findMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("takes no lock outside a transaction", async () => {
+    vitest
+      .mocked(db.userOrganization.findMany)
+      .mockResolvedValueOnce([{ userId: "u-1" }] as never);
+
+    await expect(
+      filterUsersInOrg({ userIds: ["u-1"], organizationId: ORG })
+    ).resolves.toEqual(["u-1"]);
   });
 
   it("keeps the members in input order, once each, and drops the rest", async () => {

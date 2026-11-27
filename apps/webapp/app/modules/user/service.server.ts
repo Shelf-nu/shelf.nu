@@ -34,6 +34,7 @@ import { SOFT_DELETED_EMAIL_DOMAIN } from "~/emails/email.worker.server";
 import { sendEmail } from "~/emails/mail.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { removeDepartedMemberFromOpenAudits } from "~/modules/audit/departed-assignees.server";
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
@@ -1897,6 +1898,8 @@ export { lockMembership };
  *   (SSO, SCIM, account deletion), which are not bound by the owner-only rule.
  * @param args.allowMissingMembership - Treat a missing membership as already
  *   revoked instead of refusing it
+ * @param args.actorUserId - The member doing the revoking, recorded on the
+ *   audit notes and events; left undefined by system callers
  * @returns The updated user row
  * @throws {ShelfError} 404 when the user is not a member and
  *   `allowMissingMembership` is not set; 400 when the member owns the
@@ -1910,11 +1913,13 @@ export async function revokeMembershipInTx(
     organizationId,
     actorOwnsWorkspace,
     allowMissingMembership = false,
+    actorUserId,
   }: {
     userId: User["id"];
     organizationId: Organization["id"];
     actorOwnsWorkspace?: boolean;
     allowMissingMembership?: boolean;
+    actorUserId?: User["id"];
   }
 ) {
   const persisted = await lockMembership(tx, { userId, organizationId });
@@ -1972,6 +1977,15 @@ export async function revokeMembershipInTx(
   // the lock it can only match nothing when the membership is already gone.
   await deleteMembershipUnlessOwner({ userId, organizationId }, tx);
 
+  // Membership removal does not cascade to audit assignments. Runs after the
+  // delete, under the membership lock, which an in-flight audit assignment
+  // also holds (FOR SHARE) until it commits: its rows are visible here.
+  await removeDepartedMemberFromOpenAudits(tx, {
+    userId,
+    organizationId,
+    actorUserId: actorUserId ?? null,
+  });
+
   return tx.user.update({
     where: { id: userId },
     data: {
@@ -2028,6 +2042,8 @@ export async function clearLastSelectedOrganization({
  * @param args.organizationId - The workspace
  * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the member doing
  *   the revoking; undefined for system callers (see {@link revokeMembershipInTx})
+ * @param args.actorUserId - The member doing the revoking; undefined for
+ *   system callers
  * @returns The updated user row
  * @throws {ShelfError} 404 when the user is not a member (unless
  *   `allowMissingMembership`); 400 when the member owns the workspace; 403
@@ -2038,12 +2054,15 @@ export async function revokeAccessToOrganization({
   organizationId,
   actorOwnsWorkspace,
   allowMissingMembership,
+  actorUserId,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   actorOwnsWorkspace?: boolean;
   /** See {@link revokeMembershipInTx}. */
   allowMissingMembership?: boolean;
+  /** See {@link revokeMembershipInTx}. */
+  actorUserId?: User["id"];
 }) {
   try {
     /**
@@ -2075,6 +2094,7 @@ export async function revokeAccessToOrganization({
         organizationId,
         actorOwnsWorkspace,
         allowMissingMembership,
+        actorUserId,
       })
     );
 
