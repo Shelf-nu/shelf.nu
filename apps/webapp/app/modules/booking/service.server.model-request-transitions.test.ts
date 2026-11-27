@@ -448,10 +448,14 @@ describe("checkoutBooking", () => {
 
     const [args] = vitest.mocked(assertOutstandingModelRequestsFit).mock
       .calls[0];
+    const writtenFrom = args.from;
+    if (!writtenFrom) throw new Error("Expected the guard to get a start");
     // The written start is now, cut to the minute: a reservation between now
     // and the planned start competes for the same units.
-    expect(args.from.getTime()).toBeLessThan(from.getTime());
-    expect(Math.abs(args.from.getTime() - before)).toBeLessThan(5 * 60 * 1000);
+    expect(writtenFrom.getTime()).toBeLessThan(from.getTime());
+    expect(Math.abs(writtenFrom.getTime() - before)).toBeLessThan(
+      5 * 60 * 1000
+    );
     expect(args.to).toEqual(to);
     // The same start the status write commits.
     expect(tx.booking.update).toHaveBeenCalledWith(
