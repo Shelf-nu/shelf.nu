@@ -5,11 +5,14 @@
  * @see {@link file://./booked-quantity.server.ts}
  */
 
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { URL_SHAPED_VALUE, expectValueOnlyInTag } from "@helpers/note-tags";
+import { accessFor } from "@helpers/role-access";
 
 import { db } from "~/database/db.server";
+import { recordEvent } from "~/modules/activity-event/service.server";
 import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -19,19 +22,31 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
 import {
+  formatSourcesForNote,
   noteBookedQuantityChanges,
+  sourcesMoved,
   setStandaloneBookedQuantities,
   setStandaloneBookedQuantitiesWithinTx,
   setStandaloneBookedQuantity,
   type BookedQuantityChange,
 } from "./booked-quantity.server";
 import { applyRequestGrowthRule } from "./request-change.server";
+import {
+  bookingSourcesInPlay,
+  resizeSlices,
+  setAutoSources,
+  setManualSources,
+} from "./sources/booking-sources.server";
 
 // @vitest-environment node
 
 /** The transaction client the service is handed; reset per test. */
 const tx = {
+  // The booking row lock (`SELECT status ... FOR UPDATE`).
+  $queryRaw: vi.fn(),
   bookingAsset: { findUnique: vi.fn(), update: vi.fn() },
+  bookingAssetSource: { findMany: vi.fn() },
+  location: { findMany: vi.fn() },
   // why: a changed amount moves the booking's version (`updatedAt`) first.
   booking: { updateMany: vi.fn() },
 };
@@ -68,18 +83,40 @@ vi.mock("~/modules/booking-note/service.server", () => ({
 }));
 vi.mock("~/modules/user/service.server", () => ({ getUserByID: vi.fn() }));
 
+// why: the event write is a database insert with its own suite; we assert the
+// payload and that it runs on the same transaction client as the change.
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn(),
+}));
+
+// why: the sources facade (locks, conversion, allocation, admission) has its
+// own suite; here we assert when it is called, with what, and in which order
+// against the quantity write.
+vi.mock("./sources/booking-sources.server", () => ({
+  // Sources take part unless a case says otherwise.
+  bookingSourcesInPlay: vi.fn(),
+  resizeSlices: vi.fn(),
+  setManualSources: vi.fn(),
+  setAutoSources: vi.fn(),
+}));
+
 // why: a failed note is logged, never thrown; the spy makes that observable
 // without printing during the run.
 vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
+
+/** An admin manages items in every open status. */
+const ADMIN_ACCESS = accessFor([OrganizationRoles.ADMIN]);
 
 const SCOPE = {
   bookingId: "booking-1",
   organizationId: "org-1",
   actorUserId: "user-1",
-  window: {
-    from: new Date("2026-09-10T09:00:00.000Z"),
-    to: new Date("2026-09-12T17:00:00.000Z"),
-  },
+};
+
+/** The booking's window as the booking lock reads it, unless a case moves it. */
+const WINDOW = {
+  from: new Date("2026-09-10T09:00:00.000Z"),
+  to: new Date("2026-09-12T17:00:00.000Z"),
 };
 
 /** A requested change of one standalone slice. */
@@ -98,30 +135,67 @@ function change(
   };
 }
 
+/** A slice as the locked re-read returns it. */
+type HeldSlice = {
+  quantity: number;
+  checkedOutAt?: Date | null;
+  sourceAllocation?: "LEGACY" | "KIT" | "AUTO" | "MANUAL";
+};
+
 /** What the slice holds under the lock, keyed by its id. */
-function slicesHold(
-  rows: Record<string, { quantity: number; checkedOutAt?: Date | null } | null>
-) {
+function slicesHold(rows: Record<string, HeldSlice | null>) {
   const read = ({ where }: { where: { id: string } }) => {
     const row = rows[where.id];
     return Promise.resolve(
       row
-        ? { quantity: row.quantity, checkedOutAt: row.checkedOutAt ?? null }
+        ? {
+            quantity: row.quantity,
+            checkedOutAt: row.checkedOutAt ?? null,
+            sourceAllocation: row.sourceAllocation ?? "LEGACY",
+          }
         : null
     );
   };
   tx.bookingAsset.findUnique.mockImplementation(read);
 }
 
+/**
+ * The status the booking lock reads, with the window it reads in the same
+ * statement ({@link WINDOW} unless a case moves it).
+ */
+function bookingIs(status: string, window = WINDOW) {
+  tx.$queryRaw.mockResolvedValue([{ status, ...window }]);
+}
+
+/** A source row as the service reads it. */
+function row(
+  kind: "LOCATION" | "UNPLACED" | "UNKNOWN" | "UNASSIGNED",
+  locationId: string | null,
+  counts: { quantity: number; out?: number; released?: number }
+) {
+  return {
+    kind,
+    locationId,
+    quantity: counts.quantity,
+    outQuantity: counts.out ?? 0,
+    releasedQuantity: counts.released ?? 0,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   tx.bookingAsset.findUnique.mockReset();
   tx.bookingAsset.update.mockReset().mockResolvedValue({});
+  tx.bookingAssetSource.findMany.mockReset().mockResolvedValue([]);
+  tx.location.findMany.mockReset().mockResolvedValue([]);
+  tx.$queryRaw.mockReset();
+  bookingIs("RESERVED");
   vi.mocked(db.$transaction).mockImplementation(((
     callback: (client: typeof tx) => unknown
   ) => callback(tx)) as never);
   vi.mocked(assertAssetQuantityAvailable).mockResolvedValue(undefined);
   vi.mocked(lockAssetForQuantityUpdate).mockResolvedValue(undefined as never);
+  vi.mocked(bookingSourcesInPlay).mockResolvedValue(true);
 });
 
 describe("setStandaloneBookedQuantities", () => {
@@ -197,7 +271,7 @@ describe("setStandaloneBookedQuantities", () => {
       expect.objectContaining({
         assetId: "a",
         tx,
-        window: SCOPE.window,
+        window: WINDOW,
         excludeBookingId: "booking-1",
         currentQuantity: 2,
         requestedQuantity: 6,
@@ -286,8 +360,9 @@ describe("setStandaloneBookedQuantities", () => {
       })
     ).rejects.toMatchObject({ status: 400 });
     expect(db.$transaction).toHaveBeenCalledTimes(1);
-    // b never reached its write; a's write rolls back with the transaction.
-    expect(tx.bookingAsset.update).toHaveBeenCalledTimes(1);
+    // Every guard runs before the first write, so nothing was written.
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
+    expect(resizeSlices).not.toHaveBeenCalled();
   });
 
   it("opens no transaction for an empty set", async () => {
@@ -321,8 +396,695 @@ describe("setStandaloneBookedQuantity", () => {
     slicesHold({ "slice-a": { quantity: 3 } });
 
     await expect(
-      setStandaloneBookedQuantity({ ...SCOPE, ...change("a", 7) })
-    ).resolves.toEqual({ previousQuantity: 3 });
+      setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 7),
+      })
+    ).resolves.toEqual({ previousQuantity: 3, sourcesChanged: false });
+  });
+});
+
+describe("pool source rows", () => {
+  it("resizes the source rows before writing the new quantity", async () => {
+    slicesHold({ "slice-a": { quantity: 2, sourceAllocation: "AUTO" } });
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+
+    expect(resizeSlices).toHaveBeenCalledWith(tx, {
+      organizationId: "org-1",
+      bookingId: "booking-1",
+      changes: [{ sliceId: "slice-a", quantity: 5 }],
+      window: WINDOW,
+      admit: true,
+    });
+    expect(vi.mocked(resizeSlices).mock.invocationCallOrder[0]).toBeLessThan(
+      tx.bookingAsset.update.mock.invocationCallOrder[0]
+    );
+  });
+
+  describe("when the stored end moved after the caller read the booking", () => {
+    /** The window the booking lock reads: extended by a day since. */
+    const LOCKED_WINDOW = {
+      from: WINDOW.from,
+      to: new Date("2026-09-13T17:00:00.000Z"),
+    };
+
+    it("measures availability over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 2 } });
+
+      await setStandaloneBookedQuantities({
+        ...SCOPE,
+        changes: [change("a", 5)],
+      });
+
+      expect(assertAssetQuantityAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+
+    it("measures the adjust action's availability over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 2 } });
+
+      await setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 5),
+      });
+
+      expect(assertAssetQuantityAvailable).toHaveBeenCalledWith(
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+
+    it("resizes the source rows over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 2, sourceAllocation: "AUTO" } });
+
+      await setStandaloneBookedQuantities({
+        ...SCOPE,
+        changes: [change("a", 5)],
+      });
+
+      expect(resizeSlices).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+
+    it("sets sources over the window read under the lock", async () => {
+      bookingIs("RESERVED", LOCKED_WINDOW);
+      slicesHold({ "slice-a": { quantity: 15, sourceAllocation: "AUTO" } });
+
+      await setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 15),
+        sources: { input: { mode: "AUTO" }, userId: "user-1" },
+      });
+
+      expect(setAutoSources).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ window: LOCKED_WINDOW })
+      );
+    });
+  });
+
+  it("asks once whether sources take part and hands the answer to the resize and the sources call", async () => {
+    slicesHold({ "slice-a": { quantity: 10, sourceAllocation: "AUTO" } });
+
+    await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 15),
+      sources: { input: { mode: "AUTO" }, userId: "user-1" },
+    });
+
+    expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+    expect(resizeSlices).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ sourcesInPlay: true })
+    );
+    expect(setAutoSources).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ sourcesInPlay: true })
+    );
+  });
+
+  it("skips the resize when the caller's answer says sources are out of play", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+
+    await setStandaloneBookedQuantitiesWithinTx(tx as never, {
+      ...SCOPE,
+      changes: [change("a", 5)],
+      sourcesInPlay: false,
+    });
+
+    expect(resizeSlices).not.toHaveBeenCalled();
+    // The quantity is still written: the slice is LEGACY.
+    expect(tx.bookingAsset.update).toHaveBeenCalledWith({
+      where: { id: "slice-a" },
+      data: { quantity: 5 },
+    });
+  });
+
+  it("locks the booking before the asset", async () => {
+    slicesHold({ "slice-a": { quantity: 2 } });
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 5)],
+    });
+
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(lockAssetForQuantityUpdate).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("skips the facade when no quantity changes", async () => {
+    slicesHold({ "slice-a": { quantity: 4, sourceAllocation: "AUTO" } });
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 4)],
+    });
+
+    expect(resizeSlices).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the facade refuses the resize", async () => {
+    slicesHold({ "slice-a": { quantity: 2, sourceAllocation: "AUTO" } });
+    vi.mocked(resizeSlices).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "Not enough free at Demo Warehouse.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      setStandaloneBookedQuantities({ ...SCOPE, changes: [change("a", 9)] })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("checked-out slices", () => {
+  const OUT_AT = new Date("2026-09-10T10:00Z");
+
+  it("lets a pool slice on an ONGOING booking gain pending units", async () => {
+    bookingIs("ONGOING");
+    slicesHold({
+      "slice-a": {
+        quantity: 10,
+        checkedOutAt: OUT_AT,
+        sourceAllocation: "AUTO",
+      },
+    });
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 12)],
+    });
+
+    expect(resizeSlices).toHaveBeenCalledTimes(1);
+    expect(tx.bookingAsset.update).toHaveBeenCalledWith({
+      where: { id: "slice-a" },
+      data: { quantity: 12 },
+    });
+  });
+
+  it("lets a pool slice on an OVERDUE booking drop pending units only", async () => {
+    bookingIs("OVERDUE");
+    slicesHold({
+      "slice-a": {
+        quantity: 10,
+        checkedOutAt: OUT_AT,
+        sourceAllocation: "MANUAL",
+      },
+    });
+    // 6 out, 1 returned, 3 pending: the floor is 7.
+    tx.bookingAssetSource.findMany.mockResolvedValue([
+      row("LOCATION", "loc-1", { quantity: 8, out: 5, released: 1 }),
+      row("UNPLACED", null, { quantity: 2, out: 1 }),
+    ]);
+
+    await setStandaloneBookedQuantities({
+      ...SCOPE,
+      changes: [change("a", 7)],
+    });
+    expect(tx.bookingAsset.update).toHaveBeenCalledWith({
+      where: { id: "slice-a" },
+      data: { quantity: 7 },
+    });
+  });
+
+  it("refuses to drop units that are out or already returned", async () => {
+    bookingIs("ONGOING");
+    slicesHold({
+      "slice-a": {
+        quantity: 10,
+        checkedOutAt: OUT_AT,
+        sourceAllocation: "AUTO",
+      },
+    });
+    tx.bookingAssetSource.findMany.mockResolvedValue([
+      row("LOCATION", "loc-1", { quantity: 8, out: 5, released: 1 }),
+      row("UNPLACED", null, { quantity: 2, out: 1 }),
+    ]);
+
+    await expect(
+      setStandaloneBookedQuantities({ ...SCOPE, changes: [change("a", 6)] })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("cannot go below 7"),
+    });
+    expect(resizeSlices).not.toHaveBeenCalled();
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps refusing a LEGACY slice on an ONGOING booking", async () => {
+    bookingIs("ONGOING");
+    slicesHold({
+      "slice-a": {
+        quantity: 10,
+        checkedOutAt: OUT_AT,
+        sourceAllocation: "LEGACY",
+      },
+    });
+
+    await expect(
+      setStandaloneBookedQuantities({ ...SCOPE, changes: [change("a", 12)] })
+    ).rejects.toMatchObject({ status: 400, title: "Already checked out" });
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a pool slice whose booking is no longer ONGOING or OVERDUE", async () => {
+    bookingIs("COMPLETE");
+    slicesHold({
+      "slice-a": {
+        quantity: 10,
+        checkedOutAt: OUT_AT,
+        sourceAllocation: "AUTO",
+      },
+    });
+
+    await expect(
+      setStandaloneBookedQuantities({ ...SCOPE, changes: [change("a", 12)] })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(resizeSlices).not.toHaveBeenCalled();
+  });
+});
+
+describe("setStandaloneBookedQuantity with sources", () => {
+  const MANUAL = {
+    mode: "MANUAL" as const,
+    sources: [
+      { locationId: "loc-1", quantity: 8 },
+      { locationId: null, quantity: 7 },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.mocked(getUserByID).mockResolvedValue({
+      id: "user-1",
+      firstName: "Sam",
+      lastName: "Lee",
+      displayName: "Sam",
+    } as never);
+    tx.location.findMany.mockResolvedValue([
+      { id: "loc-1", name: "Demo Warehouse" },
+    ]);
+  });
+
+  /** The slice's rows before and after the facade call, and its mode. */
+  function sourcesMoveFrom(
+    before: ReturnType<typeof row>[],
+    after: ReturnType<typeof row>[],
+    modes: { before: string; after: string }
+  ) {
+    tx.bookingAssetSource.findMany
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) => {
+        if (select.quantity) {
+          return Promise.resolve({
+            quantity: 15,
+            checkedOutAt: null,
+            sourceAllocation: modes.before,
+          });
+        }
+        // The mode is read once before the rows are first read, once after.
+        const mode =
+          tx.bookingAssetSource.findMany.mock.calls.length === 0
+            ? modes.before
+            : modes.after;
+        return Promise.resolve({ sourceAllocation: mode });
+      }
+    );
+  }
+
+  it("sets MANUAL sources and writes a note and an event on the same transaction", async () => {
+    sourcesMoveFrom(
+      [row("UNPLACED", null, { quantity: 15 })],
+      [
+        row("LOCATION", "loc-1", { quantity: 8 }),
+        row("UNPLACED", null, { quantity: 7 }),
+      ],
+      { before: "AUTO", after: "MANUAL" }
+    );
+
+    const result = await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 15),
+      sources: { input: MANUAL, userId: "user-1" },
+    });
+
+    expect(result).toEqual({ previousQuantity: 15, sourcesChanged: true });
+    expect(setManualSources).toHaveBeenCalledWith(tx, {
+      organizationId: "org-1",
+      bookingId: "booking-1",
+      sliceId: "slice-a",
+      sources: MANUAL.sources,
+      window: WINDOW,
+      sourcesInPlay: true,
+    });
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        content: expect.stringContaining(
+          'changed where units come from for {% link to="/assets/a" text="Asset a" /%}: Demo Warehouse 8, Unplaced 7.'
+        ),
+      }),
+      tx
+    );
+    expect(recordEvent).toHaveBeenCalledWith(
+      {
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "BOOKING_ASSET_SOURCES_CHANGED",
+        entityType: "BOOKING",
+        entityId: "booking-1",
+        bookingId: "booking-1",
+        assetId: "a",
+        field: "sources",
+        fromValue: [{ kind: "UNPLACED", locationId: null, planned: 15 }],
+        toValue: [
+          { kind: "LOCATION", locationId: "loc-1", planned: 8 },
+          { kind: "UNPLACED", locationId: null, planned: 7 },
+        ],
+        meta: { sliceId: "slice-a", mode: "MANUAL" },
+      },
+      tx
+    );
+  });
+
+  it("returns the slice to AUTO and says so in the note", async () => {
+    sourcesMoveFrom(
+      [
+        row("LOCATION", "loc-1", { quantity: 8 }),
+        row("UNPLACED", null, { quantity: 7 }),
+      ],
+      [row("UNPLACED", null, { quantity: 15 })],
+      { before: "MANUAL", after: "AUTO" }
+    );
+
+    await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 15),
+      sources: { input: { mode: "AUTO" }, userId: "user-1" },
+    });
+
+    expect(setAutoSources).toHaveBeenCalledWith(tx, {
+      organizationId: "org-1",
+      bookingId: "booking-1",
+      sliceId: "slice-a",
+      window: WINDOW,
+      sourcesInPlay: true,
+    });
+    expect(
+      vi.mocked(createSystemBookingNote).mock.calls[0][0].content
+    ).toContain("Unplaced 15 (chosen automatically).");
+  });
+
+  it("writes no note or event when nothing moved", async () => {
+    const same = [row("UNPLACED", null, { quantity: 15 })];
+    sourcesMoveFrom(same, same, { before: "AUTO", after: "AUTO" });
+
+    const result = await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 15),
+      sources: { input: { mode: "AUTO" }, userId: "user-1" },
+    });
+
+    expect(result.sourcesChanged).toBe(false);
+    expect(createSystemBookingNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("resizes without admitting, before setting the sources", async () => {
+    sourcesMoveFrom(
+      [row("UNPLACED", null, { quantity: 15 })],
+      [
+        row("LOCATION", "loc-1", { quantity: 8 }),
+        row("UNPLACED", null, { quantity: 7 }),
+      ],
+      { before: "AUTO", after: "MANUAL" }
+    );
+    // The locked re-read sees 10 units, so the request for 15 resizes.
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        Promise.resolve(
+          select.quantity
+            ? { quantity: 10, checkedOutAt: null, sourceAllocation: "AUTO" }
+            : {
+                sourceAllocation:
+                  tx.bookingAssetSource.findMany.mock.calls.length === 0
+                    ? "AUTO"
+                    : "MANUAL",
+              }
+        )
+    );
+
+    await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 15),
+      sources: { input: MANUAL, userId: "user-1" },
+    });
+
+    expect(vi.mocked(resizeSlices).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(setManualSources).mock.invocationCallOrder[0]
+    );
+    // The resize admits nothing; setManualSources admits the combined result.
+    expect(resizeSlices).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ admit: false })
+    );
+  });
+
+  it("refuses any change on a closed booking with the manage-items 403 and touches nothing", async () => {
+    bookingIs("CANCELLED");
+    slicesHold({ "slice-a": { quantity: 15, sourceAllocation: "AUTO" } });
+
+    await expect(
+      setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 15),
+        sources: { input: MANUAL, userId: "user-1" },
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(setManualSources).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("records the state before the quantity change as fromValue", async () => {
+    sourcesMoveFrom(
+      [row("LOCATION", "loc-1", { quantity: 5 })],
+      [
+        row("LOCATION", "loc-1", { quantity: 5 }),
+        row("UNPLACED", null, { quantity: 3 }),
+      ],
+      { before: "AUTO", after: "MANUAL" }
+    );
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        Promise.resolve(
+          select.quantity
+            ? { quantity: 5, checkedOutAt: null, sourceAllocation: "AUTO" }
+            : {
+                sourceAllocation:
+                  tx.bookingAssetSource.findMany.mock.calls.length === 0
+                    ? "AUTO"
+                    : "MANUAL",
+              }
+        )
+    );
+
+    await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 8),
+      sources: {
+        input: {
+          mode: "MANUAL",
+          sources: [
+            { locationId: "loc-1", quantity: 5 },
+            { locationId: null, quantity: 3 },
+          ],
+        },
+        userId: "user-1",
+      },
+    });
+
+    // The snapshot is read before the resize writes anything.
+    expect(
+      tx.bookingAssetSource.findMany.mock.invocationCallOrder[0]
+    ).toBeLessThan(vi.mocked(resizeSlices).mock.invocationCallOrder[0]);
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromValue: [{ kind: "LOCATION", locationId: "loc-1", planned: 5 }],
+        toValue: [
+          { kind: "LOCATION", locationId: "loc-1", planned: 5 },
+          { kind: "UNPLACED", locationId: null, planned: 3 },
+        ],
+      }),
+      tx
+    );
+  });
+
+  it("writes no source note when an AUTO slice only grows on the same sources", async () => {
+    sourcesMoveFrom(
+      [row("UNPLACED", null, { quantity: 5 })],
+      [row("UNPLACED", null, { quantity: 8 })],
+      { before: "AUTO", after: "AUTO" }
+    );
+    tx.bookingAsset.findUnique.mockImplementation(
+      ({ select }: { select: Record<string, boolean> }) =>
+        Promise.resolve(
+          select.quantity
+            ? { quantity: 5, checkedOutAt: null, sourceAllocation: "AUTO" }
+            : { sourceAllocation: "AUTO" }
+        )
+    );
+
+    const result = await setStandaloneBookedQuantity({
+      ...SCOPE,
+      access: ADMIN_ACCESS,
+      ...change("a", 8),
+      sources: { input: { mode: "AUTO" }, userId: "user-1" },
+    });
+
+    expect(result).toEqual({ previousQuantity: 5, sourcesChanged: false });
+    expect(createSystemBookingNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a caller held to DRAFT on a RESERVED booking with the mobile route's 403", async () => {
+    bookingIs("RESERVED");
+    slicesHold({ "slice-a": { quantity: 5, sourceAllocation: "AUTO" } });
+
+    await expect(
+      setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        ...change("a", 6),
+      })
+    ).rejects.toMatchObject({
+      status: 403,
+      message:
+        "Quantities cannot be changed on this booking in its current status.",
+    });
+    expect(lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    expect(tx.bookingAsset.update).not.toHaveBeenCalled();
+  });
+
+  it("passes a facade refusal through and writes no note or event", async () => {
+    slicesHold({ "slice-a": { quantity: 15, sourceAllocation: "AUTO" } });
+    vi.mocked(setManualSources).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "One of the chosen locations does not hold this asset.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      setStandaloneBookedQuantity({
+        ...SCOPE,
+        access: ADMIN_ACCESS,
+        ...change("a", 15),
+        sources: { input: MANUAL, userId: "user-1" },
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(createSystemBookingNote).not.toHaveBeenCalled();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("sourcesMoved", () => {
+  /** A part with only the fields the comparison reads. */
+  function part(key: string, planned: number) {
+    return {
+      key,
+      kind: "UNPLACED" as const,
+      locationId: null,
+      label: key,
+      planned,
+      out: 0,
+      short: false,
+    };
+  }
+  const state = (
+    mode: "AUTO" | "MANUAL",
+    parts: ReturnType<typeof part>[]
+  ) => ({
+    mode,
+    parts,
+  });
+
+  it("is false when sources only grow or only shrink with the quantity", () => {
+    expect(
+      sourcesMoved(state("AUTO", [part("A", 5)]), state("AUTO", [part("A", 8)]))
+    ).toBe(false);
+    expect(
+      sourcesMoved(
+        state("MANUAL", [part("A", 5), part("B", 3)]),
+        state("MANUAL", [part("A", 4), part("B", 2)])
+      )
+    ).toBe(false);
+  });
+
+  it("is true when units move between sources or the mode changes", () => {
+    expect(
+      sourcesMoved(state("AUTO", [part("A", 5)]), state("AUTO", [part("B", 5)]))
+    ).toBe(true);
+    expect(
+      sourcesMoved(
+        state("AUTO", [part("A", 5)]),
+        state("AUTO", [part("A", 3), part("B", 4)])
+      )
+    ).toBe(true);
+    expect(
+      sourcesMoved(
+        state("AUTO", [part("A", 5)]),
+        state("MANUAL", [part("A", 5)])
+      )
+    ).toBe(true);
+  });
+});
+
+describe("formatSourcesForNote", () => {
+  it("strips Markdoc delimiters from location names", () => {
+    expect(
+      formatSourcesForNote([
+        {
+          key: "LOCATION:loc-1",
+          kind: "LOCATION",
+          locationId: "loc-1",
+          label: "Shelf {% a %}",
+          planned: 3,
+          out: 0,
+          short: false,
+        },
+      ])
+    ).not.toContain("{%");
   });
 });
 

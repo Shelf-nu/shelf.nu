@@ -24,6 +24,7 @@ import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { sourceSubmissionFromRecord } from "./checkout-source-location";
 import {
   buildOverriddenReservationNotes,
   computeBookingAssetRemainingToCheckOut,
@@ -32,6 +33,11 @@ import {
   getRemainingCheckoutPayload,
   partialCheckoutBooking,
 } from "./service.server";
+import {
+  admitWindowChange,
+  bookingSourcesInPlay,
+  dispatchUnits,
+} from "./sources/booking-sources.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -195,6 +201,10 @@ vitest.mock("~/database/db.server", () => {
         // sends out, beside the PartialBookingCheckout session row.
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+        // why: a batch that covers every remaining item is handed to
+        // `checkoutBooking`, which probes under the booking lock for a slice
+        // its read did not see. Default: none, the booking is unchanged.
+        findFirst: vitest.fn().mockResolvedValue(null),
       },
       // why: the add-assets and remove-assets flows this suite reaches read
       // and drain model reservations. Default to none.
@@ -303,6 +313,24 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
     unitOfMeasure: null,
     quantity: 0,
   }),
+  // why: a full check-out reached through the delegate locks pools held only
+  // through kits in one raw `SELECT … FOR UPDATE`, which this fake cannot run.
+  lockEveryAssetForQuantityUpdate: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: the booking sources facade reads, locks and writes source rows through
+// raw SQL and its own repository, which this model-shaped fake cannot serve;
+// its behaviour is covered by `sources/booking-sources.server.test.ts`. Here
+// it reports every picked slice LEGACY by default, so the LEGACY source path
+// runs as it does without sources, and the dispatch tests below override it.
+vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // Sources take part, so the session hands its pools to the facade spies;
+  // the skip when they do not is pinned in its own case below.
+  bookingSourcesInPlay: vitest.fn().mockResolvedValue(true),
+  allocateNewSlices: vitest.fn().mockResolvedValue(undefined),
+  resizeSlices: vitest.fn().mockResolvedValue(undefined),
+  admitWindowChange: vitest.fn().mockResolvedValue(undefined),
+  dispatchUnits: vitest.fn(),
 }));
 
 // why: the scan check-out reads each pool's free stock through this batched
@@ -462,6 +490,17 @@ const futureFrom = new Date();
 futureFrom.setDate(futureFrom.getDate() + 30);
 const futureTo = new Date(futureFrom.getTime() + HOURS * 60 * 60 * 1000);
 
+/**
+ * The row the booking lock reads: its status and its live window, which
+ * matches the booking fixtures below unless a test says otherwise.
+ */
+function lockedBookingRow(
+  status: BookingStatus,
+  window: { from: Date; to: Date } = { from: futureFrom, to: futureTo }
+) {
+  return { status, ...window };
+}
+
 const mockHints = {
   timeZone: "America/New_York",
   locale: "en-US",
@@ -503,6 +542,25 @@ const baseParams = {
   hints: mockHints,
 };
 
+/** The facade's default answer: every picked slice stays LEGACY. */
+function dispatchAllLegacy() {
+  vitest.mocked(dispatchUnits).mockImplementation((_tx, args) =>
+    Promise.resolve({
+      dispatched: [],
+      legacySliceIds: args.picks.map((pick) => pick.sliceId),
+    })
+  );
+}
+
+beforeEach(() => {
+  dispatchAllLegacy();
+  // why: the check-out's booking lock is a raw `SELECT … FOR UPDATE` that also
+  // reads the window; ONGOING with the fixtures' window serves every path
+  (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
+    lockedBookingRow(BookingStatus.ONGOING),
+  ]);
+});
+
 describe("partialCheckoutBooking", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -523,8 +581,9 @@ describe("partialCheckoutBooking", () => {
       requireApprovalForBase: false,
       requireApprovalForSelfService: false,
     });
+    // The lock also reads the booking's live window (lockBookingWithWindow).
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValue([
-      { status: BookingStatus.ONGOING },
+      lockedBookingRow(BookingStatus.ONGOING),
     ]);
     (db.booking.findUnique as ReturnType<typeof vitest.fn>).mockResolvedValue({
       status: BookingStatus.RESERVED,
@@ -733,7 +792,7 @@ describe("partialCheckoutBooking", () => {
     expect.assertions(4);
     // The row lock still reads the booking RESERVED.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.RESERVED },
+      lockedBookingRow(BookingStatus.RESERVED),
     ]);
 
     // First lookup loads the still-RESERVED booking; the post-update re-fetch
@@ -804,7 +863,7 @@ describe("partialCheckoutBooking", () => {
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue(reservedBooking);
       (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: lockedStatus },
+        lockedBookingRow(lockedStatus),
       ]);
 
       await expect(
@@ -820,7 +879,7 @@ describe("partialCheckoutBooking", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(reservedBooking);
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.DRAFT },
+      lockedBookingRow(BookingStatus.DRAFT),
     ]);
 
     await expect(
@@ -835,7 +894,7 @@ describe("partialCheckoutBooking", () => {
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue(reservedBooking);
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.ONGOING },
+      lockedBookingRow(BookingStatus.ONGOING),
     ]);
 
     await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] });
@@ -851,7 +910,7 @@ describe("partialCheckoutBooking", () => {
     expect.assertions(1);
     // The row lock still reads the booking RESERVED.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.RESERVED },
+      lockedBookingRow(BookingStatus.RESERVED),
     ]);
 
     // reservedBooking.from is in the future, so this is an early checkout.
@@ -908,7 +967,7 @@ describe("partialCheckoutBooking", () => {
       expect.assertions(1);
       // The row lock still reads the booking RESERVED.
       (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: BookingStatus.RESERVED },
+        lockedBookingRow(BookingStatus.RESERVED),
       ]);
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -1162,7 +1221,7 @@ describe("partialCheckoutBooking", () => {
     expect.assertions(1);
     // The row lock still reads the booking RESERVED.
     (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-      { status: BookingStatus.RESERVED },
+      lockedBookingRow(BookingStatus.RESERVED),
     ]);
 
     // The post-update re-fetch carries the status the batch wrote.
@@ -3704,6 +3763,47 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       });
     });
 
+    it("reads the free stock over the window an adjusted early check-out commits", async () => {
+      expect.assertions(4);
+
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // With sources out of play this read is the only aggregate check, so it
+      // must also cover the hours the moved start adds.
+      vitest.mocked(bookingSourcesInPlay).mockResolvedValueOnce(false);
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the RESERVED row of a first scan
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED),
+      ]);
+      freeStock({ "asset-qty-1": { physical: 10 } });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      const [, options] = vitest.mocked(getAssetAvailabilityBatch).mock
+        .calls[0] as [string[], { window: { from: Date; to: Date } }];
+      // The start moves to now, earlier than the booked start.
+      expect(options.window.from.getTime()).toBeLessThan(futureFrom.getTime());
+      expect(options.window.to).toEqual(futureTo);
+      expect(checkedOutIncrements()).toEqual([["ba-qty-1", 5]]);
+      // The start the status write commits is the one the stock was read over.
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: BookingStatus.ONGOING,
+            from: options.window.from,
+          }),
+        })
+      );
+    });
+
     it("refuses a whole-booking scan that the Check out button's guard handles, when the units are not on the shelf", async () => {
       expect.assertions(2);
 
@@ -4218,6 +4318,338 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
 
     // Sanity: the batch still records every slice (1 of 10 each → none complete).
     expect(result.isComplete).toBe(false);
+  });
+
+  describe("source dispatch", () => {
+    /** A converted slice's dispatch, as the facade reports it. */
+    const dispatchedFromWarehouse = {
+      sliceId: "ba-qty-1",
+      assetId: "asset-qty-1",
+      sources: [
+        {
+          kind: "LOCATION" as const,
+          locationId: "loc-warehouse",
+          name: "Demo Warehouse",
+          quantity: 5,
+        },
+      ],
+    };
+
+    it("dispatches the pool slice's units through the facade before its counter grows, with the pick and the client's capability", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      vitest.mocked(dispatchUnits).mockResolvedValue({
+        dispatched: [dispatchedFromWarehouse],
+        legacySliceIds: [],
+      });
+      const reported: unknown[] = [];
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        sourceLocations: sourceSubmissionFromRecord({
+          "ba-qty-1": "loc-warehouse",
+        }),
+        clientSupportsSources: false,
+        onDispatched: (slices) => reported.push(...slices),
+      });
+
+      expect(dispatchUnits).toHaveBeenCalledTimes(1);
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1]).toEqual({
+        organizationId: "org-1",
+        bookingId: "booking-1",
+        window: { from: futureFrom, to: futureTo },
+        clientSupportsSources: false,
+        // Asked once for the session, then handed to every source call.
+        sourcesInPlay: true,
+        picks: [
+          { sliceId: "ba-qty-1", units: 5, fromLocationId: "loc-warehouse" },
+        ],
+      });
+      // The rows' dispatchedTotal and the slice counter grow together.
+      const counterWrite = vitest
+        .mocked(db.bookingAsset.updateMany)
+        .mock.calls.findIndex(
+          ([args]) =>
+            (args as { data?: { checkedOutQuantity?: unknown } }).data
+              ?.checkedOutQuantity !== undefined
+        );
+      expect(counterWrite).toBeGreaterThanOrEqual(0);
+      expect(
+        vitest.mocked(dispatchUnits).mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        vitest.mocked(db.bookingAsset.updateMany).mock.invocationCallOrder[
+          counterWrite
+        ]
+      );
+      // A converted slice records no LEGACY source.
+      expect(db.bookingAsset.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            sourceLocationId: expect.anything(),
+          }),
+        })
+      );
+      // Reported after the commit, for the phone's response summary.
+      expect(reported).toEqual([dispatchedFromWarehouse]);
+    });
+
+    it("admits an early scan that moves the start to now, then dispatches over the moved window", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // The row lock reads the booking RESERVED: this is its first scan.
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the row it reads
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED),
+      ]);
+      // why: the booking's pool slices are read under the booking lock to
+      // lock their assets before the admission; every other slice read keeps
+      // the shared fake's answer.
+      const findMany = vitest.mocked(db.bookingAsset.findMany);
+      const shared = findMany.getMockImplementation();
+      findMany.mockImplementation(((args?: {
+        where?: { id?: unknown; asset?: { type?: unknown } };
+      }) =>
+        args?.where?.asset?.type && !args.where.id
+          ? Promise.resolve([{ id: "ba-qty-1", assetId: "asset-qty-1" }])
+          : shared?.(args as never) ??
+            Promise.resolve([{ quantity: 1 }])) as never);
+      onTestFinished(() => {
+        if (shared) findMany.mockImplementation(shared);
+      });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      expect(admitWindowChange).toHaveBeenCalledTimes(1);
+      const admitted = vitest.mocked(admitWindowChange).mock.calls[0][1];
+      expect(admitted).toMatchObject({
+        organizationId: "org-1",
+        bookingId: "booking-1",
+        to: futureTo,
+        previous: { from: futureFrom, to: futureTo },
+        kind: "dates",
+      });
+      expect(admitted.from.getTime()).toBeLessThan(futureFrom.getTime());
+      // The dispatch measures the window the booking is written with.
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1].window).toEqual({
+        from: admitted.from,
+        to: futureTo,
+      });
+      expect(
+        vitest.mocked(admitWindowChange).mock.invocationCallOrder[0]
+      ).toBeLessThan(vitest.mocked(dispatchUnits).mock.invocationCallOrder[0]);
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ from: admitted.from }),
+        })
+      );
+    });
+
+    it("measures the window read under the booking lock, not the earlier read", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // A concurrent extension committed between the pre-transaction read
+      // (which still ends at futureTo) and the row lock.
+      const extendedTo = new Date(futureTo.getTime() + 24 * 60 * 60 * 1000);
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the row it reads, with the extended end
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED, {
+          from: futureFrom,
+          to: extendedTo,
+        }),
+      ]);
+      // why: the booking's pool slices are read under the booking lock to
+      // lock their assets before the admission; every other slice read keeps
+      // the shared fake's answer.
+      const findMany = vitest.mocked(db.bookingAsset.findMany);
+      const shared = findMany.getMockImplementation();
+      findMany.mockImplementation(((args?: {
+        where?: { id?: unknown; asset?: { type?: unknown } };
+      }) =>
+        args?.where?.asset?.type && !args.where.id
+          ? Promise.resolve([{ id: "ba-qty-1", assetId: "asset-qty-1" }])
+          : shared?.(args as never) ??
+            Promise.resolve([{ quantity: 1 }])) as never);
+      onTestFinished(() => {
+        if (shared) findMany.mockImplementation(shared);
+      });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      expect(admitWindowChange).toHaveBeenCalledTimes(1);
+      expect(vitest.mocked(admitWindowChange).mock.calls[0][1]).toMatchObject({
+        to: extendedTo,
+        previous: { from: futureFrom, to: extendedTo },
+      });
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1].window.to).toEqual(
+        extendedTo
+      );
+    });
+
+    it("admits nothing when the scan keeps the booking's window", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      expect(admitWindowChange).not.toHaveBeenCalled();
+    });
+
+    it("with sources out of play, asks once and then reads, admits and dispatches nothing through sources", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // Adoption off and no converted group on the booking.
+      vitest.mocked(bookingSourcesInPlay).mockResolvedValueOnce(false);
+      // An early first scan that moves the start: the admission would run
+      // were sources in play.
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the row it reads
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED),
+      ]);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      expect(bookingSourcesInPlay).toHaveBeenCalledTimes(1);
+      expect(admitWindowChange).not.toHaveBeenCalled();
+      expect(dispatchUnits).not.toHaveBeenCalled();
+      // No pool-slice read for sources was sent: the asset-type read that
+      // selects only `id` and `assetId`. The LEGACY source recorder's own
+      // read (it also selects `assetKitId`) runs, as it does without sources.
+      const poolSliceReads = vitest
+        .mocked(db.bookingAsset.findMany)
+        .mock.calls.filter(([args]) => {
+          const read = args as
+            | {
+                where?: { asset?: { type?: unknown } };
+                select?: Record<string, unknown>;
+              }
+            | undefined;
+          return (
+            read?.where?.asset?.type !== undefined &&
+            Object.keys(read.select ?? {})
+              .sort()
+              .join(",") === "assetId,id"
+          );
+        });
+      expect(poolSliceReads).toEqual([]);
+    });
+
+    it("dispatches by allocation when nothing was picked", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      expect(vitest.mocked(dispatchUnits).mock.calls[0][1].picks).toEqual([
+        { sliceId: "ba-qty-1", units: 5 },
+      ]);
+    });
+
+    it("refuses the batch with the facade's reason and writes no counter when a short slice cannot go out", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      vitest.mocked(dispatchUnits).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+          message:
+            "Pens is short at Demo Warehouse and needs a location. Change where its units come from, then check out again.",
+        })
+      );
+      const reported: unknown[] = [];
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            {
+              assetId: "asset-qty-1",
+              bookingAssetId: "ba-qty-1",
+              quantity: 5,
+            },
+          ],
+          onDispatched: (slices) => reported.push(...slices),
+        })
+      ).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("short at Demo Warehouse"),
+      });
+      // No slice write carries a departure count, whatever else it sets.
+      const updateManyCalls = (
+        db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
+      ).mock.calls as Array<[{ data?: Record<string, unknown> }]>;
+      expect(
+        updateManyCalls.some(
+          ([args]) => "checkedOutQuantity" in (args.data ?? {})
+        )
+      ).toBe(false);
+      expect(reported).toEqual([]);
+    });
+
+    it("hands a slice the facade leaves LEGACY to the LEGACY source path", async () => {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      // The LEGACY recorder reads the slice still at 0 to give it a source.
+      expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ["ba-qty-1"] },
+            checkedOutQuantity: 0,
+          }),
+        })
+      );
+    });
   });
 });
 

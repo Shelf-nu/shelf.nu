@@ -4,10 +4,15 @@
  * Reads a pool's manual placements and operator custody under the caller's
  * asset lock, answers "how many units does this location have left", and
  * applies the re-home plan when a placement change leaves a location holding
- * fewer units than are in custody from it. The rules themselves are pure and
- * live in `custody-source.ts`.
+ * fewer units than are in custody or out on bookings from it. Booking units
+ * out on converted slices move first, then custody takes what is left of the
+ * excess (`planSourceRehome`); with no booking units out, custody moves
+ * exactly as `planCustodyRehome` decides. The rules themselves are pure and
+ * live in `custody-source.ts` and `booking/sources/rehome.ts`.
  *
  * @see {@link file://./custody-source.ts}
+ * @see {@link file://../booking/sources/rehome.ts}
+ * @see {@link file://../booking/sources/rehome.server.ts}
  */
 
 import type { AssetType, Prisma } from "@prisma/client";
@@ -15,7 +20,17 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
-import { loadBookedOutBySource } from "~/modules/booking/units-out-by-source.server";
+import { loadUnitsOutBySource } from "~/modules/booking/sources/capacity.server";
+import type {
+  BookingOutRow,
+  SourceMove,
+} from "~/modules/booking/sources/rehome";
+import { planSourceRehome } from "~/modules/booking/sources/rehome";
+import {
+  applySourceMoves,
+  loadBookingOutRows,
+  plannerFailure,
+} from "~/modules/booking/sources/rehome.server";
 import { createSystemLocationNote } from "~/modules/location-note/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
@@ -35,7 +50,6 @@ import type {
 import {
   buildCustodySourceOptions,
   hasMultipleSources,
-  planCustodyRehome,
   unitsLeftAtSource,
 } from "./custody-source";
 
@@ -54,11 +68,18 @@ export type CustodySourceTxClient = Omit<
 export type LoadedCustodySources = {
   state: CustodySourceState;
   rows: CustodyRowForPlan[];
+  /**
+   * Units out on the pool's converted booking slices, per source row, when
+   * the loader read them ({@link loadCustodySourcesForAssets} before a
+   * placement change). Absent when nothing is out or it was not read.
+   */
+  bookingOut?: BookingOutRow[];
 };
 
 /**
  * Reads a pool's manual placements, operator custody, and the units out on
- * bookings per location they left from.
+ * bookings per source they left from (a location, or the unplaced units for
+ * a converted booking slice).
  *
  * Call it inside the transaction that holds `lockAssetForQuantityUpdate` for
  * the asset, so the numbers cannot move before the caller writes.
@@ -89,8 +110,9 @@ export async function loadCustodySources(
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
-    // Units out on bookings from each location are not there to hand out.
-    loadBookedOutBySource(tx, { assetIds: [assetId] }),
+    // Units out on bookings from each source (LEGACY and converted groups
+    // alike) are not there to hand out.
+    loadUnitsOutBySource(tx, { assetIds: [assetId] }),
   ]);
 
   return {
@@ -105,36 +127,63 @@ export async function loadCustodySources(
 }
 
 /**
- * {@link loadCustodySources} for many pools in two queries, for paths that
- * change placements of many assets at once. Only pools with operator
- * custody are returned: a placement change can only re-home custody that
- * exists.
+ * {@link loadCustodySources} for many pools, for paths that change
+ * placements of many assets at once. Only pools a placement change can
+ * re-home are returned: pools with operator custody, and (when
+ * `withBookingOut`) pools with units out on converted booking slices.
+ *
+ * Queries: custody (one) and, with `withBookingOut`, the booking probe of
+ * {@link loadBookingOutRows} (one, plus one row read when a converted slice
+ * is out) in parallel; then placements (one) when any pool is returned.
  *
  * @param assets - Pools (already locked by the caller) with their totals
+ * @param options.organizationId - The trusted workspace id; booking slices
+ *   are read only in it
+ * @param options.withBookingOut - Also read booking units out per source row
+ *   (the state before a placement change); default true
+ * @param options.everyAsset - Return every given pool, held or not (the state
+ *   after a placement change, for pools already known to need a re-home)
  */
 export async function loadCustodySourcesForAssets(
   tx: CustodySourceTxClient,
-  assets: Array<{ id: string; total: number }>
+  assets: Array<{ id: string; total: number }>,
+  options: {
+    organizationId: string;
+    withBookingOut?: boolean;
+    everyAsset?: boolean;
+  }
 ): Promise<Map<string, LoadedCustodySources>> {
+  const { organizationId, withBookingOut = true, everyAsset = false } = options;
   const result = new Map<string, LoadedCustodySources>();
   if (assets.length === 0) return result;
+  const assetIds = assets.map((a) => a.id);
 
-  const rows = await tx.custody.findMany({
-    where: { assetId: { in: assets.map((a) => a.id) }, kitCustodyId: null },
-    select: {
-      id: true,
-      assetId: true,
-      teamMemberId: true,
-      locationId: true,
-      sourceUnknown: true,
-      quantity: true,
-      createdAt: true,
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-  });
-  if (rows.length === 0) return result;
+  const [rows, bookingOut] = await Promise.all([
+    tx.custody.findMany({
+      where: { assetId: { in: assetIds }, kitCustodyId: null },
+      select: {
+        id: true,
+        assetId: true,
+        teamMemberId: true,
+        locationId: true,
+        sourceUnknown: true,
+        quantity: true,
+        createdAt: true,
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    }),
+    withBookingOut
+      ? loadBookingOutRows(tx, { organizationId, assetIds })
+      : Promise.resolve(new Map<string, BookingOutRow[]>()),
+  ]);
 
-  const heldIds = Array.from(new Set(rows.map((row) => row.assetId)));
+  const heldIds = everyAsset
+    ? assetIds
+    : Array.from(
+        new Set([...rows.map((row) => row.assetId), ...bookingOut.keys()])
+      );
+  if (heldIds.length === 0) return result;
+
   const placements = await tx.assetLocation.findMany({
     where: { assetId: { in: heldIds }, assetKitId: null },
     select: { assetId: true, locationId: true, quantity: true },
@@ -151,27 +200,85 @@ export async function loadCustodySourcesForAssets(
         operatorCustody: assetRows,
       },
       rows: assetRows,
+      bookingOut: bookingOut.get(asset.id),
     });
   }
   return result;
 }
 
 /**
- * {@link rehomeCustodyForPlacementChange} for many pools at once: reads the
- * after-state in two queries, then plans and applies each pool's moves.
+ * Plans one pool's combined re-home and writes it: booking partial moves
+ * through the sources repository, then custody moves.
  *
+ * @param organizationId - The trusted workspace id the moves are written in
+ * @param before - The pool before the placement write
+ * @param bookingOut - The pool's booking rows with units out
+ * @param after - The pool after the placement write
+ * @param destinationLocationId - The single location the change sent units to
+ * @returns The custody and booking moves applied
+ * @throws {ShelfError} 500 when the planner or the repository refuses
+ */
+async function planAndApplyRehome(
+  tx: CustodySourceTxClient,
+  {
+    assetId,
+    organizationId,
+    before,
+    after,
+    bookingOut,
+    destinationLocationId,
+  }: {
+    assetId: string;
+    organizationId: string;
+    before: LoadedCustodySources;
+    after: LoadedCustodySources;
+    bookingOut: BookingOutRow[] | undefined;
+    destinationLocationId: string | null | undefined;
+  }
+): Promise<{ moves: RehomeMove[]; bookingMoves: SourceMove[] }> {
+  let planned: ReturnType<typeof planSourceRehome>;
+  try {
+    planned = planSourceRehome({
+      before: before.state,
+      after: after.state,
+      bookingOutRows: bookingOut ?? [],
+      custodyRows: after.rows,
+      destinationLocationId,
+    });
+  } catch (cause) {
+    throw plannerFailure(cause, { assetId });
+  }
+
+  if (planned.bookingMoves.length > 0) {
+    await applySourceMoves(tx, {
+      organizationId,
+      moves: planned.bookingMoves,
+    });
+  }
+  await applyCustodyRehome(tx, { assetId, moves: planned.custodyMoves });
+  return { moves: planned.custodyMoves, bookingMoves: planned.bookingMoves };
+}
+
+/**
+ * {@link rehomeCustodyForPlacementChange} for many pools at once: reads the
+ * after-state in two queries, then plans and applies each pool's moves
+ * (booking units out first, then custody).
+ *
+ * @param organizationId - The trusted workspace id of every pool
  * @param before - {@link loadCustodySourcesForAssets} taken before the writes
  * @param totals - `Asset.quantity` per pool after the change
  * @param destinationFor - The single location a pool's change sent units to
- * @returns The pools whose custody moved, with what moved
+ * @returns The pools whose custody or booking units moved, with what moved
  */
 export async function rehomeCustodyForPlacementChanges(
   tx: CustodySourceTxClient,
   {
+    organizationId,
     before,
     totals,
     destinationFor,
   }: {
+    organizationId: string;
     before: Map<string, LoadedCustodySources>;
     totals: Map<string, number>;
     destinationFor: (assetId: string) => string | null | undefined;
@@ -180,9 +287,12 @@ export async function rehomeCustodyForPlacementChanges(
   const assetIds = Array.from(before.keys());
   if (assetIds.length === 0) return [];
 
+  // Booking rows do not change with a placement write, so only the custody
+  // and placements are read again.
   const after = await loadCustodySourcesForAssets(
     tx,
-    assetIds.map((id) => ({ id, total: totals.get(id) ?? 0 }))
+    assetIds.map((id) => ({ id, total: totals.get(id) ?? 0 })),
+    { organizationId, withBookingOut: false, everyAsset: true }
   );
 
   const results: Array<{ assetId: string; result: CustodyRehomeResult }> = [];
@@ -191,19 +301,21 @@ export async function rehomeCustodyForPlacementChanges(
     const afterState = after.get(assetId);
     if (!beforeState || !afterState) continue;
 
-    const moves = planCustodyRehome({
-      before: beforeState.state,
-      after: afterState.state,
-      rows: afterState.rows,
+    const { moves, bookingMoves } = await planAndApplyRehome(tx, {
+      assetId,
+      organizationId,
+      before: beforeState,
+      after: afterState,
+      bookingOut: beforeState.bookingOut,
       destinationLocationId: destinationFor(assetId),
     });
-    if (moves.length === 0) continue;
+    if (moves.length === 0 && bookingMoves.length === 0) continue;
 
-    await applyCustodyRehome(tx, { assetId, moves });
     results.push({
       assetId,
       result: {
         moves,
+        bookingMoves,
         multiSource:
           hasMultipleSources(beforeState.state) ||
           hasMultipleSources(afterState.state),
@@ -326,56 +438,77 @@ export async function applyCustodyRehome(
   }
 }
 
-/** What a placement change did to the custody sources. */
+/** What a placement change did to the custody sources and booking units. */
 export type CustodyRehomeResult = {
+  /** Custody moves (what the asset note reports). */
   moves: RehomeMove[];
+  /** Partial moves of booking units out on converted slices. */
+  bookingMoves?: SourceMove[];
   /** Whether the pool was placed at two or more locations before or after the change. */
   multiSource: boolean;
 };
 
 /**
- * Makes custody follow a placement change that lowered, removed or collapsed
- * a manual placement, without refusing it. See `planCustodyRehome` for the
- * rules. Call it after the placement write, inside the same locked
- * transaction, with the state read before the write.
+ * Makes custody and booking units out follow a placement change that
+ * lowered, removed or collapsed a manual placement, without refusing it. See
+ * `planSourceRehome` for the rules: booking units out on converted slices
+ * move first, then custody under `planCustodyRehome`'s rules. Pending booking
+ * holds never move; a hold left above its source becomes short. Call it
+ * after the placement write, inside the same locked transaction, with the
+ * state read before the write.
  *
+ * Queries beyond today's custody re-home: one indexed probe for converted
+ * booking slices out on the pool, plus their rows and one repository write
+ * only when there are some.
+ *
+ * @param organizationId - The trusted workspace id of the pool
  * @param before - {@link loadCustodySources} output taken before the write
  * @param destinationLocationId - The single location the change sent units
  *   to (a move, or a whole-pool relocation). Omit when there is none.
+ * @throws {ShelfError} 500 when the planned booking moves cannot be written
  */
 export async function rehomeCustodyForPlacementChange(
   tx: CustodySourceTxClient,
   {
     assetId,
+    organizationId,
     total,
     before,
     destinationLocationId,
   }: {
     assetId: string;
+    organizationId: string;
     /** `Asset.quantity` after the change. */
     total: number;
     before: LoadedCustodySources;
     destinationLocationId?: string | null;
   }
 ): Promise<CustodyRehomeResult> {
-  const after = await loadCustodySources(tx, { assetId, total });
+  // Booking rows do not change with a placement write: one read serves both
+  // sides of the plan.
+  const [after, bookingOut] = await Promise.all([
+    loadCustodySources(tx, { assetId, total }),
+    loadBookingOutRows(tx, { organizationId, assetIds: [assetId] }),
+  ]);
+  const poolBookingOut = bookingOut.get(assetId);
 
-  // Nothing out on the operator axis: nothing can need a new home.
-  if (after.rows.length === 0) {
+  // Nothing out on the operator or booking axis: nothing can need a new home.
+  if (after.rows.length === 0 && !poolBookingOut) {
     return { moves: [], multiSource: false };
   }
 
-  const moves = planCustodyRehome({
-    before: before.state,
-    after: after.state,
-    rows: after.rows,
+  const { moves, bookingMoves } = await planAndApplyRehome(tx, {
+    assetId,
+    organizationId,
+    before,
+    after,
+    bookingOut: poolBookingOut,
     destinationLocationId,
   });
 
-  await applyCustodyRehome(tx, { assetId, moves });
-
   return {
     moves,
+    bookingMoves,
     multiSource:
       hasMultipleSources(before.state) || hasMultipleSources(after.state),
   };

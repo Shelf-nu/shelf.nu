@@ -2724,13 +2724,17 @@ export async function updateAsset({
 
         /**
          * The rewrite collapses every manual placement into at most one.
-         * Custody from a dropped location follows the units to the new
-         * location (as far as it holds them), and becomes unplaced when the
-         * location is cleared. Never refused.
+         * Booking units out on converted slices follow first, then custody:
+         * from a dropped location both follow the units to the new location
+         * (as far as it holds them), and become unplaced when the location
+         * is cleared (booking units with no room there go to UNKNOWN).
+         * Pending booking holds stay at their sources and may become short.
+         * Never refused.
          */
         if (custodyBefore) {
           placementRehome = await rehomeCustodyForPlacementChange(tx, {
             assetId: id,
+            organizationId,
             total: updated.quantity ?? 0,
             before: custodyBefore,
             destinationLocationId: newLocationId ?? null,
@@ -4928,13 +4932,16 @@ export async function replaceAssetPlacements({
       }
 
       /**
-       * A location shrunk or removed below what is in custody from it: that
-       * excess custody becomes unplaced (the editor names no single
-       * destination). Never refused.
+       * A location shrunk or removed below what is out from it: booking units
+       * out on converted slices follow first, then custody, and the excess
+       * becomes unplaced (the editor names no single destination; booking
+       * units with no room there go to UNKNOWN). Pending booking holds stay
+       * at their sources and may become short. Never refused.
        */
       if (custodyBefore) {
         rehome = await rehomeCustodyForPlacementChange(tx, {
           assetId,
+          organizationId,
           total: locked.quantity ?? 0,
           before: custodyBefore,
         });
@@ -11454,13 +11461,16 @@ export async function moveAssetLocationUnits(
       );
 
       /**
-       * Step 10b: Custody follows the units. Units not in custody leave the
+       * Step 10b: Booking units out on converted slices follow the units
+       * first, then custody. Units neither out nor in custody leave the
        * source first; only when the source ends up holding fewer units than
-       * are in custody from it does that excess custody move to the
-       * destination. Never refused.
+       * are out from it does that excess move to the destination. Pending
+       * booking holds stay at their sources and may become short. Never
+       * refused.
        */
       const rehome = await rehomeCustodyForPlacementChange(tx, {
         assetId,
+        organizationId,
         total: asset.quantity ?? 0,
         before: custodyBefore,
         destinationLocationId: toLocationId,
@@ -11789,13 +11799,16 @@ export async function placeUnplacedUnits(
       );
 
       /**
-       * Unplaced units not in custody are placed first. Once the unplaced
-       * pile holds fewer units than are in custody from it, that excess
-       * custody now belongs at the destination: it is the only place the
-       * unplaced units went.
+       * Unplaced units neither out nor in custody are placed first. Once the
+       * unplaced pile holds fewer units than are out from it, that excess
+       * (booking units out on converted slices first, then custody) belongs
+       * at the destination: it is the only place the unplaced units went.
+       * Pending booking holds stay at their sources and may become short.
+       * Never refused.
        */
       const rehome = await rehomeCustodyForPlacementChange(tx, {
         assetId,
+        organizationId,
         total: totalQuantity,
         before: custodyBefore,
         destinationLocationId: toLocationId,

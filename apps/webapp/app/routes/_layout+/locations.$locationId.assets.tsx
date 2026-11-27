@@ -77,6 +77,11 @@ import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { loadMultiPlacedPoolIds } from "~/modules/booking/checkout-source-location.server";
+import { formatLocationPoolLine } from "~/modules/booking/sources/location-holds";
+import {
+  loadOperatorCustodyByPool,
+  loadReservedNextAtLocation,
+} from "~/modules/booking/sources/location-holds.server";
 import { countUnitsOnBookingsFromLocation } from "~/modules/booking/units-out-by-source.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
@@ -222,13 +227,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
     /**
-     * For pools placed at two or more locations, how many of this location's
-     * units are out with people ("· 2 in custody"), and how many are out on a
-     * booking having left from here ("· 10 on a booking"). Counts only,
-     * never a name, and neither changes the location's placed count.
+     * The now-figures and the reservation behind each pool's line ("8 here ·
+     * 2 out on bookings · 1 in custody · 3 reserved next"). The line is
+     * decomposed only for a pool whose units out and in custody from here are
+     * measured, so it never shows a figure nobody counted:
+     *  - a pool placed at two or more locations: custody and booked units
+     *    record the place they left from;
+     *  - a converted pool at one placement: its units out are its LOCATION
+     *    source rows here, and with one placement every unit in custody was
+     *    taken from it.
+     * Every other pool keeps "N units at this location". "Reserved next" is
+     * the peak of units still to leave here over the next booking window.
+     * Counts only, never a name, and none changes the placed count. While
+     * every group is LEGACY the booking side costs one probe.
      */
     const pools = assets.filter((asset) => isQuantityTracked(asset));
-    const [custodyFromHere, onBookingByAssetId] = await Promise.all([
+    const poolIds = pools.map((asset) => asset.id);
+    const [custodyFromHere, sourceFigures] = await Promise.all([
       getCustodyFromLocationByPool({
         locationId,
         organizationId,
@@ -237,18 +252,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           total: asset.quantity ?? 0,
         })),
       }),
-      // Only pools at two or more placements say where booked units came
-      // from; a pool at one location shows nothing new.
-      loadMultiPlacedPoolIds({
-        organizationId,
-        assetIds: pools.map((asset) => asset.id),
-      }).then((multiPlaced) =>
-        countUnitsOnBookingsFromLocation({
+      Promise.all([
+        loadMultiPlacedPoolIds({ organizationId, assetIds: poolIds }),
+        loadReservedNextAtLocation({
           organizationId,
           locationId,
-          assetIds: [...multiPlaced],
-        })
-      ),
+          assetIds: poolIds,
+        }),
+      ]).then(async ([multiPlaced, holds]) => {
+        const singlePlacedConverted = [...holds.convertedAssetIds].filter(
+          (assetId) => !multiPlaced.has(assetId)
+        );
+        const measured = new Set([...multiPlaced, ...singlePlacedConverted]);
+        // Nothing measured, nothing to read.
+        const [onBooking, singlePlacedCustody] = await Promise.all([
+          measured.size === 0
+            ? new Map<string, number>()
+            : countUnitsOnBookingsFromLocation({
+                organizationId,
+                locationId,
+                assetIds: [...measured],
+              }),
+          singlePlacedConverted.length === 0
+            ? new Map<string, number>()
+            : loadOperatorCustodyByPool({
+                organizationId,
+                assetIds: singlePlacedConverted,
+              }),
+        ]);
+        return {
+          measured,
+          onBooking,
+          singlePlacedCustody,
+          reservedNext: holds.reservedNext,
+        };
+      }),
     ]);
     // Rows carry each custodian's name and email whether or not the UI draws
     // them, so a viewer without custody visibility could read them out of the
@@ -264,8 +302,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     ).map((asset) => ({
       ...asset,
-      inCustodyHere: custodyFromHere[asset.id] ?? 0,
-      onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,
+      inCustodyHere:
+        custodyFromHere[asset.id] ??
+        sourceFigures.singlePlacedCustody.get(asset.id) ??
+        0,
+      onBookingFromHere: sourceFigures.onBooking.get(asset.id) ?? 0,
+      reservedNextHere: sourceFigures.reservedNext.get(asset.id) ?? 0,
+      sourceFiguresMeasured: sourceFigures.measured.has(asset.id),
     }));
 
     const header: HeaderData = {
@@ -607,6 +650,20 @@ const ListAssetContent = ({
      * sources; 0 otherwise. Set by the loader.
      */
     inCustodyHere?: number;
+    /**
+     * Peak of this pool's units still to leave THIS location for bookings,
+     * over the next booking window (see `loadReservedNextAtLocation`); 0
+     * otherwise. Set by the loader. Never read by the status badge, which
+     * shows now-figures only.
+     */
+    reservedNextHere?: number;
+    /**
+     * True when this pool's units out and in custody from THIS location are
+     * measured (placed at two or more locations, or converted at one
+     * placement); only then does the row decompose its count. Set by the
+     * loader.
+     */
+    sourceFiguresMeasured?: boolean;
     custody: Array<{
       quantity: number;
       custodian: {
@@ -719,15 +776,29 @@ const ListAssetContent = ({
                         });
                       }
                       const kitEntries = Array.from(kitRowsByKitId.values());
+                      // A manual placement here gets the pool line when its
+                      // figures are measured; otherwise, and for units here
+                      // only through kits, the plain count stays (the kit
+                      // badge explains kit units). A placement reduced to 0
+                      // still has its row, so the line still renders.
+                      const manualRows = rowsAtThisLocation.filter(
+                        (al) => al.assetKitId === null
+                      );
+                      const poolLine =
+                        manualRows.length > 0 && item.sourceFiguresMeasured
+                          ? formatLocationPoolLine({
+                              placed: manualRows.reduce(
+                                (sum, al) => sum + (al.quantity ?? 0),
+                                0
+                              ),
+                              outOnBookings: item.onBookingFromHere ?? 0,
+                              inCustody: item.inCustodyHere ?? 0,
+                              reservedNext: item.reservedNextHere ?? 0,
+                            })
+                          : `${atLocation} ${unit} at this location`;
                       return (
-                        <span className="ml-2 inline-flex items-center gap-2 text-xs font-normal text-gray-500">
-                          · {atLocation} {unit} at this location
-                          {item.inCustodyHere
-                            ? ` · ${item.inCustodyHere} in custody`
-                            : null}
-                          {item.onBookingFromHere
-                            ? ` · ${item.onBookingFromHere} on a booking`
-                            : null}
+                        <span className="ml-2 inline-flex flex-wrap items-center gap-2 text-xs font-normal text-gray-500">
+                          · {poolLine}
                           {kitEntries.length > 0 ? (
                             <TooltipProvider delayDuration={150}>
                               <Tooltip>

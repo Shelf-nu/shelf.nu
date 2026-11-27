@@ -41,6 +41,7 @@ export type FieldChangeAction =
   | "ASSET_AVAILABLE_TO_BOOK_CHANGED"
   | "BOOKING_STATUS_CHANGED"
   | "BOOKING_DATES_CHANGED"
+  | "BOOKING_ASSET_SOURCES_CHANGED"
   | "BOOKING_MODEL_REQUEST_CHANGED"
   | "AUDIT_DUE_DATE_CHANGED"
   // Not named `*_CHANGED`, but shaped like one on purpose: this is a per-field

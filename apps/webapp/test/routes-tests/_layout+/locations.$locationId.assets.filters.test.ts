@@ -39,6 +39,17 @@ vi.mock("~/modules/booking/checkout-source-location.server", () => ({
 }));
 vi.mock("~/modules/booking/units-out-by-source.server", () => ({
   countUnitsOnBookingsFromLocation: vi.fn(),
+  loadConvertedOutNow: vi.fn().mockResolvedValue([]),
+}));
+// why: "reserved next", the converted-pool probe and pool custody read
+// booking source and custody rows; the default is none, and the source
+// figure cases choose what they return.
+vi.mock("~/modules/booking/sources/location-holds.server", () => ({
+  loadReservedNextAtLocation: vi.fn().mockResolvedValue({
+    reservedNext: new Map(),
+    convertedAssetIds: new Set(),
+  }),
+  loadOperatorCustodyByPool: vi.fn().mockResolvedValue(new Map()),
 }));
 // why: the permission resolver needs a session and a database.
 vi.mock("~/utils/roles.server", () => ({
@@ -56,6 +67,10 @@ vi.mock("~/modules/team-member/service.server", async (importOriginal) => ({
 import { db } from "~/database/db.server";
 import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.server";
 import { loadMultiPlacedPoolIds } from "~/modules/booking/checkout-source-location.server";
+import {
+  loadOperatorCustodyByPool,
+  loadReservedNextAtLocation,
+} from "~/modules/booking/sources/location-holds.server";
 import { countUnitsOnBookingsFromLocation } from "~/modules/booking/units-out-by-source.server";
 import { getLocation } from "~/modules/location/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -300,5 +315,159 @@ describe("locations.$locationId.assets loader: custodian privacy", () => {
     expect(JSON.stringify(loaderData(result).items)).toContain(
       "colleague@example.com"
     );
+  });
+});
+
+describe("locations.$locationId.assets loader: source figures", () => {
+  /** A pool placed here with `placed` units, as getLocation selects it. */
+  function poolPlacedHere(id: string, placed: number) {
+    return {
+      id,
+      type: "QUANTITY_TRACKED",
+      quantity: 20,
+      custody: [],
+      assetLocations: [
+        {
+          locationId: "location-1",
+          quantity: placed,
+          assetKitId: null,
+          assetKit: null,
+        },
+      ],
+    };
+  }
+
+  /** The rows the loader hands the page. */
+  type Row = {
+    id: string;
+    reservedNextHere: number;
+    onBookingFromHere: number;
+    inCustodyHere: number;
+    sourceFiguresMeasured: boolean;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    signInAs({ seeAllCustody: true });
+    vi.mocked(getTeamMemberForCustodianFilter).mockResolvedValue({
+      teamMembers: [],
+      totalTeamMembers: 0,
+    } as never);
+    vi.mocked(getCustodyFromLocationByPool).mockResolvedValue({} as never);
+    vi.mocked(loadMultiPlacedPoolIds).mockResolvedValue(new Set() as never);
+    vi.mocked(countUnitsOnBookingsFromLocation).mockResolvedValue(
+      new Map() as never
+    );
+    vi.mocked(loadOperatorCustodyByPool).mockResolvedValue(new Map());
+    // Every case starts LEGACY; a case that converts a pool says so.
+    vi.mocked(loadReservedNextAtLocation).mockResolvedValue({
+      reservedNext: new Map(),
+      convertedAssetIds: new Set(),
+    });
+    vi.mocked(db.asset.count).mockResolvedValue(0);
+  });
+
+  it("asks for the page's pools only and puts the peak on each row", async () => {
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 2,
+      assets: [
+        poolPlacedHere("cables", 11),
+        { id: "camera", type: "INDIVIDUAL", quantity: null, custody: [] },
+      ],
+    } as never);
+    vi.mocked(loadReservedNextAtLocation).mockResolvedValue({
+      reservedNext: new Map([["cables", 3]]),
+      convertedAssetIds: new Set(["cables"]),
+    });
+
+    const result = await loader(buildArgs(""));
+
+    expect(loadReservedNextAtLocation).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      locationId: "location-1",
+      assetIds: ["cables"],
+    });
+    const items = loaderData(result).items as Row[];
+    expect(items.map((item) => [item.id, item.reservedNextHere])).toEqual([
+      ["cables", 3],
+      ["camera", 0],
+    ]);
+  });
+
+  it("measures a converted pool at one placement: units out from its rows, every unit in custody", async () => {
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 1,
+      assets: [poolPlacedHere("cables", 11)],
+    } as never);
+    vi.mocked(loadReservedNextAtLocation).mockResolvedValue({
+      reservedNext: new Map(),
+      convertedAssetIds: new Set(["cables"]),
+    });
+    vi.mocked(countUnitsOnBookingsFromLocation).mockResolvedValue(
+      new Map([["cables", 2]])
+    );
+    vi.mocked(loadOperatorCustodyByPool).mockResolvedValue(
+      new Map([["cables", 1]])
+    );
+
+    const result = await loader(buildArgs(""));
+
+    expect(countUnitsOnBookingsFromLocation).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      locationId: "location-1",
+      assetIds: ["cables"],
+    });
+    expect(loadOperatorCustodyByPool).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      assetIds: ["cables"],
+    });
+    const [row] = loaderData(result).items as Row[];
+    expect(row).toMatchObject({
+      id: "cables",
+      onBookingFromHere: 2,
+      inCustodyHere: 1,
+      sourceFiguresMeasured: true,
+    });
+  });
+
+  it("keeps the plain count for a LEGACY pool at one placement", async () => {
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 1,
+      assets: [poolPlacedHere("cables", 11)],
+    } as never);
+
+    const result = await loader(buildArgs(""));
+
+    // Nothing is measured, so no out or custody figure is read for it.
+    expect(countUnitsOnBookingsFromLocation).not.toHaveBeenCalled();
+    expect(loadOperatorCustodyByPool).not.toHaveBeenCalled();
+    const [row] = loaderData(result).items as Row[];
+    expect(row).toMatchObject({
+      id: "cables",
+      onBookingFromHere: 0,
+      inCustodyHere: 0,
+      sourceFiguresMeasured: false,
+    });
+  });
+
+  it("keeps the row of a placement reduced to 0 with pending units held there", async () => {
+    vi.mocked(getLocation).mockResolvedValue({
+      location: { id: "location-1", name: "Shelf B2" },
+      totalAssetsWithinLocation: 1,
+      assets: [poolPlacedHere("cables", 0)],
+    } as never);
+    vi.mocked(loadReservedNextAtLocation).mockResolvedValue({
+      reservedNext: new Map([["cables", 5]]),
+      convertedAssetIds: new Set(["cables"]),
+    });
+
+    const result = await loader(buildArgs(""));
+
+    const items = loaderData(result).items as Row[];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: "cables", reservedNextHere: 5 });
   });
 });

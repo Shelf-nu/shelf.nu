@@ -107,6 +107,7 @@ export default {
             text: "Protected Indexes and Foreign Keys",
             link: "/protected-indexes",
           },
+          { text: "Real Database Tests", link: "/real-database-tests" },
         ],
       },
       {
@@ -129,6 +130,10 @@ export default {
           {
             text: "Booking conflict handling",
             link: "/booking-conflict-queries",
+          },
+          {
+            text: "Booking source locations",
+            link: "/booking-source-locations",
           },
           {
             text: "Security Review Agent",

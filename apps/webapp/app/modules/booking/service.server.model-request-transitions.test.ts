@@ -24,6 +24,7 @@
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   assertModelUnitsNotReservedElsewhere,
@@ -287,8 +288,10 @@ beforeEach(() => {
   vitest.clearAllMocks();
   // `clearAllMocks` clears calls, not implementations, so the defaults the
   // factory set survive. The two that a case routinely changes are restated.
+  // The booking lock answers with the staged row's window: check-out refuses
+  // a window that moved since its earlier read.
   // @ts-expect-error mocked
-  db.$queryRaw.mockResolvedValue([{ status: BookingStatus.DRAFT }]);
+  db.$queryRaw.mockResolvedValue([{ status: BookingStatus.DRAFT, from, to }]);
   // @ts-expect-error mocked
   db.booking.findUniqueOrThrow.mockResolvedValue(
     bookingRow(BookingStatus.DRAFT)
@@ -432,6 +435,36 @@ describe("checkoutBooking", () => {
     );
   });
 
+  it("measures a draft checked out early with an adjusted date from now, the start it writes", async () => {
+    expect.assertions(4);
+    const tx = openTx();
+    tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
+    const before = Date.now();
+
+    await checkoutBooking({
+      ...checkoutParams,
+      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+    });
+
+    const [args] = vitest.mocked(assertOutstandingModelRequestsFit).mock
+      .calls[0];
+    const writtenFrom = args.from;
+    if (!writtenFrom) throw new Error("Expected the guard to get a start");
+    // The written start is now, cut to the minute: a reservation between now
+    // and the planned start competes for the same units.
+    expect(writtenFrom.getTime()).toBeLessThan(from.getTime());
+    expect(Math.abs(writtenFrom.getTime() - before)).toBeLessThan(
+      5 * 60 * 1000
+    );
+    expect(args.to).toEqual(to);
+    // The same start the status write commits.
+    expect(tx.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ from: args.from }),
+      })
+    );
+  });
+
   it("formats a refusal for the caller and keeps other bookings unnamed by default", async () => {
     expect.assertions(1);
     const tx = openTx();
@@ -471,7 +504,9 @@ describe("checkoutBooking", () => {
       bookingRow(BookingStatus.RESERVED)
     );
     // @ts-expect-error mocked
-    db.$queryRaw.mockResolvedValue([{ status: BookingStatus.RESERVED }]);
+    db.$queryRaw.mockResolvedValue([
+      { status: BookingStatus.RESERVED, from, to },
+    ]);
     const tx = openTx();
     tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
 

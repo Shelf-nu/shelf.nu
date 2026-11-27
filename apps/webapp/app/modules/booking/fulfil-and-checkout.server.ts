@@ -526,6 +526,8 @@ async function checkOutScannedUnits(
     intentChoice: args.checkoutIntentChoice,
     provenance: args.provenance,
     sourceLocations: args.sourceLocations,
+    clientSupportsSources: args.clientSupportsSources,
+    onDispatched: args.onDispatched,
   });
 
   return {

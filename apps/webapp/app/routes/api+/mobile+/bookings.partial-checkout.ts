@@ -2,6 +2,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
+import { clientHasCapability } from "~/modules/api/capabilities.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -12,10 +13,12 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { CLIENT_DECLARED_BOOKING_METHODS } from "~/modules/booking/checkout-method";
 import {
+  mobileDispatchSummary,
   mobileSourceLocationsSchema,
   sourceSubmissionFromRecord,
 } from "~/modules/booking/checkout-source-location";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import type { DispatchedSlice } from "~/modules/booking/sources/booking-sources.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
@@ -42,8 +45,13 @@ import {
  *   driven by `assetIds` alone. `method` says how the app collected the rows;
  *   the server cannot tell a scan from a tick on this route, so a bundle that
  *   sends nothing is recorded with `method: null`.
- * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking }`
- *   on success, or `{ error: { message } }` with the appropriate status on failure.
+ *   The `X-Shelf-Capabilities: booking-sources` header says the app can answer
+ *   the source question for a slice split across sources; without it, a pick
+ *   for such a slice is ignored and it goes out by its allocation.
+ * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking,
+ *   slices }` on success, `slices` listing the real sources each pool slice
+ *   with planned sources sent its units from; or `{ error: { message } }` with
+ *   the appropriate status on failure.
  * @throws Never throws to the caller — errors are normalized via
  *   {@link makeShelfError} into the JSON error response.
  */
@@ -156,6 +164,8 @@ export async function action({ request }: ActionFunctionArgs) {
       action: "check out",
     });
 
+    /** Where converted pool slices' units left from, reported after commit. */
+    const dispatched: DispatchedSlice[] = [];
     const result = await partialCheckoutBooking({
       id: bookingId,
       organizationId,
@@ -170,6 +180,10 @@ export async function action({ request }: ActionFunctionArgs) {
       // Never guessed: a bundle that declared no method is recorded as null.
       provenance: { surface: "phone", method: method ?? null },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
+      // An older build cannot answer the source question for a split slice;
+      // the server dispatches those by allocation.
+      clientSupportsSources: clientHasCapability(request, "booking-sources"),
+      onDispatched: (slices) => dispatched.push(...slices),
     });
 
     return data({
@@ -182,6 +196,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: result.booking.name,
         status: result.booking.status,
       },
+      slices: mobileDispatchSummary(dispatched),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

@@ -9,6 +9,7 @@
 import { useMemo, useEffect } from "react";
 import NProgress from "nprogress";
 import { useNavigation, useFetchers } from "react-router";
+import { SOURCE_EDITOR_FETCHER_KEY_PREFIX } from "~/modules/booking/sources/source-editor";
 import { RECORD_NAVIGATION_FETCHER_PREFIX } from "./use-list-context";
 
 /** Fetcher keys that never move the progress bar. */
@@ -38,6 +39,7 @@ const EXCLUDED_FETCHER_KEY_PREFIXES = [
   "scan-history-",
   "notification-preference-",
   RECORD_NAVIGATION_FETCHER_PREFIX,
+  SOURCE_EDITOR_FETCHER_KEY_PREFIX,
 ] as const;
 
 /**

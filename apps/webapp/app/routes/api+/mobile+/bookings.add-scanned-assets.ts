@@ -387,10 +387,6 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     });
 
-    const window =
-      booking.from && booking.to
-        ? { from: booking.from, to: booking.to }
-        : null;
     const resizes: BookedQuantityChange[] = slicesToResize.map((slice) => ({
       bookingAssetId: slice.id,
       assetId: slice.assetId,
@@ -415,13 +411,17 @@ export async function action({ request }: ActionFunctionArgs) {
       // Locale from Accept-Language; the guard reads the user's own date
       // preferences (by `userId`) for the day a pool refusal names.
       hints: getClientHint(request),
-      inSameTransaction: async (tx) => {
+      // The resized assets join the add's first sorted asset lock, so the
+      // transaction takes its asset locks in one batch.
+      alsoLockAssetIds: resizes.map((resize) => resize.assetId),
+      inSameTransaction: async (tx, { sourcesInPlay }) => {
         appliedResizes = await setStandaloneBookedQuantitiesWithinTx(tx, {
           bookingId,
           organizationId,
           actorUserId: user.id,
-          window,
           changes: resizes,
+          // The add's answer when it asked, so the probe is not sent twice.
+          sourcesInPlay,
         });
       },
     });

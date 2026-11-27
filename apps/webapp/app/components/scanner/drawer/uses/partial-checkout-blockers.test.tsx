@@ -15,11 +15,19 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ScanListItems } from "~/atoms/qr-scanner";
+import {
+  ALLOCATION_SOURCE_FORM_VALUE,
+  UNPLACED_SOURCE_FORM_VALUE,
+} from "~/modules/booking/checkout-source-location";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 
 import {
+  assetIdsWithPickedSource,
   buildPartialCheckoutBlockers,
+  questionsAtSubmittedQuantities,
+  withoutSourcePick,
   type PartialCheckoutBlockers,
+  type PickedSourceQuestion,
 } from "./partial-checkout-blockers";
 
 /** Every blocker the partial check-out drawer declares, in order. */
@@ -27,6 +35,7 @@ const EXPECTED_IDS = [
   "assets-not-in-booking",
   "assets-already-checked-out",
   "assets-in-custody",
+  "short-source",
   "kits-already-checked-out",
   "kit-in-custody",
   "kits-booked-elsewhere",
@@ -90,12 +99,16 @@ function build(
     alreadyCheckedOut = [],
     kitsBookedElsewhere = [],
     assetsInKitsBookedElsewhere = [],
+    shortSourceAssetIds = [],
+    pickedSourceAssetIds = [],
   }: {
     bookingAssetIds?: string[];
     remainingByAssetId?: Record<string, number>;
     alreadyCheckedOut?: string[];
     kitsBookedElsewhere?: string[];
     assetsInKitsBookedElsewhere?: string[];
+    shortSourceAssetIds?: string[];
+    pickedSourceAssetIds?: string[];
   } = {}
 ): PartialCheckoutBlockers & {
   removeAssetsFromList: ReturnType<typeof vi.fn>;
@@ -112,6 +125,8 @@ function build(
       alreadyCheckedOut: new Set(alreadyCheckedOut),
       kitsBookedElsewhere: new Set(kitsBookedElsewhere),
       assetsInKitsBookedElsewhere: new Set(assetsInKitsBookedElsewhere),
+      shortSourceAssetIds: new Set(shortSourceAssetIds),
+      pickedSourceAssetIds: new Set(pickedSourceAssetIds),
       removeAssetsFromList,
       removeItemsFromList,
     }),
@@ -188,6 +203,56 @@ describe("buildPartialCheckoutBlockers", () => {
       { remainingByAssetId: { a1: 1 } }
     );
     expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a pool whose slice is short at its source", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      { remainingByAssetId: { a1: 5 }, shortSourceAssetIds: ["a1"] }
+    );
+    expect(activeIds(built)).toEqual(["short-source"]);
+    built.blockerConfigs.find((b) => b.id === "short-source")?.onResolve();
+    expect(built.removeItemsFromList).toHaveBeenCalledWith(["qrPool"]);
+  });
+
+  it("short-source: a pool with room at its sources does not block", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      { remainingByAssetId: { a1: 5 }, shortSourceAssetIds: ["a2"] }
+    );
+    expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a short pool the operator sends out from a picked source with room does not block", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      {
+        remainingByAssetId: { a1: 5 },
+        shortSourceAssetIds: ["a1"],
+        pickedSourceAssetIds: ["a1"],
+      }
+    );
+    expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a pick for another pool leaves a short pool blocked", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      {
+        remainingByAssetId: { a1: 5 },
+        shortSourceAssetIds: ["a1"],
+        pickedSourceAssetIds: ["a2"],
+      }
+    );
+    expect(activeIds(built)).toEqual(["short-source"]);
+  });
+
+  it("short-source: a pool with nothing left to go out is reported as already out only", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      { remainingByAssetId: { a1: 0 }, shortSourceAssetIds: ["a1"] }
+    );
+    expect(activeIds(built)).toEqual(["assets-already-checked-out"]);
   });
 
   it("kits-already-checked-out: every booked member is already out", () => {
@@ -347,5 +412,130 @@ describe("buildPartialCheckoutBlockers", () => {
     expect(removedBy(built.removeItemsFromList)).toEqual(
       expect.arrayContaining(["qr2", "qrKit", "qrBad"])
     );
+  });
+});
+
+describe("assetIdsWithPickedSource", () => {
+  /** Pens: 5 units going out, Warehouse has 8 left, Shop 2, 6 unplaced. */
+  const question: PickedSourceQuestion = {
+    sliceId: "ba-pens",
+    assetId: "pens",
+    quantity: 5,
+    placements: [
+      {
+        locationId: "loc-warehouse",
+        name: "Warehouse",
+        placed: 8,
+        inCustody: 0,
+        onBooking: 0,
+        left: 8,
+      },
+      {
+        locationId: "loc-shop",
+        name: "Shop",
+        placed: 4,
+        inCustody: 2,
+        onBooking: 0,
+        left: 2,
+      },
+    ],
+    unplaced: 6,
+  };
+
+  it("counts a picked location with room for the slice's units", () => {
+    expect(
+      assetIdsWithPickedSource([question], { "ba-pens": "loc-warehouse" })
+    ).toEqual(new Set(["pens"]));
+  });
+
+  it("counts Unplaced when the unplaced units cover the slice", () => {
+    expect(
+      assetIdsWithPickedSource([question], {
+        "ba-pens": UNPLACED_SOURCE_FORM_VALUE,
+      })
+    ).toEqual(new Set(["pens"]));
+  });
+
+  it("skips a picked location without room for the slice's units", () => {
+    expect(
+      assetIdsWithPickedSource([question], { "ba-pens": "loc-shop" })
+    ).toEqual(new Set());
+  });
+
+  it("skips As planned, which is the short plan itself", () => {
+    expect(
+      assetIdsWithPickedSource([question], {
+        "ba-pens": ALLOCATION_SOURCE_FORM_VALUE,
+      })
+    ).toEqual(new Set());
+  });
+
+  it("skips a question the operator has not answered", () => {
+    expect(assetIdsWithPickedSource([question], {})).toEqual(new Set());
+  });
+
+  it("forgets the pick of a row that left the list", () => {
+    const picks = withoutSourcePick(
+      { "ba-pens": "loc-warehouse", "ba-tape": "loc-shop" },
+      "ba-pens"
+    );
+    expect(picks).toEqual({ "ba-tape": "loc-shop" });
+    expect(assetIdsWithPickedSource([question], picks)).toEqual(new Set());
+  });
+});
+
+describe("short-source at the submitted quantity", () => {
+  /** Pens: a 5-unit slice, the picked Shelf has room for 3. */
+  const roomForThree: PickedSourceQuestion = {
+    sliceId: "ba-pens",
+    assetId: "a1",
+    quantity: 5,
+    placements: [
+      {
+        locationId: "loc-shelf",
+        name: "Shelf",
+        placed: 3,
+        inCustody: 0,
+        onBooking: 0,
+        left: 3,
+      },
+    ],
+    unplaced: 0,
+  };
+  const pick = { "ba-pens": "loc-shelf" };
+
+  /** The short-source state of a scanned short pool for a submitted count. */
+  function blockersFor(submitted: number): string[] {
+    const picked = assetIdsWithPickedSource(
+      questionsAtSubmittedQuantities(
+        [roomForThree],
+        [{ bookingAssetId: "ba-pens", quantity: submitted }]
+      ),
+      pick
+    );
+    return activeIds(
+      build(
+        { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+        {
+          remainingByAssetId: { a1: 5 },
+          shortSourceAssetIds: ["a1"],
+          pickedSourceAssetIds: [...picked],
+        }
+      )
+    );
+  }
+
+  it("room 3, 2 submitted: the pick covers what leaves, no blocker", () => {
+    expect(blockersFor(2)).toEqual([]);
+  });
+
+  it("room 3, 4 submitted: the pick falls short, short-source blocks", () => {
+    expect(blockersFor(4)).toEqual(["short-source"]);
+  });
+
+  it("a slice not in the payload is judged at its full quantity", () => {
+    expect(
+      questionsAtSubmittedQuantities([roomForThree], [])[0]?.quantity
+    ).toBe(5);
   });
 });

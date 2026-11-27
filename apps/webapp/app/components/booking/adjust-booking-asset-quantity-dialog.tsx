@@ -9,12 +9,23 @@
  * dialog is opened programmatically (e.g., auto-open after create-new
  * booking with a qty-tracked asset).
  *
+ * With `sourceEditor`, the dialog also shows a "From" section to choose
+ * where the slice's units come from. A split the operator edited is sent as
+ * a MANUAL `sources` field with the quantity; "Auto" sends `{ mode: "AUTO" }`
+ * at once. An untouched split sends no `sources` field, so a plain quantity
+ * change leaves the sources to the server's resize.
+ *
  * @see {@link file://../../routes/api+/bookings.$bookingId.adjust-asset-quantity.ts}
+ * @see {@link file://./booking-source-editor.tsx}
  */
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
+import {
+  BookingSourceEditor,
+  useSourceSplit,
+} from "~/components/booking/booking-source-editor";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -32,7 +43,16 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import {
+  isSplitLocked,
+  requiredPending,
+  resolveManualSources,
+  type SourceEditorData,
+} from "~/modules/booking/sources/source-editor";
+import type { AdjustBookingAssetQuantitySchema } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
 import { isFormProcessing } from "~/utils/form";
+import { getValidationErrors } from "~/utils/http";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 
 /** Props for the AdjustBookingAssetQuantityDialog component */
 export interface AdjustBookingAssetQuantityDialogProps {
@@ -85,6 +105,45 @@ export interface AdjustBookingAssetQuantityDialogProps {
   open?: boolean;
   /** Controlled open-change callback */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * The slice's "From" section data (from the adjust route's loader). Null
+   * or omitted hides the section: only standalone pool slices of pools with
+   * manual placements, on bookings the viewer may change, get one.
+   */
+  sourceEditor?: SourceEditorData | null;
+}
+
+/** One opening's form state: what is typed and what was last sent. */
+type FormState = {
+  /** Client-side complaint about the quantity, if any. */
+  quantityError: string | null;
+  /** The quantity being typed, so the From section knows its target. */
+  quantityDraft: string;
+  /** Whether this opening's last submission carried a `sources` field. */
+  sentSources: boolean;
+};
+
+type FormAction =
+  | { type: "open"; currentQuantity: number }
+  | { type: "type"; value: string }
+  | { type: "quantityError"; message: string | null }
+  | { type: "submitted"; sentSources: boolean };
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case "open":
+      return {
+        quantityError: null,
+        quantityDraft: String(action.currentQuantity),
+        sentSources: false,
+      };
+    case "type":
+      return { ...state, quantityError: null, quantityDraft: action.value };
+    case "quantityError":
+      return { ...state, quantityError: action.message };
+    case "submitted":
+      return { ...state, quantityError: null, sentSources: action.sentSources };
+  }
 }
 
 /**
@@ -108,6 +167,7 @@ export function AdjustBookingAssetQuantityDialog({
   trigger,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  sourceEditor,
 }: AdjustBookingAssetQuantityDialogProps) {
   // The link opens the bookings index; offer it exactly when that index would
   // show this member other people's bookings.
@@ -126,8 +186,16 @@ export function AdjustBookingAssetQuantityDialog({
     [isControlled, controlledOnOpenChange]
   );
 
-  const [quantityError, setQuantityError] = useState<string | null>(null);
-  const fetcher = useFetcher({ key: `adjust-booking-asset-${assetId}` });
+  const [form, dispatch] = useReducer(formReducer, {
+    quantityError: null,
+    quantityDraft: String(currentQuantity),
+    sentSources: false,
+  });
+  const { quantityError, quantityDraft, sentSources } = form;
+  const split = useSourceSplit(sourceEditor);
+  const fetcher = useFetcher<DataOrErrorResponse>({
+    key: `adjust-booking-asset-${assetId}`,
+  });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
   // Replaces `autoFocus` to satisfy jsx-a11y/no-autofocus while keeping the
@@ -146,26 +214,60 @@ export function AdjustBookingAssetQuantityDialog({
    */
   const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
   const serverError = outcome.message;
+  /** Field errors of this opening's refusal (server-side Zod fallback). */
+  const validationErrors =
+    outcome.status === "rejected"
+      ? getValidationErrors<typeof AdjustBookingAssetQuantitySchema>(
+          fetcher.data?.error
+        )
+      : undefined;
 
   // The client-side complaint belongs to one opening too: the operator fixing
   // the number tomorrow should not be met with yesterday's objection to it.
+  // The reset runs only on the closed to open flip: a revalidation that hands
+  // in a new `currentQuantity` while the dialog is open must not wipe the
+  // operator's draft or split (the uncontrolled input keeps its typed value).
+  const resetSplit = split.reset;
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
-      setQuantityError(null);
+    const opened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (opened) {
+      dispatch({ type: "open", currentQuantity });
+      resetSplit();
     }
-  }, [open]);
+  }, [open, currentQuantity, resetSplit]);
+
+  /** New quantity minus the current one; 0 while the input is not a number. */
+  const draftNumber = Number(quantityDraft);
+  const quantityDelta = Number.isInteger(draftNumber)
+    ? draftNumber - currentQuantity
+    : 0;
+
+  // A refusal of a request that carried sources is shown under From, where
+  // the operator is looking; anything else stays on the quantity field.
+  const sourcesServerError = sentSources
+    ? validationErrors?.sources?.message || serverError
+    : null;
+  const quantityServerError =
+    validationErrors?.quantity?.message || (sentSources ? null : serverError);
 
   /** Close once this opening's change has been accepted. */
   useEffect(() => {
     if (outcome.status === "accepted") {
       setOpen(false);
-      setQuantityError(null);
+      dispatch({ type: "quantityError", message: null });
       formRef.current?.reset();
     }
   }, [outcome.status, setOpen]);
 
-  /** Submit with client-side validation */
-  function handleSubmit() {
+  /**
+   * Submit with client-side validation.
+   *
+   * @param auto - True for the From section's Auto button: the sources go
+   *   back to the allocation rule, whatever the split shows.
+   */
+  function handleSubmit(auto = false) {
     const form = formRef.current;
     if (!form) return;
 
@@ -173,7 +275,10 @@ export function AdjustBookingAssetQuantityDialog({
     const qty = Number(formData.get("quantity"));
 
     if (!Number.isInteger(qty) || qty < 1) {
-      setQuantityError("Quantity must be a whole number greater than 0.");
+      dispatch({
+        type: "quantityError",
+        message: "Quantity must be a whole number greater than 0.",
+      });
       return;
     }
 
@@ -184,13 +289,39 @@ export function AdjustBookingAssetQuantityDialog({
     // editable-down. The server guard is the real source of truth; this is
     // purely a client-side UX nicety.
     if (maxQuantity != null && qty > maxQuantity && qty > currentQuantity) {
-      setQuantityError(
-        `Only ${maxQuantity} ${unitLabel} available. Please reduce the quantity.`
-      );
+      dispatch({
+        type: "quantityError",
+        message: `Only ${maxQuantity} ${unitLabel} available. Please reduce the quantity.`,
+      });
       return;
     }
 
-    setQuantityError(null);
+    let hasSources = false;
+    if (sourceEditor && auto) {
+      formData.set("sources", JSON.stringify({ mode: "AUTO" }));
+      hasSources = true;
+    } else if (
+      sourceEditor &&
+      split.edited &&
+      // A locked split offers only Auto; nothing typed is sent.
+      !isSplitLocked(sourceEditor)
+    ) {
+      const resolved = resolveManualSources({
+        editor: sourceEditor,
+        values: split.values,
+        quantityDelta: qty - currentQuantity,
+        unitLabel,
+      });
+      if (!resolved.ok) {
+        split.setError(resolved.message);
+        return;
+      }
+      formData.set("sources", JSON.stringify(resolved.input));
+      hasSources = true;
+    }
+    split.setError(null);
+    dispatch({ type: "submitted", sentSources: hasSources });
+
     void fetcher.submit(formData, {
       method: "POST",
       action: `/api/bookings/${bookingId}/adjust-asset-quantity`,
@@ -231,8 +362,10 @@ export function AdjustBookingAssetQuantityDialog({
               step={1}
               required
               defaultValue={currentQuantity}
-              error={quantityError || serverError || undefined}
-              onChange={() => setQuantityError(null)}
+              error={quantityError || quantityServerError || undefined}
+              onChange={(event) =>
+                dispatch({ type: "type", value: event.target.value })
+              }
             />
             {maxQuantity != null ? (
               totalQuantity != null ? (
@@ -284,6 +417,19 @@ export function AdjustBookingAssetQuantityDialog({
                 </p>
               )
             ) : null}
+            {sourceEditor ? (
+              <BookingSourceEditor
+                editor={sourceEditor}
+                values={split.values}
+                edited={split.edited}
+                onChange={split.change}
+                onAuto={() => handleSubmit(true)}
+                required={requiredPending(sourceEditor, quantityDelta)}
+                error={split.error || sourcesServerError}
+                disabled={disabled}
+                unitLabel={unitLabel}
+              />
+            ) : null}
           </div>
         </fetcher.Form>
 
@@ -297,7 +443,7 @@ export function AdjustBookingAssetQuantityDialog({
           <Button
             type="button"
             variant="primary"
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={disabled}
           >
             {isSubmitting ? "Saving..." : "Save"}

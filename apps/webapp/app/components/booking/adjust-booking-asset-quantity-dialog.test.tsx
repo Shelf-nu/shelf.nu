@@ -29,13 +29,24 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accessFor } from "@helpers/role-access";
+import { useDisabled } from "~/hooks/use-disabled";
+import type { SourceEditorData } from "~/modules/booking/sources/source-editor";
+import { VALIDATION_ERROR } from "~/utils/error";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { AdjustBookingAssetQuantityDialog } from "./adjust-booking-asset-quantity-dialog";
 
 /** Mutable per-test fetcher state, reassigned in `beforeEach`. */
 type FetcherState = {
   state: "idle" | "submitting" | "loading";
-  data: { success?: boolean; error?: { message?: string } | null } | undefined;
+  data:
+    | {
+        success?: boolean;
+        error?: {
+          message?: string;
+          additionalData?: Record<string, unknown>;
+        } | null;
+      }
+    | undefined;
 };
 
 let mockFetcherState: FetcherState = { state: "idle", data: undefined };
@@ -47,6 +58,21 @@ let mockAccess: RoleAccess = accessFor(["ADMIN"]);
 // test, and a `submit` we assert against for the happy-path case.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
+  // One component identity for every render: a new one per render would
+  // remount the form and wipe what the operator typed.
+  const FormShell = ({
+    children,
+    onSubmit,
+    ...rest
+  }: {
+    children: ReactNode;
+    onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
+    [key: string]: unknown;
+  }) => (
+    <form {...rest} onSubmit={onSubmit}>
+      {children}
+    </form>
+  );
   return {
     ...actual,
     // why: the real <Link> needs a Router context we don't set up here; render
@@ -66,19 +92,7 @@ vi.mock("react-router", async () => {
     ),
     useFetcher: () => ({
       ...mockFetcherState,
-      Form: ({
-        children,
-        onSubmit,
-        ...rest
-      }: {
-        children: ReactNode;
-        onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
-        [key: string]: unknown;
-      }) => (
-        <form {...rest} onSubmit={onSubmit}>
-          {children}
-        </form>
-      ),
+      Form: FormShell,
       submit: mockSubmit,
     }),
   };
@@ -87,7 +101,7 @@ vi.mock("react-router", async () => {
 // why: useDisabled depends on useNavigation/fetcher plumbing; stabilise to
 // `false` so the Save button is always clickable in these tests.
 vi.mock("~/hooks/use-disabled", () => ({
-  useDisabled: () => false,
+  useDisabled: vi.fn(() => false),
 }));
 
 // why: the dialog reads the viewer's booking visibility from the layout data
@@ -414,6 +428,330 @@ describe("AdjustBookingAssetQuantityDialog", () => {
       rerender(dialog(true, onOpenChange));
 
       expect(onOpenChange).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("From section", () => {
+    /** A RESERVED slice of 15: 8 at the warehouse, 7 unplaced. */
+    function editorData(
+      overrides: Partial<SourceEditorData> = {}
+    ): SourceEditorData {
+      return {
+        sliceId: "ba-1",
+        mode: "AUTO",
+        rows: [
+          {
+            key: "LOCATION:loc-1",
+            locationId: "loc-1",
+            label: "Demo Warehouse",
+            pending: 8,
+            out: 0,
+            free: 10,
+          },
+          {
+            key: "UNPLACED:",
+            locationId: null,
+            label: "Unplaced",
+            pending: 7,
+            out: 0,
+            free: 9,
+          },
+        ],
+        unassignedPending: 0,
+        unknownOut: 0,
+        stranded: [],
+        ...overrides,
+      };
+    }
+
+    function dialog(
+      editor: SourceEditorData | null,
+      currentQuantity = 15
+    ): React.ReactElement {
+      return (
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={currentQuantity}
+          maxQuantity={30}
+          totalQuantity={30}
+          sourceEditor={editor}
+          open
+          onOpenChange={vi.fn()}
+        />
+      );
+    }
+
+    /** The `sources` field of the n-th submission, parsed. */
+    function sentSources(call = 0): unknown {
+      const formData = mockSubmit.mock.calls[call]?.[0] as FormData;
+      const raw = formData.get("sources");
+      return typeof raw === "string" ? JSON.parse(raw) : raw;
+    }
+
+    it("keeps the operator's split when the booked quantity revalidates while open", () => {
+      const editor = editorData();
+      const { rerender } = render(dialog(editor, 15));
+
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "12" },
+      });
+      rerender(dialog(editor, 16));
+
+      expect(screen.getByLabelText("Demo Warehouse")).toHaveValue(12);
+    });
+
+    it("resets the split when the dialog is closed and opened again", () => {
+      const editor = editorData();
+      const onOpenChange = vi.fn();
+      /** Same dialog as `dialog`, with the open state driven by the test. */
+      const at = (open: boolean) => (
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          assetTitle="Chairs"
+          currentQuantity={15}
+          maxQuantity={30}
+          totalQuantity={30}
+          sourceEditor={editor}
+          open={open}
+          onOpenChange={onOpenChange}
+        />
+      );
+      const { rerender } = render(at(true));
+
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "12" },
+      });
+      rerender(at(false));
+      rerender(at(true));
+
+      expect(screen.getByLabelText("Demo Warehouse")).toHaveValue(8);
+    });
+
+    it("is hidden without editor data", () => {
+      render(dialog(null));
+
+      expect(screen.queryByText("From")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Auto" })
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows one input per placement plus Unplaced with free units", () => {
+      const editor = editorData();
+      render(dialog(editor));
+
+      expect(screen.getByLabelText("Demo Warehouse")).toHaveValue(8);
+      expect(screen.getByLabelText("Unplaced")).toHaveValue(7);
+      expect(screen.getByText("10 free")).toBeInTheDocument();
+      expect(screen.getByText("9 free")).toBeInTheDocument();
+      expect(
+        screen.getByText(/Free counts loose units only/i)
+      ).toBeInTheDocument();
+    });
+
+    it("sends no sources field when the split is untouched", () => {
+      const editor = editorData();
+      render(dialog(editor));
+
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+      expect(mockSubmit).toHaveBeenCalledTimes(1);
+      expect(sentSources()).toBeNull();
+    });
+
+    it("posts mode AUTO from the Auto button", () => {
+      const editor = editorData({ mode: "MANUAL" });
+      render(dialog(editor));
+
+      fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+
+      expect(mockSubmit).toHaveBeenCalledTimes(1);
+      expect(sentSources()).toEqual({ mode: "AUTO" });
+      const formData = mockSubmit.mock.calls[0][0] as FormData;
+      expect(formData.get("quantity")).toBe("15");
+    });
+
+    it("posts an edited split as MANUAL planned units", () => {
+      const editor = editorData();
+      render(dialog(editor));
+
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "15" },
+      });
+      fireEvent.change(screen.getByLabelText("Unplaced"), {
+        target: { value: "0" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+      expect(sentSources()).toEqual({
+        mode: "MANUAL",
+        sources: [{ locationId: "loc-1", quantity: 15 }],
+      });
+    });
+
+    it("refuses a split that does not add up to the quantity, before sending", () => {
+      const editor = editorData();
+      render(dialog(editor));
+
+      fireEvent.change(screen.getByLabelText("Unplaced"), {
+        target: { value: "1" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+      expect(mockSubmit).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "The sources must add up to 15 units."
+      );
+    });
+
+    it("measures the split against the quantity being typed", () => {
+      const editor = editorData();
+      render(dialog(editor));
+
+      fireEvent.change(screen.getByLabelText(/Quantity/i), {
+        target: { value: "20" },
+      });
+      fireEvent.change(screen.getByLabelText("Unplaced"), {
+        target: { value: "12" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+      expect(sentSources()).toEqual({
+        mode: "MANUAL",
+        sources: [
+          { locationId: "loc-1", quantity: 8 },
+          { locationId: null, quantity: 12 },
+        ],
+      });
+    });
+
+    it("shows the server's sources validation error under From", () => {
+      const editor = editorData();
+      const { rerender } = render(dialog(editor));
+
+      fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(editor));
+      mockFetcherState = {
+        state: "idle",
+        data: {
+          error: {
+            message: "Choose at least one source.",
+            additionalData: {
+              [VALIDATION_ERROR]: {
+                sources: { message: "Choose at least one source." },
+              },
+            },
+          },
+        },
+      };
+      rerender(dialog(editor));
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Choose at least one source."
+      );
+    });
+
+    it("shows a server refusal of the split under From", () => {
+      const editor = editorData();
+      const { rerender } = render(dialog(editor));
+      const refusal = "One of the chosen locations does not hold this asset.";
+
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "15" },
+      });
+      fireEvent.change(screen.getByLabelText("Unplaced"), {
+        target: { value: "0" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      mockFetcherState = { state: "submitting", data: undefined };
+      rerender(dialog(editor));
+      mockFetcherState = {
+        state: "idle",
+        data: { error: { message: refusal } },
+      };
+      rerender(dialog(editor));
+
+      expect(screen.getByRole("alert")).toHaveTextContent(refusal);
+    });
+
+    it("edits only units still to go out on an ongoing booking", () => {
+      const editor = editorData({
+        rows: [
+          {
+            key: "LOCATION:loc-1",
+            locationId: "loc-1",
+            label: "Demo Warehouse",
+            pending: 6,
+            out: 2,
+            free: 10,
+          },
+          {
+            key: "UNPLACED:",
+            locationId: null,
+            label: "Unplaced",
+            pending: 7,
+            out: 0,
+            free: 9,
+          },
+        ],
+      });
+      render(dialog(editor));
+
+      expect(screen.getByLabelText("Demo Warehouse")).toHaveValue(6);
+      fireEvent.change(screen.getByLabelText("Demo Warehouse"), {
+        target: { value: "0" },
+      });
+      fireEvent.change(screen.getByLabelText("Unplaced"), {
+        target: { value: "13" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+      // The 2 units out stay at the warehouse: planned there is 2 + 0.
+      expect(sentSources()).toEqual({
+        mode: "MANUAL",
+        sources: [
+          { locationId: "loc-1", quantity: 2 },
+          { locationId: null, quantity: 13 },
+        ],
+      });
+    });
+
+    it("offers only Auto while units sit at a former placement", () => {
+      const editor = editorData({
+        stranded: [
+          {
+            key: "LOCATION:loc-gone",
+            locationId: "loc-gone",
+            label: "Old Shed",
+            pending: 0,
+            out: 2,
+          },
+        ],
+      });
+      render(dialog(editor));
+
+      expect(screen.queryByLabelText("Demo Warehouse")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      expect(sentSources()).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+      expect(sentSources(1)).toEqual({ mode: "AUTO" });
+    });
+
+    it("gives every button an explicit type and disables through the fetcher", () => {
+      const editor = editorData();
+      render(dialog(editor));
+
+      for (const button of screen.getAllByRole("button")) {
+        expect(button).toHaveAttribute("type");
+      }
+      expect(vi.mocked(useDisabled)).toHaveBeenCalledWith(
+        expect.objectContaining({ state: "idle", submit: mockSubmit })
+      );
     });
   });
 });

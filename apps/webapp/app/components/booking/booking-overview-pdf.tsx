@@ -542,6 +542,23 @@ export const BookingPDFPreview = ({
       case "category":
         return asset?.category?.name;
       case "location":
+        // A pool slice planned by source prints where its units come from,
+        // with a note per short source (no tooltip or tint on paper).
+        if (asset.sourceLine) {
+          return (
+            <>
+              {asset.sourceLine.text}
+              {asset.sourceLine.warnings.map((warning) => (
+                <span
+                  key={warning}
+                  className="mt-1 block text-xs text-gray-500"
+                >
+                  {warning}
+                </span>
+              ))}
+            </>
+          );
+        }
         return asset?.location?.name;
       case "customField":
         // A field with no value prints an empty cell, to fill in by hand.

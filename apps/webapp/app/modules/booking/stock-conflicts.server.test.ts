@@ -20,6 +20,7 @@ vitest.mock("~/database/db.server", () => ({
   db: {
     asset: { findMany: vitest.fn().mockResolvedValue([]) },
     bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
+    bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
     consumptionLog: {
       findMany: vitest.fn().mockResolvedValue([]),
       groupBy: vitest.fn().mockResolvedValue([]),
@@ -70,6 +71,7 @@ function createMockClient() {
   return {
     asset: { findMany: vitest.fn().mockResolvedValue([]) },
     bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
+    bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
     consumptionLog: {
       findMany: vitest.fn().mockResolvedValue([]),
       groupBy: vitest.fn().mockResolvedValue([]),
@@ -114,6 +116,102 @@ function reservedRow(args: {
 }
 
 describe("flagBookingStockConflicts", () => {
+  it("reads a converted slice from its source rows, not from its booking's logs", async () => {
+    const client = createMockClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    client.bookingAsset.findMany.mockResolvedValue([
+      // LEGACY: 6 over Jan 1-10, nothing returned.
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 6,
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-01-10T00:00:00Z",
+        }),
+        id: "legacy-row",
+        sourceAllocation: "LEGACY",
+      },
+      // Converted AUTO over Jan 5-15: booked 9, its rows still hold 5.
+      {
+        ...reservedRow({
+          assetId: "a1",
+          bookingId: "b2",
+          quantity: 9,
+          from: "2026-01-05T00:00:00Z",
+          to: "2026-01-15T00:00:00Z",
+        }),
+        id: "auto-row",
+        sourceAllocation: "AUTO",
+      },
+    ]);
+    // A log on b2 already lives in the rows' released units. Netting it
+    // again (9 - 9 = 0) would hide the conflict.
+    client.consumptionLog.groupBy.mockResolvedValue([
+      { bookingId: "b2", assetId: "a1", _sum: { quantity: 9 } },
+    ]);
+    client.bookingAssetSource.findMany.mockResolvedValue([
+      { bookingAssetId: "auto-row", quantity: 8, releasedQuantity: 3 },
+    ]);
+
+    const result = await flagBookingStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings: [
+        booking({
+          id: "b1",
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-10T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+        booking({
+          id: "b2",
+          from: new Date("2026-01-05T00:00:00Z"),
+          to: new Date("2026-01-15T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+      ],
+    });
+
+    // Overlap Jan 5-10: 6 + 5 = 11 > 10.
+    expect(result).toEqual(new Set(["b1", "b2"]));
+    expect(client.consumptionLog.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { in: ["b1"] } }),
+      })
+    );
+  });
+
+  it("issues no source-row read when every reserved row is LEGACY", async () => {
+    const client = createMockClient();
+    client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);
+    client.bookingAsset.findMany.mockResolvedValue([
+      reservedRow({
+        assetId: "a1",
+        bookingId: "b1",
+        quantity: 6,
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-10T00:00:00Z",
+      }),
+    ]);
+
+    await flagBookingStockConflicts({
+      organizationId: ORG_ID,
+      db: client,
+      bookings: [
+        booking({
+          id: "b1",
+          from: new Date("2026-01-01T00:00:00Z"),
+          to: new Date("2026-01-10T00:00:00Z"),
+          qtyAssetIds: ["a1"],
+        }),
+      ],
+    });
+
+    expect(client.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
+    expect(client.bookingAssetSource.findMany).not.toHaveBeenCalled();
+  });
+
   it("flags BOTH bookings when their overlapping demand exceeds the asset's total", async () => {
     const client = createMockClient();
     client.asset.findMany.mockResolvedValue([{ id: "a1", quantity: 10 }]);

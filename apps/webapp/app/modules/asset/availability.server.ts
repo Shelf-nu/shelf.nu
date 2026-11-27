@@ -61,7 +61,7 @@
  * @see superpowers/2026-07-27-qt-availability-unification-plan.md
  */
 
-import type { Prisma } from "@prisma/client";
+import type { BookingSourceAllocation, Prisma } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import {
   checkQuantityAvailable,
@@ -73,10 +73,12 @@ import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-ou
 import type {
   CheckoutAttributionLog,
   CheckoutSession,
+  DispositionShareUnits,
 } from "~/modules/booking/checkout-attribution";
 import {
   checkoutSessionsToLogsByAsset,
   computeUnitsStillOutBySlice,
+  groupDispositionsForStillOut,
 } from "~/modules/booking/checkout-attribution";
 import { isReservationExpired } from "~/modules/booking/helpers";
 import {
@@ -90,6 +92,9 @@ import {
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
   computeCustodyAvailability,
+  convertedStandaloneIds,
+  isConvertedSlice,
+  loadRemainingReservationBySlice,
   loggedUnitsByReservationRow,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
@@ -99,6 +104,7 @@ import {
 import type {
   AssertAssetQuantityNotBelowReservationsTxClient,
   AvailabilityInterval,
+  ConvertedSliceRowsClient,
   CustodyAvailability,
   CustodyAvailabilityClient,
 } from "./availability-primitives.server";
@@ -186,6 +192,7 @@ export type PrismaClientOrTx = {
         quantity: true;
         assetKitId: true;
         checkedOutAt: true;
+        sourceAllocation: true;
         // Sizes a slice that came back and went out again; see
         // `reservedUnitsStillHeld`.
         checkedOutQuantity: true;
@@ -198,11 +205,14 @@ export type PrismaClientOrTx = {
         quantity: number;
         assetKitId?: string | null;
         checkedOutAt?: Date | null;
+        sourceAllocation?: BookingSourceAllocation;
         checkedOutQuantity?: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
       }>
     >;
   };
+  /** Source rows of converted standalone slices (see the reserved read). */
+  bookingAssetSource: ConvertedSliceRowsClient["bookingAssetSource"];
   consumptionLog: {
     /**
      * The checked-out read (`computeCheckedOutBreakdownForAsset`): the RETURN /
@@ -334,11 +344,16 @@ type GetAssetAvailabilityArgs = {
  *
  * Only standalone reservations (`assetKitId IS NULL`) are summed: kit-driven
  * slices are already accounted for via `inKits` and must never be summed
- * twice. They are still read, so each already-logged RETURN/CONSUME/LOSS/DAMAGE
- * unit is taken off the slice it was logged on and never off a sibling
- * ({@link loggedUnitsByReservationRow}). Partial check-in writes
- * `ConsumptionLog` rows without decrementing `BookingAsset.quantity`, so each
- * row's remaining is its quantity minus its own logged units, clamped at 0 as
+ * twice. The remaining quantity is picked per (booking, asset) group:
+ * - A LEGACY row is its quantity minus its own already-logged
+ *   RETURN/CONSUME/LOSS/DAMAGE units (partial check-in writes `ConsumptionLog`
+ *   rows without decrementing `BookingAsset.quantity`). Kit-driven LEGACY rows
+ *   are still read, so each logged unit is taken off the slice it was logged
+ *   on and never off a sibling ({@link loggedUnitsByReservationRow}).
+ * - An AUTO / MANUAL row of a converted group holds its source rows'
+ *   `sum(quantity - releasedQuantity)`, UNASSIGNED included; its logs are not
+ *   read.
+ * All rows feed one interval list, and each remaining is clamped at 0 as
  * defence-in-depth.
  *
  * @param args.assetId - The asset to compute availability for.
@@ -414,6 +429,7 @@ export async function getAssetAvailability({
         quantity: true,
         assetKitId: true,
         checkedOutAt: true,
+        sourceAllocation: true,
         checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
@@ -425,42 +441,59 @@ export async function getAssetAvailability({
     const intervals: AvailabilityInterval[] = [];
 
     if (reservedRows.length > 0) {
-      const bookingIds = reservedRows.map((r) => r.bookingId);
+      // A group is all LEGACY or has no LEGACY slice, so a row's own mode
+      // answers for its group. LEGACY rows keep their kit-driven siblings for
+      // attribution; converted standalone rows read their source rows.
+      const legacyRows = reservedRows.filter(
+        (r) => !isConvertedSlice(r.sourceAllocation)
+      );
+      const bookingIds = legacyRows.map((r) => r.bookingId);
 
       /**
-       * Already-logged disposition quantities for this asset, per slice
-       * (RETURN/CONSUME/LOSS/DAMAGE reduce the reservation footprint;
-       * CHECKOUT does not, it's a custody handoff, not a reduction).
+       * LEGACY rows: already-logged disposition quantities for this asset,
+       * per slice (RETURN/CONSUME/LOSS/DAMAGE reduce the reservation
+       * footprint; CHECKOUT does not, it's a custody handoff, not a
+       * reduction). Converted rows (AUTO / MANUAL) read their source rows'
+       * remaining reservation instead, where those logs are already
+       * released. Both lanes run only when such rows exist.
        */
-      const loggedGroups = await client.consumptionLog.groupBy({
-        by: ["bookingAssetId", "bookingId"],
-        where: {
-          assetId,
-          bookingId: { in: bookingIds },
-          category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-        },
-        _sum: { quantity: true },
-      });
+      const [loggedGroups, convertedRemaining] = await Promise.all([
+        bookingIds.length === 0
+          ? Promise.resolve([])
+          : client.consumptionLog.groupBy({
+              by: ["bookingAssetId", "bookingId"],
+              where: {
+                assetId,
+                bookingId: { in: bookingIds },
+                category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+              },
+              _sum: { quantity: true },
+            }),
+        loadRemainingReservationBySlice(
+          client,
+          organizationId,
+          convertedStandaloneIds(reservedRows.filter((r) => !r.assetKitId))
+        ),
+      ]);
 
-      const loggedByRow = loggedUnitsByReservationRow(
-        reservedRows,
-        loggedGroups
-      );
+      const loggedByRow = loggedUnitsByReservationRow(legacyRows, loggedGroups);
 
       for (const row of reservedRows) {
         // Counted via `inKits`; fetched for attribution only.
         if (row.assetKitId) continue;
-        const logged = loggedByRow.get(row) ?? 0;
-        // Never negative, and never below the units the row has out right
-        // now: a slice returned in full and checked out again still holds
-        // the units of its second trip.
-        const remaining = reservedUnitsStillHeld(
-          {
-            quantity: row.quantity,
-            checkedOutQuantity: row.checkedOutQuantity ?? null,
-          },
-          logged
-        );
+        // A converted slice holds what its source rows have not released.
+        // A LEGACY slice is never negative, and never below the units it has
+        // out right now: a slice returned in full and checked out again
+        // still holds the units of its second trip.
+        const remaining = isConvertedSlice(row.sourceAllocation)
+          ? convertedRemaining.get(row.id ?? "") ?? 0
+          : reservedUnitsStillHeld(
+              {
+                quantity: row.quantity,
+                checkedOutQuantity: row.checkedOutQuantity ?? null,
+              },
+              loggedByRow.get(row) ?? 0
+            );
         if (remaining === 0) continue;
 
         // Every active booking occupies its window for the peak-concurrency
@@ -588,16 +621,19 @@ export type AvailabilityBatchClient = {
     >;
   };
   /**
-   * Used for BOTH the checked-out pivots read and the standalone-reserved
-   * rows read (same select shape for both — the checked-out read simply
-   * ignores the `booking.from`/`booking.to`/`booking.status` fields it
-   * doesn't need). Reusing one signature for both call sites keeps this type
-   * from needing method overloads.
+   * Used for BOTH the checked-out pivots read and the reserved-rows read
+   * (one select shape for both: the checked-out read ignores the
+   * `booking.from`/`booking.to`/`booking.status` fields it does not need).
+   * Reusing one signature for both call sites keeps this type from needing
+   * method overloads.
    *
-   * `id`/`assetKitId` are OPTIONAL: only the checked-out pivots read selects
-   * them (it needs `id` to attribute checkout claims per slice and `assetKitId`
-   * to split standalone vs kit-driven checked-out — #2790 ③). The reserved-rows
-   * read leaves them off, so the widened type still accepts its narrower select.
+   * Both reads select `id` and `assetKitId`. The checked-out read uses `id` to
+   * attribute checkout claims per slice and `assetKitId` to split standalone
+   * from kit-driven units (#2790). The reserved read uses `id` to find a
+   * converted slice's source balance and a LEGACY slice's logged units, and
+   * `assetKitId` to skip kit-driven slices (counted through `inKits`) while
+   * keeping them for log attribution. They are optional only so narrower
+   * test fixtures still compile.
    */
   bookingAsset: {
     findMany: (args: {
@@ -612,6 +648,9 @@ export type AvailabilityBatchClient = {
         // slice's departure records.
         checkedOutAt?: true;
         checkedOutQuantity?: true;
+        // Only the reserved-rows reads need the mode, to pick the method per
+        // group.
+        sourceAllocation?: true;
         booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
@@ -623,7 +662,33 @@ export type AvailabilityBatchClient = {
         assetKitId?: string | null;
         checkedOutAt?: Date | null;
         checkedOutQuantity?: number | null;
+        sourceAllocation?: BookingSourceAllocation;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
+      }>
+    >;
+  };
+  /** Source rows of converted standalone slices (see the reserved read). */
+  bookingAssetSource: ConvertedSliceRowsClient["bookingAssetSource"];
+  /**
+   * The checked-out read's disposition shares of converted groups, each
+   * naming the slice its units came off. Issued only when an active booking
+   * holds a converted slice of a requested asset.
+   */
+  bookingDispositionShare: {
+    findMany: (args: {
+      where: Prisma.BookingDispositionShareWhereInput;
+      select: {
+        bookingId: true;
+        assetId: true;
+        bookingAssetId: true;
+        quantity: true;
+      };
+    }) => Promise<
+      Array<{
+        bookingId: string;
+        assetId: string;
+        bookingAssetId: string | null;
+        quantity: number;
       }>
     >;
   };
@@ -714,12 +779,15 @@ type GetAssetAvailabilityBatchCommonArgs = {
  * "windowed-occupancy model" note for the full rationale:
  * - Only standalone (`assetKitId: null`) slices are summed into reserved:
  *   kit-driven slices are already counted via `inKits`, so summing them here
- *   too would double-count the same units. Kit-driven rows are still read,
- *   to place each logged unit on the slice it was logged on (see
- *   {@link loggedUnitsByReservationRow}).
- * - Logged RETURN/CONSUME/LOSS/DAMAGE dispositions reduce the remaining
- *   reserved quantity of the slice they were logged on before the
- *   peak-concurrent sweep, clamped at 0 per row.
+ *   too would double-count the same units.
+ * - The remaining reserved quantity is picked per (booking, asset) group
+ *   before the peak-concurrent sweep, clamped at 0: LEGACY rows subtract the
+ *   RETURN/CONSUME/LOSS/DAMAGE units logged on that slice (kit-driven LEGACY
+ *   rows are still read to place each logged unit, see
+ *   {@link loggedUnitsByReservationRow}); AUTO / MANUAL rows of a converted
+ *   group hold their source rows' `sum(quantity - releasedQuantity)`. The
+ *   logs read runs only for LEGACY rows and the source-row read only for
+ *   converted ones, in parallel.
  * - `checkedOut` is window-independent and feeds ONLY `physicalAvailable`;
  *   `bookable` subtracts `reserved` only — ONGOING bookings are windowed by
  *   their real `[from, to]`, OVERDUE bookings get a sentinel `to`
@@ -816,6 +884,7 @@ export async function getAssetAvailabilityBatch(
         quantity: true,
         assetKitId: true,
         checkedOutAt: true,
+        sourceAllocation: true,
         checkedOutQuantity: true,
         booking: { select: { from: true, to: true, status: true } },
       },
@@ -827,40 +896,54 @@ export async function getAssetAvailabilityBatch(
     const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
 
     if (reservedRows.length > 0) {
+      // Same per-group split as the singular primitive.
+      const legacyRows = reservedRows.filter(
+        (r) => !isConvertedSlice(r.sourceAllocation)
+      );
       const reservedBookingIds = [
-        ...new Set(reservedRows.map((r) => r.bookingId)),
+        ...new Set(legacyRows.map((r) => r.bookingId)),
       ];
 
-      // Grouped by slice, booking and asset: this read spans many assets,
-      // and a booking can hold one asset on several slices.
-      const loggedGroups = await client.consumptionLog.groupBy({
-        by: ["bookingAssetId", "bookingId", "assetId"],
-        where: {
-          assetId: { in: uniqueAssetIds },
-          bookingId: { in: reservedBookingIds },
-          category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-        },
-        _sum: { quantity: true },
-      });
+      // LEGACY rows: grouped by slice, booking and asset, since this read
+      // spans many assets and a booking can hold one asset on several
+      // slices. Converted rows read their source rows instead. Each lane
+      // runs only when such rows exist.
+      const [loggedGroups, convertedRemaining] = await Promise.all([
+        reservedBookingIds.length === 0
+          ? Promise.resolve([])
+          : client.consumptionLog.groupBy({
+              by: ["bookingAssetId", "bookingId", "assetId"],
+              where: {
+                assetId: { in: uniqueAssetIds },
+                bookingId: { in: reservedBookingIds },
+                category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+              },
+              _sum: { quantity: true },
+            }),
+        loadRemainingReservationBySlice(
+          client,
+          organizationId,
+          convertedStandaloneIds(reservedRows.filter((r) => !r.assetKitId))
+        ),
+      ]);
 
-      const loggedByRow = loggedUnitsByReservationRow(
-        reservedRows,
-        loggedGroups
-      );
+      const loggedByRow = loggedUnitsByReservationRow(legacyRows, loggedGroups);
 
       for (const row of reservedRows) {
         // Counted via `inKits`; fetched for attribution only.
         if (row.assetKitId) continue;
-        const logged = loggedByRow.get(row) ?? 0;
-        // Never negative, and never below the units the row has out right
-        // now. Mirrors the singular primitive.
-        const remaining = reservedUnitsStillHeld(
-          {
-            quantity: row.quantity,
-            checkedOutQuantity: row.checkedOutQuantity ?? null,
-          },
-          logged
-        );
+        // Converted slices read their source rows; LEGACY slices are never
+        // negative and never below the units they have out right now.
+        // Mirrors the singular primitive.
+        const remaining = isConvertedSlice(row.sourceAllocation)
+          ? convertedRemaining.get(row.id ?? "") ?? 0
+          : reservedUnitsStillHeld(
+              {
+                quantity: row.quantity,
+                checkedOutQuantity: row.checkedOutQuantity ?? null,
+              },
+              loggedByRow.get(row) ?? 0
+            );
         if (remaining === 0) continue;
 
         // Every active booking occupies its window (peak-concurrency sweep +
@@ -1011,7 +1094,10 @@ export type CheckedOutBreakdown = { total: number; standalone: number };
  * {@link computeCheckedOutBreakdownForAsset} runs: what left (the larger of the
  * slice's session claims, or the whole slice when only its `checkedOutAt`
  * records the departure, and the stored `checkedOutQuantity`) minus what came
- * back or was used up. The two are pinned together by
+ * back or was used up. A LEGACY group nets its raw disposition logs; a
+ * converted group nets its disposition shares on the slices they name (see
+ * {@link groupDispositionsForStillOut}), read in a fourth query issued only
+ * when a converted group is present. The two are pinned together by
  * `checked-out-batch-parity.test.ts`.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
@@ -1054,9 +1140,9 @@ async function computeCheckedOutBreakdownBatch(
 /**
  * {@link computeCheckedOutBreakdownBatch}, kept per booking: for every
  * requested asset, the units of it still off the shelf on each ONGOING /
- * OVERDUE booking it is on, in the same fixed three queries. The batched
- * sibling of `computeCheckedOutByBookingForAsset`, for list surfaces that show
- * one line per booking (the asset index status badge).
+ * OVERDUE booking it is on, in the same three queries (a fourth for converted
+ * groups). The batched sibling of `computeCheckedOutByBookingForAsset`, for
+ * list surfaces that show one line per booking (the asset index status badge).
  *
  * @param client - Batch Prisma surface (see {@link AvailabilityBatchClient}).
  * @param assetIds - Assets to compute checked-out units for (already deduped).
@@ -1082,8 +1168,8 @@ export async function computeCheckedOutByBookingBatch(
     },
     select: {
       // `id` + `assetKitId` are needed for per-slice attribution and the
-      // standalone/kit-driven split (#2790 ③) — the reserved-rows read shares
-      // this select type but leaves both off (they're optional there).
+      // standalone/kit-driven split (#2790). See the select type on
+      // `AvailabilityBatchClient.bookingAsset`.
       id: true,
       assetId: true,
       bookingId: true,
@@ -1091,11 +1177,20 @@ export async function computeCheckedOutByBookingBatch(
       assetKitId: true,
       checkedOutAt: true,
       checkedOutQuantity: true,
+      sourceAllocation: true,
       booking: { select: { from: true, to: true, status: true } },
     },
   });
 
   if (pivots.length === 0) return byAssetByBooking;
+
+  /**
+   * Converted groups, keyed `${bookingId}:${assetId}`. One slice's mode
+   * answers for its group, because conversion converts every slice at once.
+   */
+  const convertedGroups = new Set<string>();
+  const convertedBookingIds = new Set<string>();
+  const convertedAssetIds = new Set<string>();
 
   /** slices grouped: bookingId → assetId → its slices on that booking. */
   type Slice = {
@@ -1128,10 +1223,15 @@ export async function computeCheckedOutByBookingBatch(
     } else {
       byAsset.set(p.assetId, [slice]);
     }
+    if (isConvertedSlice(p.sourceAllocation)) {
+      convertedGroups.add(`${p.bookingId}:${p.assetId}`);
+      convertedBookingIds.add(p.bookingId);
+      convertedAssetIds.add(p.assetId);
+    }
   }
 
   const activeBookingIds = [...slicesByBookingByAsset.keys()];
-  const [sessions, dispositionLogs] = await Promise.all([
+  const [sessions, dispositionLogs, shares] = await Promise.all([
     client.partialBookingCheckout.findMany({
       where: { bookingId: { in: activeBookingIds } },
       select: {
@@ -1154,7 +1254,39 @@ export async function computeCheckedOutByBookingBatch(
         quantity: true,
       },
     }),
+    // Converted groups only: a batch with no converted group issues no share
+    // read. Orphaned shares name no slice and net nothing, so they are left out.
+    convertedGroups.size === 0
+      ? Promise.resolve([])
+      : client.bookingDispositionShare.findMany({
+          where: {
+            organizationId,
+            bookingId: { in: [...convertedBookingIds] },
+            assetId: { in: [...convertedAssetIds] },
+            bookingAssetId: { not: null },
+          },
+          select: {
+            bookingId: true,
+            assetId: true,
+            bookingAssetId: true,
+            quantity: true,
+          },
+        }),
   ]);
+
+  /** shares grouped: `${bookingId}:${assetId}` to its shares. */
+  const sharesByGroup = new Map<string, DispositionShareUnits[]>();
+  for (const share of shares) {
+    const key = `${share.bookingId}:${share.assetId}`;
+    // The two `in` filters form a cross product; keep converted groups only.
+    if (!convertedGroups.has(key)) continue;
+    const list = sharesByGroup.get(key) ?? [];
+    list.push({
+      bookingAssetId: share.bookingAssetId,
+      quantity: share.quantity,
+    });
+    sharesByGroup.set(key, list);
+  }
 
   /** dispositions grouped: bookingId → assetId → its logs on that booking. */
   const dispositionsByBookingByAsset = new Map<
@@ -1194,8 +1326,11 @@ export async function computeCheckedOutByBookingBatch(
       const stillOutBySlice = computeUnitsStillOutBySlice({
         slices,
         checkoutClaims: logsByAsset.get(assetId) ?? [],
-        dispositions:
-          dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
+        dispositions: groupDispositionsForStillOut({
+          converted: convertedGroups.has(`${bookingId}:${assetId}`),
+          logs: dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
+          shares: sharesByGroup.get(`${bookingId}:${assetId}`) ?? [],
+        }),
       });
 
       const acc: CheckedOutBreakdown = { total: 0, standalone: 0 };

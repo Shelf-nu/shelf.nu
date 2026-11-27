@@ -171,6 +171,9 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       provenance: { surface: "phone", method: null },
       // No `sourceLocations` in the body: no answers, so the default applies.
       sourceLocations: new Map(),
+      // No `X-Shelf-Capabilities` header: an older build.
+      clientSupportsSources: false,
+      onDispatched: expect.any(Function),
     });
   });
 
@@ -264,6 +267,8 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       intentChoice: "without-adjusted-date",
       provenance: { surface: "phone", method: null },
       sourceLocations: new Map(),
+      clientSupportsSources: false,
+      onDispatched: expect.any(Function),
     });
   });
 

@@ -53,6 +53,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { BookingMethodProvenance } from "./checkout-method";
+import { questionNeedsBookingPage } from "./checkout-source-location";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
 import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "./constants";
 import { isReservationExpired } from "./helpers";
@@ -451,14 +452,19 @@ export async function bulkCheckoutBookings(
 
     // One booking at a time: each lookup is a handful of queries, and a
     // select-all can name a whole page, which fired at once would flood the
-    // connection pool before anything is validated.
+    // connection pool before anything is validated. A slice that dispatches
+    // by allocation (planned, or converting at this check-out) goes out by
+    // that plan when nobody picks; only a question whose default is a shelf
+    // guess sends a booking to its page.
     const needingSourceChoice: SelectedBooking[] = [];
     for (const booking of bookings) {
       const questions = await getCheckoutSourceQuestions({
         organizationId,
         bookingId: booking.id,
       });
-      if (questions.length > 0) needingSourceChoice.push(booking);
+      if (questions.some(questionNeedsBookingPage)) {
+        needingSourceChoice.push(booking);
+      }
     }
     if (needingSourceChoice.length > 0) {
       refuseBatch({

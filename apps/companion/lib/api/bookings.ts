@@ -21,6 +21,7 @@ import type {
   AvailableAssetsResponse,
   BookingAssetAvailabilityResponse,
   AdjustBookingAssetQuantityResponse,
+  AdjustBookingSourcesInput,
   AvailableKitsResponse,
   AvailableModelsResponse,
   ModelRequestMutationResponse,
@@ -123,18 +124,26 @@ export const bookingsApi = {
    * Change how many units of one quantity-tracked asset a booking holds (the
    * standalone slice). A reduction always passes; an increase is checked
    * against the window's free units server-side, same as the web dialog.
+   * `sources` set to `{ mode: "AUTO" }` also hands a hand-set split back to
+   * Shelf; left out, the split is not touched.
    */
   adjustBookingAssetQuantity: (
     orgId: string,
     bookingId: string,
     assetId: string,
-    quantity: number
+    quantity: number,
+    sources?: AdjustBookingSourcesInput
   ) =>
     apiFetch<AdjustBookingAssetQuantityResponse>(
       `/api/mobile/bookings/adjust-asset-quantity?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetId, quantity }),
+        body: JSON.stringify({
+          bookingId,
+          assetId,
+          quantity,
+          ...(sources ? { sources } : {}),
+        }),
       }
     ),
 

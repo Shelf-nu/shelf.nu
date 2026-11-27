@@ -14,9 +14,11 @@
  * @see {@link file://./../../../modules/booking/shape-booking-assets.ts} sortCollapsedBookingAssets
  */
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
+import type { BookingSourcePart } from "@shelf/quantity-control";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { clientHasCapability } from "~/modules/api/capabilities.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -61,6 +63,15 @@ import {
   getDetailedPartialCheckinData,
 } from "~/modules/booking/service.server";
 import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-assets";
+import {
+  getSliceSourceSummaries,
+  type SliceSourceSummary,
+} from "~/modules/booking/sources/booking-sources.server";
+import {
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+} from "~/modules/booking/sources/pool-source-cell";
+import type { SourceAllocationMode } from "~/modules/booking/sources/types";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -222,6 +233,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // Where a pool slice's units left from, recorded at check-out.
             // Resolved to `{ id, name }` per slice below.
             sourceLocationId: true,
+            // How the slice plans its sources; AUTO and MANUAL slices send
+            // their source parts (see `sources` below).
+            sourceAllocation: true,
             asset: {
               select: {
                 id: true,
@@ -356,7 +370,38 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
        * location, slices not out yet, the unplaced units, a deleted location).
        */
       sourceLocation: SliceSourceLocation | null;
+      /**
+       * Where this slice's units come from, one part per source, the same
+       * parts the web booking page's Location cell shows. Set only for a
+       * standalone pool slice planned by source (`AUTO` or `MANUAL`); empty
+       * otherwise. Additive: older clients ignore it.
+       */
+      sources: BookingSourcePart[];
+      /**
+       * How the slice plans its sources: `LEGACY` (no source rows yet),
+       * `KIT`, `AUTO` (Shelf picks) or `MANUAL` (split set by hand, which
+       * the app can hand back to Shelf with `sources: { mode: "AUTO" }` on
+       * the adjust-quantity request).
+       */
+      sourceAllocation: SourceAllocationMode;
     };
+    /**
+     * Source parts are read only when some standalone pool slice is planned
+     * by source (`AUTO` or `MANUAL`), so a booking of `LEGACY` and kit slices
+     * costs no extra query.
+     */
+    const sourcePlannedPoolIds = [
+      ...new Set(
+        booking.bookingAssets
+          .filter(
+            (ba) =>
+              isStandalonePoolSlice(ba) &&
+              (ba.sourceAllocation === "AUTO" ||
+                ba.sourceAllocation === "MANUAL")
+          )
+          .map((ba) => ba.asset.id)
+      ),
+    ];
     const sourcedPoolSlices = booking.bookingAssets.filter(
       (ba) =>
         ba.asset.type === AssetType.QUANTITY_TRACKED && isManualSourceSlice(ba)
@@ -365,6 +410,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       sourceLocationsById,
       multiPlacedPoolIds,
       modelReservationShortfalls,
+      sliceSourceSummaries,
+      placedPoolIds,
     ] = await Promise.all([
       loadSliceSourceLocations({
         organizationId,
@@ -388,6 +435,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             organizationId,
           })
         : [],
+      sourcePlannedPoolIds.length > 0
+        ? getSliceSourceSummaries({ organizationId, bookingId: booking.id })
+        : new Map<string, SliceSourceSummary>(),
+      // Pools with at least one placement, kit-driven included: a pool with
+      // none keeps the plain location while all its units are unplaced (see
+      // `selectPoolSourceCell`).
+      sourcePlannedPoolIds.length > 0
+        ? db.assetLocation
+            .findMany({
+              where: {
+                assetId: { in: sourcePlannedPoolIds },
+                organizationId,
+              },
+              select: { assetId: true },
+              distinct: ["assetId"],
+            })
+            .then((rows) => new Set(rows.map((row) => row.assetId)))
+        : new Set<string>(),
     ]);
     type CollapsedRow = {
       assetId: string;
@@ -417,6 +482,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           multiPlacedPoolIds.has(ba.asset.id)
             ? sourceLocationsById.get(ba.sourceLocationId) ?? null
             : null,
+        sources:
+          selectPoolSourceCell({
+            summary: sliceSourceSummaries.get(ba.id),
+            isStandalonePoolSlice: isStandalonePoolSlice(ba),
+            hasPlacements: placedPoolIds.has(ba.asset.id),
+          })?.parts ?? [],
+        sourceAllocation: ba.sourceAllocation,
       };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {
@@ -1091,7 +1163,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * gone out yet, with the options a "From location" picker needs. The same
      * data the web check-out dialogs read, so the phone can ask the same
      * question and send the answers as `sourceLocations`. Empty unless the
-     * booking can still check out. Additive: older apps ignore it.
+     * booking can still check out. Additive: older apps ignore it. An app
+     * without the `booking-sources` capability gets no question for a slice
+     * split across sources: it cannot answer one, so the server dispatches
+     * that slice by its allocation.
      */
     const checkoutSourceQuestions = (
       [
@@ -1103,6 +1178,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? await getCheckoutSourceQuestions({
           organizationId,
           bookingId: booking.id,
+          clientSupportsSources: clientHasCapability(
+            request,
+            "booking-sources"
+          ),
+          // The phone's "As planned" row names the plan; only a capable
+          // client gets it (the loader checks the capability too).
+          withPlannedSummary: true,
         })
       : [];
 

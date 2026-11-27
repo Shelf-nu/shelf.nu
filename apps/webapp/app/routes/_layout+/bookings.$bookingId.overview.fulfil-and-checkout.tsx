@@ -244,6 +244,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const checkoutSourceQuestions = await getCheckoutSourceQuestions({
       organizationId,
       bookingId: booking.id,
+      withPlannedSummary: true,
     });
 
     return payload({

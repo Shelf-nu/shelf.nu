@@ -1,15 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  countUnitsOnBookingsFromLocation,
   loadBookedOutBySource,
   unitsStillOutBySlice,
 } from "./units-out-by-source.server";
 
 // @vitest-environment node
 
-// why: the module's loader reads through `db`; the pure attribution under
-// test never touches it.
-vi.mock("~/database/db.server", () => ({ db: {} }));
+const dbMock = vi.hoisted(() => ({
+  bookingAsset: { findMany: vi.fn() },
+  bookingAssetSource: { findMany: vi.fn() },
+  consumptionLog: { findMany: vi.fn() },
+}));
+
+// why: the location-page count reads through the root `db`; stubbing its three
+// delegates lets each case state the rows and observe which reads happen,
+// without opening a connection.
+vi.mock("~/database/db.server", () => ({ db: dbMock }));
 
 const slice = {
   id: "ba-1",
@@ -259,6 +267,190 @@ describe("loadBookedOutBySource", () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ assetKitId: null, sourceKitId: null }),
+      })
+    );
+  });
+
+  it("reads LEGACY groups only: converted groups' units out live on source rows", async () => {
+    const findMany = vi.fn(() => Promise.resolve([]));
+    const client = {
+      bookingAsset: { findMany },
+      consumptionLog: { findMany: vi.fn(() => Promise.resolve([])) },
+    };
+
+    await loadBookedOutBySource(client as never, { assetIds: ["pool-1"] });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ sourceAllocation: "LEGACY" }),
+      })
+    );
+  });
+});
+
+describe("countUnitsOnBookingsFromLocation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Converted slices with the status of their booking. */
+  const convertedSlices = [
+    { id: "ba-on", assetId: "pool-1", status: "ONGOING", mode: "AUTO" },
+    { id: "ba-reserved", assetId: "pool-1", status: "RESERVED", mode: "AUTO" },
+    { id: "ba-done", assetId: "pool-1", status: "COMPLETE", mode: "MANUAL" },
+    { id: "ba-kit", assetId: "pool-1", status: "ONGOING", mode: "KIT" },
+  ];
+
+  /** A LEGACY slice out from the location, as the LEGACY read returns it. */
+  type LegacySlice = typeof slice & {
+    checkedOutQuantity: number;
+    sourceLocationId: string;
+  };
+
+  /**
+   * Seeds the stubs: `sourceRows` answer the source-row read; the slice read
+   * applies the `id`, `assetId`, `sourceAllocation` and `booking.status`
+   * filters the reader sends. The LEGACY read (it filters on
+   * `sourceLocationId`) returns `legacySlices`, and the LEGACY sibling read
+   * (it filters on `bookingId`) returns them without their source.
+   */
+  function seed(
+    sourceRows: Array<{ bookingAssetId: string; outQuantity: number }>,
+    legacySlices: LegacySlice[] = []
+  ) {
+    dbMock.bookingAssetSource.findMany.mockResolvedValue(sourceRows);
+    dbMock.consumptionLog.findMany.mockResolvedValue([]);
+    dbMock.bookingAsset.findMany.mockImplementation(
+      (args: {
+        where: {
+          sourceLocationId?: unknown;
+          bookingId?: { in: string[] };
+          id?: { in: string[] };
+          assetId?: { in: string[] };
+          sourceAllocation?: { in: string[] };
+          booking?: { status?: { in: string[] } };
+        };
+      }) => {
+        if (args.where.sourceLocationId !== undefined) {
+          return Promise.resolve(legacySlices);
+        }
+        if (args.where.bookingId !== undefined) {
+          return Promise.resolve(
+            legacySlices.map(({ sourceLocationId: _source, ...row }) => row)
+          );
+        }
+        const { id, assetId, sourceAllocation, booking } = args.where;
+        return Promise.resolve(
+          convertedSlices
+            .filter(
+              (s) =>
+                (!id || id.in.includes(s.id)) &&
+                (!assetId || assetId.in.includes(s.assetId)) &&
+                (!sourceAllocation || sourceAllocation.in.includes(s.mode)) &&
+                (!booking?.status || booking.status.in.includes(s.status))
+            )
+            .map(({ id: sliceId, assetId: sliceAsset }) => ({
+              id: sliceId,
+              assetId: sliceAsset,
+            }))
+        );
+      }
+    );
+  }
+
+  const args = {
+    organizationId: "org-1",
+    locationId: "loc-a",
+    assetIds: ["pool-1"],
+  };
+
+  it("counts a converted LOCATION row out on an ONGOING booking", async () => {
+    seed([{ bookingAssetId: "ba-on", outQuantity: 4 }]);
+
+    const counts = await countUnitsOnBookingsFromLocation(args);
+
+    expect(counts.get("pool-1")).toBe(4);
+    expect(dbMock.bookingAssetSource.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId: "org-1",
+          locationId: "loc-a",
+          kind: "LOCATION",
+          outQuantity: { gt: 0 },
+        },
+      })
+    );
+  });
+
+  it("adds LEGACY units out from the location to converted rows out from it", async () => {
+    // 2 units out on a LEGACY slice that recorded loc-a, and 3 on a converted
+    // LOCATION row at loc-a.
+    seed(
+      [{ bookingAssetId: "ba-on", outQuantity: 3 }],
+      [
+        {
+          ...slice,
+          id: "ba-legacy",
+          bookingId: "b-legacy",
+          quantity: 2,
+          checkedOutQuantity: 2,
+          sourceLocationId: "loc-a",
+        },
+      ]
+    );
+
+    const counts = await countUnitsOnBookingsFromLocation(args);
+
+    expect(counts.get("pool-1")).toBe(5);
+    expect(dbMock.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceAllocation: "LEGACY",
+          sourceLocationId: "loc-a",
+        }),
+      })
+    );
+  });
+
+  it("does not count the same row on a RESERVED or COMPLETE booking", async () => {
+    seed([
+      { bookingAssetId: "ba-reserved", outQuantity: 4 },
+      { bookingAssetId: "ba-done", outQuantity: 3 },
+    ]);
+
+    const counts = await countUnitsOnBookingsFromLocation(args);
+
+    expect(counts.get("pool-1")).toBeUndefined();
+  });
+
+  it("counts only rows whose slice is AUTO or MANUAL", async () => {
+    seed([
+      { bookingAssetId: "ba-on", outQuantity: 4 },
+      { bookingAssetId: "ba-kit", outQuantity: 2 },
+    ]);
+
+    const counts = await countUnitsOnBookingsFromLocation(args);
+
+    expect(counts.get("pool-1")).toBe(4);
+    expect(dbMock.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceAllocation: { in: ["AUTO", "MANUAL"] },
+        }),
+      })
+    );
+  });
+
+  it("issues no converted slice query when no source row is out at the location", async () => {
+    seed([]);
+
+    await countUnitsOnBookingsFromLocation(args);
+
+    // Only the LEGACY read touches slices.
+    expect(dbMock.bookingAsset.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ sourceAllocation: "LEGACY" }),
       })
     );
   });

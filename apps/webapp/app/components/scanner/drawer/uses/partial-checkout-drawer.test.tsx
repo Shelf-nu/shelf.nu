@@ -172,6 +172,8 @@ function makeLoaderData(
     statusByAssetId?: Record<string, AssetStatus>;
     /** Pools at two or more locations still to go out, see the loader. */
     checkoutSourceQuestions?: CheckoutSourceQuestion[];
+    /** Pools whose slice is short at its source, see the loader. */
+    shortSourceAssetIds?: string[];
   } = {}
 ) {
   const bookingAssets = assets.map((a) => ({
@@ -209,6 +211,7 @@ function makeLoaderData(
     remainingToCheckOutByAsset: overrides.remainingToCheckOutByAsset ?? {},
     checkoutSourceQuestions: overrides.checkoutSourceQuestions ?? [],
     kitsBookedElsewhere: [] as { id: string; assetIds: string[] }[],
+    shortSourceAssetIds: overrides.shortSourceAssetIds ?? ([] as string[]),
   };
 }
 
@@ -376,6 +379,7 @@ function makeLoaderDataFromExpected(
     remainingToCheckOutByAsset,
     checkoutSourceQuestions: [] as CheckoutSourceQuestion[],
     kitsBookedElsewhere: [] as { id: string; assetIds: string[] }[],
+    shortSourceAssetIds: [] as string[],
   };
 }
 
@@ -733,6 +737,32 @@ describe("PartialCheckoutDrawer", () => {
 
     expect(screen.getByText("In custody")).toBeInTheDocument();
     expect(screen.getByText(/release custody first/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Check out assets" })
+    ).toBeDisabled();
+  });
+
+  it("blocks a scanned pool the loader reports short at its source", () => {
+    const sandbag: ScannedAssetFixture = {
+      id: "sandbag-id",
+      title: "Sandbag",
+      kind: "QUANTITY_TRACKED",
+      bookedQuantity: 4,
+      unitOfMeasure: "pcs",
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData([sandbag], {
+        remainingToCheckOutByAsset: { "sandbag-id": 4 },
+        shortSourceAssetIds: ["sandbag-id"],
+      })
+    );
+
+    const store = seedStore({ "qr-sandbag": scannedAsset(sandbag) });
+    renderDrawer(store);
+
+    expect(
+      screen.getByText(/short at its source location/i)
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Check out assets" })
     ).toBeDisabled();

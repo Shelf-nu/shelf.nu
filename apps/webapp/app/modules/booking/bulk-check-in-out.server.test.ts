@@ -26,6 +26,7 @@ import {
   bulkCheckoutBookings,
   listBookingNames,
 } from "./bulk-check-in-out.server";
+import { ALLOCATION_SOURCE_FORM_VALUE } from "./checkout-source-location";
 import { getCheckoutSourceQuestions } from "./checkout-source-location.server";
 import { MAX_BULK_CHECK_IN_OUT_BOOKINGS } from "./constants";
 import {
@@ -304,6 +305,44 @@ describe("bulkCheckoutBookings", () => {
       /"Booking b2" needs a from-location choice/
     );
     expect(checkoutMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a LEGACY slice whose default is a shelf location (adoption off)", async () => {
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.RESERVED),
+    ] as never);
+    // The question adoption off builds for a LEGACY slice: no plan, and a
+    // shelf default nobody chose.
+    questionsMock.mockResolvedValue([
+      { sliceId: "s1", fromAllocation: false, defaultLocationId: "loc-1" },
+    ] as never);
+
+    await expect(bulkCheckoutBookings(args(["b1"]))).rejects.toThrow(
+      /"Booking b1" needs a from-location choice/
+    );
+    expect(checkoutMock).not.toHaveBeenCalled();
+  });
+
+  it("checks out a LEGACY slice that defaults to as planned (adoption on): it converts and goes out by allocation", async () => {
+    findManyMock.mockResolvedValue([
+      selected("b1", BookingStatus.RESERVED),
+    ] as never);
+    // The question adoption on builds for a LEGACY slice: not converted yet,
+    // but its unanswered default dispatches by allocation.
+    questionsMock.mockResolvedValue([
+      {
+        sliceId: "s1",
+        fromAllocation: false,
+        defaultLocationId: ALLOCATION_SOURCE_FORM_VALUE,
+      },
+    ] as never);
+    checkoutMock.mockResolvedValueOnce(processed("b1", ["a1"]));
+
+    await bulkCheckoutBookings(args(["b1"]));
+
+    expect(checkoutMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "b1" })
+    );
   });
 
   it("refuses the whole batch with 403 when the workspace requires explicit check-out for the caller", async () => {

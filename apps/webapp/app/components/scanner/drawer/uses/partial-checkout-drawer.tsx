@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -50,6 +51,7 @@ import {
   assetLabelPresets,
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
+import { CheckoutRefusal } from "./checkout-refusal";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScanItemGroup } from "../scan-item-group";
@@ -58,6 +60,9 @@ import {
   ScanSubmitFailureAlert,
 } from "../scan-submit-failure-alert";
 import {
+  assetIdsWithPickedSource,
+  questionsAtSubmittedQuantities,
+  withoutSourcePick,
   buildPartialCheckoutBlockers,
   isAssetFullyCheckedOut,
 } from "./partial-checkout-blockers";
@@ -186,6 +191,10 @@ type CheckoutDispositionContextValue = {
   /** Map of `bookingAssetId` → slice info (remaining units, unitOfMeasure). */
   qtyByBookingAssetId: Record<string, CheckoutQtyInfo>;
   updateQuantity: (bookingAssetId: string, value: string) => void;
+  /** Records the operator's "From location" answer for a slice. */
+  pickSource: (bookingAssetId: string, value: string) => void;
+  /** Forgets a slice's "From location" answer; called when its row unmounts. */
+  clearSourcePick: (bookingAssetId: string) => void;
 };
 
 /**
@@ -267,6 +276,8 @@ export default function PartialCheckoutDrawer({
     checkedInAssetIds,
     remainingToCheckOutByAsset,
     kitsBookedElsewhere,
+    shortSourceAssetIds,
+    checkoutSourceQuestions,
   } = useLoaderData<typeof loader>();
 
   // Per-asset units-still-to-check-out map for QUANTITY_TRACKED assets,
@@ -312,6 +323,19 @@ export default function PartialCheckoutDrawer({
       [bookingAssetId]: { quantity: value },
     }));
   };
+
+  // The operator's "From location" answers, keyed by `bookingAssetId`. The
+  // selects post them on their own; the drawer keeps a copy because the
+  // `short-source` blocker depends on where the units leave from.
+  const [sourcePicks, setSourcePicks] = useState<Record<string, string>>({});
+  const pickSource = (bookingAssetId: string, value: string) => {
+    setSourcePicks((prev) => ({ ...prev, [bookingAssetId]: value }));
+  };
+  // Stable, because a row's unmount cleanup depends on it: a new function
+  // each render would run that cleanup (and drop the pick) on every render.
+  const clearSourcePick = useCallback((bookingAssetId: string) => {
+    setSourcePicks((prev) => withoutSourcePick(prev, bookingAssetId));
+  }, []);
 
   // Filter and prepare data for component rendering
   const assets = Object.values(items)
@@ -631,6 +655,14 @@ export default function PartialCheckoutDrawer({
     return zeroed;
   }, [activeQtySliceIds, booking.bookingAssets, checkoutsPayload]);
 
+  // A pick only has to cover the units that leave, not the slice's full
+  // quantity, so the questions are judged at the submitted quantities.
+  const sourceQuestionsAtSubmit = useMemo(
+    () =>
+      questionsAtSubmittedQuantities(checkoutSourceQuestions, checkoutsPayload),
+    [checkoutSourceQuestions, checkoutsPayload]
+  );
+
   /** What the form submits: the scanned assets less the zeroed pools. */
   const submittedAssetIds = assetIdsForCheckout.filter(
     (assetId) => !zeroedQtyAssetIds.has(assetId)
@@ -679,6 +711,11 @@ export default function PartialCheckoutDrawer({
     kitsBookedElsewhere: new Set(kitsBookedElsewhere.map((kit) => kit.id)),
     assetsInKitsBookedElsewhere: new Set(
       kitsBookedElsewhere.flatMap((kit) => kit.assetIds)
+    ),
+    shortSourceAssetIds: new Set(shortSourceAssetIds),
+    pickedSourceAssetIds: assetIdsWithPickedSource(
+      sourceQuestionsAtSubmit,
+      sourcePicks
     ),
     removeAssetsFromList,
     removeItemsFromList,
@@ -867,6 +904,8 @@ export default function PartialCheckoutDrawer({
     dispositions: checkoutDispositions,
     qtyByBookingAssetId,
     updateQuantity: updateCheckoutQuantity,
+    pickSource,
+    clearSourcePick,
   };
 
   return (
@@ -1204,7 +1243,14 @@ function QuantityCheckoutBlock({
   bookingAssetId: string;
   info: CheckoutQtyInfo;
 }) {
-  const { dispositions, updateQuantity } = useCheckoutDispositionContext();
+  const { dispositions, updateQuantity, pickSource, clearSourcePick } =
+    useCheckoutDispositionContext();
+  // The pick lives in the drawer; a row that leaves the list takes its pick
+  // with it, so a removed row can never clear a `short-source` blocker.
+  useEffect(
+    () => () => clearSourcePick(bookingAssetId),
+    [bookingAssetId, clearSourcePick]
+  );
   // A pool at two or more locations going out for the first time asks
   // where its units leave from. The select lives in this row, outside the
   // footer form, so it joins the submission through `form=`.
@@ -1268,6 +1314,7 @@ function QuantityCheckoutBlock({
           formId={PARTIAL_CHECKOUT_FORM_ID}
           variant="inline"
           className="mt-2"
+          onPick={(value) => pickSource(bookingAssetId, value)}
         />
       ) : null}
     </div>
@@ -1442,9 +1489,19 @@ const CustomForm = ({
     <Form
       ref={setFormElement}
       id={PARTIAL_CHECKOUT_FORM_ID}
-      className="flex max-h-full w-full"
+      className="flex max-h-full w-full flex-col"
       method="post"
     >
+      {/* A refusal only the server can make, such as units leaving from a
+          source that is short for the slice. Dismissed once the submitted
+          list changes. */}
+      <CheckoutRefusal
+        listKey={JSON.stringify([
+          assetIdsForCheckout,
+          selectedBookingAssetIds,
+          checkoutsPayload,
+        ])}
+      />
       <div className="flex w-full gap-2 px-3 py-2">
         {/* Hidden form fields */}
         {assetIdsForCheckout.map((assetId, index) => (

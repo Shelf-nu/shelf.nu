@@ -47,6 +47,13 @@ vi.mock("./service.server", () => ({
   getBooking: vi.fn(),
 }));
 
+// why: the source summaries read capacity, competing holds and source rows
+// across several tables; that facade has its own suite. Here only the rows it
+// returns and whether it is asked at all matter.
+vi.mock("./sources/booking-sources.server", () => ({
+  getSliceSourceSummaries: vi.fn(),
+}));
+
 import type { QrIdDisplayPreference } from "@prisma/client";
 
 import { db } from "~/database/db.server";
@@ -56,6 +63,7 @@ import { getQrCodeMaps } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 
 import { getBooking } from "./service.server";
+import { getSliceSourceSummaries } from "./sources/booking-sources.server";
 
 const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
@@ -92,6 +100,7 @@ const KIT = { id: "kit-1", name: "Camera kit", location: null };
 const BOOKING_ASSETS = [
   {
     id: "ba-standalone",
+    assetId: "asset-1",
     quantity: 2,
     assetKitId: null,
     sourceKitId: null,
@@ -99,6 +108,7 @@ const BOOKING_ASSETS = [
   },
   {
     id: "ba-via-kit",
+    assetId: "asset-1",
     quantity: 3,
     assetKitId: "ak-1",
     sourceKitId: "kit-1",
@@ -713,5 +723,147 @@ describe("booking PDF: custom field values", () => {
     });
     expect(result.customFields).toEqual([]);
     expect(result.assets[0].customFieldValues).toEqual({});
+  });
+});
+
+describe("booking PDF: where a pool's units come from", () => {
+  /** A pool kept at one placement and in one kit. */
+  const POOL = {
+    ...ASSET,
+    type: "QUANTITY_TRACKED",
+    assetLocations: [{ location: { name: "Studio" } }],
+  };
+
+  /** Parts as the source facade builds them. */
+  const part = (
+    label: string,
+    planned: number,
+    kind: "LOCATION" | "UNPLACED" = "LOCATION",
+    short = false
+  ) => ({
+    key: `${kind}:${label}`,
+    kind,
+    locationId: kind === "LOCATION" ? label : null,
+    label,
+    planned,
+    out: 0,
+    short,
+  });
+
+  async function runWithSources(
+    standaloneMode: "LEGACY" | "AUTO" | "MANUAL",
+    parts: ReturnType<typeof part>[]
+  ) {
+    vi.clearAllMocks();
+    // why: two slices of one pool, the standalone one in the mode under test
+    // and one through a kit, which never shows sources.
+    mockOf(getBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      description: null,
+      custodianUser: null,
+      custodianTeamMember: { name: "Ada" },
+      tags: [],
+      modelRequests: [],
+      bookingAssets: [
+        { ...BOOKING_ASSETS[0], sourceAllocation: standaloneMode, asset: POOL },
+        { ...BOOKING_ASSETS[1], sourceAllocation: "KIT", asset: POOL },
+      ],
+    });
+    mockOf(db.asset.findMany).mockResolvedValue([POOL]);
+    mockOf(db.kit.findMany).mockResolvedValue([KIT]);
+    mockOf(db.organization.findUnique).mockResolvedValue({
+      id: "org-1",
+      name: "Org",
+      imageId: null,
+      currency: "USD",
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+      showQrCodesOnPdfs: false,
+    });
+    // why: the summaries per slice, as the facade returns them.
+    mockOf(getSliceSourceSummaries).mockResolvedValue(
+      new Map([
+        ["ba-standalone", { parts, short: false, mode: standaloneMode }],
+        ["ba-via-kit", { parts: [], short: false, mode: "KIT" }],
+      ])
+    );
+
+    return fetchAllPdfRelatedData(
+      "booking-1",
+      "org-1",
+      "user-1",
+      undefined,
+      new Request("http://localhost/x")
+    );
+  }
+
+  it("prints the sources of a pool slice planned by source, and the location on every other row", async () => {
+    const result = await runWithSources("AUTO", [
+      part("Demo Warehouse", 8),
+      part("Unplaced", 7, "UNPLACED"),
+    ]);
+
+    expect(getSliceSourceSummaries).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      bookingId: "booking-1",
+    });
+    const row = (id: string) =>
+      result.assets.find((asset) => asset.bookingAssetId === id);
+    expect(row("ba-standalone")?.sourceLine).toEqual({
+      text: "Demo Warehouse 8 · Unplaced 7",
+      warnings: [],
+    });
+    // The kit slice keeps the ordinary Location cell.
+    expect(row("ba-via-kit")?.sourceLine).toBeNull();
+    expect(row("ba-via-kit")?.location).toEqual({ name: "Studio" });
+  });
+
+  it("reads every placement of the pool, kit-driven ones included", async () => {
+    await runWithSources("AUTO", [part("Demo Warehouse", 8)]);
+
+    expect(
+      mockOf(db.asset.findMany).mock.calls[0][0].include.assetLocations
+    ).toEqual({
+      select: { location: { select: { name: true } } },
+    });
+  });
+
+  it("prints Unplaced for a placed pool whose units all come from Unplaced", async () => {
+    // The pool has a placement (its kit's counts as one), so the Location
+    // cell would name a place these loose units do not come from.
+    const result = await runWithSources("AUTO", [
+      part("Unplaced", 7, "UNPLACED"),
+    ]);
+
+    const standalone = result.assets.find(
+      (asset) => asset.bookingAssetId === "ba-standalone"
+    );
+    expect(standalone?.sourceLine).toEqual({ text: "Unplaced", warnings: [] });
+  });
+
+  it("names a short source on the row", async () => {
+    const result = await runWithSources("MANUAL", [
+      part("Demo Warehouse", 8, "LOCATION", true),
+      part("Unplaced", 7, "UNPLACED"),
+    ]);
+
+    const standalone = result.assets.find(
+      (asset) => asset.bookingAssetId === "ba-standalone"
+    );
+    expect(standalone?.sourceLine?.warnings).toEqual([
+      "Short at Demo Warehouse",
+    ]);
+  });
+
+  it("reads no sources when no pool slice is planned by source", async () => {
+    const result = await runWithSources("LEGACY", []);
+
+    expect(getSliceSourceSummaries).not.toHaveBeenCalled();
+    for (const row of result.assets) {
+      expect(row.sourceLine).toBeNull();
+      expect(row.location).toEqual({ name: "Studio" });
+    }
   });
 });

@@ -1,11 +1,11 @@
 /**
- * Regression tests for the ownership guard on
- * `api+/bookings.$bookingId.adjust-asset-quantity.ts`.
+ * Route tests for `api+/bookings.$bookingId.adjust-asset-quantity.ts`: the
+ * ownership guard, the locked re-read, and the optional `sources` field.
  *
- * Covers the same cross-user IDOR scenario that hex-security flagged
- * in r3199039448: SELF_SERVICE / BASE users carry `booking:update`, so
- * without an explicit ownership check they could change the booked
- * quantity of a QUANTITY_TRACKED asset on any booking in their org.
+ * SELF_SERVICE / BASE users carry `booking:update`, so without an explicit
+ * ownership check they could change the booked quantity of a
+ * QUANTITY_TRACKED asset on any booking in their org. The `sources` field
+ * (JSON text) reaches the sources facade only after every route guard.
  */
 
 import { AssetType, OrganizationRoles } from "@prisma/client";
@@ -14,7 +14,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { permissionContext } from "@helpers/role-access";
 import { applyRequestGrowthRule } from "~/modules/booking/request-change.server";
 
+import { recordEvent } from "~/modules/activity-event/service.server";
+import { setManualSources } from "~/modules/booking/sources/booking-sources.server";
 import { action } from "~/routes/api+/bookings.$bookingId.adjust-asset-quantity";
+import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: data() returns a fetch Response so route handlers can be invoked
@@ -37,19 +40,27 @@ const dbMocks = vi.hoisted(() => {
   // Re-read of the slice's booked quantity UNDER the asset lock (the TOCTOU
   // guard). Hoisted so tests can control the FRESH value per-scenario.
   const bookingAssetFindUnique = vi.fn();
+  const bookingAssetUpdate = vi.fn().mockResolvedValue(undefined);
+  // The booking row lock reads the booking's status.
+  const queryRaw = vi.fn();
+  const tx = {
+    $queryRaw: queryRaw,
+    bookingAsset: {
+      findUnique: bookingAssetFindUnique,
+      update: bookingAssetUpdate,
+    },
+    bookingAssetSource: { findMany: vi.fn().mockResolvedValue([]) },
+    location: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: a changed amount moves the booking's version (updatedAt) first.
+    booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+  };
   return {
     bookingAssetFindFirst: vi.fn(),
     bookingAssetFindUnique,
-    $transaction: vi.fn(async (cb: any) =>
-      cb({
-        bookingAsset: {
-          findUnique: bookingAssetFindUnique,
-          update: vi.fn().mockResolvedValue(undefined),
-        },
-        // why: a changed amount moves the booking's version (updatedAt) first.
-        booking: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      })
-    ),
+    bookingAssetUpdate,
+    queryRaw,
+    tx,
+    $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
   };
 });
 
@@ -91,6 +102,22 @@ vi.mock("~/modules/asset/availability.server", () => ({
 
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
+}));
+
+// why: the sources facade (locks, conversion, allocation, admission) has its
+// own suite; here we assert what the route hands it and that a refusal
+// reaches the caller.
+vi.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  // Sources take part: the adjust hands its change to the facade spies.
+  bookingSourcesInPlay: vi.fn().mockResolvedValue(true),
+  resizeSlices: vi.fn().mockResolvedValue(undefined),
+  setManualSources: vi.fn().mockResolvedValue(undefined),
+  setAutoSources: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: the event insert has its own suite; asserted by payload only.
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
 // why: side effects (notes, notifications, user lookup) shouldn't
@@ -143,14 +170,18 @@ function buildBookingAsset(bookingOverrides: {
       name: "Test booking",
       creatorId: bookingOverrides.creatorId,
       custodianUserId: bookingOverrides.custodianUserId,
+      // `Booking.from`/`to` are required columns: every booking has dates.
+      from: new Date("2026-09-10T09:00:00.000Z"),
+      to: new Date("2026-09-12T17:00:00.000Z"),
     },
   };
 }
 
-function buildRequest(quantity = 7, assetId = "asset-1") {
+function buildRequest(quantity = 7, assetId = "asset-1", sources?: string) {
   const formData = new FormData();
   formData.set("assetId", assetId);
   formData.set("quantity", String(quantity));
+  if (sources !== undefined) formData.set("sources", sources);
   return new Request(
     "https://example.com/api/bookings/booking-1/adjust-asset-quantity",
     { method: "POST", body: formData }
@@ -173,6 +204,8 @@ beforeEach(() => {
   // snapshot did (`buildBookingAsset` → 5). Tests that model a concurrent
   // change override this per-scenario.
   dbMocks.bookingAssetFindUnique.mockResolvedValue({ quantity: 5 });
+  // A DRAFT booking: every role may change its items.
+  dbMocks.queryRaw.mockResolvedValue([{ status: "DRAFT" }]);
 });
 
 describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", () => {
@@ -363,5 +396,158 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — TOCTOU re-read", () 
     expect(
       consumptionMocks.assertAssetQuantityAvailable
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe("api/bookings/:bookingId/adjust-asset-quantity: sources field", () => {
+  const MANUAL = {
+    mode: "MANUAL",
+    sources: [
+      { locationId: "loc-1", quantity: 2 },
+      { locationId: null, quantity: 3 },
+    ],
+  };
+
+  beforeEach(() => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+  });
+
+  it("hands a MANUAL split to the facade inside the transaction", async () => {
+    const response = (await action(
+      buildArgs(buildRequest(5, "asset-1", JSON.stringify(MANUAL)))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    expect(setManualSources).toHaveBeenCalledWith(
+      dbMocks.tx,
+      expect.objectContaining({
+        organizationId: expect.any(String),
+        bookingId: "booking-1",
+        sliceId: "ba-1",
+        sources: MANUAL.sources,
+      })
+    );
+  });
+
+  it("400s a malformed split before opening the transaction", async () => {
+    const duplicate = JSON.stringify({
+      mode: "MANUAL",
+      sources: [
+        { locationId: "loc-1", quantity: 2 },
+        { locationId: "loc-1", quantity: 3 },
+      ],
+    });
+
+    const response = (await action(
+      buildArgs(buildRequest(5, "asset-1", duplicate))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(400);
+    expect(dbMocks.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("400s text that is not JSON", async () => {
+    const response = (await action(
+      buildArgs(buildRequest(5, "asset-1", "{oops"))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(400);
+    expect(dbMocks.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("passes the facade's refusal of a foreign location through and records nothing", async () => {
+    vi.mocked(setManualSources).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "One of the chosen locations does not hold this asset.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const response = (await action(
+      buildArgs(buildRequest(5, "asset-1", JSON.stringify(MANUAL)))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      "One of the chosen locations does not hold this asset."
+    );
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("403s any change on a closed booking", async () => {
+    dbMocks.queryRaw.mockResolvedValue([{ status: "COMPLETE" }]);
+
+    const response = (await action(
+      buildArgs(buildRequest(5, "asset-1", JSON.stringify({ mode: "AUTO" })))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    expect(setManualSources).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ownership guard in front of a sources change", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "someone-else", custodianUserId: null })
+    );
+
+    const response = (await action(
+      buildArgs(buildRequest(5, "asset-1", JSON.stringify(MANUAL)))
+    )) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    expect(dbMocks.$transaction).not.toHaveBeenCalled();
+    expect(setManualSources).not.toHaveBeenCalled();
+  });
+});
+
+describe("api/bookings/:bookingId/adjust-asset-quantity: status rule", () => {
+  it("refuses a SELF_SERVICE owner on a RESERVED booking like the mobile route does", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    // The gate reads the LOCKED status, not the outside-tx snapshot.
+    dbMocks.queryRaw.mockResolvedValue([{ status: "RESERVED" }]);
+
+    const response = (await action(
+      buildArgs(buildRequest())
+    )) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      "Quantities cannot be changed on this booking in its current status."
+    );
+    expect(dbMocks.bookingAssetUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lets an ADMIN change a RESERVED booking", async () => {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+    dbMocks.bookingAssetFindFirst.mockResolvedValue(
+      buildBookingAsset({ creatorId: "user-current", custodianUserId: null })
+    );
+    dbMocks.queryRaw.mockResolvedValue([{ status: "RESERVED" }]);
+
+    const response = (await action(
+      buildArgs(buildRequest())
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
   });
 });

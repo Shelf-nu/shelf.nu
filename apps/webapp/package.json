@@ -17,6 +17,7 @@
     "test": "vitest",
     "test:run": "vitest --run",
     "test:changed": "vitest --run --changed main",
+    "test:db": "vitest --run --config vitest.db.config.ts",
     "test:cov": "vitest --coverage",
     "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx playwright test --ui'",
     "test:e2e:run": "start-server-and-test dev http://localhost:3000 'npx playwright test'",

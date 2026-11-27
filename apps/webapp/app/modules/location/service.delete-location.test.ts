@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 
@@ -29,6 +30,14 @@ const removePublicFilesMock = vi.hoisted(() => vi.fn());
 vi.mock("~/utils/storage.server", () => ({
   MAX_PUBLIC_FILES_PER_REMOVE: 1000,
   removePublicFiles: removePublicFilesMock,
+}));
+
+// why: the evacuation of booking source rows has its own tests
+// (`booking/sources/location-delete.server.test.ts`); these tests pin where
+// the delete paths call it and what happens when it refuses.
+const evacuateMock = vi.hoisted(() => vi.fn());
+vi.mock("~/modules/booking/sources/location-delete.server", () => ({
+  evacuateLocationsForDelete: evacuateMock,
 }));
 
 const { deleteLocation, bulkDeleteLocations } = await import(
@@ -198,6 +207,59 @@ describe("deleteLocation", () => {
     expect(dbMocks.image.delete).toHaveBeenCalledTimes(1);
     expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
+
+  it("moves booking sources away inside the transaction, before the location row is deleted", async () => {
+    dbMocks.location.delete.mockResolvedValue(makeLocation("loc-1"));
+
+    await deleteLocation({ id: "loc-1", organizationId: "org-1" });
+
+    expect(evacuateMock).toHaveBeenCalledTimes(1);
+    expect(evacuateMock).toHaveBeenCalledWith(dbMocks, {
+      organizationId: "org-1",
+      locationIds: ["loc-1"],
+    });
+    expect(evacuateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMocks.location.delete.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("A missed source row at a location being deleted: the delete fails and nothing is removed", async () => {
+    evacuateMock.mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          "A booking at this location could not be moved. Nothing was deleted.",
+        label: "Location",
+        status: 500,
+      })
+    );
+
+    await expect(
+      deleteLocation({ id: "loc-1", organizationId: "org-1" })
+    ).rejects.toMatchObject({
+      message: "Something went wrong while deleting the location",
+    });
+
+    expect(dbMocks.location.delete).not.toHaveBeenCalled();
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the retry message when bookings at the location changed mid-delete", async () => {
+    evacuateMock.mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          "Bookings at this location changed while it was being deleted. Please try again.",
+        label: "Location",
+        status: 409,
+      })
+    );
+
+    await expect(
+      deleteLocation({ id: "loc-1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(dbMocks.location.delete).not.toHaveBeenCalled();
+  });
 });
 
 describe("bulkDeleteLocations", () => {
@@ -244,6 +306,45 @@ describe("bulkDeleteLocations", () => {
     expect(
       dbMocks.location.deleteMany.mock.invocationCallOrder[0]
     ).toBeLessThan(removePublicFilesMock.mock.invocationCallOrder[0]);
+  });
+
+  it("Bulk delete A and B: moves the booking sources of every location in one call, before the rows are deleted", async () => {
+    dbMocks.location.findMany.mockResolvedValue([
+      makeLocation("loc-a"),
+      makeLocation("loc-b"),
+    ]);
+
+    await bulkDeleteLocations({
+      locationIds: ["loc-a", "loc-b"],
+      confirmation: "2",
+      organizationId: "org-1",
+    });
+
+    expect(evacuateMock).toHaveBeenCalledTimes(1);
+    expect(evacuateMock).toHaveBeenCalledWith(dbMocks, {
+      organizationId: "org-1",
+      locationIds: ["loc-a", "loc-b"],
+    });
+    expect(evacuateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMocks.location.deleteMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("deletes nothing when the booking sources cannot be moved", async () => {
+    dbMocks.location.findMany.mockResolvedValue([makeLocation("loc-a")]);
+    evacuateMock.mockRejectedValue(new Error("row left behind"));
+
+    await expect(
+      bulkDeleteLocations({
+        locationIds: ["loc-a"],
+        confirmation: "1",
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({
+      message: "Something went wrong while bulk deleting locations.",
+    });
+    expect(dbMocks.location.deleteMany).not.toHaveBeenCalled();
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
 
   it("resolves without waiting for the storage cleanup to finish", async () => {

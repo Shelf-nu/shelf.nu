@@ -289,6 +289,24 @@ describe("buildCustodySourceOptions", () => {
     ]);
   });
 
+  it("shows units a converted booking took from Unplaced on the Unplaced option", () => {
+    const options = buildCustodySourceOptions(
+      {
+        ...state(7, [
+          [A, 2],
+          [B, 2],
+        ]),
+        bookedOut: [{ locationId: null, quantity: 2 }],
+      },
+      names
+    );
+    expect(options.find((o) => o.locationId === null)).toMatchObject({
+      placed: 3,
+      onBooking: 2,
+      left: 1,
+    });
+  });
+
   it("omits Unplaced for a fully placed pool", () => {
     const options = buildCustodySourceOptions(
       state(4, [

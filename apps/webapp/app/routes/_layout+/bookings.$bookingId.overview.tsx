@@ -1,6 +1,5 @@
 import {
   AssetStatus,
-  AssetType,
   BookingStatus,
   TagUseFor,
   type Prisma,
@@ -45,15 +44,10 @@ import {
   BOOKING_DISPOSITION_CATEGORIES,
   computeBookingSliceUnitCounts,
 } from "~/modules/booking/booking-slice-unit-counts.server";
-import {
-  isManualSourceSlice,
-  parseSourceLocationsFromFormData,
-} from "~/modules/booking/checkout-source-location";
+import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import {
   assertNoCheckoutSourceQuestions,
   getCheckoutSourceQuestions,
-  loadMultiPlacedPoolIds,
-  loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import { isExtendableStatus } from "~/modules/booking/extend-eligibility";
@@ -85,6 +79,15 @@ import {
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
+import {
+  getSliceSourceSummaries,
+  type SliceSourceSummary,
+} from "~/modules/booking/sources/booking-sources.server";
+import {
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+  type PoolSourceCell,
+} from "~/modules/booking/sources/pool-source-cell";
 import {
   buildArchivedAssets,
   buildUnavailableAssets,
@@ -121,6 +124,10 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import {
+  legacySourceLocationsBySlice,
+  loadLegacySourceLocations,
+} from "~/utils/booking-legacy-source-line.server";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -451,6 +458,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .filter((ba) => ba.asset?.type === "QUANTITY_TRACKED")
       .map((ba) => ba.assetId);
 
+    /**
+     * The Location cell's source summaries are read only when some standalone
+     * pool slice is allocated by source (`AUTO` or `MANUAL`), so a booking
+     * whose slices are all `LEGACY` or kit-driven costs no extra query.
+     */
+    const hasSourcedPoolSlice = booking.bookingAssets.some(
+      (ba) =>
+        isStandalonePoolSlice(ba) &&
+        (ba.sourceAllocation === "AUTO" || ba.sourceAllocation === "MANUAL")
+    );
+
     // Execute all necessary queries in parallel. Asset + kit enrichment now
     // covers ALL booking assets/kits (not just the current page) so the
     // clientLoader can re-shape from cache without a server round-trip.
@@ -462,6 +480,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       rawKits,
       modelShortfalls,
       nextReservations,
+      sliceSourceSummaries,
+      legacySourceLocationsById,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -677,6 +697,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             viewer: { userId, seesAllBookings: access.bookings.seeAll },
           })
         : NO_NEXT_RESERVATIONS,
+
+      /** Location cell sources per slice; see `hasSourcedPoolSlice`. */
+      hasSourcedPoolSlice
+        ? getSliceSourceSummaries({ organizationId, bookingId })
+        : new Map<string, SliceSourceSummary>(),
+
+      /**
+       * Names of the locations checked-out `LEGACY` pool slices left from,
+       * for their "from <Location>" line. Sends no query when the booking
+       * has no such slice.
+       */
+      loadLegacySourceLocations({
+        organizationId,
+        bookingAssets: booking.bookingAssets,
+      }),
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -722,25 +757,39 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
 
     /**
-     * Where each checked-out pool slice's units left from, for the "from
-     * <Location>" line on its row. Shown only on standalone slices of pools
-     * at two or more placements: a pool at one location, or a kit's units,
-     * shows nothing new.
+     * Location cell sources for standalone pool slices, keyed by
+     * `bookingAssetId` (summaries read in the batch above, only when needed).
+     * Rows without an entry keep their primary location (see
+     * `selectPoolSourceCell`).
      */
-    const poolSliceAssetIds = booking.bookingAssets
-      .filter(
-        (ba) =>
-          ba.asset.type === AssetType.QUANTITY_TRACKED &&
-          isManualSourceSlice(ba)
-      )
-      .map((ba) => ba.assetId);
-    const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
-      loadSliceSourceLocations({
-        organizationId,
-        locationIds: booking.bookingAssets.map((ba) => ba.sourceLocationId),
-      }),
-      loadMultiPlacedPoolIds({ organizationId, assetIds: poolSliceAssetIds }),
-    ]);
+    const poolSourcesBySlice: Record<string, PoolSourceCell> = {};
+    if (hasSourcedPoolSlice) {
+      for (const ba of booking.bookingAssets) {
+        const cell = selectPoolSourceCell({
+          summary: sliceSourceSummaries.get(ba.id),
+          isStandalonePoolSlice: isStandalonePoolSlice(ba),
+          // Any placement, kit-driven included: see `selectPoolSourceCell`.
+          hasPlacements:
+            (assetDetailsMap.get(ba.assetId)?.assetLocations.length ?? 0) > 0,
+        });
+        if (cell) poolSourcesBySlice[ba.id] = cell;
+      }
+    }
+
+    /**
+     * The "from <Location>" line per checked-out `LEGACY` pool slice of a
+     * pool at two or more manual placements, keyed by `bookingAssetId`. A
+     * slice whose Location cell shows its sources never gets it.
+     */
+    const sourceLocationsBySlice = legacySourceLocationsBySlice({
+      bookingAssets: booking.bookingAssets,
+      sourceLocationsById: legacySourceLocationsById,
+      manualPlacementCount: (assetId) =>
+        assetDetailsMap
+          .get(assetId)
+          ?.assetLocations.filter((al) => al.assetKitId === null).length ?? 0,
+      hasSourceCell: (bookingAssetId) => bookingAssetId in poolSourcesBySlice,
+    });
 
     const enrichedAssetsForView = booking.bookingAssets.map((ba) => {
       const detail = assetDetailsMap.get(ba.assetId);
@@ -836,17 +885,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         fulfilsModelName: ba.bookingModelRequestId
           ? modelNameByRequestId.get(ba.bookingModelRequestId) ?? null
           : null,
-        /**
-         * The location this pool slice's units left from, recorded at
-         * check-out. `null` unless the slice is a standalone slice of a pool
-         * at two or more placements (see above). Derived here for the same
-         * reason as the markers above: the cached row projection does not
-         * carry `sourceLocationId`.
-         */
-        sourceLocation:
-          isManualSourceSlice(ba) && multiPlacedPoolIds.has(ba.assetId)
-            ? sourceLocationsById.get(ba.sourceLocationId) ?? null
-            : null,
       };
     });
 
@@ -1282,6 +1320,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ? await getCheckoutSourceQuestions({
           organizationId,
           bookingId: booking.id,
+          withPlannedSummary: true,
         })
       : [];
 
@@ -1393,6 +1432,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * consumers can rely on the key.
          */
         availableUnitsByAsset,
+        /**
+         * Location cell sources per standalone pool slice, keyed by
+         * `bookingAssetId`; read by `list-asset-content.tsx`. Always
+         * serialised, empty `{}` when no slice shows its sources.
+         */
+        poolSourcesBySlice,
+        /**
+         * Where each checked-out `LEGACY` pool slice's units left from,
+         * keyed by `bookingAssetId`; read by `list-asset-content.tsx` for the
+         * "from <Location>" line. Always serialised, empty `{}` when no slice
+         * shows it.
+         */
+        sourceLocationsBySlice,
         partialCheckoutDetails,
         // Pivot-projected, view-ready raw assets + raw kits + shaping inputs
         // so clientLoader can re-shape without a server round-trip on

@@ -1112,6 +1112,47 @@ describe("buildCsvExportDataFromBookings", () => {
     expect(assetRow[14]).toBe('""'); // booking rollup not repeated on asset rows
     expect(assetRow[15]).toBe('""');
   });
+
+  it("prints a pool slice with planned sources as title and quantity, no source column", () => {
+    // why: the bookings export has one row per booked item and no location
+    // column; a slice whose units are planned at two sources reads the same
+    // as any other quantity-tracked item.
+    const booking = {
+      id: "booking-3",
+      name: "Event",
+      status: "RESERVED",
+      from: new Date("2024-01-02T03:04:00Z"),
+      originalFrom: undefined,
+      to: new Date("2024-01-03T03:04:00Z"),
+      originalTo: undefined,
+      custodianTeamMember: { name: "Custodian", user: null },
+      custodianUser: null,
+      description: "",
+      tags: [],
+      bookingAssets: [
+        {
+          quantity: 15,
+          sourceAllocation: "MANUAL",
+          asset: {
+            id: "pool-1",
+            title: "Sandbags",
+            type: "QUANTITY_TRACKED",
+          },
+        },
+      ],
+    };
+
+    const [headers, mainRow] = buildCsvExportDataFromBookings(
+      [booking as never],
+      HARDCODED_DEFAULT_PREFS,
+      SEES_ALL_CUSTODY
+    );
+
+    expect(headers).toHaveLength(16);
+    expect(headers).not.toContain("Location");
+    expect(mainRow[11]).toBe('"Sandbags × 15"');
+    expect(mainRow.join(",")).not.toContain("Unplaced");
+  });
 });
 
 describe("buildCsvExportDataFromBookings custodian visibility", () => {

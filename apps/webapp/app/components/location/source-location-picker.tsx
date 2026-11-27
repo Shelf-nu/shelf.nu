@@ -47,6 +47,8 @@ export type SourceLocationPickerProps = {
    * Leave unset when a label points at `id`.
    */
   triggerAriaLabel?: string;
+  /** Id of a hint that describes the trigger (`aria-describedby`). */
+  triggerDescribedBy?: string;
   disabled?: boolean;
   /** Smaller trigger text and padding, for a scanned row in a drawer. */
   compact?: boolean;
@@ -66,6 +68,7 @@ export function SourceLocationPicker({
   onChange,
   listLabel,
   triggerAriaLabel,
+  triggerDescribedBy,
   disabled = false,
   compact = false,
   triggerClassName,
@@ -121,6 +124,7 @@ export function SourceLocationPicker({
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-label={triggerAriaLabel}
+          aria-describedby={triggerDescribedBy}
           disabled={disabled}
           className={tw("w-full", disabled && "cursor-not-allowed opacity-60")}
         >

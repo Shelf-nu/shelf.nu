@@ -3,9 +3,11 @@
  *
  * Mobile twin of the web's check-out source dialog: for every pool on the
  * booking that is kept at two or more locations and has not gone out yet, one
- * "From location" picker, pre-selected with the server's own default. The
- * answers go out as `sourceLocations` on the check-out request; units used up
- * on the booking later come off the picked location at check-in.
+ * "From location" picker, pre-selected with the server's own default. A slice
+ * whose sources are planned opens on "As planned", which names the plan and
+ * sends its units out by it. The answers go out as `sourceLocations` on the
+ * check-out request; units used up on the booking later come off the picked
+ * location at check-in.
  *
  * Follows the house selection-flow contract (QuantityInputSheet):
  * `<Modal animationType="slide" presentationStyle="pageSheet">` + SafeAreaView
@@ -34,8 +36,10 @@ import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
 import type { CheckoutSourceQuestion } from "@/lib/api";
 import {
+  AS_PLANNED_SOURCE,
   checkoutSourceAnswers,
   checkoutSourceOptions,
+  checkoutSourceRowA11yLabel,
   defaultCheckoutSource,
 } from "@/lib/custody-source-options";
 import { useSheetColumnStyle } from "@/lib/use-content-gutter";
@@ -89,6 +93,9 @@ export function CheckoutSourceSheet({
 
   const canConfirm =
     !isSubmitting && questions.every((question) => answers[question.sliceId]);
+  const offersAsPlanned = questions.some(
+    (question) => question.defaultLocationId === AS_PLANNED_SOURCE
+  );
 
   return (
     <Modal
@@ -120,6 +127,9 @@ export function CheckoutSourceSheet({
             {questions.length === 1
               ? "This item is kept at more than one location. Pick where the units leave from. Units used up on this booking come off that location at check-in."
               : "These items are kept at more than one location. Pick where each one's units leave from. Units used up on this booking come off that location at check-in."}
+            {offersAsPlanned
+              ? " Leave As planned to send the units from the sources the booking planned."
+              : ""}
           </Text>
 
           {questions.map((question) => {
@@ -155,11 +165,10 @@ export function CheckoutSourceSheet({
                       activeOpacity={0.7}
                       accessibilityRole="radio"
                       accessibilityState={{ selected, disabled: isSubmitting }}
-                      accessibilityLabel={
-                        option.hint
-                          ? `${question.title} from ${option.label}, ${option.hint}`
-                          : `${question.title} from ${option.label}`
-                      }
+                      accessibilityLabel={checkoutSourceRowA11yLabel(
+                        question.title,
+                        option
+                      )}
                     >
                       <Ionicons
                         name={selected ? "radio-button-on" : "radio-button-off"}

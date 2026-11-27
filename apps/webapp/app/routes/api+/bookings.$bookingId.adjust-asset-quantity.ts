@@ -5,13 +5,40 @@
  * a booking, on its standalone slice. The change itself is the shared
  * booked-quantity service: a reduction always passes, an increase is
  * measured against windowed availability over the booking's own
- * `[from, to]`, and a slice whose units are checked out keeps its amount.
+ * `[from, to]`, and a slice whose units are checked out keeps its amount
+ * (except the pending units of a pool slice on an ONGOING or OVERDUE
+ * booking).
+ *
+ * Form fields:
+ * - `assetId`, `quantity` (required)
+ * - `sources` (optional): JSON text, either `{"mode":"AUTO"}` to return the
+ *   slice to the allocation rule, or
+ *   `{"mode":"MANUAL","sources":[{"locationId":"loc-1","quantity":8},{"locationId":null,"quantity":7}]}`
+ *   to set the planned units per source by hand (`null` is Unplaced). The
+ *   units must add up to the slice's planned units after the quantity
+ *   change. A blank or missing field leaves the sources alone; the literal
+ *   JSON `null` is invalid (400), so omit the field instead.
+ *
+ * Loader (GET `?assetId=`): the "From" section of the adjust dialog for the
+ * asset's standalone slice, as `{ sourceEditor }` (null when the section
+ * does not apply, including when the caller may not change this booking's
+ * items in its current status). Same permission and ownership guards as the
+ * action. It is never revalidated (`shouldRevalidate`): the dialog loads it
+ * on each opening.
+ *
+ * Status rule: the manage-items one (`canManageBookingItems`), checked by
+ * the service against the locked booking status, the same gate as the
+ * mobile route (403 with the same message).
  *
  * @see {@link file://./../../components/booking/adjust-booking-asset-quantity-dialog.tsx}
  * @see {@link file://./../../modules/booking/booked-quantity.server.ts}
  */
 
-import { data, type ActionFunctionArgs } from "react-router";
+import {
+  data,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -19,6 +46,11 @@ import {
   noteBookedQuantityChanges,
   setStandaloneBookedQuantity,
 } from "~/modules/booking/booked-quantity.server";
+import { getSourceEditorData } from "~/modules/booking/sources/source-editor.server";
+import {
+  SOURCES_FORM_FIELD,
+  sourcesFormFieldSchema,
+} from "~/modules/booking/sources/sources-input";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -26,6 +58,7 @@ import {
   assertIsPost,
   payload,
   error,
+  getCurrentSearchParams,
   getParams,
   parseData,
 } from "~/utils/http.server";
@@ -33,15 +66,133 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 
+/** The adjust form: asset, new quantity and an optional sources change. */
 export const AdjustBookingAssetQuantitySchema = z.object({
   assetId: z.string().min(1, "Asset ID is required"),
   quantity: z.coerce
     .number()
     .int()
     .positive("Quantity must be a positive integer"),
+  [SOURCES_FORM_FIELD]: sourcesFormFieldSchema,
 });
+
+/**
+ * The loader never re-runs on its own. Its only consumer, the adjust dialog's
+ * From section, loads it fresh each time the dialog opens, so re-reading it
+ * after every action on the booking page would only cost queries. This does
+ * not touch the action: a fetcher that submits here still gets its result.
+ */
+export const shouldRevalidate = () => false;
+
+/**
+ * Reads the From section for one asset's standalone slice.
+ *
+ * One query reads the slice with its booking (the ownership and status
+ * guards need it); a slice the section does not apply to, such as a LEGACY
+ * one, stops there. No lock: the figures are a preview the action re-checks.
+ */
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const userId = authSession.userId;
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId, access } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    const { assetId } = parseData(
+      getCurrentSearchParams(request),
+      z.object({ assetId: z.string().min(1, "Asset ID is required") })
+    );
+
+    const bookingAsset = await db.bookingAsset.findFirst({
+      where: {
+        bookingId,
+        assetId,
+        assetKitId: null,
+        booking: { organizationId },
+      },
+      select: {
+        id: true,
+        assetId: true,
+        sourceKitId: true,
+        sourceAllocation: true,
+        asset: { select: { type: true } },
+        booking: {
+          select: {
+            status: true,
+            from: true,
+            to: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
+        },
+      },
+    });
+
+    if (!bookingAsset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not found",
+        message: "This asset is not part of the booking.",
+        label: "Booking",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingAsset.booking.creatorId,
+        custodianUserId: bookingAsset.booking.custodianUserId,
+      },
+      userId,
+      access,
+      action: "adjust asset quantity on",
+    });
+
+    // The action refuses these callers in this status, so offer nothing to edit.
+    if (
+      !canManageBookingItems({
+        access,
+        bookingStatus: bookingAsset.booking.status,
+      })
+    ) {
+      return data(payload({ sourceEditor: null }));
+    }
+
+    const sourceEditor = await getSourceEditorData({
+      organizationId,
+      bookingId,
+      slice: {
+        id: bookingAsset.id,
+        assetId: bookingAsset.assetId,
+        sourceKitId: bookingAsset.sourceKitId,
+        sourceAllocation: bookingAsset.sourceAllocation,
+        isPool: isQuantityTracked(bookingAsset.asset),
+        booking: {
+          status: bookingAsset.booking.status,
+          from: bookingAsset.booking.from,
+          to: bookingAsset.booking.to,
+        },
+      },
+    });
+
+    return data(payload({ sourceEditor }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return data(error(reason), { status: reason.status });
+  }
+}
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -61,7 +212,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const { assetId, quantity } = parseData(
+    const { assetId, quantity, sources } = parseData(
       formData,
       AdjustBookingAssetQuantitySchema
     );
@@ -143,21 +294,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Locked, re-read and directionally guarded in one transaction, and
-    // refused once the slice's units have been checked out. See the module.
+    // Locked, re-read and directionally guarded in one transaction, with the
+    // checked-out and sources rules of the module. A sources change commits
+    // its own booking note and activity event in that transaction.
     const { previousQuantity } = await setStandaloneBookedQuantity({
       bookingAssetId: bookingAsset.id,
       assetId,
       bookingId,
       organizationId,
       actorUserId: userId,
-      window:
-        bookingAsset.booking.from && bookingAsset.booking.to
-          ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }
-          : null,
       quantity,
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
+      sources: sources ? { input: sources, userId } : undefined,
+      // The manage-items status rule runs against the locked status.
+      access,
     });
 
     // Best-effort: a note failure is logged and never fails the saved change.

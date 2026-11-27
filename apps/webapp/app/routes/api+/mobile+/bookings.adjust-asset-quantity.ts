@@ -14,6 +14,7 @@ import {
   noteBookedQuantityChanges,
   setStandaloneBookedQuantity,
 } from "~/modules/booking/booked-quantity.server";
+import { bookingSourcesInputSchema } from "~/modules/booking/sources/sources-input";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -26,8 +27,8 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 /**
  * POST /api/mobile/bookings/adjust-asset-quantity
  *
- * Changes how many units of one quantity-tracked asset a booking holds — the
- * mobile twin of the web "Adjust quantity" dialog
+ * Changes how many units of one quantity-tracked asset a booking holds, and
+ * optionally where they come from: the mobile twin of the web "Adjust quantity" dialog
  * (`api+/bookings.$bookingId.adjust-asset-quantity`). Same rules, same guard:
  *
  * - Only the STANDALONE slice (`assetKitId IS NULL`) is editable. A kit-driven
@@ -35,15 +36,26 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * - A reduction always passes, even when the pool is already over-committed
  *   by other bookings; only an increase is measured against what is free in
  *   the booking's own `[from, to]` window, with this booking excluded.
- * - A slice whose units have been checked out keeps its amount (400).
+ * - A slice whose units have been checked out keeps its amount (400), except
+ *   the pending units of a pool slice on an ONGOING or OVERDUE booking.
+ * - `sources` (optional) sets where the units come from: `{ mode: "AUTO" }`
+ *   returns the slice to the allocation rule; `{ mode: "MANUAL", sources:
+ *   [{ locationId, quantity }] }` sets planned units per source by hand
+ *   (`locationId: null` is Unplaced), adding up to the slice's planned units
+ *   after the quantity change. A location that is not a placement of the
+ *   asset gets a 400, whether it is foreign, unplaced or missing. The change
+ *   commits with its booking note and activity event.
  * - The asset row is locked for the read-then-write, so two concurrent edits
  *   cannot both pass the guard and oversubscribe the pool.
  * - The status rule is the add-items one (`canManageBookingItems`):
  *   COMPLETE / ARCHIVED / CANCELLED bookings reject, and callers held to DRAFT
- *   may only touch a DRAFT booking. Callers who do not write every booking may
- *   only touch their own.
+ *   may only touch a DRAFT booking. Checked here on the snapshot (403 before
+ *   any transaction) and again by the service against the locked status.
+ *   Callers who do not write every booking may only touch their own.
  *
- * Body: { bookingId: string, assetId: string, quantity: number }
+ * Body: { bookingId: string, assetId: string, quantity: number,
+ *         sources?: { mode: "AUTO" } | { mode: "MANUAL", sources: Array<{
+ *           locationId: string | null, quantity: number }> } }
  * Response: { success: true, quantity, previousQuantity }
  *
  * @see {@link file://../bookings.$bookingId.adjust-asset-quantity.ts} web twin
@@ -55,6 +67,7 @@ const BodySchema = z.object({
   bookingId: z.string().min(1),
   assetId: z.string().min(1),
   quantity: z.number().int().positive().max(1_000_000),
+  sources: bookingSourcesInputSchema.optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -76,7 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetId, quantity } = await parseMobileBody(
+    const { bookingId, assetId, quantity, sources } = await parseMobileBody(
       BodySchema,
       request,
       "Booking"
@@ -176,13 +189,12 @@ export async function action({ request }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       actorUserId: user.id,
-      window:
-        bookingAsset.booking.from && bookingAsset.booking.to
-          ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }
-          : null,
       quantity,
       assetTitle: bookingAsset.asset.title,
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
+      sources: sources ? { input: sources, userId: user.id } : undefined,
+      // The service repeats the status rule against the locked status.
+      access,
     });
 
     await noteBookedQuantityChanges({

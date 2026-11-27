@@ -15,6 +15,8 @@
  * @see ../../../packages/quantity-control/src/custody-source.ts
  */
 import {
+  AS_PLANNED_SOURCE,
+  asPlannedSourceLabel,
   custodySourceKey,
   describeCustodySourceParts,
   sourceCommitmentParts,
@@ -30,6 +32,7 @@ import type {
 import { formatQuantity } from "./quantity-format";
 
 export {
+  AS_PLANNED_SOURCE,
   defaultAssignSourceOption,
   UNPLACED_SOURCE,
   UNRECORDED_SOURCE,
@@ -200,16 +203,28 @@ export function releaseSourceQuantity(
 
 /**
  * The rows of one check-out question: each location the pool is placed at,
- * then "Unplaced" when the pool has unplaced units.
+ * then "Unplaced" when the pool has unplaced units. A question whose server
+ * default is "As planned" (a slice with sources planned) lists that row
+ * first, with the plan ("Camera Room 6 · Studio 4") as its hint, the same
+ * choice the web check-out select offers.
  */
 export function checkoutSourceOptions(
   question: CheckoutSourceQuestion
 ): SourcePickerOption[] {
-  const rows: SourcePickerOption[] = question.placements.map((placement) => ({
+  const rows: SourcePickerOption[] = [];
+  if (question.defaultLocationId === AS_PLANNED_SOURCE) {
+    rows.push({
+      value: AS_PLANNED_SOURCE,
+      label: asPlannedSourceLabel(),
+      ...(question.plannedSummary ? { hint: question.plannedSummary } : {}),
+    });
+  }
+  const placementRows = question.placements.map((placement) => ({
     value: placement.locationId,
     label: placement.name,
     hint: sourceHint(placement, question.unitOfMeasure),
   }));
+  rows.push(...placementRows);
   if (question.unplaced > 0) {
     rows.push({
       value: UNPLACED_SOURCE,
@@ -223,10 +238,30 @@ export function checkoutSourceOptions(
 }
 
 /**
- * The row a check-out question opens on: the server's own default. A null
- * default means the unplaced units (every location is empty but unplaced
- * units are left), so that row is picked, not the first location. Only a
- * question with neither falls back to the first location.
+ * What a screen reader says for one check-out row: "Gloves from Studio, 40
+ * boxes" for a location, "Gloves, as planned, Camera Room 6 · Studio 4" for
+ * the "As planned" row (it is no place the units come "from").
+ *
+ * @param title - The pool's name
+ * @param option - One row from {@link checkoutSourceOptions}
+ */
+export function checkoutSourceRowA11yLabel(
+  title: string,
+  option: SourcePickerOption
+): string {
+  const base =
+    option.value === AS_PLANNED_SOURCE
+      ? `${title}, as planned`
+      : `${title} from ${option.label}`;
+  return option.hint ? `${base}, ${option.hint}` : base;
+}
+
+/**
+ * The row a check-out question opens on: the server's own default, which is
+ * {@link AS_PLANNED_SOURCE} for a slice with sources planned. A null default
+ * means the unplaced units (every location is empty but unplaced units are
+ * left), so that row is picked, not the first location. Only a question with
+ * neither falls back to the first location.
  */
 export function defaultCheckoutSource(
   question: CheckoutSourceQuestion
@@ -241,7 +276,8 @@ export function defaultCheckoutSource(
  * The `sourceLocations` body for a check-out: the answers the operator
  * changed, "Unplaced" sent as `null`. A row left on its pre-selected default
  * is not sent, so the server records its own default from the state at
- * check-out time rather than a value that may be a minute old.
+ * check-out time rather than a value that may be a minute old. "As planned"
+ * is never sent either: leaving a slice out is what dispatches it by plan.
  */
 export function checkoutSourceAnswers(
   answers: Record<string, string>,
@@ -250,7 +286,7 @@ export function checkoutSourceAnswers(
   const body: Record<string, string | null> = {};
   for (const sliceId of touched) {
     const value = answers[sliceId];
-    if (value === undefined) continue;
+    if (value === undefined || value === AS_PLANNED_SOURCE) continue;
     body[sliceId] = assignSourceRequestValue(value);
   }
   return body;

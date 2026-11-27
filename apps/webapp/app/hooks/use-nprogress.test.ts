@@ -24,6 +24,19 @@ describe("isFetcherExcludedFromProgress", () => {
     ).toBe(true);
   });
 
+  it("keeps the adjust dialog's From section load off the bar", () => {
+    // The section stays hidden until its data arrives.
+    expect(
+      isFetcherExcludedFromProgress(
+        "adjust-booking-asset-sources-booking-1-asset-1"
+      )
+    ).toBe(true);
+    // The dialog's own save keeps moving the bar.
+    expect(isFetcherExcludedFromProgress("adjust-booking-asset-asset-1")).toBe(
+      false
+    );
+  });
+
   it("keeps a listed fetcher off the bar", () => {
     expect(isFetcherExcludedFromProgress("add-note")).toBe(true);
   });

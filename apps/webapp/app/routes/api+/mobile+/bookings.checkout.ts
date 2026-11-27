@@ -2,6 +2,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
+import { clientHasCapability } from "~/modules/api/capabilities.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -11,10 +12,12 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
+  mobileDispatchSummary,
   mobileSourceLocationsSchema,
   sourceSubmissionFromRecord,
 } from "~/modules/booking/checkout-source-location";
 import { checkoutBooking } from "~/modules/booking/service.server";
+import type { DispatchedSlice } from "~/modules/booking/sources/booking-sources.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -36,7 +39,11 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  *
  * `sourceLocations` says where each pool's units leave from (only pools at two
  * or more placements need it; `null` = Unplaced). An app that does not send it
- * gets the default: see `recordCheckoutSourceLocations`.
+ * gets the default: see `dispatchCheckoutSources`. An app without the
+ * `booking-sources` capability (`X-Shelf-Capabilities`) is never asked about
+ * a slice split across sources, so any pick it sends for one is ignored and
+ * the slice goes out by its allocation. The response's `slices` lists the
+ * real sources each such slice's units left from.
  *
  * For mobile, we always do "without-adjusted-date" to keep things simple.
  * The mobile user just taps "Check Out" and it happens. The choice is sent
@@ -146,6 +153,8 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(timeZone ? { timeZone } : {}),
     };
 
+    /** Where converted pool slices' units left from, reported after commit. */
+    const dispatched: DispatchedSlice[] = [];
     const booking = await checkoutBooking({
       id: bookingId,
       organizationId,
@@ -162,6 +171,10 @@ export async function action({ request }: ActionFunctionArgs) {
       // "Check Out All Assets": the phone's one tap.
       provenance: { surface: "phone", method: "quick" },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
+      // An older build cannot answer the source question for a split slice;
+      // the server dispatches those by allocation.
+      clientSupportsSources: clientHasCapability(request, "booking-sources"),
+      onDispatched: (slices) => dispatched.push(...slices),
     });
 
     return data({
@@ -171,6 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: booking.name,
         status: booking.status,
       },
+      slices: mobileDispatchSummary(dispatched),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

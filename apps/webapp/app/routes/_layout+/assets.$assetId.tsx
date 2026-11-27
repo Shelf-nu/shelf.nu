@@ -49,6 +49,7 @@ import {
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
 import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-out.server";
+import { withReservedSourceSummaries } from "~/modules/booking/sources/reserved-source-summaries.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/asset.css?url";
@@ -266,13 +267,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           null,
         ];
 
+    // Reserved bookings with planned sources list them in the header
+    // tooltip, the same lines the lazy-fetch endpoint adds.
     const assetWithEffectiveBookingAssets = stillOutByBooking
       ? {
           ...asset,
-          bookingAssets: toStillOutBookingRows(
-            asset.bookingAssets ?? [],
-            stillOutByBooking
-          ),
+          bookingAssets: await withReservedSourceSummaries(db, {
+            organizationId,
+            assetId: asset.id,
+            rows: toStillOutBookingRows(
+              asset.bookingAssets ?? [],
+              stillOutByBooking
+            ),
+          }),
           freeNow,
         }
       : asset;

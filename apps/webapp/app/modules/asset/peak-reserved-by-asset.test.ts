@@ -26,9 +26,13 @@ const OTHER = "asset-2";
  */
 function txWith(
   reservedRows: unknown[],
-  loggedGroups: unknown[] = []
+  loggedGroups: unknown[] = [],
+  sourceRows: unknown[] = []
 ): Parameters<typeof getPeakReservedUnitsByAsset>[0]["tx"] {
   return {
+    // why: a converted slice's demand is the remaining reservation of its
+    // source rows; feeding them directly states that demand per case.
+    bookingAssetSource: { findMany: vi.fn().mockResolvedValue(sourceRows) },
     // why: the reservation rows are the timeline under test — feeding them
     // directly is what lets a case state a set of booking windows.
     bookingAsset: { findMany: vi.fn().mockResolvedValue(reservedRows) },
@@ -49,7 +53,13 @@ function reservation(
     id = `${bookingId}-${assetId}`,
     assetKitId = null,
     status = BookingStatus.RESERVED,
-  }: { id?: string; assetKitId?: string | null; status?: BookingStatus } = {}
+    sourceAllocation = "LEGACY",
+  }: {
+    id?: string;
+    assetKitId?: string | null;
+    status?: BookingStatus;
+    sourceAllocation?: "LEGACY" | "KIT" | "AUTO" | "MANUAL";
+  } = {}
 ) {
   return {
     id,
@@ -57,9 +67,19 @@ function reservation(
     bookingId,
     quantity: qty,
     assetKitId,
+    sourceAllocation,
     checkedOutQuantity: 0,
     booking: { from: new Date(from), to: new Date(to), status },
   };
+}
+
+/** One source row of a converted slice. */
+function sourceRow(
+  bookingAssetId: string,
+  quantity: number,
+  releasedQuantity = 0
+) {
+  return { bookingAssetId, quantity, releasedQuantity };
 }
 
 beforeEach(() => {
@@ -402,5 +422,103 @@ describe("getPeakReservedUnitsByAsset, a slice sent out again after a full retur
     });
 
     expect(peaks.get(ASSET)).toBeUndefined();
+  });
+});
+
+describe("getPeakReservedUnitsByAsset, method per booking group", () => {
+  it("picks the method per group and combines every interval in one sweep", async () => {
+    // b1 is a LEGACY group: 6 booked, 1 returned, so 5 held over Jan 1-10.
+    // b2 is a converted group over Jan 5-15: its AUTO slice holds what its
+    // rows still reserve (5 - 2 released at a location, plus 3 UNASSIGNED =
+    // 6), its return log is already inside `releasedQuantity`, and its KIT
+    // slice holds nothing here. Overlap Jan 5-10: 5 + 6 = 11.
+    const tx = txWith(
+      [
+        reservation(ASSET, "b1", 6, "2026-01-01", "2026-01-10", {
+          id: "legacy-row",
+        }),
+        reservation(ASSET, "b2", 8, "2026-01-05", "2026-01-15", {
+          id: "auto-row",
+          sourceAllocation: "AUTO",
+        }),
+        reservation(ASSET, "b2", 4, "2026-01-05", "2026-01-15", {
+          id: "kit-row",
+          assetKitId: "ak-1",
+          sourceAllocation: "KIT",
+        }),
+      ],
+      [
+        {
+          bookingAssetId: "legacy-row",
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 1 },
+        },
+        {
+          bookingAssetId: "auto-row",
+          bookingId: "b2",
+          assetId: ASSET,
+          _sum: { quantity: 2 },
+        },
+      ],
+      [sourceRow("auto-row", 5, 2), sourceRow("auto-row", 3)]
+    );
+
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx,
+    });
+
+    expect(peaks.get(ASSET)).toBe(11);
+    // Logs are read for the LEGACY group only, source rows for the AUTO
+    // slice only, each in one query.
+    expect(tx.consumptionLog.groupBy).toHaveBeenCalledTimes(1);
+    expect(tx.consumptionLog.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { in: ["b1"] } }),
+      })
+    );
+    expect(tx.bookingAssetSource.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.bookingAssetSource.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: "org", bookingAssetId: { in: ["auto-row"] } },
+      })
+    );
+  });
+
+  it("counts nothing for a converted group's KIT slice", async () => {
+    // Kit units are counted once, through `AssetKit.quantity`.
+    const tx = txWith([
+      reservation(ASSET, "b1", 4, "2026-01-01", "2026-01-10", {
+        id: "kit-row",
+        assetKitId: "ak-1",
+        sourceAllocation: "KIT",
+      }),
+    ]);
+
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx,
+    });
+
+    expect(peaks.get(ASSET)).toBeUndefined();
+    expect(tx.bookingAssetSource.findMany).not.toHaveBeenCalled();
+    expect(tx.consumptionLog.groupBy).not.toHaveBeenCalled();
+  });
+
+  it("issues no source-row query when every group is LEGACY", async () => {
+    const tx = txWith([
+      reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10"),
+    ]);
+
+    await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx,
+    });
+
+    expect(tx.bookingAssetSource.findMany).not.toHaveBeenCalled();
   });
 });

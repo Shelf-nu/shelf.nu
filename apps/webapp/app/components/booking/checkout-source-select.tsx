@@ -19,6 +19,11 @@
  * deleted while the dialog was open) therefore never comes back as a refused
  * "pick".
  *
+ * A slice that goes out by its plan pre-selects "As planned". The option names
+ * the plan ("As planned: Demo Warehouse 8 · Unplaced 7") and a line under the
+ * picker names the plan and says what leaving it alone does, linked to the
+ * picker's trigger by `aria-describedby`.
+ *
  * @see {@link file://../../modules/booking/checkout-source-location.ts} the rule and the option labels
  */
 import { useId, useState } from "react";
@@ -26,6 +31,7 @@ import { useId, useState } from "react";
 import { SourceLocationPicker } from "~/components/location/source-location-picker";
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import {
+  ALLOCATION_SOURCE_FORM_VALUE,
   checkoutSourceOptions,
   sourceLocationFieldName,
   sourceUnitLabel,
@@ -44,6 +50,7 @@ type CheckoutSourceSelectProps = {
     | "placements"
     | "unplaced"
     | "defaultLocationId"
+    | "plannedSummary"
   >;
   /**
    * What the answer is keyed by: the slice id (`BookingAsset.id`) when the
@@ -61,6 +68,11 @@ type CheckoutSourceSelectProps = {
    */
   variant?: "titled" | "inline";
   className?: string;
+  /**
+   * Called with the operator's answer each time they pick one (the value the
+   * hidden input posts), for a surface whose checks depend on the source.
+   */
+  onPick?: (value: string) => void;
 };
 
 /**
@@ -76,8 +88,10 @@ export function CheckoutSourceSelect({
   disabled,
   variant = "titled",
   className,
+  onPick,
 }: CheckoutSourceSelectProps) {
   const id = useId();
+  const hintId = `${id}-hint`;
   const options = checkoutSourceOptions(question);
   /** The pre-selected option: what the server records if nothing is posted. */
   const [value, setValue] = useState(
@@ -86,11 +100,12 @@ export function CheckoutSourceSelect({
   /** Whether the operator picked an answer: only then is it posted. */
   const [picked, setPicked] = useState(false);
   const isInline = variant === "inline";
+  const hint = asPlannedHint(question);
 
   return (
     <div
       className={tw(
-        isInline ? "flex items-center gap-2" : "flex flex-col gap-1",
+        isInline ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-1",
         className
       )}
     >
@@ -133,15 +148,42 @@ export function CheckoutSourceSelect({
             if (next === value) return;
             setValue(next);
             setPicked(true);
+            onPick?.(next);
           }}
           listLabel={`From location for ${question.title}`}
           triggerAriaLabel={
             isInline ? `From location for ${question.title}` : undefined
           }
+          triggerDescribedBy={hint ? hintId : undefined}
           disabled={disabled}
           triggerClassName="rounded-md"
         />
       </div>
+      {hint ? (
+        <p
+          id={hintId}
+          className={tw("text-xs text-gray-600", isInline && "basis-full")}
+        >
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * The line under a select that pre-selects "As planned": it names the stored
+ * plan and says that leaving the option alone sends the units out by it.
+ * Nothing for any other default.
+ *
+ * @param question - The pool being asked about
+ * @returns The hint, or `null`
+ */
+export function asPlannedHint(
+  question: Pick<CheckoutSourceQuestion, "defaultLocationId" | "plannedSummary">
+): string | null {
+  if (question.defaultLocationId !== ALLOCATION_SOURCE_FORM_VALUE) return null;
+  return question.plannedSummary
+    ? `Planned: ${question.plannedSummary}. These units go out by that plan; pick a location to take them from it instead.`
+    : "Shelf picks the locations with room for these units. Pick a location to take them from it instead.";
 }

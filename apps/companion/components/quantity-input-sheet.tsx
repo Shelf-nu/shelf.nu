@@ -111,6 +111,24 @@ type Props = {
    * informational: the picker stays usable so the operator can switch rows.
    */
   notice?: string;
+  /**
+   * Optional neutral context lines under the subtitle, e.g. where a booked
+   * pool's units come from ("From Demo Warehouse 8 · Unplaced 7"). Purely
+   * informational.
+   */
+  info?: string[];
+  /**
+   * Optional second action under the confirm button, sent with the same
+   * validated quantity. Locks and spins like confirm while `isSubmitting`;
+   * the caller tells the two apart by which handler ran.
+   */
+  secondaryAction?: {
+    /** Button label, e.g. "Let Shelf choose the sources". */
+    label: string;
+    /** Line under the button saying what it does. */
+    hint?: string;
+    onPress: (quantity: number) => void;
+  };
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
   /**
@@ -162,6 +180,8 @@ export function QuantityInputSheet({
   secondary,
   source,
   notice,
+  info,
+  secondaryAction,
   confirmLabel,
   destructive,
   isSubmitting = false,
@@ -317,6 +337,12 @@ export function QuantityInputSheet({
           keyboardShouldPersistTaps="handled"
         >
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+
+          {info?.map((line) => (
+            <Text key={line} style={styles.info}>
+              {line}
+            </Text>
+          ))}
 
           {/* "From location": one tappable row per source. The picked row
               drives `max`, so the quantity echo and the cap follow it. */}
@@ -509,6 +535,36 @@ export function QuantityInputSheet({
               <Text style={styles.confirmText}>{confirmLabel}</Text>
             )}
           </TouchableOpacity>
+
+          {secondaryAction ? (
+            <View style={styles.secondaryActionBlock}>
+              <TouchableOpacity
+                style={[
+                  styles.secondaryAction,
+                  !canConfirm && styles.confirmDisabled,
+                ]}
+                onPress={() => {
+                  if (canConfirm) secondaryAction.onPress(parsed);
+                }}
+                disabled={!canConfirm}
+                activeOpacity={0.7}
+                accessibilityLabel={secondaryAction.label}
+                accessibilityHint={secondaryAction.hint}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: !canConfirm,
+                  busy: isSubmitting,
+                }}
+              >
+                <Text style={styles.secondaryActionText}>
+                  {secondaryAction.label}
+                </Text>
+              </TouchableOpacity>
+              {secondaryAction.hint ? (
+                <Text style={styles.echoHint}>{secondaryAction.hint}</Text>
+              ) : null}
+            </View>
+          ) : null}
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -549,6 +605,10 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  info: {
+    fontSize: fontSize.sm,
+    color: colors.foregroundSecondary,
   },
   sourceSection: {
     gap: spacing.xs,
@@ -669,6 +729,23 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   confirmDisabled: {
     opacity: 0.5,
+  },
+  secondaryActionBlock: {
+    gap: spacing.xs,
+  },
+  secondaryAction: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.white,
+    paddingVertical: 12,
+  },
+  secondaryActionText: {
+    color: colors.foreground,
+    fontSize: fontSize.md,
+    fontWeight: "600",
   },
   confirmText: {
     color: colors.primaryForeground,

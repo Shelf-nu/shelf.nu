@@ -98,6 +98,16 @@ vitest.mock("~/modules/booking/checked-out.server", () => ({
   computeCheckedOutBreakdownForAsset: vitest.fn(),
 }));
 
+// why: the pool sources facade (asset lock, conversion, allocation) has its
+// own suite and needs models this tx mock does not stand in for; these tests
+// target the pool-wide availability guard only.
+vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  bookingSourcesInPlay: vitest.fn().mockResolvedValue(true),
+  resizeSlices: vitest.fn(),
+  setManualSources: vitest.fn(),
+  setAutoSources: vitest.fn(),
+}));
+
 // why: `vitest.mock` calls above are hoisted above all imports by Vitest's
 // transform regardless of source position, so importing the module under
 // test here (after the mocks are declared) is only for readability.
@@ -123,7 +133,8 @@ type ReservedRowFixture = {
 /**
  * Builds the `tx` mock passed into `db.$transaction`'s callback. Shaped
  * like `PrismaClientOrTx` (`~/modules/asset/availability.server`) plus
- * `$queryRaw` (consumed by `lockAssetForQuantityUpdate`'s row lock),
+ * `$queryRaw` (consumed by `lockAssetForQuantityUpdate`'s row lock and by
+ * the booking lock, which reads the window),
  * `bookingAsset.findUnique` (the route's TOCTOU re-read of the booked
  * quantity UNDER the lock) and `bookingAsset.update` (the route's own
  * write), so the REAL `assertAssetQuantityAvailable` → `getAssetAvailability`
@@ -144,7 +155,16 @@ function createTxMock({
   currentQuantity?: number;
 } = {}) {
   return {
-    $queryRaw: vitest.fn().mockResolvedValue([{ id: ASSET_ID }]),
+    // One row serves both raw locks: the asset lock reads `id`, the booking
+    // lock reads the window the availability guard measures (the fixture's
+    // default dates).
+    $queryRaw: vitest.fn().mockResolvedValue([
+      {
+        id: ASSET_ID,
+        from: new Date("2026-08-01T09:00:00.000Z"),
+        to: new Date("2026-08-05T09:00:00.000Z"),
+      },
+    ]),
     assetKit: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: inKits } }),
     },
@@ -425,7 +445,7 @@ describe("action (adjust-asset-quantity)", () => {
     // reduction against the stale 8), and the write did NOT happen.
     expect(tx.bookingAsset.findUnique).toHaveBeenCalledWith({
       where: { id: BOOKING_ASSET_ID },
-      select: { quantity: true, checkedOutAt: true },
+      select: { quantity: true, checkedOutAt: true, sourceAllocation: true },
     });
     expect(tx.bookingAsset.findMany).toHaveBeenCalled();
     expect(tx.bookingAsset.update).not.toHaveBeenCalled();

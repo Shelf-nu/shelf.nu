@@ -51,6 +51,11 @@
  */
 import type { BookingStatus, Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
+import {
+  convertedStandaloneIds,
+  isConvertedSlice,
+  loadRemainingReservationBySlice,
+} from "~/modules/asset/availability-primitives.server";
 import type {
   AvailabilityBatchClient,
   AvailabilityInterval,
@@ -75,14 +80,20 @@ const label: ErrorLabel = "Booking";
  * of {@link AvailabilityBatchClient} rather than a fresh structural type, so
  * this module can never drift from the shape the availability primitives
  * already query with (`asset.findMany`, `bookingAsset.findMany`,
- * `consumptionLog.groupBy`, `custody.groupBy`, `assetKit.groupBy`).
+ * `consumptionLog.groupBy`, `custody.groupBy`, `assetKit.groupBy`, and
+ * `bookingAssetSource.findMany` for converted slices).
  * `partialBookingCheckout` is intentionally excluded — this detector never
  * needs a separate `checkedOut` adjustment (see the module doc's threshold-
  * parity note).
  */
 export type StockConflictDbClient = Pick<
   AvailabilityBatchClient,
-  "asset" | "bookingAsset" | "consumptionLog" | "custody" | "assetKit"
+  | "asset"
+  | "bookingAsset"
+  | "bookingAssetSource"
+  | "consumptionLog"
+  | "custody"
+  | "assetKit"
 >;
 
 /** One row of the bookings-list input this detector evaluates. */
@@ -148,11 +159,14 @@ function overlapsHalfOpen(
  *      `inCustody`);
  *    - Σ `AssetKit.quantity` per asset (`assetKit.groupBy` — mirrors
  *      `getAssetAvailability`'s `inKits`).
- *    Each reserved row's remaining quantity is then reduced by
- *    already-logged RETURN/CONSUME/LOSS/DAMAGE dispositions (ONE more
- *    batched query, grouped by `(bookingId, assetId)`, skipped entirely
- *    when there are no reserved rows), and its interval's `to` resolved via
- *    {@link resolveIntervalTo} (OVERDUE → sentinel).
+ *    Each reserved row's remaining quantity is then picked per (booking,
+ *    asset) group: a LEGACY row is reduced by already-logged
+ *    RETURN/CONSUME/LOSS/DAMAGE dispositions (one batched query grouped by
+ *    `(bookingId, assetId)`, only when LEGACY rows exist); an AUTO / MANUAL
+ *    row of a converted group holds its source rows' `sum(quantity -
+ *    releasedQuantity)` (one batched query, only when such rows exist, in
+ *    parallel with the logs read). Its interval's `to` is resolved via
+ *    {@link resolveIntervalTo} (OVERDUE to the sentinel).
  * 3. For each asset, compute its EFFECTIVE POOL —
  *    `max(0, total − inCustody − inKits)` (see the module doc's
  *    threshold-parity note) — and run {@link overCommittedWindows} ONCE over
@@ -222,6 +236,7 @@ export async function flagBookingStockConflicts({
             quantity: true,
             assetKitId: true,
             checkedOutAt: true,
+            sourceAllocation: true,
             checkedOutQuantity: true,
             booking: { select: { from: true, to: true, status: true } },
           },
@@ -262,24 +277,37 @@ export async function flagBookingStockConflicts({
     const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
 
     if (reservedRows.length > 0) {
-      const bookingIds = [...new Set(reservedRows.map((r) => r.bookingId))];
-
-      // Mirrors `getAssetAvailabilityBatch`'s logged-dispositions read:
-      // grouped by slice, booking and asset.
-      const loggedGroups = await client.consumptionLog.groupBy({
-        by: ["bookingAssetId", "bookingId", "assetId"],
-        where: {
-          assetId: { in: assetIds },
-          bookingId: { in: bookingIds },
-          category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
-        },
-        _sum: { quantity: true },
-      });
-
-      const loggedByRow = loggedUnitsByReservationRow(
-        reservedRows,
-        loggedGroups
+      // Same per-group split as `getAssetAvailabilityBatch`: LEGACY rows keep
+      // their kit-driven siblings for attribution, converted standalone rows
+      // read their source rows.
+      const legacyRows = reservedRows.filter(
+        (r) => !isConvertedSlice(r.sourceAllocation)
       );
+      const bookingIds = [...new Set(legacyRows.map((r) => r.bookingId))];
+
+      // Mirrors `getAssetAvailabilityBatch`: LEGACY rows read logged
+      // dispositions grouped by slice, booking and asset; converted rows read
+      // their source rows.
+      const [loggedGroups, convertedRemaining] = await Promise.all([
+        bookingIds.length === 0
+          ? Promise.resolve([])
+          : client.consumptionLog.groupBy({
+              by: ["bookingAssetId", "bookingId", "assetId"],
+              where: {
+                assetId: { in: assetIds },
+                bookingId: { in: bookingIds },
+                category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+              },
+              _sum: { quantity: true },
+            }),
+        loadRemainingReservationBySlice(
+          client,
+          organizationId,
+          convertedStandaloneIds(reservedRows.filter((r) => !r.assetKitId))
+        ),
+      ]);
+
+      const loggedByRow = loggedUnitsByReservationRow(legacyRows, loggedGroups);
 
       for (const row of reservedRows) {
         // Kit-driven: fetched for attribution only.
@@ -289,16 +317,18 @@ export async function flagBookingStockConflicts({
         // practice — skip rather than fabricate a fallback window.
         if (!row.booking) continue;
 
-        const logged = loggedByRow.get(row) ?? 0;
-        // Never negative, and never below the units the row has out right
-        // now, same as the availability primitives.
-        const remaining = reservedUnitsStillHeld(
-          {
-            quantity: row.quantity,
-            checkedOutQuantity: row.checkedOutQuantity ?? null,
-          },
-          logged
-        );
+        // Converted slices read their source rows; LEGACY slices are never
+        // negative and never below the units they have out right now, same
+        // as the availability primitives.
+        const remaining = isConvertedSlice(row.sourceAllocation)
+          ? convertedRemaining.get(row.id ?? "") ?? 0
+          : reservedUnitsStillHeld(
+              {
+                quantity: row.quantity,
+                checkedOutQuantity: row.checkedOutQuantity ?? null,
+              },
+              loggedByRow.get(row) ?? 0
+            );
         if (remaining === 0) continue;
 
         // `windowTo` fallback is unreachable here (`row.booking.to` is

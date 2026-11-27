@@ -28,6 +28,10 @@
  * @see {@link file://../asset/placement-reconcile.server.ts} what check-in does with the answer
  */
 
+import {
+  AS_PLANNED_SOURCE,
+  asPlannedSourceLabel,
+} from "@shelf/quantity-control";
 import { z } from "zod";
 import type { StockEvent } from "~/modules/consumption-log/stock-ledger";
 import { resolveSentUnits } from "./checkin-receipt";
@@ -35,6 +39,10 @@ import {
   attributeDispositionsByBookingAsset,
   compareSlicesForGreedyFill,
 } from "./checkout-attribution";
+import type {
+  DispatchedSlice,
+  DispatchedSource,
+} from "./sources/booking-sources.server";
 
 /**
  * Form value an "Unplaced" option submits. A `<select>` cannot submit `null`,
@@ -42,6 +50,18 @@ import {
  * field means "not asked", which resolves to the default).
  */
 export const UNPLACED_SOURCE_FORM_VALUE = "";
+
+/**
+ * Form value (and question default) that means "as planned": the slice's
+ * units go out by its allocation, exactly as when no pick is sent. The
+ * default for every slice that dispatches through its source rows (a
+ * converted group, or a LEGACY group that converts at check-out), so leaving
+ * the select alone never forces a source the plan avoids. Parsers drop it,
+ * so it reaches the server as "not picked". The same value the companion's
+ * "As planned" row sends: both read `AS_PLANNED_SOURCE` from
+ * `@shelf/quantity-control`.
+ */
+export const ALLOCATION_SOURCE_FORM_VALUE = AS_PLANNED_SOURCE;
 
 /** Prefix of the form fields that carry a source per slice or asset. */
 export const SOURCE_LOCATION_FIELD_PREFIX = "sourceLocation.";
@@ -83,6 +103,8 @@ export function parseSourceLocationsFromFormData(
     if (!name.startsWith(SOURCE_LOCATION_FIELD_PREFIX)) continue;
     const key = name.slice(SOURCE_LOCATION_FIELD_PREFIX.length);
     if (!key || typeof value !== "string") continue;
+    // "As planned" is the same as not picking: dispatch by allocation.
+    if (value === ALLOCATION_SOURCE_FORM_VALUE) continue;
     submission.set(key, value === UNPLACED_SOURCE_FORM_VALUE ? null : value);
   }
   return submission;
@@ -93,7 +115,8 @@ export function parseSourceLocationsFromFormData(
  *
  * @param record - `{ [bookingAssetId or assetId]: locationId | null }`, or
  *   `undefined` from an app that does not send the field
- * @returns The same pairs as a map (an empty `""` also means "Unplaced")
+ * @returns The same pairs as a map (an empty `""` also means "Unplaced";
+ *   {@link ALLOCATION_SOURCE_FORM_VALUE} is dropped, as if not sent)
  */
 export function sourceSubmissionFromRecord(
   record: Record<string, string | null> | null | undefined
@@ -101,6 +124,8 @@ export function sourceSubmissionFromRecord(
   const submission = new Map<string, string | null>();
   for (const [key, value] of Object.entries(record ?? {})) {
     if (!key) continue;
+    // "As planned" is the same as not picking: dispatch by allocation.
+    if (value === ALLOCATION_SOURCE_FORM_VALUE) continue;
     submission.set(
       key,
       value === null || value === UNPLACED_SOURCE_FORM_VALUE ? null : value
@@ -118,6 +143,36 @@ export function sourceSubmissionFromRecord(
 export const mobileSourceLocationsSchema = z
   .record(z.string().min(1), z.string().nullable())
   .optional();
+
+/** One slice in a mobile check-out response: where its units left from. */
+export type MobileDispatchedSlice = {
+  /** The slice (`BookingAsset.id`). */
+  bookingAssetId: string;
+  assetId: string;
+  /** Each loose source the units left from in this check-out, with its name. */
+  sources: DispatchedSource[];
+};
+
+/**
+ * The `slices` field of the mobile check-out responses: every pool slice with
+ * planned sources that sent units out, and the real sources they left from.
+ * A client that never answered the source question for a split slice reads
+ * here where its units actually went. LEGACY slices are not listed.
+ *
+ * @param dispatched - What the check-out service reported after commit
+ * @returns One entry per slice with at least one loose source
+ */
+export function mobileDispatchSummary(
+  dispatched: readonly DispatchedSlice[]
+): MobileDispatchedSlice[] {
+  return dispatched
+    .filter((slice) => slice.sources.length > 0)
+    .map((slice) => ({
+      bookingAssetId: slice.sliceId,
+      assetId: slice.assetId,
+      sources: slice.sources,
+    }));
+}
 
 /** One manual placement of a pool, as the source question sees it. */
 export type SourcePlacement = {
@@ -171,9 +226,54 @@ export type CheckoutSourceQuestion = {
   quantity: number;
   placements: SourcePlacement[];
   unplaced: number;
-  /** The option to pre-select: the server's answer when nothing is picked. */
+  /**
+   * The option to pre-select: the server's answer when nothing is picked. A
+   * location id, null for Unplaced, or {@link ALLOCATION_SOURCE_FORM_VALUE}
+   * ("as planned") for a slice that dispatches through its source rows.
+   */
   defaultLocationId: string | null;
+  /**
+   * True when the slice has a stored plan (its group is converted): a
+   * check-out that picks nothing dispatches by that plan, so surfaces that
+   * cannot ask the question may check such a slice out without refusing it.
+   * Absent means false (a LEGACY slice). It does not name the pre-selected
+   * option: that is {@link CheckoutSourceQuestion.defaultLocationId}, which
+   * is "as planned" for a client with the `booking-sources` capability and,
+   * for an older phone, the single pending source or the shelf default.
+   */
+  fromAllocation?: boolean;
+  /**
+   * What "as planned" sends out, as one line per source in the booking's own
+   * words ("Demo Warehouse 8 · Needs a location 7"). Set only when the loader
+   * asks for it (`withPlannedSummary`), for a client with the
+   * `booking-sources` capability, on a slice whose sources are planned;
+   * absent while nothing is planned yet (a LEGACY slice converts at
+   * check-out and picks its sources then).
+   */
+  plannedSummary?: string;
 };
+
+/**
+ * Whether a check-out that picks nothing for this question would go out from
+ * a location nobody chose. A question whose default is "as planned"
+ * ({@link ALLOCATION_SOURCE_FORM_VALUE}) dispatches by allocation when left
+ * unanswered: a converted slice by its plan, a LEGACY slice that converts at
+ * this check-out (adoption on) by the plan it gets then. Any other default is
+ * a shelf guess, so a surface that cannot ask the question must send the
+ * operator to the booking page instead.
+ *
+ * Reads the default, so it is exact for questions built for a client with
+ * the `booking-sources` capability (the server's own guards); an older
+ * phone's defaults are always a real location.
+ *
+ * @param question - One question from `getCheckoutSourceQuestions`
+ * @returns True when only the booking page can check this slice out
+ */
+export function questionNeedsBookingPage(
+  question: Pick<CheckoutSourceQuestion, "defaultLocationId">
+): boolean {
+  return question.defaultLocationId !== ALLOCATION_SOURCE_FORM_VALUE;
+}
 
 /**
  * The words for a count of a pool's units: its unit of measure, or "units".
@@ -190,7 +290,8 @@ export function sourceUnitLabel(unitOfMeasure: string | null): string {
  * placement as "Camera Room · 60 pcs", with "· 10 in custody" and "· 20 on a
  * booking" when some of those units are out, then "Unplaced · 5 pcs" when the
  * pool has unplaced units. The same words as the location page's row and the
- * custody dialog.
+ * custody dialog. A question that defaults to "as planned" lists that option
+ * first, naming the plan when the question carries one.
  *
  * @param question - The pool being asked about
  * @returns `value` is the form value (a location id, or the unplaced sentinel)
@@ -199,7 +300,10 @@ export function checkoutSourceOptions(
   question: Pick<
     CheckoutSourceQuestion,
     "placements" | "unplaced" | "unitOfMeasure"
-  >
+  > &
+    Partial<
+      Pick<CheckoutSourceQuestion, "defaultLocationId" | "plannedSummary">
+    >
 ): Array<{ value: string; label: string }> {
   const unit = sourceUnitLabel(question.unitOfMeasure);
   const options = question.placements.map((placement) => {
@@ -216,8 +320,28 @@ export function checkoutSourceOptions(
       label: `Unplaced · ${question.unplaced} ${unit}`,
     });
   }
+  // A slice that defaults to its plan needs that plan as an option to select,
+  // and the option names the plan when there is one.
+  if (question.defaultLocationId === ALLOCATION_SOURCE_FORM_VALUE) {
+    options.unshift({
+      value: ALLOCATION_SOURCE_FORM_VALUE,
+      label: asPlannedLabel(question.plannedSummary),
+    });
+  }
   return options;
 }
+
+/**
+ * The words of the "as planned" option: the plan itself when it is known
+ * ("As planned: Demo Warehouse 8 · Unplaced 7"), else just "As planned".
+ * `asPlannedSourceLabel` from `@shelf/quantity-control`, which the companion
+ * reads too.
+ *
+ * @param plannedSummary - {@link CheckoutSourceQuestion.plannedSummary}
+ * @returns The option label
+ */
+export const asPlannedLabel: (plannedSummary?: string | null) => string =
+  asPlannedSourceLabel;
 
 /**
  * Whether a check-out asks where this pool's units come from.

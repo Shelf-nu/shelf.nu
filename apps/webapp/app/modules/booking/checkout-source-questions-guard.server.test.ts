@@ -5,8 +5,10 @@
  * The bookings-list row and the bulk check-out post without the dialog that
  * renders one select per multi-placed pool, so the overview action calls
  * `assertNoCheckoutSourceQuestions` for them. This suite pins both answers:
- * silence when every pool to go out sits at one placement or none, and the
- * 400 with the "open the booking" message when one sits at two.
+ * silence when every pool to go out sits at one placement or none, or already
+ * has its sources planned or converts at this check-out (it goes out by
+ * allocation), and the 400 with the "open the booking" message when a LEGACY
+ * pool slice sits at two while adoption is off.
  *
  * @see {@link file://./checkout-source-location.server.ts}
  */
@@ -27,6 +29,8 @@ vi.mock("~/database/db.server", () => ({
     asset: { findMany: vi.fn() },
     assetLocation: { findMany: vi.fn() },
     custody: { findMany: vi.fn().mockResolvedValue([]) },
+    // The rows of slices with planned sources; none planned anything here.
+    bookingAssetSource: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -34,6 +38,9 @@ vi.mock("~/database/db.server", () => ({
 // question does not depend on; nothing is out here.
 vi.mock("./units-out-by-source.server", () => ({
   loadBookedOutBySource: vi.fn().mockResolvedValue(new Map()),
+  bookedOutFromLegacySourcedSlices: vi.fn().mockResolvedValue(new Map()),
+  loadConvertedOutNow: vi.fn().mockResolvedValue([]),
+  LEGACY_SOURCED_SLICE_WHERE: {},
 }));
 
 const ORG = "org-1";
@@ -73,15 +80,42 @@ describe("assertNoCheckoutSourceQuestions", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("refuses with 400 and the open-the-booking message when a pool sits at two placements", async () => {
+  it("refuses with 400 and the open-the-booking message when a LEGACY pool sits at two placements and adoption is off", async () => {
     poolWithPlacements(2);
 
     await expect(
-      assertNoCheckoutSourceQuestions({ organizationId: ORG, bookingId: "b1" })
+      assertNoCheckoutSourceQuestions({
+        organizationId: ORG,
+        bookingId: "b1",
+        adoptionEnabled: false,
+      })
     ).rejects.toMatchObject({
       status: 400,
       message: CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE,
       additionalData: { bookingId: "b1", sliceIds: ["slice-1"] },
     });
+  });
+
+  it("lets a LEGACY pool at two placements through when adoption is on: it converts and goes out by allocation", async () => {
+    poolWithPlacements(2);
+
+    await expect(
+      assertNoCheckoutSourceQuestions({
+        organizationId: ORG,
+        bookingId: "b1",
+        adoptionEnabled: true,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("lets a slice with planned sources through: it goes out by its plan", async () => {
+    poolWithPlacements(2);
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { id: "slice-1", assetId: "tape", quantity: 2, sourceAllocation: "AUTO" },
+    ] as never);
+
+    await expect(
+      assertNoCheckoutSourceQuestions({ organizationId: ORG, bookingId: "b1" })
+    ).resolves.toBeUndefined();
   });
 });

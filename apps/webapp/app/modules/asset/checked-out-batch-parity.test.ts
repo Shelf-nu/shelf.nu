@@ -79,6 +79,17 @@ type FixtureBookingAsset = {
    * checkout stamps without writing a session. Omitted = not stamped.
    */
   stamped?: boolean;
+  /** The slice's source mode. Omitted = LEGACY. */
+  sourceAllocation?: "LEGACY" | "KIT" | "AUTO" | "MANUAL";
+};
+
+/** One `BookingDispositionShare` row: a disposition's units on one slice. */
+type FixtureShare = {
+  assetId: string;
+  bookingId: string;
+  /** The slice the units came off, or `null` once orphaned. */
+  bookingAssetId: string | null;
+  quantity: number;
 };
 
 /** One `ConsumptionLog` row recorded against a booking. */
@@ -150,6 +161,7 @@ function createFakeClient(fixture: {
   assets?: FixtureAsset[];
   assetKits?: FixtureAssetKit[];
   dispositions?: FixtureDisposition[];
+  shares?: FixtureShare[];
 }) {
   const bookingById = new Map(fixture.bookings.map((b) => [b.id, b]));
   const assets = fixture.assets ?? [];
@@ -166,8 +178,10 @@ function createFakeClient(fixture: {
     assetKitId: row.assetKitId ?? null,
     checkedOutQuantity: row.checkedOutQuantity ?? 0,
     checkedOutAt: row.stamped ? new Date("2026-09-01T09:00:00Z") : null,
+    sourceAllocation: row.sourceAllocation ?? "LEGACY",
   }));
   const dispositions = fixture.dispositions ?? [];
+  const shares = fixture.shares ?? [];
 
   return {
     asset: {
@@ -302,11 +316,41 @@ function createFakeClient(fixture: {
               assetKitId: row.assetKitId,
               checkedOutQuantity: row.checkedOutQuantity,
               checkedOutAt: row.checkedOutAt,
+              sourceAllocation: row.sourceAllocation,
               // Neither formula under test reads `booking.from`/`.to` for the
               // checked-out computation (that's only consulted by the
               // `reserved` side of `getAssetAvailabilityBatch`, which this
               // suite calls with `window: null`).
               booking: null,
+            }))
+      ),
+    },
+    // The reserved side reads a converted slice's source rows. This suite
+    // compares checked-out figures only, so the slices hold no source rows.
+    bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
+    bookingDispositionShare: {
+      findMany: vitest.fn(
+        ({
+          where,
+        }: {
+          where: {
+            assetId?: ScalarFilter;
+            bookingId?: ScalarFilter;
+            bookingAssetId?: { not: null };
+          };
+        }) =>
+          shares
+            .filter(
+              (share) =>
+                matchesFilter(share.assetId, where.assetId) &&
+                matchesFilter(share.bookingId, where.bookingId) &&
+                (!where.bookingAssetId || share.bookingAssetId !== null)
+            )
+            .map((share) => ({
+              bookingId: share.bookingId,
+              assetId: share.assetId,
+              bookingAssetId: share.bookingAssetId,
+              quantity: share.quantity,
             }))
       ),
     },
@@ -976,6 +1020,93 @@ describe("units that came back or were used up are no longer checked out", () =>
 
     expect(real).toBe(3);
     expect(batch?.checkedOut).toBe(real);
+  });
+});
+
+describe("a converted group nets its disposition shares, not its raw logs", () => {
+  /** Runs both real implementations and returns their figures for one asset. */
+  async function bothFor(
+    client: ReturnType<typeof createFakeClient>,
+    assetId: string
+  ) {
+    const real = await computeCheckedOutForAsset(client, assetId, ORG_ID);
+    const batch = await getAssetAvailabilityBatch([assetId], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client as unknown as AvailabilityBatchClient,
+    });
+    return { real, batch: batch.get(assetId) };
+  }
+
+  /**
+   * One AUTO slice of 10 sent out in full on b1. 6 units came back in one
+   * RETURN log: 4 of them are shared onto the slice, 2 onto a slice the
+   * booking no longer holds (an orphaned share).
+   */
+  function convertedFixture() {
+    return createFakeClient({
+      bookingAssets: [
+        {
+          id: "s-auto",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 10,
+          sourceAllocation: "AUTO",
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [10],
+          bookingAssetIds: ["s-auto"],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 6 },
+      ],
+      shares: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s-auto",
+          quantity: 4,
+        },
+        { assetId: "a1", bookingId: "b1", bookingAssetId: null, quantity: 2 },
+      ],
+      assets: [{ id: "a1", quantity: 30 }],
+    });
+  }
+
+  it("agree that an orphaned share takes nothing off the slices still out", async () => {
+    const client = convertedFixture();
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    // 10 out minus the 4 shared onto the slice; the orphaned 2 net nothing.
+    expect(real).toBe(6);
+    expect(batch?.checkedOut).toBe(real);
+    expect(batch?.physicalAvailable).toBe(24);
+  });
+
+  it("issues no share read for a LEGACY-only batch", async () => {
+    const client = createFakeClient({
+      bookingAssets: [
+        { assetId: "a1", bookingId: "b1", quantity: 5, stamped: true },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [],
+    });
+
+    await bothFor(client, "a1");
+
+    expect(client.bookingDispositionShare.findMany).not.toHaveBeenCalled();
   });
 });
 

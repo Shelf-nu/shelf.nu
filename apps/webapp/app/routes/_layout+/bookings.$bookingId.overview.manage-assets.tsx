@@ -259,13 +259,11 @@ export type AssetWithBooking = Asset & {
    */
   fulfilsModelName?: string | null;
   /**
-   * The location a checked-out pool slice's units left from
-   * (`BookingAsset.sourceLocationId`), shown as "from <Location>" under the
-   * title. Resolved by the booking-overview loader, and only for standalone
-   * slices of pools at two or more placements; absent on surfaces that don't
-   * project it.
+   * The `BookingAsset` slice this row renders. Set by the booking-overview
+   * loader so per-slice data (such as the Location cell's sources) can be
+   * looked up for this row; absent on surfaces that don't project it.
    */
-  sourceLocation?: { id: string; name: string } | null;
+  bookingAssetId?: string | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.

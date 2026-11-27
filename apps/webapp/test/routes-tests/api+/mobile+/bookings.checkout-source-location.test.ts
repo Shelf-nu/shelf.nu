@@ -13,6 +13,11 @@
  * The full check-out routes also hand the service what a model-pool refusal
  * needs: the request's client hints and whether the caller sees every booking.
  *
+ * Every route also tells the service whether the app announced the
+ * `booking-sources` capability (an older build is never asked about a split
+ * slice, so the server dispatches it by allocation), and lists in `slices` the
+ * real sources each pool slice's units left from.
+ *
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.checkout.ts}
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.partial-checkout.ts}
  * @see {@link file://../../../../app/routes/api+/mobile+/bookings.fulfil-and-checkout.ts}
@@ -32,6 +37,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import type { SourceLocationSubmission } from "~/modules/booking/checkout-source-location";
+import type { CheckoutDispatchOptions } from "~/modules/booking/service.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import type * as BookingServiceServer from "~/modules/booking/service.server";
 import {
@@ -144,13 +150,14 @@ beforeEach(() => {
 function post(
   action: typeof checkoutAction,
   path: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {}
 ) {
   return action(
     createActionArgs({
       request: new Request(`http://localhost:3000/api/mobile/${path}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...headers },
         body: JSON.stringify({ bookingId: BOOKING_ID, ...body }),
       }),
       params: {},
@@ -248,6 +255,92 @@ describe.each([ROUTES[0], ROUTES[2]])(
           seesAllBookings: true,
         })
       );
+    });
+  }
+);
+
+describe.each(ROUTES)(
+  "POST /api/mobile/$name booking-sources capability",
+  (route) => {
+    /** The capability flag the service received. */
+    function receivedCapability() {
+      const [args] = vi.mocked(route.service).mock.calls[0] as unknown as [
+        CheckoutDispatchOptions,
+      ];
+      return args.clientSupportsSources;
+    }
+
+    it("tells the service an app without the header cannot answer for a split slice", async () => {
+      await post(route.action, route.path, route.body);
+
+      expect(receivedCapability()).toBe(false);
+    });
+
+    it("tells the service an app that announces booking-sources can", async () => {
+      await post(route.action, route.path, route.body, {
+        "X-Shelf-Capabilities": "booking-sources",
+      });
+
+      expect(receivedCapability()).toBe(true);
+    });
+
+    it("lists the real sources each pool slice's units left from", async () => {
+      // The service reports where the units went once it has committed.
+      vi.mocked(route.service).mockImplementationOnce(((
+        args: CheckoutDispatchOptions
+      ) => {
+        args.onDispatched?.([
+          {
+            sliceId: "ba-1",
+            assetId: "pool-1",
+            sources: [
+              {
+                kind: "LOCATION",
+                locationId: "loc-warehouse",
+                name: "Demo Warehouse",
+                quantity: 8,
+              },
+              {
+                kind: "UNPLACED",
+                locationId: null,
+                name: "Unplaced",
+                quantity: 7,
+              },
+            ],
+          },
+        ]);
+        return Promise.resolve(
+          route.service === checkoutBooking
+            ? { id: BOOKING_ID, name: "Load-in", status: "ONGOING" }
+            : {
+                checkedOutAssetCount: 1,
+                remainingAssetCount: 0,
+                isComplete: true,
+                booking: { id: BOOKING_ID, name: "Load-in", status: "ONGOING" },
+              }
+        );
+      }) as never);
+
+      const response = await post(route.action, route.path, route.body);
+
+      assertIsDataWithResponseInit(response);
+      expect(response.data).toMatchObject({
+        success: true,
+        slices: [
+          {
+            bookingAssetId: "ba-1",
+            assetId: "pool-1",
+            sources: [
+              {
+                locationId: "loc-warehouse",
+                name: "Demo Warehouse",
+                quantity: 8,
+              },
+              { locationId: null, name: "Unplaced", quantity: 7 },
+            ],
+          },
+        ],
+      });
     });
   }
 );

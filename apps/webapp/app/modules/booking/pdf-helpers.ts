@@ -7,6 +7,10 @@ import type {
   Prisma,
   Kit,
 } from "@prisma/client";
+import {
+  describeSourceLine,
+  type BookingSourceLine,
+} from "@shelf/quantity-control";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
@@ -16,6 +20,10 @@ import {
 } from "~/modules/barcode/display";
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
+import {
+  isStandalonePoolSlice,
+  selectPoolSourceCell,
+} from "~/modules/booking/sources/pool-source-cell";
 import { formatTemplateCustomFieldValue } from "~/modules/pdf-template/format";
 import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
@@ -32,6 +40,10 @@ import {
   groupAndSortAssetsByKit,
 } from "./helpers";
 import { getBooking } from "./service.server";
+import {
+  getSliceSourceSummaries,
+  type SliceSourceSummary,
+} from "./sources/booking-sources.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 export interface SortParams {
@@ -98,6 +110,13 @@ export interface PdfDbResult {
      * entry and prints an empty cell.
      */
     customFieldValues: Record<string, string>;
+    /**
+     * Where this slice's units come from, printed in the Location cell in
+     * place of the asset's location: set only for a standalone pool slice
+     * planned by source (`AUTO` or `MANUAL`), the same rows the booking page
+     * shows sources for. `null` (or absent) keeps the asset's location.
+     */
+    sourceLine?: BookingSourceLine | null;
   })[];
   /**
    * The custom fields the template prints, in the template's order. Only live
@@ -218,6 +237,18 @@ export async function fetchAllPdfRelatedData(
     const visibleAssetIds = [...new Set(visibleBookingAssets.map((a) => a.id))];
 
     /**
+     * Sources are read only when some standalone pool slice is planned by
+     * source (`AUTO` or `MANUAL`), so a booking of `LEGACY` and kit slices
+     * costs no extra query.
+     */
+    const bookingSlices = booking?.bookingAssets ?? [];
+    const hasSourcedPoolSlice = bookingSlices.some(
+      (ba) =>
+        isStandalonePoolSlice(ba) &&
+        (ba.sourceAllocation === "AUTO" || ba.sourceAllocation === "MANUAL")
+    );
+
+    /**
      * Kits referenced by a visible slice's durable `BookingAsset.sourceKitId`.
      * Fetched because the PDF, unlike the booking overview, has no kit query of
      * its own — a kit only ever reaches it through `asset.assetKits`, which is
@@ -231,114 +262,125 @@ export async function fetchAllPdfRelatedData(
       ),
     ];
 
-    const [rawAssets, organization, snapshotKits, templateCustomFields] =
-      await Promise.all([
-        db.asset.findMany({
-          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: booking PDF lists every asset the booking already holds, archived ones included
-          where: {
-            id: { in: visibleAssetIds },
-            // Defense-in-depth: scope to the caller's org even though the
-            // asset ids originate from an already org-scoped booking
-            organizationId,
-          },
-          include: {
-            // Model cover image for assets with no image of their own: the
-            // exported PDF renders the same cascade as every web surface.
-            ...ASSET_MODEL_IMAGE_SELECT,
-            category: {
-              select: {
-                name: true,
-              },
+    const [
+      rawAssets,
+      organization,
+      snapshotKits,
+      templateCustomFields,
+      sliceSourceSummaries,
+    ] = await Promise.all([
+      db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: booking PDF lists every asset the booking already holds, archived ones included
+        where: {
+          id: { in: visibleAssetIds },
+          // Defense-in-depth: scope to the caller's org even though the
+          // asset ids originate from an already org-scoped booking
+          organizationId,
+        },
+        include: {
+          // Model cover image for assets with no image of their own: the
+          // exported PDF renders the same cascade as every web surface.
+          ...ASSET_MODEL_IMAGE_SELECT,
+          category: {
+            select: {
+              name: true,
             },
-            // why: out of this rule: `getQrCodeMaps` renders the image from
-            // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
-            // Ordered so the QR picture and the QR id printed under it are the
-            // same first code on every print.
-            qrCodes: { orderBy: QR_CODES_ORDER_BY },
-            // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
-            // its barcode value printed instead of the QR id.
-            barcodes: { select: { id: true, type: true, value: true } },
-            assetLocations: {
-              select: {
-                location: {
-                  select: {
-                    name: true,
-                  },
+          },
+          // why: out of this rule: `getQrCodeMaps` renders the image from
+          // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
+          // Ordered so the QR picture and the QR id printed under it are the
+          // same first code on every print.
+          qrCodes: { orderBy: QR_CODES_ORDER_BY },
+          // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
+          // its barcode value printed instead of the QR id.
+          barcodes: { select: { id: true, type: true, value: true } },
+          // Every placement, kit-driven included: whether a pool has any
+          // decides whether its sources say anything beyond "Unplaced" (see
+          // `selectPoolSourceCell`).
+          assetLocations: {
+            select: {
+              location: {
+                select: {
+                  name: true,
                 },
               },
             },
-            // Each slice's `kit` / `kitId` are resolved PER SLICE below by
-            // matching the slice's `BookingAsset.assetKitId` against these
-            // memberships' `id` (a QT asset can be in several kits, so
-            // `assetKits[0]` is not necessarily the slice's kit). `kit.location`
-            // is included so `groupAndSortAssetsByKit` can sort kit groups by
-            // Location in the exported PDF (otherwise every kit is treated as
-            // null-location and falls back to kit-name order, making the PDF not
-            // match the selected Location sort).
-            assetKits: {
-              select: {
-                id: true,
-                kit: {
-                  select: {
-                    id: true,
-                    name: true,
-                    location: { select: { name: true } },
-                  },
+          },
+          // Each slice's `kit` / `kitId` are resolved PER SLICE below by
+          // matching the slice's `BookingAsset.assetKitId` against these
+          // memberships' `id` (a QT asset can be in several kits, so
+          // `assetKits[0]` is not necessarily the slice's kit). `kit.location`
+          // is included so `groupAndSortAssetsByKit` can sort kit groups by
+          // Location in the exported PDF (otherwise every kit is treated as
+          // null-location and falls back to kit-name order, making the PDF not
+          // match the selected Location sort).
+          assetKits: {
+            select: {
+              id: true,
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                  location: { select: { name: true } },
                 },
               },
             },
-            // Only the values of the custom fields the template prints, and
-            // no query at all for a template that prints none.
-            customFields: customFieldIds.length > 0 && {
-              where: { customFieldId: { in: customFieldIds } },
-              select: { customFieldId: true, value: true },
+          },
+          // Only the values of the custom fields the template prints, and
+          // no query at all for a template that prints none.
+          customFields: customFieldIds.length > 0 && {
+            where: { customFieldId: { in: customFieldIds } },
+            select: { customFieldId: true, value: true },
+          },
+        },
+      }),
+      db.organization.findUnique({
+        where: { id: organizationId },
+        select: {
+          imageId: true,
+          name: true,
+          id: true,
+          currency: true,
+          updatedAt: true,
+          // Which code the workspace wants printed, and whether its picture is
+          // printed at all.
+          qrIdDisplayPreference: true,
+          barcodesEnabled: true,
+          showQrCodesOnPdfs: true,
+        },
+      }),
+      // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
+      // organization, so this lookup is org-scoped and an id that doesn't
+      // resolve simply leaves the slice rendering as a standalone row.
+      snapshotKitIds.length > 0
+        ? db.kit.findMany({
+            where: { id: { in: snapshotKitIds }, organizationId },
+            select: {
+              id: true,
+              name: true,
+              // Kit location: `groupAndSortAssetsByKit` sorts kit groups by
+              // it, so a snapshot kit must carry it like a live one.
+              location: { select: { name: true } },
             },
-          },
-        }),
-        db.organization.findUnique({
-          where: { id: organizationId },
-          select: {
-            imageId: true,
-            name: true,
-            id: true,
-            currency: true,
-            updatedAt: true,
-            // Which code the workspace wants printed, and whether its picture is
-            // printed at all.
-            qrIdDisplayPreference: true,
-            barcodesEnabled: true,
-            showQrCodesOnPdfs: true,
-          },
-        }),
-        // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
-        // organization, so this lookup is org-scoped and an id that doesn't
-        // resolve simply leaves the slice rendering as a standalone row.
-        snapshotKitIds.length > 0
-          ? db.kit.findMany({
-              where: { id: { in: snapshotKitIds }, organizationId },
-              select: {
-                id: true,
-                name: true,
-                // Kit location: `groupAndSortAssetsByKit` sorts kit groups by
-                // it, so a snapshot kit must carry it like a live one.
-                location: { select: { name: true } },
-              },
-            })
-          : Promise.resolve<PdfSnapshotKit[]>([]),
-        customFieldIds.length > 0
-          ? db.customField.findMany({
-              where: {
-                id: { in: customFieldIds },
-                organizationId,
-                deletedAt: null,
-                // An inactive field is not printed, even when a saved
-                // template still names it.
-                active: true,
-              },
-              select: { id: true, name: true, type: true },
-            })
-          : Promise.resolve<Pick<CustomField, "id" | "name" | "type">[]>([]),
-      ]);
+          })
+        : Promise.resolve<PdfSnapshotKit[]>([]),
+      customFieldIds.length > 0
+        ? db.customField.findMany({
+            where: {
+              id: { in: customFieldIds },
+              organizationId,
+              deletedAt: null,
+              // An inactive field is not printed, even when a saved
+              // template still names it.
+              active: true,
+            },
+            select: { id: true, name: true, type: true },
+          })
+        : Promise.resolve<Pick<CustomField, "id" | "name" | "type">[]>([]),
+      hasSourcedPoolSlice
+        ? getSliceSourceSummaries({ organizationId, bookingId })
+        : Promise.resolve(new Map<string, SliceSourceSummary>()),
+    ]);
 
     if (!organization) {
       throw new ShelfError({
@@ -360,6 +402,24 @@ export async function fetchAllPdfRelatedData(
       rawAssetsById,
       snapshotKitsById
     );
+
+    /**
+     * The Location cell's source line per slice (`bookingAssetId`), decided
+     * by the same rule as the booking page's Location cell. Slices without an
+     * entry print the asset's location.
+     */
+    const sourceLineBySlice = new Map<string, BookingSourceLine>();
+    for (const ba of hasSourcedPoolSlice ? bookingSlices : []) {
+      const cell = selectPoolSourceCell({
+        summary: sliceSourceSummaries.get(ba.id),
+        isStandalonePoolSlice: isStandalonePoolSlice(ba),
+        // Any placement, kit-driven included: see `selectPoolSourceCell`.
+        hasPlacements:
+          (rawAssetsById.get(ba.assetId)?.assetLocations.length ?? 0) > 0,
+      });
+      const line = cell ? describeSourceLine(cell.parts) : null;
+      if (line) sourceLineBySlice.set(ba.id, line);
+    }
 
     // Group by kit and sort - this keeps each kit's per-slice rows contiguous.
     const sortedAssets = groupAndSortAssetsByKit(
@@ -464,7 +524,11 @@ export async function fetchAllPdfRelatedData(
           });
           if (text !== null) customFieldValues[field.id] = text;
         }
-        return { ...row, customFieldValues };
+        return {
+          ...row,
+          customFieldValues,
+          sourceLine: sourceLineBySlice.get(row.bookingAssetId) ?? null,
+        };
       }
     );
 

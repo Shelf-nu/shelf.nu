@@ -1,20 +1,27 @@
 /**
  * Record which location a booking slice's units leave from (DB side).
  *
- * Every check-out writer calls {@link recordCheckoutSourceLocations} inside its
- * own transaction, right before it adds to `BookingAsset.checkedOutQuantity`.
- * The pure rule lives in {@link file://./checkout-source-location.ts}; this
- * module only reads what the rule needs and writes the answer.
+ * Every check-out writer calls {@link dispatchCheckoutSources} inside its own
+ * transaction, right before it adds to `BookingAsset.checkedOutQuantity`.
+ * Slices with source rows (converted groups) dispatch from those rows through
+ * the booking sources facade; LEGACY slices go through
+ * {@link recordCheckoutSourceLocations}, whose pure rule lives in
+ * {@link file://./checkout-source-location.ts}.
  *
  * The check-out dialogs read the same data through
  * {@link getCheckoutSourceQuestions}, so the option the dialog pre-selects is
- * the answer the server records when nothing is submitted.
+ * the answer the server uses when nothing is submitted.
  *
  * @see {@link file://./checkout-source-location.ts}
+ * @see {@link file://./sources/booking-sources.server.ts} `dispatchUnits`
  * @see {@link file://./service.server.ts} the check-out writers
  */
 
 import { AssetType } from "@prisma/client";
+import {
+  describeBookingSources,
+  formatSourceSummary,
+} from "@shelf/quantity-control";
 
 import { db } from "~/database/db.server";
 import type { ExtendedPrismaClient } from "~/database/db.server";
@@ -24,6 +31,7 @@ import {
   custodyFromSource,
   unitsLeftAtSource,
 } from "~/modules/asset/custody-source";
+import { BOOKING_SOURCES_ENABLED } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -35,13 +43,18 @@ import type {
   SourcePlacement,
 } from "./checkout-source-location";
 import {
+  ALLOCATION_SOURCE_FORM_VALUE,
   defaultSourceLocationId,
   NO_SOURCE_SUBMISSION,
   poolAsksForSource,
+  questionNeedsBookingPage,
   resolveSliceSource,
   submittedSourceForSlice,
 } from "./checkout-source-location";
-import { loadBookedOutBySource } from "./units-out-by-source.server";
+import { dispatchUnits } from "./sources/booking-sources.server";
+import type { DispatchedSlice } from "./sources/booking-sources.server";
+import { loadUnitsOutBySource } from "./sources/capacity.server";
+import type { BookingSourcesTx } from "./sources/conversion.server";
 
 const label: ErrorLabel = "Booking";
 
@@ -56,6 +69,7 @@ type SourceTxClient = Pick<
   | "assetLocation"
   | "assetKit"
   | "bookingAsset"
+  | "bookingAssetSource"
   | "consumptionLog"
   | "custody"
   | "kit"
@@ -125,8 +139,9 @@ export async function loadPoolSourceSnapshots(
         quantity: true,
       },
     }),
-    // Units out on other bookings from each location are not there either.
-    loadBookedOutBySource(tx, { assetIds: uniqueAssetIds, organizationId }),
+    // Units out on bookings from each source are not there either: LEGACY
+    // groups by their recorded location, converted groups by their rows.
+    loadUnitsOutBySource(tx, { assetIds: uniqueAssetIds, organizationId }),
   ]);
 
   const placementsByAsset = new Map<string, SourcePlacement[]>();
@@ -349,6 +364,22 @@ export async function recordCheckoutSourceLocations(
  *
  * Read-only; the dialogs use it to render one "From location" select per pool.
  *
+ * For a client with the `booking-sources` capability, a slice with planned
+ * sources (a converted group), and a LEGACY slice when adoption is on (it
+ * converts at check-out), defaults to "as planned"
+ * (`ALLOCATION_SOURCE_FORM_VALUE`): submitting the default dispatches by
+ * allocation like no pick, so a source the plan avoids is never forced. A
+ * LEGACY slice with adoption off defaults to the shelf (the most units left).
+ * With `withPlannedSummary`, a converted slice also carries its plan as one
+ * line (`plannedSummary`, such as "Demo Warehouse 8 · Needs a location 7"),
+ * so the select can say what "as planned" sends out.
+ *
+ * A client without the capability has no "as planned" option, so its default
+ * is always a real location: a converted slice's single pending LOCATION or
+ * UNPLACED source when it has exactly one, otherwise the shelf default. Such a
+ * client sends only the answers the operator changed, so an untouched default
+ * is never submitted and the slice still dispatches by allocation.
+ *
  * @param args.organizationId - Scopes every read
  * @param args.bookingId - The booking being checked out
  * @param args.sliceIds - Limit to these slices (a partial check-out's rows);
@@ -359,10 +390,32 @@ export async function getCheckoutSourceQuestions({
   organizationId,
   bookingId,
   sliceIds,
+  clientSupportsSources = true,
+  adoptionEnabled = BOOKING_SOURCES_ENABLED,
+  withPlannedSummary = false,
 }: {
   organizationId: string;
   bookingId: string;
   sliceIds?: string[];
+  /**
+   * False for a phone build that does not announce the `booking-sources`
+   * capability: it gets no question for a slice whose pending units are
+   * split across sources (the server dispatches those by allocation), and
+   * every default it gets is a location or Unplaced, never "as planned".
+   */
+  clientSupportsSources?: boolean;
+  /**
+   * Whether a LEGACY group converts at check-out; defaults to
+   * `BOOKING_SOURCES_ENABLED`. Decides the default of a LEGACY slice.
+   */
+  adoptionEnabled?: boolean;
+  /**
+   * Whether to name each converted slice's plan (`plannedSummary`). Only the
+   * surfaces that render the select (the check-out dialogs, the scanner
+   * drawer, fulfil-and-check-out) ask for it; guards and bulk paths that
+   * only test for questions skip the source row and location name reads.
+   */
+  withPlannedSummary?: boolean;
 }): Promise<CheckoutSourceQuestion[]> {
   const slices = await db.bookingAsset.findMany({
     where: {
@@ -373,19 +426,114 @@ export async function getCheckoutSourceQuestions({
       asset: { type: AssetType.QUANTITY_TRACKED, organizationId },
       ...(sliceIds ? { id: { in: sliceIds } } : {}),
     },
-    select: { id: true, assetId: true, quantity: true },
+    select: {
+      id: true,
+      assetId: true,
+      quantity: true,
+      sourceAllocation: true,
+    },
   });
   if (slices.length === 0) return [];
 
-  const snapshots = await loadPoolSourceSnapshots(db, {
-    organizationId,
-    assetIds: slices.map((slice) => slice.assetId),
-  });
+  // Converted slices already have sources planned. Their rows name the plan
+  // behind "as planned" (when asked for), and an older phone is asked
+  // nothing about a split plan, with a single pending source as its default.
+  // Nobody else needs them, so they are read only for those two.
+  const convertedIds = slices
+    .filter(
+      (slice) =>
+        slice.sourceAllocation === "AUTO" || slice.sourceAllocation === "MANUAL"
+    )
+    .map((slice) => slice.id);
+  /** A capable client's select names the plan behind "as planned". */
+  const namesPlan = clientSupportsSources && withPlannedSummary;
+  const [snapshots, rows] = await Promise.all([
+    loadPoolSourceSnapshots(db, {
+      organizationId,
+      assetIds: slices.map((slice) => slice.assetId),
+    }),
+    convertedIds.length === 0 || !(namesPlan || !clientSupportsSources)
+      ? Promise.resolve([])
+      : db.bookingAssetSource.findMany({
+          where: {
+            organizationId,
+            bookingAssetId: { in: convertedIds },
+            // The plan also names units on "Needs a location"; an older
+            // phone's default reads LOCATION and UNPLACED rows only.
+            kind: {
+              in: namesPlan
+                ? ["LOCATION", "UNPLACED", "UNASSIGNED"]
+                : ["LOCATION", "UNPLACED"],
+            },
+          },
+          select: {
+            bookingAssetId: true,
+            kind: true,
+            locationId: true,
+            quantity: true,
+            outQuantity: true,
+            releasedQuantity: true,
+          },
+        }),
+  ]);
+  const convertedSet = new Set(convertedIds);
+  /** The converted slices' rows, as one array type whichever branch ran. */
+  const sourceRows: Array<(typeof rows)[number]> = rows;
+  const locationNames = namesPlan
+    ? await planLocationNames(db, {
+        organizationId,
+        rows: sourceRows,
+        snapshots,
+      })
+    : new Map<string, string>();
 
   const questions: CheckoutSourceQuestion[] = [];
   for (const slice of slices) {
     const snapshot = snapshots.get(slice.assetId);
     if (!snapshot || !poolAsksForSource(snapshot)) continue;
+    const fromAllocation = convertedSet.has(slice.id);
+    let defaultLocationId: string | null;
+    if (!clientSupportsSources) {
+      const pendingSources = fromAllocation
+        ? sourceRows.filter(
+            (row) =>
+              row.bookingAssetId === slice.id &&
+              (row.kind === "LOCATION" || row.kind === "UNPLACED") &&
+              row.quantity - row.releasedQuantity - row.outQuantity > 0
+          )
+        : [];
+      // A split plan: an older phone cannot answer for it, so it is not asked
+      // and the slice goes out by its plan.
+      if (pendingSources.length > 1) continue;
+      // An older phone lists only locations and Unplaced, so it gets a real
+      // one: the plan's single pending source (null for UNPLACED), else the
+      // shelf default. It sends only rows the operator changed, so this
+      // display default never reaches the server as a pick.
+      defaultLocationId =
+        pendingSources.length === 1
+          ? pendingSources[0].locationId
+          : defaultSourceLocationId(snapshot);
+    } else {
+      // "As planned" whenever the slice dispatches through its source rows
+      // (converted, or converting now): a shelf default submitted unchanged
+      // would read as the operator's choice and move the plan into it.
+      defaultLocationId =
+        fromAllocation || adoptionEnabled
+          ? ALLOCATION_SOURCE_FORM_VALUE
+          : defaultSourceLocationId(snapshot);
+    }
+    // What "as planned" sends out, for the select to name. Only a capable
+    // client offers that option, and only a converted slice has a plan.
+    const plannedSummary =
+      namesPlan && fromAllocation
+        ? formatSourceSummary(
+            describeBookingSources({
+              rows: sourceRows.filter((row) => row.bookingAssetId === slice.id),
+              locationNames,
+              shortSourceKeys: new Set(),
+            })
+          )
+        : "";
     questions.push({
       sliceId: slice.id,
       assetId: slice.assetId,
@@ -394,11 +542,171 @@ export async function getCheckoutSourceQuestions({
       quantity: slice.quantity,
       placements: snapshot.placements,
       unplaced: snapshot.unplaced,
-      defaultLocationId: defaultSourceLocationId(snapshot),
+      defaultLocationId,
+      fromAllocation,
+      ...(plannedSummary ? { plannedSummary } : {}),
     });
   }
 
   return questions.sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/**
+ * Names of the locations a set of planned source rows points at. Placements
+ * already read for the pools supply most of them; a row at a location the
+ * pool is no longer placed at (its placement was removed while units stay
+ * held there) is looked up, scoped to the workspace.
+ *
+ * @param client - The client to read through: a transaction client or the
+ *   root client. Outside a transaction the lookup is a separate read, which
+ *   is fine for display names: a location renamed in between only changes
+ *   the label shown
+ * @param args.organizationId - Scopes the lookup
+ * @param args.rows - The planned rows
+ * @param args.snapshots - The pools' placements, keyed by asset id
+ * @returns Location id to name; one query only when a name is missing
+ */
+async function planLocationNames(
+  client: Pick<ExtendedPrismaClient, "location">,
+  {
+    organizationId,
+    rows,
+    snapshots,
+  }: {
+    organizationId: string;
+    rows: ReadonlyArray<{ locationId: string | null }>;
+    snapshots: ReadonlyMap<string, Pick<PoolSourceSnapshot, "placements">>;
+  }
+): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (const snapshot of snapshots.values()) {
+    for (const placement of snapshot.placements) {
+      names.set(placement.locationId, placement.name);
+    }
+  }
+  const missing = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.locationId && !names.has(row.locationId) ? [row.locationId] : []
+      )
+    ),
+  ];
+  if (missing.length === 0) return names;
+  const locations = await client.location.findMany({
+    where: { id: { in: missing }, organizationId },
+    select: { id: true, name: true },
+  });
+  for (const location of locations) names.set(location.id, location.name);
+  return names;
+}
+
+/** One slice a check-out sends units out of, as the writers know it. */
+export type CheckoutDeparture = {
+  /** `BookingAsset.id`. */
+  sliceId: string;
+  assetId: string;
+  /** Units leaving now; the writer adds the same to `checkedOutQuantity`. */
+  units: number;
+};
+
+/**
+ * Records where a check-out's units leave from, for every departing slice,
+ * inside the check-out's transaction and BEFORE the writer adds to
+ * `BookingAsset.checkedOutQuantity`.
+ *
+ * Slices of quantity-tracked pools go through {@link dispatchUnits}: a
+ * converted group (or a LEGACY group that converts now) dispatches from its
+ * source rows, by allocation or from the source picked in `submission`, with
+ * the short, re-claim and physical-now refusals that implies. Every other
+ * departing slice (a group that stays LEGACY, an INDIVIDUAL asset) is
+ * recorded the LEGACY way by {@link recordCheckoutSourceLocations}.
+ *
+ * The caller must already hold every pool asset in `poolAssetIds` under its
+ * first sorted asset lock: the facade re-takes those rows only.
+ *
+ * @param tx - The check-out's transaction client
+ * @param args.organizationId - The trusted workspace id
+ * @param args.bookingId - The booking being checked out
+ * @param args.departures - Every slice leaving in this call, with its units
+ * @param args.poolAssetIds - The quantity-tracked assets among them
+ * @param args.submission - Picks from the dialog or the phone, keyed by slice
+ *   or asset id
+ * @param args.window - The booking window the check-out commits
+ * @param args.clientSupportsSources - False for a phone build without the
+ *   `booking-sources` capability; defaults to true
+ * @param args.adoptionEnabled - Whether a LEGACY group may convert here;
+ *   defaults to `BOOKING_SOURCES_ENABLED` (false keeps LEGACY groups as they are)
+ * @param args.sourcesInPlay - The writer's `bookingSourcesInPlay` answer for
+ *   this transaction. False skips the facade: every departing slice is
+ *   recorded the LEGACY way, with no source query. Probed by the facade when
+ *   omitted.
+ * @returns The sources each converted slice dispatched from
+ * @throws {ShelfError} 400 from either path; the transaction rolls back
+ */
+export async function dispatchCheckoutSources(
+  tx: SourceTxClient & BookingSourcesTx,
+  {
+    organizationId,
+    bookingId,
+    departures,
+    poolAssetIds,
+    submission = NO_SOURCE_SUBMISSION,
+    window,
+    clientSupportsSources = true,
+    adoptionEnabled,
+    sourcesInPlay,
+  }: {
+    organizationId: string;
+    bookingId: string;
+    departures: CheckoutDeparture[];
+    poolAssetIds: ReadonlySet<string>;
+    submission?: SourceLocationSubmission;
+    window: { from: Date; to: Date };
+    clientSupportsSources?: boolean;
+    adoptionEnabled?: boolean;
+    sourcesInPlay?: boolean;
+  }
+): Promise<DispatchedSlice[]> {
+  const leaving = departures.filter((d) => d.units > 0);
+  const pools =
+    sourcesInPlay === false
+      ? []
+      : leaving.filter((d) => poolAssetIds.has(d.assetId));
+  const result =
+    pools.length === 0
+      ? { dispatched: [], legacySliceIds: [] }
+      : await dispatchUnits(tx, {
+          organizationId,
+          bookingId,
+          window,
+          clientSupportsSources,
+          sourcesInPlay,
+          ...(adoptionEnabled === undefined ? {} : { adoptionEnabled }),
+          picks: pools.map((d) => {
+            const submitted = submittedSourceForSlice(submission, {
+              id: d.sliceId,
+              assetId: d.assetId,
+            });
+            return submitted
+              ? {
+                  sliceId: d.sliceId,
+                  units: d.units,
+                  fromLocationId: submitted.locationId,
+                }
+              : { sliceId: d.sliceId, units: d.units };
+          }),
+        });
+
+  const legacy = new Set(result.legacySliceIds);
+  const dispatchedIds = new Set(pools.map((d) => d.sliceId));
+  await recordCheckoutSourceLocations(tx, {
+    organizationId,
+    sliceIds: leaving
+      .filter((d) => !dispatchedIds.has(d.sliceId) || legacy.has(d.sliceId))
+      .map((d) => d.sliceId),
+    submission,
+  });
+  return result.dispatched;
 }
 
 /**
@@ -411,7 +719,10 @@ export const CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE =
 
 /**
  * Refuses a check-out made from a surface that cannot ask the "From location"
- * question when the booking has one to ask.
+ * question when the booking has one whose unanswered default is a location
+ * nobody chose. A slice that dispatches by allocation (sources already
+ * planned, or a LEGACY slice that converts at this check-out while adoption
+ * is on) defaults to "as planned" and never refuses.
  *
  * The booking page's dialog renders one select per question, so a check-out
  * from there has always had the chance to answer. A row on the bookings list
@@ -421,20 +732,27 @@ export const CHECKOUT_NEEDS_SOURCE_CHOICE_MESSAGE =
  *
  * @param args.organizationId - Scopes the read
  * @param args.bookingId - The booking being checked out
- * @throws {ShelfError} 400 when at least one pool still to go out sits at two
- *   or more placements
+ * @param args.adoptionEnabled - Whether a LEGACY group converts at check-out;
+ *   defaults to `BOOKING_SOURCES_ENABLED`, the same default the check-out uses
+ * @throws {ShelfError} 400 when at least one pool slice still to go out sits
+ *   at two or more placements and would leave from a shelf default
  */
 export async function assertNoCheckoutSourceQuestions({
   organizationId,
   bookingId,
+  adoptionEnabled,
 }: {
   organizationId: string;
   bookingId: string;
+  adoptionEnabled?: boolean;
 }): Promise<void> {
-  const questions = await getCheckoutSourceQuestions({
-    organizationId,
-    bookingId,
-  });
+  const questions = (
+    await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId,
+      ...(adoptionEnabled === undefined ? {} : { adoptionEnabled }),
+    })
+  ).filter(questionNeedsBookingPage);
   if (questions.length === 0) return;
 
   throw new ShelfError({

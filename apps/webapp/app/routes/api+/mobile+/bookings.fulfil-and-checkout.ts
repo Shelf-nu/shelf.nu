@@ -3,6 +3,7 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
+import { clientHasCapability } from "~/modules/api/capabilities.server";
 import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
@@ -13,10 +14,12 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
+  mobileDispatchSummary,
   mobileSourceLocationsSchema,
   sourceSubmissionFromRecord,
 } from "~/modules/booking/checkout-source-location";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import type { DispatchedSlice } from "~/modules/booking/sources/booking-sources.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -47,7 +50,11 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  * `BookingAsset`s (same as web). Reserved units no scan covered stay open on
  * the ongoing booking: a check-out needs at least one item to go out, and under
  * the explicit check-out requirement that item has to be scanned.
- * `remainingCount` says how many booked assets are still to check out.
+ * `remainingCount` says how many booked assets are still to check out, and
+ * `slices` lists the real sources each pool slice with planned sources sent
+ * its units from. An app without the `booking-sources` capability
+ * (`X-Shelf-Capabilities`) is never asked about a slice split across sources:
+ * a pick it sends for one is ignored and the slice goes out by its allocation.
  *
  * Body: {
  *   bookingId: string,
@@ -165,6 +172,8 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(timeZone ? { timeZone } : {}),
     };
 
+    /** Where converted pool slices' units left from, reported after commit. */
+    const dispatched: DispatchedSlice[] = [];
     const result = await fulfilAndCheckOut({
       bookingId,
       organizationId,
@@ -182,6 +191,10 @@ export async function action({ request }: ActionFunctionArgs) {
       to: existingBooking.to,
       provenance: { surface: "phone", method: method ?? null },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
+      // An older build cannot answer the source question for a split slice;
+      // the server dispatches those by allocation.
+      clientSupportsSources: clientHasCapability(request, "booking-sources"),
+      onDispatched: (slices) => dispatched.push(...slices),
     });
 
     return data({
@@ -192,6 +205,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status: result.booking.status,
       },
       remainingCount: result.remainingAssetCount,
+      slices: mobileDispatchSummary(dispatched),
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

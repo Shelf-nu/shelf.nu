@@ -26,6 +26,12 @@ export interface BookingAssetRecord {
   quantity?: number;
   /** Set when this slice is kit-driven (Polish-6 discriminator); null/undefined for standalone slices */
   assetKitId?: string | null;
+  /**
+   * Where a RESERVED standalone slice takes its units from, as one line
+   * ("Demo Warehouse 8 · Unplaced 7"). Set by loaders for bookings with
+   * planned sources (`withReservedSourceSummaries`); absent otherwise.
+   */
+  sourceSummary?: string;
   booking?: {
     id?: string;
     name?: string;

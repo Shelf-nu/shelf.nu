@@ -19,9 +19,12 @@
  *
  * Anything else fails the test: an unexpected error is never read as either.
  *
- * `partialCheckinBooking` has no booking-status check. It judges each slice by
- * its check-out marker. Once a batch returns everything still out, it hands
- * completion to `checkinBooking`, whose refusal is pinned in its own row.
+ * `partialCheckinBooking` has no status check before its first other read. It
+ * judges each slice by its check-out marker, and refuses a booking that is no
+ * longer ongoing or overdue only under the booking lock, which this fake never
+ * reaches (that refusal is pinned in `service.server.test.ts`). Once a batch
+ * returns everything still out, it hands completion to `checkinBooking`, whose
+ * refusal is pinned in its own row.
  * `checkoutRemainingAssets` is not probed: it reads the remaining payload
  * first and then delegates to `partialCheckoutBooking`, which is pinned here.
  * The `fulfilAndCheckOut` orchestrator is pinned in
@@ -39,7 +42,9 @@ const h = vi.hoisted(() => {
   /** Thrown by every database access other than the booking and user reads. */
   class PastStatusCheck extends Error {}
 
-  const state = { booking: null as { status: string } | null };
+  const state = {
+    booking: null as { status: string; from?: Date; to?: Date } | null,
+  };
   const READS = new Set([
     "findUniqueOrThrow",
     "findFirstOrThrow",
@@ -82,9 +87,17 @@ const h = vi.hoisted(() => {
     {
       get(_target, prop) {
         if (typeof prop !== "string" || prop === "then") return undefined;
-        // The locked in-transaction status read (`lockBookingForStatusCheck`).
+        // The locked in-transaction read (`lockBookingForStatusCheck`, and
+        // `lockBookingWithWindow`, which also reads the window).
         if (prop === "$queryRaw") {
-          return () => Promise.resolve([{ status: state.booking?.status }]);
+          return () =>
+            Promise.resolve([
+              {
+                status: state.booking?.status,
+                from: state.booking?.from,
+                to: state.booking?.to,
+              },
+            ]);
         }
         if (prop === "$transaction") {
           return (work: unknown) =>
@@ -312,7 +325,7 @@ const S = BookingStatus;
  * - `partialCheckoutBooking`: its inline RESERVED / ONGOING / OVERDUE check
  *   (`checkoutAssets` and `checkoutRemainingAssets` delegate to it);
  * - `partialCheckinBooking` (and `checkinAssets`) and
- *   `fulfilModelRequestsAndCheckout`: none.
+ *   `fulfilModelRequestsAndCheckout`: none before their first other read.
  */
 const REFUSED_STATUSES: Record<ServiceName, BookingStatus[]> = {
   checkoutBooking: [S.COMPLETE, S.ARCHIVED, S.CANCELLED],

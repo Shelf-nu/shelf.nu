@@ -39,6 +39,7 @@ import {
 import { recordEvents } from "../activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
 import { releaseUnattachedBarcodes } from "../barcode/service.server";
+import { dispatchUnits } from "../booking/sources/booking-sources.server";
 import {
   createSystemBookingNote,
   createSystemBookingNotes,
@@ -187,6 +188,11 @@ vitest.mock("~/database/db.server", () => ({
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
+    // why: kit propagation's source seeding probes for groups converted only
+    // through disposition shares; no fixture here has any.
+    bookingDispositionShare: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
     // why: the same helper re-opens any `BookingModelRequest` the deleted
     // slice was fulfilling, mirroring `removeAssets`.
     bookingModelRequest: {
@@ -236,6 +242,22 @@ vitest.mock("~/database/db.server", () => ({
 // a controlled asset snapshot.
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
+}));
+
+// why: the booking sources facade reads, locks and writes source rows through
+// raw SQL and its own repository, which this model-shaped db mock cannot
+// serve; its behaviour is covered by `booking-sources.server.test.ts`. Every
+// picked slice is reported LEGACY unless a case says otherwise.
+vitest.mock("~/modules/booking/sources/booking-sources.server", () => ({
+  dispatchUnits: vitest
+    .fn()
+    .mockImplementation(
+      (_tx: unknown, args: { picks: { sliceId: string }[] }) =>
+        Promise.resolve({
+          dispatched: [],
+          legacySliceIds: args.picks.map((pick) => pick.sliceId),
+        })
+    ),
 }));
 
 // why: ensuring predictable ID generation for consistent test assertions
@@ -4882,7 +4904,20 @@ describe("updateKitAssets - check-in floor guard (Polish-7b)", () => {
     });
 
     expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
-      where: { assetKitId: "ak-pens" },
+      where: {
+        assetKitId: "ak-pens",
+        // Finished bookings are frozen records and never follow the kit.
+        booking: {
+          status: {
+            in: [
+              BookingStatus.DRAFT,
+              BookingStatus.RESERVED,
+              BookingStatus.ONGOING,
+              BookingStatus.OVERDUE,
+            ],
+          },
+        },
+      },
       data: { quantity: 40 },
     });
   });
@@ -6946,7 +6981,11 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a", "ak-b"]);
+    await mergeStandaloneCollisionsForKitDetachment(
+      db,
+      ["ak-a", "ak-b"],
+      "org-1"
+    );
 
     expect(db.bookingAsset.update).toHaveBeenCalledTimes(1);
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
@@ -6973,7 +7012,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
       where: { id: "ba-standalone" },
@@ -7008,7 +7047,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
     // The survivor keeps its own stamp — only the quantity changes.
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
@@ -7049,7 +7088,11 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
     const { mergeStandaloneCollisionsForKitDetachment } = await import(
       "./service.server"
     );
-    await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a", "ak-b"]);
+    await mergeStandaloneCollisionsForKitDetachment(
+      db,
+      ["ak-a", "ak-b"],
+      "org-1"
+    );
 
     expect(db.bookingAsset.update).toHaveBeenCalledWith({
       where: { id: "ba-standalone" },
@@ -7100,7 +7143,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.bookingAsset.update).toHaveBeenCalledWith({
         where: { id: "ba-standalone" },
@@ -7132,7 +7175,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.bookingAsset.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -7165,7 +7208,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.consumptionLog.updateMany).toHaveBeenCalledWith({
         where: { bookingAssetId: { in: ["ba-kit"] } },
@@ -7205,7 +7248,7 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
-      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"], "org-1");
 
       expect(db.partialBookingCheckout.update).toHaveBeenCalledWith({
         where: { id: "pco-legacy" },
@@ -8500,6 +8543,105 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     expect(insertOrder.length).toBeGreaterThan(0);
     expect(Math.max(...lockOrder)).toBeLessThan(Math.min(...insertOrder));
   });
+
+  it("dispatches a pool member's new kit slice through the facade before its counter is set, never converting a LEGACY group", async () => {
+    arrange(BookingStatus.ONGOING);
+    const from = new Date("2026-08-01T09:00:00Z");
+    const to = new Date("2026-08-05T09:00:00Z");
+    // The newcomer is a quantity-tracked pool joining with 3 units.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null
+            ? []
+            : [
+                {
+                  id: "sitting-member",
+                  title: "Sitting member",
+                  type: AssetType.INDIVIDUAL,
+                  quantity: null,
+                  unitOfMeasure: null,
+                  assetKits: [{ kitId: "kit-1" }],
+                  custody: [],
+                  bookingAssets: [],
+                  assetLocations: [],
+                },
+                {
+                  id: "newcomer",
+                  title: "Cables",
+                  type: AssetType.QUANTITY_TRACKED,
+                  quantity: 20,
+                  unitOfMeasure: null,
+                  assetKits: [],
+                  custody: [],
+                  bookingAssets: [],
+                  assetLocations: [],
+                },
+              ]
+        )
+    );
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-newcomer", assetId: "newcomer", quantity: 3 },
+    ]);
+    // The eligibility read keeps its answer; the departing read finds the new
+    // kit slice this call wrote.
+    const eligibility = vitest
+      .mocked(db.bookingAsset.findMany)
+      .getMockImplementation();
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockImplementation(
+      (args?: { select?: { quantity?: boolean; checkedOutAt?: boolean } }) =>
+        args?.select?.quantity && !args.select.checkedOutAt
+          ? Promise.resolve([
+              {
+                id: "ba-newcomer",
+                bookingId: "booking-1",
+                assetId: "newcomer",
+                quantity: 3,
+              },
+            ])
+          : eligibility?.(args as never) ?? Promise.resolve([])
+    );
+    // why: the booking windows the dispatch measures over; the shared db mock
+    // has no booking delegate.
+    Object.assign(db, {
+      booking: {
+        findMany: vitest
+          .fn()
+          .mockResolvedValue([{ id: "booking-1", from, to }]),
+      },
+    });
+
+    await act();
+
+    expect(dispatchUnits).toHaveBeenCalledWith(expect.anything(), {
+      organizationId: "org-1",
+      bookingId: "booking-1",
+      window: { from, to },
+      clientSupportsSources: true,
+      adoptionEnabled: false,
+      picks: [{ sliceId: "ba-newcomer", units: 3 }],
+    });
+    // The rows' dispatchedTotal and the slice counter grow together.
+    const counterWrites = vitest
+      .mocked(db.bookingAsset.updateMany)
+      .mock.calls.map(([args], index) => ({ args, index }))
+      .filter(
+        ({ args }) =>
+          (args as { data?: { checkedOutQuantity?: unknown } }).data
+            ?.checkedOutQuantity === 3
+      );
+    expect(counterWrites).toHaveLength(1);
+    expect(
+      vitest.mocked(dispatchUnits).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vitest.mocked(db.bookingAsset.updateMany).mock.invocationCallOrder[
+        counterWrites[0].index
+      ]
+    );
+  });
 });
 
 /**
@@ -8597,7 +8739,14 @@ describe("removeDestroyedUnitsFromKits", () => {
           status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
         },
       },
-      select: { id: true, bookingId: true, assetKitId: true, quantity: true },
+      select: {
+        id: true,
+        bookingId: true,
+        assetId: true,
+        assetKitId: true,
+        quantity: true,
+        sourceAllocation: true,
+      },
     });
     expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
     // The units that left the kit are recorded the way a partial move out of a

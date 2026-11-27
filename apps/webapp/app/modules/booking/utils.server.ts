@@ -1112,6 +1112,49 @@ export async function lockBookingForStatusCheck(
 }
 
 /**
+ * Takes the same row-level lock as {@link lockBookingForStatusCheck}, then
+ * returns the booking's status together with its live window.
+ *
+ * Use it when a write depends on the window as well as the status (a
+ * check-out that admits or dispatches pool sources over the booking's
+ * dates): read in the same locked statement, the window cannot be moved by a
+ * concurrent extension or check-out between the read and the write. Same
+ * transaction requirement and org scoping as the status-only lock.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param bookingId - Booking to lock
+ * @param organizationId - Caller's validated organization; scopes the lock
+ * @returns The locked booking's current status, `from` and `to`
+ * @throws {ShelfError} 404 when the booking is missing or cross-org
+ */
+export async function lockBookingWithWindow(
+  tx: RawQueryClient,
+  bookingId: Booking["id"],
+  organizationId: Booking["organizationId"]
+): Promise<{ status: BookingStatus; from: Date; to: Date }> {
+  // `status`, `from` and `to` carry no `@map`, so the Prisma field names ARE
+  // the column names; `from` and `to` are quoted because both are SQL keywords.
+  const rows = await tx.$queryRaw<
+    { status: BookingStatus; from: Date; to: Date }[]
+  >`
+    SELECT status, "from", "to" FROM "Booking" WHERE id = ${bookingId} AND "organizationId" = ${organizationId} FOR UPDATE
+  `;
+
+  if (!rows || rows.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      additionalData: { bookingId, organizationId },
+      label,
+      status: 404,
+    });
+  }
+
+  const [row] = rows;
+  return { status: row.status, from: row.from, to: row.to };
+}
+
+/**
  * Moves a booking's version (`updatedAt`) inside a transaction that changes
  * what the booking holds: its slices, booked amounts or model reservations.
  * An approver approves the version they saw (`readBookingRequestVersion`), so

@@ -54,6 +54,7 @@ declare global {
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
       ENABLE_SCIM: string;
+      BOOKING_SOURCES_ENABLED: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -617,6 +618,23 @@ export const ENABLE_SCIM =
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
+
+/**
+ * Adoption switch for booking source locations.
+ *
+ * When `"true"`, new quantity-tracked booking slices get source rows and
+ * touched LEGACY (booking, asset) groups convert. It controls adoption only:
+ * with the flag off, every source-aware read, admission check, settlement,
+ * rehome and merge still runs for groups that are already converted, so
+ * machines with the flag on and off can serve side by side.
+ *
+ * Server-side only, intentionally absent from `getBrowserEnv()`.
+ */
+export const BOOKING_SOURCES_ENABLED =
+  getEnv("BOOKING_SOURCES_ENABLED", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true";
 
 export const DEFAULT_SSO_DOMAIN =
   getEnv("DEFAULT_SSO_DOMAIN", {

@@ -1,0 +1,97 @@
+/**
+ * Resolution of an untagged check-in over the slices and rows of a group.
+ *
+ * A quantity-level disposition that names no slice is attributed to the rows
+ * with units out: slice by slice in allocation order (the caller passes
+ * `compareSlicesForGreedyFill` order, standalone first, the order the LEGACY
+ * check-in uses), and within a slice most out first, then by row id. A slice
+ * takes at most what its rows have out. Each (slice, row) used becomes one
+ * share.
+ *
+ * @see {@link file://./types.ts}
+ */
+import type { SourceRowState } from "@shelf/quantity-control";
+
+import type { SourceAllocationMode } from "./types";
+
+/** Units of an untagged disposition attributed to one slice row. */
+export type ResolvedShare = {
+  sliceId: string;
+  sourceRowId: string;
+  units: number;
+};
+
+/** Row kinds that can have units out and take an untagged settlement. */
+const RESOLVABLE_KINDS: readonly SourceRowState["kind"][] = [
+  "LOCATION",
+  "UNPLACED",
+  "KIT",
+  "UNKNOWN",
+];
+
+/**
+ * Spreads `units` settled units over the rows that have units out.
+ *
+ * @param args.slices - The slices of one converted group with their rows
+ * @param args.units - Units to attribute, a non-negative integer (0 returns
+ *   no shares)
+ * @returns One share per (slice, row) used, `units > 0`, in resolution order
+ * @throws {Error} When `units` is not a non-negative integer, a slice is
+ *   LEGACY, or `units` exceeds the total out
+ */
+export function resolveUntaggedDisposition(args: {
+  slices: Array<{
+    id: string;
+    mode: SourceAllocationMode;
+    allocationOrder: number;
+    rows: Array<SourceRowState & { id: string }>;
+  }>;
+  units: number;
+}): ResolvedShare[] {
+  const { slices, units } = args;
+  if (!Number.isInteger(units) || units < 0) {
+    throw new Error(`units must be a non-negative integer (got ${units})`);
+  }
+  const candidates: Array<{
+    sliceId: string;
+    rowId: string;
+    out: number;
+    order: number;
+  }> = [];
+  for (const slice of slices) {
+    if (slice.mode === "LEGACY") {
+      throw new Error(
+        `Slice ${slice.id} is LEGACY: untagged resolution needs a converted group`
+      );
+    }
+    for (const row of slice.rows) {
+      if (row.outQuantity > 0 && RESOLVABLE_KINDS.includes(row.kind)) {
+        candidates.push({
+          sliceId: slice.id,
+          rowId: row.id,
+          out: row.outQuantity,
+          order: slice.allocationOrder,
+        });
+      }
+    }
+  }
+  const totalOut = candidates.reduce((sum, c) => sum + c.out, 0);
+  if (units > totalOut) {
+    throw new Error(`Cannot resolve ${units} units: only ${totalOut} out`);
+  }
+  candidates.sort(
+    (a, b) =>
+      a.order - b.order ||
+      b.out - a.out ||
+      (a.rowId < b.rowId ? -1 : a.rowId > b.rowId ? 1 : 0)
+  );
+  const shares: ResolvedShare[] = [];
+  let remaining = units;
+  for (const c of candidates) {
+    if (remaining <= 0) break;
+    const take = Math.min(c.out, remaining);
+    shares.push({ sliceId: c.sliceId, sourceRowId: c.rowId, units: take });
+    remaining -= take;
+  }
+  return shares;
+}
