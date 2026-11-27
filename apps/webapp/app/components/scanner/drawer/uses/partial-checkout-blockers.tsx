@@ -162,6 +162,50 @@ export function assetIdsWithPickedSource(
   return assetIds;
 }
 
+/**
+ * The source questions at the units the form submits: each question whose
+ * slice is in `checkouts` takes that slice's submitted quantity, since a pick
+ * only has to cover what actually leaves. A question whose slice is not in
+ * `checkouts` keeps the slice's full quantity.
+ *
+ * @param questions - The booking's check-out source questions
+ * @param checkouts - The `checkouts` payload: submitted units per slice
+ * @returns The questions with `quantity` set to the units going out
+ */
+export function questionsAtSubmittedQuantities<
+  Q extends Pick<CheckoutSourceQuestion, "sliceId" | "quantity">,
+>(
+  questions: readonly Q[],
+  checkouts: ReadonlyArray<{ bookingAssetId: string; quantity: number }>
+): Q[] {
+  const submitted = new Map(
+    checkouts.map((c) => [c.bookingAssetId, c.quantity])
+  );
+  return questions.map((question) => {
+    const quantity = submitted.get(question.sliceId);
+    return quantity === undefined ? question : { ...question, quantity };
+  });
+}
+
+/**
+ * The picks without the answer of one slice: what the drawer keeps once that
+ * slice's row (and its "From location" select) leaves the list, so a stale
+ * pick never clears a `short-source` blocker.
+ *
+ * @param picks - The operator's answer per slice id
+ * @param sliceId - The slice whose row unmounted
+ * @returns The same object when there was no pick, else a copy without it
+ */
+export function withoutSourcePick(
+  picks: Readonly<Record<string, string>>,
+  sliceId: string
+): Record<string, string> {
+  if (!(sliceId in picks)) return picks;
+  const rest = { ...picks };
+  delete rest[sliceId];
+  return rest;
+}
+
 /** Scanned rows that resolved to an asset. */
 function assetsOf(items: ScanListItems): AssetFromQr[] {
   return Object.values(items)

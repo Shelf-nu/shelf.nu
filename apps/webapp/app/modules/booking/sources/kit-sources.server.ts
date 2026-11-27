@@ -329,6 +329,103 @@ export async function lockKitDetachPools(
   return new Set(assetIds);
 }
 
+/**
+ * Loose units one call has planned onto a source of a pool for one booking
+ * window, before anything is written. A later booking's session in the same
+ * call reads free units from the database, which cannot see them yet.
+ */
+type PlannedLooseHold = {
+  assetId: string;
+  /** `sourceKey` of the LOCATION or UNPLACED source. */
+  key: string;
+  units: number;
+  window: { from: Date; to: Date };
+};
+
+/** True for the source kinds that hold location or Unplaced capacity. */
+function isLooseKind(kind: SourceRowState["kind"]): boolean {
+  return kind === "LOCATION" || kind === "UNPLACED";
+}
+
+/**
+ * The loose units a planned group holds above what its persisted rows held,
+ * per source: units the session placed and has not written yet.
+ *
+ * @param group - A planned group
+ * @returns sourceKey -> units added (positive entries only)
+ */
+function plannedLooseIncrease(group: WorkingGroup): Map<string, number> {
+  const delta = new Map<string, number>();
+  const add = (row: SourceRowState, sign: 1 | -1) => {
+    if (!isLooseKind(row.kind)) return;
+    const key = sourceKey(row);
+    const hold = row.quantity - row.releasedQuantity;
+    delta.set(key, (delta.get(key) ?? 0) + sign * hold);
+  };
+  for (const slice of group.slices) {
+    for (const row of slice.rows) add(row, 1);
+    for (const row of slice.originalRows.values()) add(row, -1);
+  }
+  return new Map([...delta].filter(([, units]) => units > 0));
+}
+
+/**
+ * Records the loose units a planned session added, so the next booking's
+ * session in the same call does not hand them out again.
+ *
+ * @param session - The planned session of one booking
+ * @param window - That booking's allocation window
+ * @param tally - The call's running tally, appended to
+ */
+function recordPlannedLooseHolds(
+  session: GroupSession,
+  window: { from: Date; to: Date },
+  tally: PlannedLooseHold[]
+): void {
+  for (const group of session.groups.values()) {
+    if (group.status !== "converted") continue;
+    for (const [key, units] of plannedLooseIncrease(group)) {
+      tally.push({ assetId: group.key.assetId, key, units, window });
+    }
+  }
+}
+
+/**
+ * Takes the loose units earlier bookings of the same call planned (and have
+ * not written) out of each group's free units, where their window overlaps
+ * this session's. Free units are read per booking from the database, so
+ * without this two bookings detaching or adopting in one call could both be
+ * given the same free units.
+ *
+ * @param session - A freshly opened session, before any allocation
+ * @param window - This booking's allocation window
+ * @param tally - What earlier sessions of the call planned
+ */
+function subtractPlannedLooseHolds(
+  session: GroupSession,
+  window: { from: Date; to: Date },
+  tally: readonly PlannedLooseHold[]
+): void {
+  if (tally.length === 0) return;
+  for (const group of session.groups.values()) {
+    if (group.free.length === 0) continue;
+    const taken = new Map<string, number>();
+    for (const hold of tally) {
+      if (hold.assetId !== group.key.assetId) continue;
+      const overlaps =
+        hold.window.from.getTime() < window.to.getTime() &&
+        window.from.getTime() < hold.window.to.getTime();
+      if (!overlaps) continue;
+      taken.set(hold.key, (taken.get(hold.key) ?? 0) + hold.units);
+    }
+    if (taken.size === 0) continue;
+    group.free = group.free.map((s) => ({
+      ...s,
+      free: Math.max(0, s.free - (taken.get(sourceKey(s)) ?? 0)),
+    }));
+  }
+}
+
 /** A kit slice about to lose its kit, as the kit service read it. */
 export type DetachingKitSlice = {
   /** `BookingAsset.id`. */
@@ -561,17 +658,21 @@ export async function detachKitSliceSources(
     repointShares: [],
     setModes: [],
   };
+  // Loose units planned for earlier bookings of this call, not yet written.
+  const planned: PlannedLooseHold[] = [];
   for (const [bookingId, assetIds] of assetsByBooking) {
     const booking = bookingById.get(bookingId);
     if (!booking) continue;
     const active = isActive(booking);
+    const window = settlementWindow(booking, now);
     const session = await openGroupSession(tx, {
       organizationId,
       groups: [...assetIds].map((assetId) => ({ bookingId, assetId })),
       adoptionEnabled: adoptionEnabled && active,
-      window: settlementWindow(booking, now),
+      window,
       loadFree: active,
     });
+    subtractPlannedLooseHolds(session, window, planned);
     // Conversion seeds pending units on standalone slices; a detach is
     // involuntary, so they are placed without refusing.
     await allocateSessionPending(tx, session, "involuntary");
@@ -598,6 +699,7 @@ export async function detachKitSliceSources(
         convertedSliceIds.add(kit.id);
       }
     }
+    if (active) recordPlannedLooseHolds(session, window, planned);
 
     const sessionPlan = buildSessionPlan(session);
     plan.upsertRows.push(...sessionPlan.upsertRows);
@@ -630,8 +732,9 @@ export type NewKitSlice = {
  * the pools concerned (a re-lock for a caller that holds it) and reads the
  * bookings, the slices and every group after it.
  *
- * Queries: with adoption off, one probe for converted groups among the
- * slices' (booking, asset) pairs, and nothing else when there is none.
+ * Queries: with adoption off, two probes for converted groups among the
+ * slices' (booking, asset) pairs (non-LEGACY slices, then share rows), and
+ * nothing else when there is none.
  * Otherwise the lock, the bookings, the new slices, then per booking the
  * group session, and one write for the whole call.
  *
@@ -662,23 +765,34 @@ export async function seedKitRowsForNewKitSlices(
   const pairKey = (slice: { bookingId: string; assetId: string }) =>
     groupMapKey({ bookingId: slice.bookingId, assetId: slice.assetId });
 
-  // Converted groups among the pairs. The new slices are stored LEGACY, so
-  // only a slice the group already had can match.
+  // Converted groups among the pairs: a non-LEGACY slice, or a share row (a
+  // group whose slices were all removed stays converted through its orphaned
+  // shares, as `loadGroupStates` judges it). The new slices are stored
+  // LEGACY, so only a slice the group already had can match.
   let candidates = kitSlices;
   if (!adoptionEnabled) {
-    const converted = await tx.bookingAsset.findMany({
+    const pairs = kitSlices.map((s) => ({
+      bookingId: s.bookingId,
+      assetId: s.assetId,
+    }));
+    const convertedSlices = await tx.bookingAsset.findMany({
       where: {
         booking: { organizationId },
         sourceAllocation: { not: "LEGACY" },
-        OR: kitSlices.map((s) => ({
-          bookingId: s.bookingId,
-          assetId: s.assetId,
-        })),
+        OR: pairs,
       },
       select: { bookingId: true, assetId: true },
       distinct: ["bookingId", "assetId"],
     });
-    const convertedPairs = new Set(converted.map(pairKey));
+    // `BookingDispositionShare_bookingId_assetId_idx` serves each pair.
+    const shareGroups = await tx.bookingDispositionShare.findMany({
+      where: { organizationId, OR: pairs },
+      select: { bookingId: true, assetId: true },
+      distinct: ["bookingId", "assetId"],
+    });
+    const convertedPairs = new Set(
+      [...convertedSlices, ...shareGroups].map(pairKey)
+    );
     candidates = kitSlices.filter((s) => convertedPairs.has(pairKey(s)));
     if (candidates.length === 0) return { convertedSliceIds };
   }
@@ -727,21 +841,26 @@ export async function seedKitRowsForNewKitSlices(
     repointShares: [],
     setModes: [],
   };
+  // Loose units planned for earlier bookings of this call, not yet written.
+  const planned: PlannedLooseHold[] = [];
   for (const [bookingId, assetIds] of assetsByBooking) {
     const booking = bookingById.get(bookingId);
     if (!booking) continue;
     const active = KIT_PROPAGATION_STATUSES.includes(booking.status);
+    const window = settlementWindow(booking, now);
     const session = await openGroupSession(tx, {
       organizationId,
       groups: [...assetIds].map((assetId) => ({ bookingId, assetId })),
       adoptionEnabled: adoptionEnabled && active,
-      window: settlementWindow(booking, now),
+      window,
       newSliceIds,
       loadFree: active,
     });
+    subtractPlannedLooseHolds(session, window, planned);
     // Conversion seeds pending units on standalone slices; the kit change is
     // not the booking's choice, so they are placed without refusing.
     await allocateSessionPending(tx, session, "involuntary");
+    if (active) recordPlannedLooseHolds(session, window, planned);
 
     for (const assetId of assetIds) {
       const group = session.groups.get(groupMapKey({ bookingId, assetId }));

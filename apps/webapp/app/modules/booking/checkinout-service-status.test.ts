@@ -19,9 +19,12 @@
  *
  * Anything else fails the test: an unexpected error is never read as either.
  *
- * `partialCheckinBooking` has no booking-status check. It judges each slice by
- * its check-out marker. Once a batch returns everything still out, it hands
- * completion to `checkinBooking`, whose refusal is pinned in its own row.
+ * `partialCheckinBooking` has no status check before its first other read. It
+ * judges each slice by its check-out marker, and refuses a booking that is no
+ * longer ongoing or overdue only under the booking lock, which this fake never
+ * reaches (that refusal is pinned in `service.server.test.ts`). Once a batch
+ * returns everything still out, it hands completion to `checkinBooking`, whose
+ * refusal is pinned in its own row.
  * `checkoutRemainingAssets` is not probed: it reads the remaining payload
  * first and then delegates to `partialCheckoutBooking`, which is pinned here.
  * The `fulfilAndCheckOut` orchestrator is pinned in
@@ -322,7 +325,7 @@ const S = BookingStatus;
  * - `partialCheckoutBooking`: its inline RESERVED / ONGOING / OVERDUE check
  *   (`checkoutAssets` and `checkoutRemainingAssets` delegate to it);
  * - `partialCheckinBooking` (and `checkinAssets`) and
- *   `fulfilModelRequestsAndCheckout`: none.
+ *   `fulfilModelRequestsAndCheckout`: none before their first other read.
  */
 const REFUSED_STATUSES: Record<ServiceName, BookingStatus[]> = {
   checkoutBooking: [S.COMPLETE, S.ARCHIVED, S.CANCELLED],

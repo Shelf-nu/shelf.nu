@@ -201,6 +201,10 @@ vitest.mock("~/database/db.server", () => {
         // sends out, beside the PartialBookingCheckout session row.
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+        // why: a batch that covers every remaining item is handed to
+        // `checkoutBooking`, which probes under the booking lock for a slice
+        // its read did not see. Default: none, the booking is unchanged.
+        findFirst: vitest.fn().mockResolvedValue(null),
       },
       // why: the add-assets and remove-assets flows this suite reaches read
       // and drain model reservations. Default to none.
@@ -3760,7 +3764,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     });
 
     it("reads the free stock over the window an adjusted early check-out commits", async () => {
-      expect.assertions(3);
+      expect.assertions(4);
 
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -3789,6 +3793,15 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       expect(options.window.from.getTime()).toBeLessThan(futureFrom.getTime());
       expect(options.window.to).toEqual(futureTo);
       expect(checkedOutIncrements()).toEqual([["ba-qty-1", 5]]);
+      // The start the status write commits is the one the stock was read over.
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: BookingStatus.ONGOING,
+            from: options.window.from,
+          }),
+        })
+      );
     });
 
     it("refuses a whole-booking scan that the Check out button's guard handles, when the units are not on the shelf", async () => {

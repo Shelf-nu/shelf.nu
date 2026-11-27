@@ -24,6 +24,8 @@ import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import {
   assetIdsWithPickedSource,
   buildPartialCheckoutBlockers,
+  questionsAtSubmittedQuantities,
+  withoutSourcePick,
   type PartialCheckoutBlockers,
   type PickedSourceQuestion,
 } from "./partial-checkout-blockers";
@@ -470,5 +472,70 @@ describe("assetIdsWithPickedSource", () => {
 
   it("skips a question the operator has not answered", () => {
     expect(assetIdsWithPickedSource([question], {})).toEqual(new Set());
+  });
+
+  it("forgets the pick of a row that left the list", () => {
+    const picks = withoutSourcePick(
+      { "ba-pens": "loc-warehouse", "ba-tape": "loc-shop" },
+      "ba-pens"
+    );
+    expect(picks).toEqual({ "ba-tape": "loc-shop" });
+    expect(assetIdsWithPickedSource([question], picks)).toEqual(new Set());
+  });
+});
+
+describe("short-source at the submitted quantity", () => {
+  /** Pens: a 5-unit slice, the picked Shelf has room for 3. */
+  const roomForThree: PickedSourceQuestion = {
+    sliceId: "ba-pens",
+    assetId: "a1",
+    quantity: 5,
+    placements: [
+      {
+        locationId: "loc-shelf",
+        name: "Shelf",
+        placed: 3,
+        inCustody: 0,
+        onBooking: 0,
+        left: 3,
+      },
+    ],
+    unplaced: 0,
+  };
+  const pick = { "ba-pens": "loc-shelf" };
+
+  /** The short-source state of a scanned short pool for a submitted count. */
+  function blockersFor(submitted: number): string[] {
+    const picked = assetIdsWithPickedSource(
+      questionsAtSubmittedQuantities(
+        [roomForThree],
+        [{ bookingAssetId: "ba-pens", quantity: submitted }]
+      ),
+      pick
+    );
+    return activeIds(
+      build(
+        { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+        {
+          remainingByAssetId: { a1: 5 },
+          shortSourceAssetIds: ["a1"],
+          pickedSourceAssetIds: [...picked],
+        }
+      )
+    );
+  }
+
+  it("room 3, 2 submitted: the pick covers what leaves, no blocker", () => {
+    expect(blockersFor(2)).toEqual([]);
+  });
+
+  it("room 3, 4 submitted: the pick falls short, short-source blocks", () => {
+    expect(blockersFor(4)).toEqual(["short-source"]);
+  });
+
+  it("a slice not in the payload is judged at its full quantity", () => {
+    expect(
+      questionsAtSubmittedQuantities([roomForThree], [])[0]?.quantity
+    ).toBe(5);
   });
 });

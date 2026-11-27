@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -60,6 +61,8 @@ import {
 } from "../scan-submit-failure-alert";
 import {
   assetIdsWithPickedSource,
+  questionsAtSubmittedQuantities,
+  withoutSourcePick,
   buildPartialCheckoutBlockers,
   isAssetFullyCheckedOut,
 } from "./partial-checkout-blockers";
@@ -190,6 +193,8 @@ type CheckoutDispositionContextValue = {
   updateQuantity: (bookingAssetId: string, value: string) => void;
   /** Records the operator's "From location" answer for a slice. */
   pickSource: (bookingAssetId: string, value: string) => void;
+  /** Forgets a slice's "From location" answer; called when its row unmounts. */
+  clearSourcePick: (bookingAssetId: string) => void;
 };
 
 /**
@@ -326,6 +331,11 @@ export default function PartialCheckoutDrawer({
   const pickSource = (bookingAssetId: string, value: string) => {
     setSourcePicks((prev) => ({ ...prev, [bookingAssetId]: value }));
   };
+  // Stable, because a row's unmount cleanup depends on it: a new function
+  // each render would run that cleanup (and drop the pick) on every render.
+  const clearSourcePick = useCallback((bookingAssetId: string) => {
+    setSourcePicks((prev) => withoutSourcePick(prev, bookingAssetId));
+  }, []);
 
   // Filter and prepare data for component rendering
   const assets = Object.values(items)
@@ -645,6 +655,14 @@ export default function PartialCheckoutDrawer({
     return zeroed;
   }, [activeQtySliceIds, booking.bookingAssets, checkoutsPayload]);
 
+  // A pick only has to cover the units that leave, not the slice's full
+  // quantity, so the questions are judged at the submitted quantities.
+  const sourceQuestionsAtSubmit = useMemo(
+    () =>
+      questionsAtSubmittedQuantities(checkoutSourceQuestions, checkoutsPayload),
+    [checkoutSourceQuestions, checkoutsPayload]
+  );
+
   /** What the form submits: the scanned assets less the zeroed pools. */
   const submittedAssetIds = assetIdsForCheckout.filter(
     (assetId) => !zeroedQtyAssetIds.has(assetId)
@@ -696,7 +714,7 @@ export default function PartialCheckoutDrawer({
     ),
     shortSourceAssetIds: new Set(shortSourceAssetIds),
     pickedSourceAssetIds: assetIdsWithPickedSource(
-      checkoutSourceQuestions,
+      sourceQuestionsAtSubmit,
       sourcePicks
     ),
     removeAssetsFromList,
@@ -887,6 +905,7 @@ export default function PartialCheckoutDrawer({
     qtyByBookingAssetId,
     updateQuantity: updateCheckoutQuantity,
     pickSource,
+    clearSourcePick,
   };
 
   return (
@@ -1224,8 +1243,14 @@ function QuantityCheckoutBlock({
   bookingAssetId: string;
   info: CheckoutQtyInfo;
 }) {
-  const { dispositions, updateQuantity, pickSource } =
+  const { dispositions, updateQuantity, pickSource, clearSourcePick } =
     useCheckoutDispositionContext();
+  // The pick lives in the drawer; a row that leaves the list takes its pick
+  // with it, so a removed row can never clear a `short-source` blocker.
+  useEffect(
+    () => () => clearSourcePick(bookingAssetId),
+    [bookingAssetId, clearSourcePick]
+  );
   // A pool at two or more locations going out for the first time asks
   // where its units leave from. The select lives in this row, outside the
   // footer form, so it joins the submission through `form=`.

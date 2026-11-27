@@ -471,6 +471,39 @@ function windowMoved(
 }
 
 /**
+ * Refuses a check-out when the booking holds a slice its pre-lock read did
+ * not see. Every guard, write and event of a check-out is worked out from the
+ * slices read before the booking lock; a slice added meanwhile would be sent
+ * out by the transaction's booking-wide writes with none of them. Call it
+ * under the booking lock: the lock keeps every other writer of the booking's
+ * slices out until the transaction ends, so one probe is enough.
+ *
+ * @param tx - The caller's transaction; the caller holds the booking lock
+ * @param args.bookingId - The booking, already read org-scoped
+ * @param args.readSliceIds - The slices the pre-lock read returned
+ * @throws {ShelfError} 400 "booking changed" when an unread slice exists
+ */
+async function refuseSliceAddedSinceRead(
+  tx: Pick<ExtendedPrismaClient, "bookingAsset">,
+  args: { bookingId: string; readSliceIds: string[] }
+): Promise<void> {
+  const unread = await tx.bookingAsset.findFirst({
+    where: { bookingId: args.bookingId, id: { notIn: args.readSliceIds } },
+    select: { id: true },
+  });
+  if (!unread) return;
+  throw new ShelfError({
+    cause: null,
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    message:
+      "The booking changed while you were checking it out. Reload it and try again.",
+    additionalData: { bookingId: args.bookingId, sliceId: unread.id },
+  });
+}
+
+/**
  * Sends a booking event's notifications: an individual email to each resolved
  * recipient, and one push to the custodian among them.
  *
@@ -5202,6 +5235,12 @@ export async function checkoutBooking({
             additionalData: { bookingId: id },
           });
         }
+        // The same holds for the booking's slices: one added since the read
+        // would go out with no guard, status change or event of its own.
+        await refuseSliceAddedSinceRead(tx, {
+          bookingId: id,
+          readSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
+        });
 
         // An expired reservation re-dated to a new end later than the approved
         // one asks for more time than was approved: refused for a member whose
@@ -5750,6 +5789,13 @@ export async function fulfilModelRequestsAndCheckout({
           bookingId,
           organizationId,
           actorUserId: userId,
+        });
+        // The conflict, custody and archive guards above judged the slices
+        // read before the lock. One added since then would go out unjudged,
+        // so the check-out is refused. Runs before the scan adds its own.
+        await refuseSliceAddedSinceRead(tx, {
+          bookingId,
+          readSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
         });
         // Models before request rows. The reservation writers lock the model
         // first and hold no booking lock, so taking the request rows first
@@ -7816,9 +7862,9 @@ export async function checkinBooking({
 
         /**
          * The slices the loop below walks. A converted group's slices come
-         * from the settlement, read under the locks; a slice the pre-lock
-         * read did not see takes its asset-level fields from a sibling and
-         * has no recorded source (converted groups settle on their rows).
+         * from the settlement, read under the locks. A slice the pre-lock
+         * read did not see is refused just below; the sibling fallback only
+         * gives it a shape until then.
          */
         const checkinSlices = slicesUnderLock(
           settlement,
@@ -7844,16 +7890,35 @@ export async function checkinBooking({
         );
 
         /**
-         * The slices this check-in reconciles: every slice of the pre-lock
-         * read, plus the slices a converted group's settlement read under the
-         * locks. The closing `checkedInAt` stamp is scoped to them.
+         * A slice that joined a converted group between the pre-lock read and
+         * the locks would be settled here, but the check-in events, the kit
+         * release and the custody writes are all driven by the pre-lock read
+         * and would leave it out. The check-in is refused instead.
          */
-        const reconciledSliceIds = [
-          ...new Set([
-            ...bookingFound.bookingAssets.map((ba) => ba.id),
-            ...checkinSlices.map((slice) => slice.id),
-          ]),
-        ];
+        const readSliceIds = new Set(
+          bookingFound.bookingAssets.map((ba) => ba.id)
+        );
+        const unreadSettledSlice = checkinSlices.find(
+          (slice) => !readSliceIds.has(slice.id)
+        );
+        if (unreadSettledSlice) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it in. Reload it and try again.",
+            additionalData: { bookingId: id, sliceId: unreadSettledSlice.id },
+          });
+        }
+
+        /**
+         * The slices this check-in reconciles: every slice of the pre-lock
+         * read (every slice the settlement walks is one of them, see above).
+         * The closing `checkedInAt` stamp is scoped to them.
+         */
+        const reconciledSliceIds = [...readSliceIds];
 
         /**
          * A check-out that committed between the pre-lock read and the
@@ -9773,8 +9838,15 @@ export async function partialCheckinBooking({
        * The asset statement returns the rows; they are kept, and this
        * session's own pool decrements are applied to them as it goes, so no
        * disposition has to read its asset again.
+       *
+       * The locked status is the one that holds: a booking cancelled,
+       * completed or archived since the read above is refused here, before
+       * the asset lock and before anything is written.
        */
-      await lockBookingForStatusCheck(tx, id, organizationId);
+      assertBookingIsCheckinable({
+        status: await lockBookingForStatusCheck(tx, id, organizationId),
+        bookingId: id,
+      });
       const lockedAssetById = await lockAssetRowsForQuantityUpdate(
         tx,
         qtyAssetIdsInSession,

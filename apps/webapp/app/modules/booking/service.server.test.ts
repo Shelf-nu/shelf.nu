@@ -1323,6 +1323,48 @@ describe("partialCheckinBooking", () => {
     });
   });
 
+  it("refuses a booking cancelled since the read, on the locked status, with no writes", async () => {
+    const outSlice = (assetId: string, id: string) => ({
+      asset: { id: assetId, assetKits: [], type: AssetType.INDIVIDUAL },
+      assetId,
+      quantity: 1,
+      id,
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      checkedInAt: null,
+    });
+    // The unlocked read still sees the booking ONGOING.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        outSlice("asset-1", "ba-1"),
+        outSlice("asset-2", "ba-2"),
+        outSlice("asset-3", "ba-3"),
+      ],
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", title: "Asset 2", status: AssetStatus.CHECKED_OUT },
+    ]);
+    // why: the row lock decides the status; it reads CANCELLED, written by a
+    // concurrent cancel between the read and the lock
+    restoreMockImplementationAfterTest(db.$queryRaw).fn.mockImplementation(() =>
+      Promise.resolve([{ status: BookingStatus.CANCELLED }])
+    );
+
+    await expect(
+      partialCheckinBooking(mockPartialCheckinParams)
+    ).rejects.toThrow(/cannot check in a booking that is cancelled/);
+
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(db.bookingAsset.update).not.toHaveBeenCalled();
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+    expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("should reject checking in assets that were never checked out (progressive checkout guard)", async () => {
     expect.assertions(1);
 
@@ -5825,6 +5867,48 @@ describe("checkoutBooking", () => {
     expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 
+  it("refuses a slice added between the read and the booking lock, with no writes", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-read",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    });
+    // why: the probe under the booking lock finds a slice another writer
+    // added after the booking was read; it would go out unjudged
+    restoreMockImplementationAfterTest(
+      db.bookingAsset.findFirst
+    ).fn.mockResolvedValue({ id: "ba-added-meanwhile" });
+
+    await expect(checkoutBooking(mockCheckoutParams)).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The booking changed while you were checking it out. Reload it and try again.",
+    });
+    expect(db.bookingAsset.findFirst).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1", id: { notIn: ["ba-read"] } },
+      select: { id: true },
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+  });
+
   it("refuses an approver's check-out of a pending request too: approving comes first", async () => {
     // why: approving and checking out are two steps. Only Approve approves a
     // request (with the version the approver saw); a check-out never does,
@@ -7948,6 +8032,55 @@ describe("fulfilModelRequestsAndCheckout", () => {
       //@ts-expect-error missing vitest type
       db.booking.findUnique.mockResolvedValue(null);
     }
+  });
+
+  it("refuses a slice added between the read and the booking lock, before the scan writes anything", async () => {
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(
+      buildPreTxBooking({
+        bookingAssets: [
+          {
+            asset: {
+              id: "hp-1",
+              assetKits: [],
+              title: "HP LaserJet 2020",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            },
+            assetId: "hp-1",
+            quantity: 1,
+            id: "ba-hp",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      })
+    );
+    // why: the probe under the booking lock finds a slice another writer
+    // added after the booking was read; the guards before the lock never
+    // judged it
+    restoreMockImplementationAfterTest(
+      db.bookingAsset.findFirst
+    ).fn.mockResolvedValue({ id: "ba-added-meanwhile" });
+
+    await expect(
+      fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The booking changed while you were checking it out. Reload it and try again.",
+    });
+    expect(db.bookingAsset.findFirst).toHaveBeenCalledWith({
+      where: { bookingId: "booking-1", id: { notIn: ["ba-hp"] } },
+      select: { id: true },
+    });
+    // Neither the scan's append nor the status transition ran.
+    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 
   /**
@@ -20359,14 +20492,14 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     });
   });
 
-  it("settles a converted slice the read before the locks did not see", async () => {
-    expect.assertions(3);
+  it("refuses a converted slice the read before the locks did not see, settling and writing nothing", async () => {
+    expect.assertions(5);
 
     setupCheckinMocks(ConsumptionType.TWO_WAY);
     // why: the booking read before the locks holds only the standalone
     // slice. By the time the settlement opens under the locks, a kit slice
     // of the same converted group has joined with 4 units out from another
-    // location; the check-in walks the slices the settlement read.
+    // location; its events and kit release would be missing, so it refuses.
     vitest
       .mocked(bookingSources.openSettlement)
       .mockResolvedValueOnce(
@@ -20384,28 +20517,15 @@ describe("checkinBooking — qty-tracked auto-default", () => {
         )
       );
 
-    await checkinBooking(baseParams);
-
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        category: "RETURN",
-        quantity: 6,
-        bookingAssetId: "ba-pens-standalone",
-        locationId: "loc-a",
-      })
-    );
-    // The late slice gets its own log, tagged with it and returned to the
-    // location its units left from.
-    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetId: mockQtyAssetId,
-        category: "RETURN",
-        quantity: 4,
-        bookingAssetId: "ba-pens-late-kit",
-        locationId: "loc-b",
-      })
-    );
-    expect(bookingSources.commitSettlement).toHaveBeenCalledTimes(1);
+    await expect(checkinBooking(baseParams)).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The booking changed while you were checking it in. Reload it and try again.",
+    });
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+    expect(bookingSources.commitSettlement).not.toHaveBeenCalled();
+    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses when a check-out sent out a pool the read before the locks did not see, completing nothing", async () => {

@@ -44,7 +44,18 @@ vi.mock("./repository.server", async (importOriginal) => {
   const actual = await importOriginal<typeof RepositoryModule>();
   return {
     ...actual,
-    loadGroupStates: vi.fn(() => h.states),
+    // Only the requested groups, as the real reader returns them.
+    loadGroupStates: vi.fn(
+      (
+        _tx: unknown,
+        args: { groups: Array<{ bookingId: string; assetId: string }> }
+      ) =>
+        new Map(
+          [...h.states].filter(([key]) =>
+            args.groups.some((g) => `${g.bookingId}:${g.assetId}` === key)
+          )
+        )
+    ),
     writeSourcePlan: vi.fn((_tx: unknown, args: { plan: SourcePlanWrite }) => {
       h.writes.push(args.plan);
     }),
@@ -91,6 +102,10 @@ function fakeTx(
     probeAssetIds?: string[];
     /** (booking, asset) pairs the converted-group probe finds. */
     convertedPairs?: Array<{ bookingId: string; assetId: string }>;
+    /** (booking, asset) pairs the share probe finds. */
+    sharePairs?: Array<{ bookingId: string; assetId: string }>;
+    /** The bookings read after the lock; one ONGOING booking by default. */
+    bookings?: Array<{ id: string; status: string; from: Date; to: Date }>;
     /** The kit slices a membership change just created. */
     createdSlices?: Array<{
       id: string;
@@ -111,6 +126,12 @@ function fakeTx(
         return args.createdSlices ?? [];
       }),
     },
+    bookingDispositionShare: {
+      findMany: vi.fn(() => {
+        h.order.push("share-probe");
+        return args.sharePairs ?? [];
+      }),
+    },
     $queryRaw: vi.fn((query: unknown) => {
       if (sqlText(query).includes('FROM "AssetKit"')) {
         h.order.push("probe");
@@ -125,6 +146,9 @@ function fakeTx(
     booking: {
       findMany: vi.fn(() => {
         h.order.push("bookings");
+        if (args.bookings) {
+          return args.bookings.map((b) => ({ ...b, organizationId: ORG }));
+        }
         return [
           {
             id: BOOKING,
@@ -201,15 +225,18 @@ function slice(
   };
 }
 
-/** Seeds groups of the booking, one per asset. */
-function seedGroups(groups: Array<Partial<GroupState> & { assetId?: string }>) {
+/** Seeds groups, one per (booking, asset); the booking defaults to BOOKING. */
+function seedGroups(
+  groups: Array<Partial<GroupState> & { assetId?: string; bookingId?: string }>
+) {
   h.states = new Map(
-    groups.map((g) => {
+    groups.map(({ bookingId: groupBookingId, ...g }) => {
       const assetId = g.assetId ?? POOL;
+      const bookingId = groupBookingId ?? BOOKING;
       return [
-        `${BOOKING}:${assetId}`,
+        `${bookingId}:${assetId}`,
         {
-          key: { bookingId: BOOKING, assetId },
+          key: { bookingId, assetId },
           converted: false,
           slices: [],
           logs: [],
@@ -801,6 +828,114 @@ describe("detachKitSliceSources", () => {
     expect(upsert(plan, "ba-kit", "UNPLACED")).toBeUndefined();
   });
 
+  it("kit delete over two overlapping bookings: free units the first booking took are not handed to the second", async () => {
+    // 4 Unplaced units free to each booking as the database sees it; each
+    // booking's kit slice has 3 pending units to place.
+    h.freeUnplaced = 4;
+    const OTHER = "booking-2";
+    seedGroups([
+      { converted: true, slices: [kitSlice("ba-kit-1", {}, 3)] },
+      {
+        bookingId: OTHER,
+        converted: true,
+        slices: [kitSlice("ba-kit-2", {}, 3)],
+      },
+    ]);
+    const window = {
+      from: new Date("2026-11-30T09:00:00Z"),
+      to: new Date("2026-12-05T09:00:00Z"),
+    };
+    const tx = fakeTx({
+      bookings: [
+        { id: BOOKING, status: "RESERVED", ...window },
+        { id: OTHER, status: "RESERVED", ...window },
+      ],
+    });
+
+    await detachKitSliceSources(tx, {
+      organizationId: ORG,
+      kitSlices: [
+        {
+          id: "ba-kit-1",
+          bookingId: BOOKING,
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+        {
+          id: "ba-kit-2",
+          bookingId: OTHER,
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+      ],
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    const plan = writtenPlan();
+    expect(upsert(plan, "ba-kit-1", "UNPLACED")).toMatchObject({ quantity: 3 });
+    // Only 1 of the 4 is left for the second booking; the rest waits on
+    // UNASSIGNED instead of being booked twice.
+    expect(upsert(plan, "ba-kit-2", "UNPLACED")).toMatchObject({ quantity: 1 });
+    expect(upsert(plan, "ba-kit-2", "UNASSIGNED")).toMatchObject({
+      quantity: 2,
+    });
+  });
+
+  it("kit delete over two bookings whose windows do not overlap: each gets the free units in full", async () => {
+    h.freeUnplaced = 4;
+    const OTHER = "booking-2";
+    seedGroups([
+      { converted: true, slices: [kitSlice("ba-kit-1", {}, 3)] },
+      {
+        bookingId: OTHER,
+        converted: true,
+        slices: [kitSlice("ba-kit-2", {}, 3)],
+      },
+    ]);
+    const tx = fakeTx({
+      bookings: [
+        {
+          id: BOOKING,
+          status: "RESERVED",
+          from: new Date("2026-12-02T09:00:00Z"),
+          to: new Date("2026-12-03T09:00:00Z"),
+        },
+        {
+          id: OTHER,
+          status: "RESERVED",
+          from: new Date("2026-12-04T09:00:00Z"),
+          to: new Date("2026-12-05T09:00:00Z"),
+        },
+      ],
+    });
+
+    await detachKitSliceSources(tx, {
+      organizationId: ORG,
+      kitSlices: [
+        {
+          id: "ba-kit-1",
+          bookingId: BOOKING,
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+        {
+          id: "ba-kit-2",
+          bookingId: OTHER,
+          assetId: POOL,
+          sourceAllocation: "KIT",
+        },
+      ],
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    const plan = writtenPlan();
+    expect(upsert(plan, "ba-kit-1", "UNPLACED")).toMatchObject({ quantity: 3 });
+    expect(upsert(plan, "ba-kit-2", "UNPLACED")).toMatchObject({ quantity: 3 });
+    expect(upsert(plan, "ba-kit-2", "UNASSIGNED")).toBeUndefined();
+  });
+
   it("kit delete: every slice of the kit is split, in one write", async () => {
     seedGroups([
       {
@@ -995,15 +1130,16 @@ describe("seedKitRowsForNewKitSlices", () => {
       )
     ).toEqual([]);
     // The asset lock comes before every read that decides anything.
-    expect(h.order.slice(0, 4)).toEqual([
+    expect(h.order.slice(0, 5)).toEqual([
       "converted-probe",
+      "share-probe",
       "lock",
       "bookings",
       "new-slices",
     ]);
   });
 
-  it("with adoption off and no converted group, sends only the probe", async () => {
+  it("with adoption off and no converted group, sends only the two probes", async () => {
     const tx = fakeTx({ convertedPairs: [] });
 
     const result = await seedKitRowsForNewKitSlices(tx, {
@@ -1014,10 +1150,41 @@ describe("seedKitRowsForNewKitSlices", () => {
     });
 
     expect(result.convertedSliceIds.size).toBe(0);
-    expect(h.order).toEqual(["converted-probe"]);
+    expect(h.order).toEqual(["converted-probe", "share-probe"]);
     expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(tx.booking.findMany).not.toHaveBeenCalled();
     expect(h.writes).toHaveLength(0);
+  });
+
+  it("with adoption off, a group converted only through its orphaned shares adopts the new slice as KIT", async () => {
+    // Every earlier slice was removed; the group's shares keep it converted.
+    seedGroups([
+      {
+        converted: true,
+        slices: [
+          slice({ id: "ba-new-kit", quantity: 4, assetKitId: "ak-new" }),
+        ],
+      },
+    ]);
+    const tx = fakeTx({
+      convertedPairs: [],
+      sharePairs: [{ bookingId: BOOKING, assetId: POOL }],
+      createdSlices: [NEW_KIT_SLICE],
+    });
+
+    const result = await seedKitRowsForNewKitSlices(tx, {
+      organizationId: ORG,
+      kitSlices: KIT_SLICES,
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    const plan = writtenPlan();
+    expect(result.convertedSliceIds).toEqual(new Set(["ba-new-kit"]));
+    expect(plan.setModes).toEqual([
+      { bookingAssetId: "ba-new-kit", mode: "KIT" },
+    ]);
+    expect(upsert(plan, "ba-new-kit", "KIT")).toMatchObject({ quantity: 4 });
   });
 
   it("leaves a LEGACY group on a finished booking untouched, even with adoption on", async () => {

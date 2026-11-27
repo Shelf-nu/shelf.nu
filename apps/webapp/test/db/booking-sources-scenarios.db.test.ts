@@ -42,7 +42,10 @@ import {
   loadPhysicalNow,
 } from "~/modules/booking/sources/capacity.server";
 import { removeAssets } from "~/modules/booking/service.server";
-import { seedKitRowsForNewKitSlices } from "~/modules/booking/sources/kit-sources.server";
+import {
+  detachKitSliceSources,
+  seedKitRowsForNewKitSlices,
+} from "~/modules/booking/sources/kit-sources.server";
 import { evacuateLocationsForDelete } from "~/modules/booking/sources/location-delete.server";
 
 import type {
@@ -81,11 +84,24 @@ import {
 import type { SeededOrgWithPool } from "./fixtures";
 import { seedBooking, seedOrgWithPool } from "./fixtures";
 
-/** A booking window in the future, shared by tests that need no "now". */
+/**
+ * A two-day booking window starting 30 days from now, shared by tests that
+ * need no particular "now". Built from the clock so it stays in the future.
+ */
 const W: TestWindow = {
-  from: new Date("2030-03-01T09:00:00Z"),
-  to: new Date("2030-03-03T09:00:00Z"),
+  from: hoursFromNow(24 * 30),
+  to: hoursFromNow(24 * 32),
 };
+
+/**
+ * A moment inside {@link W}, for log timestamps.
+ *
+ * @param hours - Hours after the window starts.
+ * @param seconds - Extra seconds, to order logs of the same hour.
+ */
+function inW(hours: number, seconds = 0): Date {
+  return new Date(W.from.getTime() + (hours * 60 * 60 + seconds) * 1000);
+}
 
 afterAll(async () => {
   await disconnectTestDb();
@@ -364,7 +380,8 @@ describe("booking sources scenarios", () => {
 
       // A workspace with source rows, logs and shares is removed in full:
       // every cascade and deferred trigger lets the delete through.
-      expect(await cleanupPools(created.splice(0))).toEqual([]);
+      expect(await cleanupPools(created)).toEqual([]);
+      created.length = 0;
       const left = await getTestDb().$queryRaw<Array<{ count: number }>>`
         SELECT (
           (SELECT COUNT(*) FROM "Organization" WHERE "id" = ${seed.organizationId})
@@ -521,14 +538,14 @@ describe("booking sources scenarios", () => {
                   sliceId: seed.sliceId,
                   locationId: locationA,
                   quantity: 6,
-                  createdAt: new Date("2030-03-01T12:00:00Z"),
+                  createdAt: inW(3),
                 },
                 {
                   category: "CONSUME",
                   sliceId: seed.sliceId,
                   locationId: locationB,
                   quantity: 2,
-                  createdAt: new Date("2030-03-01T12:00:01Z"),
+                  createdAt: inW(3, 1),
                 },
               ],
             },
@@ -603,7 +620,7 @@ describe("booking sources scenarios", () => {
               bookingId: x.bookingId,
               sliceId,
               quantity: 5,
-              createdAt: new Date(`2030-03-01T${hour}:00:00Z`),
+              createdAt: inW(hour - 9),
             })
           );
         }
@@ -694,7 +711,7 @@ describe("booking sources scenarios", () => {
               bookingId: booking.bookingId,
               sliceId,
               quantity: 5,
-              createdAt: new Date(`2030-03-01T${hour}:00:00Z`),
+              createdAt: inW(hour - 9),
             })
           );
         }
@@ -1224,11 +1241,30 @@ describe("booking sources scenarios", () => {
       const rows = await readRows(newSliceId);
       expect(rows.reduce((sum, r) => sum + r.quantity, 0)).toBe(3);
       expect(looseTotals(rows)).toEqual({ out: 0, pending: 3 });
+      expect(await readShares(seed.logId)).toEqual([
+        {
+          bookingAssetId: null,
+          bookingAssetSourceId: null,
+          quantity: 6,
+          origin: "RECORDED",
+        },
+        {
+          bookingAssetId: null,
+          bookingAssetSourceId: null,
+          quantity: 4,
+          origin: "RECORDED",
+        },
+      ]);
       expect(
-        (await readShares(seed.logId)).every(
-          (s) => s.bookingAssetId === null && s.bookingAssetSourceId === null
-        )
-      ).toBe(true);
+        await getTestDb().consumptionLog.findUnique({
+          where: { id: seed.logId },
+          select: { quantity: true, bookingId: true, bookingAssetId: true },
+        })
+      ).toEqual({
+        quantity: 10,
+        bookingId: seed.bookingId,
+        bookingAssetId: null,
+      });
       await assertContractHolds({
         sliceIds: [newSliceId],
         groups: [{ bookingId: seed.bookingId, assetId: seed.assetId }],
@@ -2002,6 +2038,135 @@ describe("booking sources scenarios", () => {
       await cleanupPools(created);
     }
   });
+  it("A pool joins a kit on a booking whose group is converted only through orphaned shares, flag off: the new kit slice is KIT with one KIT row, all checks pass at COMMIT", async () => {
+    const created: SeededOrgWithPool[] = [];
+    try {
+      const seed = await seedReturnedSplitSlice(created);
+      // Every slice goes; the log's shares keep the group converted.
+      await commitTx(async (tx) => {
+        await lockBooking(tx, seed.bookingId);
+        await tx.bookingAsset.delete({ where: { id: seed.sliceId } });
+      });
+
+      const kitSliceId = await commitTx(async (tx) => {
+        const { assetKitId } = await seedKit(tx, seed, 4);
+        const sliceId = await addSlice(tx, {
+          bookingId: seed.bookingId,
+          assetId: seed.assetId,
+          quantity: 4,
+          assetKitId,
+        });
+        const result = await seedKitRowsForNewKitSlices(tx, {
+          organizationId: seed.organizationId,
+          kitSlices: [
+            { bookingId: seed.bookingId, assetId: seed.assetId, assetKitId },
+          ],
+          adoptionEnabled: false,
+        });
+        expect(result.convertedSliceIds).toEqual(new Set([sliceId]));
+        return sliceId;
+      });
+
+      expect((await readSlice(kitSliceId))?.sourceAllocation).toBe("KIT");
+      expect(shape(await readRows(kitSliceId))).toEqual([
+        ["KIT", null, 4, 0, 0, 0],
+      ]);
+      await assertContractHolds({
+        sliceIds: [kitSliceId],
+        groups: [{ bookingId: seed.bookingId, assetId: seed.assetId }],
+      });
+    } finally {
+      await cleanupPools(created);
+    }
+  });
+
+  it("A kit is deleted while two overlapping bookings hold 3 pending kit units each, 4 at Shelf A: the first takes 3 at A, the second 1 at A and 2 UNASSIGNED, never 6 at A", async () => {
+    const created: SeededOrgWithPool[] = [];
+    try {
+      const seed = await commitTx(async (tx) => {
+        const pool = await seedOrgWithPool(tx, {
+          total: 4,
+          placements: [{ name: "Shelf A", quantity: 4 }],
+        });
+        created.push(pool);
+        const { assetKitId } = await seedKit(tx, pool, 3);
+        const kitSlices: Array<{ bookingId: string; sliceId: string }> = [];
+        for (let i = 0; i < 2; i++) {
+          const booking = await seedBooking(tx, {
+            organizationId: pool.organizationId,
+            userId: pool.userId,
+            status: "RESERVED",
+            from: W.from,
+            to: W.to,
+            slices: [{ assetId: pool.assetId, quantity: 3, assetKitId }],
+          });
+          const sliceId = nth(booking.sliceIds, 0);
+          // A converted kit slice: one KIT row planning all 3 units.
+          await setSliceMode(tx, sliceId, "KIT");
+          await insertSource(tx, {
+            organizationId: pool.organizationId,
+            sliceId,
+            kind: "KIT",
+            quantity: 3,
+          });
+          kitSlices.push({ bookingId: booking.bookingId, sliceId });
+        }
+        return {
+          ...pool,
+          assetKitId,
+          locationA: nth(pool.locationIds, 0),
+          first: nth(kitSlices, 0),
+          second: nth(kitSlices, 1),
+        };
+      });
+
+      // The kit delete, as `performKitDeletion` runs it: the source detach,
+      // then the membership delete clears both slices' kit.
+      await commitTx(async (tx) => {
+        await detachKitSliceSources(tx, {
+          organizationId: seed.organizationId,
+          kitSlices: [seed.first, seed.second].map((k) => ({
+            id: k.sliceId,
+            bookingId: k.bookingId,
+            assetId: seed.assetId,
+            sourceAllocation: "KIT",
+          })),
+          adoptionEnabled: false,
+        });
+        await tx.assetKit.delete({ where: { id: seed.assetKitId } });
+      });
+
+      const firstRows = await readRows(seed.first.sliceId);
+      const secondRows = await readRows(seed.second.sliceId);
+      // One booking gets all 3 at A, the other the 1 unit left there.
+      const atA = [firstRows, secondRows]
+        .map((rows) =>
+          rows
+            .filter(
+              (r) => r.kind === "LOCATION" && r.locationId === seed.locationA
+            )
+            .reduce((sum, r) => sum + r.quantity, 0)
+        )
+        .sort();
+      expect(atA).toEqual([1, 3]);
+      const unassigned = [...firstRows, ...secondRows]
+        .filter((r) => r.kind === "UNASSIGNED")
+        .reduce((sum, r) => sum + r.quantity, 0);
+      expect(unassigned).toBe(2);
+      for (const sliceId of [seed.first.sliceId, seed.second.sliceId]) {
+        expect((await readSlice(sliceId))?.sourceAllocation).toBe("AUTO");
+      }
+      await assertContractHolds({
+        sliceIds: [seed.first.sliceId, seed.second.sliceId],
+        groups: [seed.first, seed.second].map((k) => ({
+          bookingId: k.bookingId,
+          assetId: seed.assetId,
+        })),
+      });
+    } finally {
+      await cleanupPools(created);
+    }
+  });
 });
 
 describe("booking sources probe plans", () => {
@@ -2082,7 +2247,7 @@ describe("booking sources probe plans", () => {
     expect(plan).toMatch(/BookingAsset_kit_unique/);
   });
 
-  it("the placement-path BookingAsset probe (loadBookingOutRows) is served by the assetId index and the Booking key", async () => {
+  it("the placement-path BookingAsset probe (loadBookingOutRows) is served by BookingAsset_assetId_idx, with no sequential scan on BookingAsset or Booking", async () => {
     const plan = await withRollback(async (tx) => {
       const pool = await seedOrgWithPool(tx, {
         total: 10,
@@ -2112,5 +2277,6 @@ describe("booking sources probe plans", () => {
     });
     expect(plan).not.toMatch(/Seq Scan on "BookingAsset"/);
     expect(plan).not.toMatch(/Seq Scan on "Booking"/);
+    expect(plan).toMatch(/BookingAsset_assetId_idx/);
   });
 });
