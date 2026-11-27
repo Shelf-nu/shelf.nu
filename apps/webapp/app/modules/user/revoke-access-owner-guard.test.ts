@@ -271,6 +271,22 @@ describe("revokeAccessToOrganization — owner protection", () => {
     );
   });
 
+  it("gives the revoking transaction a 15s budget", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue({
+      roles: [OrganizationRoles.BASE],
+    });
+
+    await revokeAccessToOrganization({
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // Room to wait out audit transactions share-locking this membership.
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15_000,
+    });
+  });
+
   it("records a system revocation with no actor", async () => {
     dbMock.userOrganization.findFirst.mockResolvedValue({
       roles: [OrganizationRoles.BASE],

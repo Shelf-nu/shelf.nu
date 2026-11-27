@@ -2088,14 +2088,20 @@ export async function revokeAccessToOrganization({
       });
     }
 
-    const result = await db.$transaction((tx) =>
-      revokeMembershipInTx(tx, {
-        userId,
-        organizationId,
-        actorOwnsWorkspace,
-        allowMissingMembership,
-        actorUserId,
-      })
+    const result = await db.$transaction(
+      (tx) =>
+        revokeMembershipInTx(tx, {
+          userId,
+          organizationId,
+          actorOwnsWorkspace,
+          allowMissingMembership,
+          actorUserId,
+        }),
+      // The membership lock can wait on audit transactions that share-lock
+      // this member while assigning them (see filterUsersInOrg). Those hold
+      // it for milliseconds, but the 5s default leaves little room when
+      // several overlap; 15s matches the audit transactions' own budget.
+      { timeout: 15_000 }
     );
 
     await clearLastSelectedOrganization({ userId, organizationId });
