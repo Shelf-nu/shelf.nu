@@ -7882,6 +7882,87 @@ describe("checkoutBooking", () => {
 
       await expect(checkoutBooking(mockCheckoutParams)).resolves.toBeDefined();
     });
+
+    /**
+     * Another booking's reservation of 5 of the 10 units, tomorrow: before
+     * this booking's planned start (30 days out), so only a window that starts
+     * now meets it.
+     */
+    function reservationBeforePlannedStart() {
+      const otherFrom = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      return {
+        assetId: CAMERA_ID,
+        bookingId: "other-booking",
+        quantity: 5,
+        from: otherFrom,
+        to: new Date(
+          otherFrom.getTime() + HOURS_BETWEEN_FROM_AND_TO * 60 * 60 * 1000
+        ),
+      };
+    }
+
+    it("(g) refuses an early check-out with an adjusted date when a reservation between now and the planned start leaves too few units", async () => {
+      expect.assertions(2);
+
+      // The check-out writes `from` = now, so the window it commits starts
+      // today and meets tomorrow's reservation: 10 - 5 = 5 left for 7.
+      const thisBooking = {
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        bookingAssets: [qtyBookingAssetRow(CAMERA_ID, "Camera", 7, "ba-cam")],
+      };
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(thisBooking);
+      (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue(
+        { _sum: { quantity: 0 } }
+      );
+      mockReservedRows([reservationBeforePlannedStart()]);
+
+      await expect(
+        checkoutBooking({
+          ...mockCheckoutParams,
+          intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+        })
+      ).rejects.toThrow(
+        '"Camera": requested 7, only 5 available in this window'
+      );
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("(h) checks out early without adjusting the date over the planned window, which that reservation does not meet", async () => {
+      expect.assertions(1);
+
+      // The stored window stays: tomorrow's reservation ends long before it
+      // starts, so all 10 units are bookable for it.
+      const thisBooking = {
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        bookingAssets: [qtyBookingAssetRow(CAMERA_ID, "Camera", 7, "ba-cam")],
+      };
+      (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce(thisBooking)
+        .mockResolvedValueOnce({
+          ...thisBooking,
+          status: BookingStatus.ONGOING,
+        });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({ id: "booking-1" });
+      (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue(
+        { _sum: { quantity: 0 } }
+      );
+      mockReservedRows([reservationBeforePlannedStart()]);
+
+      await checkoutBooking({
+        ...mockCheckoutParams,
+        intentChoice: CheckoutIntentEnum["without-adjusted-date"],
+      });
+
+      expect(db.asset.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [CAMERA_ID] }, organizationId: "org-1" },
+        data: { status: AssetStatus.CHECKED_OUT },
+      });
+    });
   });
 });
 
@@ -9315,6 +9396,151 @@ describe("fulfilModelRequestsAndCheckout", () => {
     // Measured against the locked window the start does not move, so the
     // scan's own locks suffice.
     expect(lockAssetsForArchiveGuard).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The windowed pool guard runs the real `getAssetAvailability` over the
+   * window the check-out writes. The booking holds 7 of a 10-unit pool, 30
+   * days out; another booking reserves 5 of them tomorrow, which only a
+   * window that starts now meets.
+   */
+  describe("pool guard over the window the check-out writes", () => {
+    const CAMERA_ID = "asset-camera";
+    const cameraSlice = {
+      asset: {
+        id: CAMERA_ID,
+        assetKits: [],
+        title: "Camera",
+        type: AssetType.QUANTITY_TRACKED,
+        status: AssetStatus.AVAILABLE,
+        unitOfMeasure: null,
+        bookingAssets: [],
+      },
+      assetId: CAMERA_ID,
+      quantity: 7,
+      id: "ba-cam",
+      assetKitId: null,
+      sourceKitId: null,
+      checkedOutAt: null,
+      checkedInAt: null,
+    };
+    const reservedHoldingCamera = {
+      ...buildPreTxBooking(),
+      bookingAssets: [cameraSlice],
+      _count: { bookingAssets: 1 },
+    };
+
+    /** Stages the pool, its reservations and the booking's slice reads. */
+    function stagePool() {
+      // why: `getAssetAvailability` reads the pool size from the asset row
+      // and the units held in kits from the pivot; none are in a kit.
+      restoreMockImplementationAfterTest(
+        db.asset.findUniqueOrThrow
+      ).fn.mockResolvedValue({ quantity: 10 });
+      restoreMockImplementationAfterTest(
+        db.assetKit.aggregate
+      ).fn.mockResolvedValue({ _sum: { quantity: 0 } });
+
+      const otherFrom = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const otherTo = new Date(otherFrom.getTime() + 8 * 60 * 60 * 1000);
+      // why: one stub answers every slice read. The post-scan snapshot is the
+      // only one that projects the asset; the reservations read answers the
+      // other booking's row when the queried window meets it, applying the
+      // overlap test Postgres would; every other read finds nothing.
+      restoreMockImplementationAfterTest(
+        db.bookingAsset.findMany
+      ).fn.mockImplementation((args?: any) => {
+        if (args?.select?.asset) {
+          return Promise.resolve([
+            {
+              id: cameraSlice.id,
+              sourceKitId: null,
+              quantity: cameraSlice.quantity,
+              assetKitId: null,
+              asset: {
+                id: CAMERA_ID,
+                title: "Camera",
+                type: AssetType.QUANTITY_TRACKED,
+                unitOfMeasure: null,
+              },
+            },
+          ]);
+        }
+        const statuses: string[] = args?.where?.booking?.status?.in ?? [];
+        if (
+          statuses.includes(BookingStatus.RESERVED) &&
+          args?.where?.assetId === CAMERA_ID
+        ) {
+          const dateBranch = (
+            (args.where.booking.OR ?? []) as Array<{
+              AND?: [{ from: { lt: Date } }, { to: { gt: Date } }];
+            }>
+          ).find((branch) => branch.AND)?.AND;
+          const meets =
+            !dateBranch ||
+            (otherFrom < dateBranch[0].from.lt &&
+              otherTo > dateBranch[1].to.gt);
+          return Promise.resolve(
+            meets
+              ? [
+                  {
+                    bookingId: "other-booking",
+                    quantity: 5,
+                    booking: { from: otherFrom, to: otherTo },
+                  },
+                ]
+              : []
+          );
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    it("refuses an early check-out with an adjusted date when a reservation between now and the planned start leaves too few units", async () => {
+      expect.assertions(2);
+      stagePool();
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(reservedHoldingCamera);
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+        []
+      );
+
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: [],
+          checkoutIntentChoice: CheckoutIntentEnum["with-adjusted-date"],
+        })
+      ).rejects.toThrow(
+        '"Camera": requested 7, only 5 available in this window'
+      );
+      expect(hasStatusUpdate()).toBe(false);
+    });
+
+    it("checks out early without adjusting the date over the planned window, which that reservation does not meet", async () => {
+      expect.assertions(1);
+      stagePool();
+      // why: the pre-tx load, then the post-commit hydration.
+      (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce(reservedHoldingCamera)
+        .mockResolvedValueOnce({
+          ...reservedHoldingCamera,
+          status: BookingStatus.ONGOING,
+        });
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({ id: "booking-1" });
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+        []
+      );
+
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: [],
+        checkoutIntentChoice: CheckoutIntentEnum["without-adjusted-date"],
+      });
+
+      expect(hasStatusUpdate()).toBe(true);
+    });
   });
 
   /**

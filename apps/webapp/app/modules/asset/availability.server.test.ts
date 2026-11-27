@@ -1210,12 +1210,13 @@ describe("getAssetAvailabilityBatch", () => {
             status: "RESERVED",
           },
         },
-        // Converted MANUAL over Jan 5-15: rows still hold 7 - 3 = 4.
+        // Converted MANUAL over Jan 5-15: booked 7 from one source row that
+        // has released 3, so it still holds 4.
         {
           id: "manual-row",
           assetId: "a1",
           bookingId: "b2",
-          quantity: 9,
+          quantity: 7,
           sourceAllocation: "MANUAL",
           booking: {
             from: new Date("2026-01-05T00:00:00Z"),
@@ -1231,7 +1232,10 @@ describe("getAssetAvailabilityBatch", () => {
         assetId: "a1",
         _sum: { quantity: 1 },
       },
-      // Already inside the converted rows' released units: must not net again.
+      // Never returned by the scoped read (b2 holds no LEGACY row), but a
+      // booking holding a LEGACY pair beside a converted one brings that
+      // pair's logs too. Already inside the source row's released units, so
+      // it must not net again.
       {
         bookingAssetId: "manual-row",
         bookingId: "b2",
@@ -1255,6 +1259,12 @@ describe("getAssetAvailabilityBatch", () => {
     // Overlap Jan 5-10: 5 + 4 = 9.
     expect(result.get("a1")?.reserved).toBe(9);
     expect(client.bookingAssetSource.findMany).toHaveBeenCalledTimes(1);
+    // The logs read asks only for the bookings holding a LEGACY row.
+    expect(client.consumptionLog.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ bookingId: { in: ["b1"] } }),
+      })
+    );
   });
 
   it("issues no source-row read when every reserved row is LEGACY", async () => {

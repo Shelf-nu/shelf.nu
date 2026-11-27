@@ -3747,7 +3747,8 @@ export async function assertRequestApprovedWithinTx(
  * @param args.bookingAssetIds - All asset IDs currently on the booking (used to fan the CHECKED_OUT status update)
  * @param args.qtyTrackedBookingAssets - Booking-asset pairs whose asset is QUANTITY_TRACKED (used for the availability guard)
  * @param args.uniqueQtyTrackedAssetIds - Deduplicated IDs from the above list
- * @param args.dataToUpdate - Pre-computed update payload for the booking row (status, optional from/originalFrom)
+ * @param args.dataToUpdate - Pre-computed update payload for the booking row (status, optional from/originalFrom).
+ *   Its dates over `storedWindow` are the window every guard here measures.
  * @param args.kitIds - Kits to flip to `CHECKED_OUT`
  * @param args.hasKits - Whether the kit update should fire
  * @param args.hints - Acting user's locale and time zone, for the day a pool refusal names
@@ -3778,8 +3779,6 @@ async function checkoutBookingWritesWithinTx(
     dataToUpdate,
     kitIds,
     hasKits,
-    from,
-    to,
     storedWindow,
     poolAssetIds: givenPoolAssetIds,
     sourcesInPlay: givenSourcesInPlay,
@@ -3792,9 +3791,12 @@ async function checkoutBookingWritesWithinTx(
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
     /**
-     * The booking's stored window, before this check-out moves it (an early
-     * start or a rescheduled window in `dataToUpdate`). The source admission
-     * measures the move from it.
+     * The booking's stored window, read under the caller's booking lock,
+     * before this check-out moves it (an early start or a rescheduled window
+     * in `dataToUpdate`). The source admission measures the move from it, and
+     * the window this check-out commits is `dataToUpdate`'s dates over it:
+     * that committed window scopes the source admission, the pool guard, the
+     * model-reservation guard and the dispatch.
      */
     storedWindow: { from: Date; to: Date };
     /**
@@ -3847,21 +3849,6 @@ async function checkoutBookingWritesWithinTx(
     dataToUpdate: Prisma.BookingUpdateInput;
     kitIds: string[];
     hasKits: boolean;
-    /**
-     * The booking's own committed reservation window (`Booking.from`/`.to`
-     * — non-nullable in the schema). Used to windowed-scope the
-     * QUANTITY_TRACKED availability guard below via
-     * {@link getAssetAvailability}'s `window`, so that OTHER bookings whose
-     * dates don't overlap this one no longer count against it (the #2724
-     * "checkout wrongly refused" bug — the previous guard summed every
-     * active reservation for the asset GLOBALLY, all-time). This is
-     * deliberately the booking's PERSISTED dates, not the optional
-     * conflict-check override params `checkoutBooking`/
-     * `fulfilModelRequestsAndCheckout` accept for early-checkout handling —
-     * those gate a different, pre-tx guard.
-     */
-    from: Booking["from"];
-    to: Booking["to"];
     /**
      * Where each pool's units come from, as picked in the check-out dialog
      * or sent by the phone. Missing answers dispatch by allocation, or the
@@ -3988,14 +3975,15 @@ async function checkoutBookingWritesWithinTx(
    * concurrent writers can both pass this guard against the same
    * snapshot.
    *
-   * Windowed by this booking's own `[from, to]` via
-   * {@link getAssetAvailability} — NOT a global all-time sum. The prior
-   * implementation (`computeBookingAvailableQuantity`) summed every
-   * RESERVED/ONGOING/OVERDUE reservation for the asset regardless of
-   * date, so three non-overlapping bookings of 7 against a 10-qty asset
-   * would wrongly block each other's checkout (#2724). Peak-concurrent
-   * sweeping (inside {@link getAssetAvailability}) only counts
-   * reservations that actually overlap this booking's window.
+   * Windowed by `committedWindow`, the dates this check-out writes, via
+   * {@link getAssetAvailability}, not a global all-time sum: three
+   * non-overlapping bookings of 7 against a 10-qty asset do not block each
+   * other's checkout (#2724). Peak-concurrent sweeping (inside
+   * {@link getAssetAvailability}) only counts reservations that overlap that
+   * window. An early check-out with an adjusted date starts the window now,
+   * so a reservation between now and the planned start counts against it; a
+   * rescheduled expired reservation is measured over its new window; any
+   * other check-out keeps the stored window.
    *
    * `getAssetAvailability` is called with `db: tx` so its reads run
    * inside this same transaction; combined with the row lock acquired
@@ -4051,7 +4039,7 @@ async function checkoutBookingWritesWithinTx(
       const { bookable, physicalAvailable } = await getAssetAvailability({
         assetId,
         organizationId,
-        window: { from, to },
+        window: committedWindow,
         excludeBookingId: bookingId,
         db: tx,
       });
@@ -4065,9 +4053,10 @@ async function checkoutBookingWritesWithinTx(
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
       // The units leave now, so they must also be on the shelf now. `bookable`
-      // is windowed by this booking's planned dates and leaves out units
-      // another booking still has out when it ends before this one starts,
-      // which an early check-out hands over too soon. The shelf is measured
+      // is windowed by the committed dates (the planned ones, unless the start
+      // is adjusted) and leaves out units another booking still has out when
+      // it ends before that window starts, which an early check-out hands
+      // over too soon. The shelf is measured
       // against what leaves in this call, the window against the booking's
       // whole standalone quantity.
       const leavingNow = leavingNowByAsset.get(assetId) ?? 0;
@@ -4117,15 +4106,16 @@ async function checkoutBookingWritesWithinTx(
    * reasons the booking did not cause. The units it owes stay open on the
    * ongoing booking either way.
    *
-   * The window is the booking's own committed one, the same `from`/`to` the
-   * quantity-tracked guard above is scoped by.
+   * The window is `committedWindow`, the one this check-out writes and the
+   * quantity-tracked guard above is scoped by: an early check-out with an
+   * adjusted date claims the units from now.
    */
   if (bookingStatus === BookingStatus.DRAFT) {
     await assertOutstandingModelRequestsFit({
       bookingId,
       organizationId,
-      from,
-      to,
+      from: committedWindow.from,
+      to: committedWindow.to,
       action: "check out booking",
       tx,
       hints,
@@ -5342,14 +5332,11 @@ export async function checkoutBooking({
           bookingAssetIds: bookingFound.bookingAssets.map((ba) => ba.asset.id),
           qtyTrackedBookingAssets,
           uniqueQtyTrackedAssetIds,
+          // Carries any reschedule or adjusted start: over `storedWindow`
+          // it gives the window the helper's guards measure.
           dataToUpdate,
           kitIds,
           hasKits,
-          // The window this check-out commits (the booking's own, or the
-          // shifted one on a reschedule). It windows the QT availability
-          // guard; see the doc comment on `checkoutBookingWritesWithinTx`.
-          from: checkoutWindow.from,
-          to: checkoutWindow.to,
           // Read under the lock; equal to the pre-lock read, or refused above.
           storedWindow: { from: locked.from, to: locked.to },
           // Pool assets are read inside the helper, after the booking lock.
@@ -5773,8 +5760,9 @@ export async function fulfilModelRequestsAndCheckout({
         // and window it locked: read any other way they are a pre-lock
         // snapshot. The model-reservation guard downstream keys off whether
         // this is a draft, and the pool-lock decision, the source admission
-        // and the availability guard below measure the locked window, which a
-        // concurrent extension cannot move while this transaction holds the row.
+        // and the availability guard below start from the locked window, which
+        // a concurrent extension cannot move while this transaction holds the
+        // row (an adjusted start then moves it to now).
         const locked = await lockBookingWithWindow(
           tx,
           bookingId,
@@ -5930,14 +5918,11 @@ export async function fulfilModelRequestsAndCheckout({
           bookingAssetIds: allBookingAssetIds,
           qtyTrackedBookingAssets,
           uniqueQtyTrackedAssetIds,
+          // Carries any adjusted start: over `storedWindow`, read under the
+          // lock, it gives the window the helper's guards measure.
           dataToUpdate,
           kitIds: unionKitIds,
           hasKits,
-          // The booking's own committed window, read under the lock: it
-          // windows the QT availability guard (see the doc comment on
-          // `checkoutBookingWritesWithinTx`).
-          from: storedWindow.from,
-          to: storedWindow.to,
           storedWindow,
           poolAssetIds: [
             ...new Set(

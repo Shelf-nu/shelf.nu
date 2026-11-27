@@ -24,6 +24,7 @@
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 
+import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   assertModelUnitsNotReservedElsewhere,
@@ -431,6 +432,32 @@ describe("checkoutBooking", () => {
     expect(tx.booking.update).toHaveBeenCalled();
     expect(firstCallOrder(assertOutstandingModelRequestsFit)).toBeLessThan(
       firstCallOrder(tx.booking.update)
+    );
+  });
+
+  it("measures a draft checked out early with an adjusted date from now, the start it writes", async () => {
+    expect.assertions(4);
+    const tx = openTx();
+    tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
+    const before = Date.now();
+
+    await checkoutBooking({
+      ...checkoutParams,
+      intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+    });
+
+    const [args] = vitest.mocked(assertOutstandingModelRequestsFit).mock
+      .calls[0];
+    // The written start is now, cut to the minute: a reservation between now
+    // and the planned start competes for the same units.
+    expect(args.from.getTime()).toBeLessThan(from.getTime());
+    expect(Math.abs(args.from.getTime() - before)).toBeLessThan(5 * 60 * 1000);
+    expect(args.to).toEqual(to);
+    // The same start the status write commits.
+    expect(tx.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ from: args.from }),
+      })
     );
   });
 

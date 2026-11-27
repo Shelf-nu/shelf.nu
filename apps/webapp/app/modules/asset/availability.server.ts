@@ -621,16 +621,19 @@ export type AvailabilityBatchClient = {
     >;
   };
   /**
-   * Used for BOTH the checked-out pivots read and the standalone-reserved
-   * rows read (same select shape for both — the checked-out read simply
-   * ignores the `booking.from`/`booking.to`/`booking.status` fields it
-   * doesn't need). Reusing one signature for both call sites keeps this type
-   * from needing method overloads.
+   * Used for BOTH the checked-out pivots read and the reserved-rows read
+   * (one select shape for both: the checked-out read ignores the
+   * `booking.from`/`booking.to`/`booking.status` fields it does not need).
+   * Reusing one signature for both call sites keeps this type from needing
+   * method overloads.
    *
-   * `id`/`assetKitId` are OPTIONAL: only the checked-out pivots read selects
-   * them (it needs `id` to attribute checkout claims per slice and `assetKitId`
-   * to split standalone vs kit-driven checked-out — #2790 ③). The reserved-rows
-   * read leaves them off, so the widened type still accepts its narrower select.
+   * Both reads select `id` and `assetKitId`. The checked-out read uses `id` to
+   * attribute checkout claims per slice and `assetKitId` to split standalone
+   * from kit-driven units (#2790). The reserved read uses `id` to find a
+   * converted slice's source balance and a LEGACY slice's logged units, and
+   * `assetKitId` to skip kit-driven slices (counted through `inKits`) while
+   * keeping them for log attribution. They are optional only so narrower
+   * test fixtures still compile.
    */
   bookingAsset: {
     findMany: (args: {
@@ -1165,8 +1168,8 @@ export async function computeCheckedOutByBookingBatch(
     },
     select: {
       // `id` + `assetKitId` are needed for per-slice attribution and the
-      // standalone/kit-driven split (#2790 ③) — the reserved-rows read shares
-      // this select type but leaves both off (they're optional there).
+      // standalone/kit-driven split (#2790). See the select type on
+      // `AvailabilityBatchClient.bookingAsset`.
       id: true,
       assetId: true,
       bookingId: true,

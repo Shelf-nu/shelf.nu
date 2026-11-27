@@ -1187,8 +1187,26 @@ describe("updateKitAssets: a pool added to a kit on a booking", () => {
     ]);
   }
 
-  it("hands the new kit slice to the sources after the slice insert, so a converted group seeds its KIT row", async () => {
+  it("hands the new kit slice to the sources after the slice insert, in the propagation transaction, so a converted group seeds its KIT row", async () => {
     arrangePensJoiningKit();
+    // why: the membership change and the propagation run in two separate
+    // transactions. The propagation one gets a client of its own, with its
+    // own slice insert, so the seed is proven to run in the transaction that
+    // inserted the slice rather than through the outer client.
+    const propagationTx = {
+      ...db,
+      bookingAsset: {
+        ...db.bookingAsset,
+        createMany: vitest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    mocked(db.$transaction)
+      .mockImplementationOnce((callback: (tx: unknown) => unknown) =>
+        callback(db)
+      )
+      .mockImplementationOnce((callback: (tx: unknown) => unknown) =>
+        callback(propagationTx)
+      );
 
     await updateKitAssets({
       kitId: "kit-1",
@@ -1199,15 +1217,32 @@ describe("updateKitAssets: a pool added to a kit on a booking", () => {
       request: new Request("http://test.com"),
     });
 
+    // The membership transaction, then the propagation one: both staged
+    // clients were used, and no other transaction opened on this path.
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(seedKitRowsForNewKitSlices).toHaveBeenCalledTimes(1);
-    expect(seedKitRowsForNewKitSlices).toHaveBeenCalledWith(db, {
+    expect(seedKitRowsForNewKitSlices).toHaveBeenCalledWith(propagationTx, {
       organizationId: "org-1",
       kitSlices: [
         { bookingId: "booking-1", assetId: "pens", assetKitId: "ak-pens-new" },
       ],
     });
+    // The slice went in through the propagation transaction, not the outer
+    // client.
+    expect(propagationTx.bookingAsset.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            bookingId: "booking-1",
+            assetId: "pens",
+            assetKitId: "ak-pens-new",
+          }),
+        ],
+      })
+    );
+    expect(db.bookingAsset.createMany).not.toHaveBeenCalled();
     expect(
-      mocked(db.bookingAsset.createMany).mock.invocationCallOrder[0]
+      propagationTx.bookingAsset.createMany.mock.invocationCallOrder[0]
     ).toBeLessThan(
       mocked(seedKitRowsForNewKitSlices).mock.invocationCallOrder[0]
     );

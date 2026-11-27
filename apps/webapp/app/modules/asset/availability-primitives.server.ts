@@ -547,8 +547,11 @@ export async function getPeakReservedUnitsByAsset({
   ]);
 
   // Only LEGACY groups place dispositions: converted groups read their source
-  // rows instead, and their logs were never fetched. Every row of a LEGACY
-  // pair is passed, kit-driven ones included, so untagged logs can reach them.
+  // rows instead. The logs read is scoped to the bookings holding a LEGACY
+  // row, so a booking that also holds a converted pair brings that pair's logs
+  // too; only LEGACY rows reach the attribution, so those logs are ignored.
+  // Every row of a LEGACY pair is passed, kit-driven ones included, so
+  // untagged logs can reach them.
   const loggedByRow = loggedUnitsByReservationRow(legacyRows, loggedGroups);
 
   const intervalsByAsset = new Map<string, AvailabilityInterval[]>();

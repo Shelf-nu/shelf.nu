@@ -7686,15 +7686,19 @@ export async function updateKitAssets({
        * the `AssetKit` rows, so a retried call recomputes `newlyAddedAssets` as
        * empty (it diffs the submitted ids against the kit's CURRENT members),
        * skips this block entirely, and never re-emits the event. The booking
-       * would keep an asset whose arrival nothing recorded — the exact
+       * would keep an asset whose arrival nothing recorded: the exact
        * untraceability these events exist to prevent.
        *
        * A NEW narrow transaction rather than the membership one above: that tx
        * already carries the detachment-impact fetch, collision merge, placement
        * preservation, location cascade and a `consumptionLog.groupBy`, and has
-       * produced P2028 on large operations. Reads stay outside it (the
-       * `assetKit.findMany` above, and the event array is pure computation) so
-       * it holds writes only.
+       * produced P2028 on large operations. It holds the writes and the reads
+       * that decide them, each after its lock: the booking status locks
+       * (`lockBookingForStatusCheck`), the asset locks with the archived read
+       * (`lockAssetsForArchiveGuard`), and the KIT row seeding
+       * (`seedKitRowsForNewKitSlices`). Reads that decide nothing here stay
+       * outside it: the `assetKit.findMany` membership read above, and the
+       * event array, which is pure computation.
        *
        * Sequential, not `Promise.all`: an interactive transaction runs on a
        * single connection, so concurrent queries on one `tx` client are unsafe.
