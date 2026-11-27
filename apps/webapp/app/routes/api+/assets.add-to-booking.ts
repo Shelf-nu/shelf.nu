@@ -84,9 +84,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         finalAssetIds
       )
     ) {
-      const alreadyAddedAssets = bookingInfo.bookingAssets.filter((ba) =>
-        finalAssetIds.includes(ba.assetId)
-      );
+      // The selected assets the booking already holds, as assets (`id`,
+      // `title`): the dialog lists them by title and matches them to the
+      // selection by id. One entry per asset, because a quantity-tracked
+      // asset can sit on the booking as several slices.
+      const alreadyAddedAssets = [
+        ...new Map(
+          bookingInfo.bookingAssets
+            .filter((ba) => finalAssetIds.includes(ba.assetId))
+            .map((ba) => [ba.asset.id, ba.asset])
+        ).values(),
+      ];
       const allAssetsInBooking =
         alreadyAddedAssets.length === finalAssetIds.length;
 
