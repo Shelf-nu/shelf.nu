@@ -6,6 +6,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import {
+  archiveAssetBlockedReason,
   archivedAssetBlockedReason,
   KIT_IN_USE_REINSTATE_REASON,
   kitMemberCustodyBlockedReason,
@@ -182,17 +183,16 @@ const ConditionalActionsDropdown = () => {
     shortfallWarning !== null && shortfallWarning !== dismissedWarning;
   /**
    * Why archiving is blocked for this asset, if at all. Mirrors the server
-   * guard in `archiveAsset` so the UI explains the disabled state up-front.
+   * guard in `archiveAsset` so the UI explains the disabled state up-front;
+   * the phone shows the same reason from `@shelf/labels`.
    */
-  const archiveDisabledReason: { reason: string } | false = isQtyTracked
-    ? { reason: "Quantity-tracked assets can't be archived yet." }
-    : assetIsCheckedOut || assetCanBeReleased
-    ? {
-        reason:
-          "Check the asset in and release any custody before archiving it.",
-      }
-    : assetIsPartOfUnavailableKit
-    ? { reason: "This asset is part of a kit that's currently in use." }
+  const archiveBlockedReason = archiveAssetBlockedReason({
+    isQuantityTracked: isQtyTracked,
+    isInUse: assetIsCheckedOut || assetCanBeReleased,
+    isInUnavailableKit: assetIsPartOfUnavailableKit,
+  });
+  const archiveDisabledReason: { reason: string } | false = archiveBlockedReason
+    ? { reason: archiveBlockedReason }
     : false;
 
   /**

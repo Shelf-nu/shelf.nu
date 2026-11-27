@@ -2079,6 +2079,15 @@ export type DeleteAssetResponse = {
   success: boolean;
 };
 
+/** Response of `POST /api/mobile/asset/archive`. */
+export type ArchiveAssetResponse = {
+  asset: { id: string; archivedAt: string };
+  /** Draft bookings that still hold the asset; they can't be reserved until it leaves. */
+  draftBookings: { id: string; name: string }[];
+  /** The web's "Asset archived" message, with the note on those drafts. */
+  message: string;
+};
+
 /** Response of `POST /api/mobile/asset/reinstate`. */
 export type ReinstateAssetResponse = {
   asset: { id: string; archivedAt: null };

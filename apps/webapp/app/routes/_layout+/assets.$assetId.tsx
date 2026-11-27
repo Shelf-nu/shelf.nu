@@ -23,7 +23,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useRecordNavigation } from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
-import { draftBookingsNote } from "~/modules/asset/archive-messages";
+import { archivedAssetMessage } from "~/modules/asset/archive-messages";
 import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
@@ -429,9 +429,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Asset archived",
-          message: `The asset is hidden from your lists and can't be booked. You can reinstate it any time.${draftBookingsNote(
-            draftBookings
-          )}`,
+          message: archivedAssetMessage(draftBookings),
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });

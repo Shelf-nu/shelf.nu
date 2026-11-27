@@ -13,6 +13,11 @@ interface UseAssetDataReturn {
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
   fetchAsset: () => Promise<void>;
+  /**
+   * Reloads the asset in place after a change made on this screen. Quiet on
+   * failure: the asset on screen stays instead of the error state.
+   */
+  reloadAsset: () => Promise<void>;
   onRefresh: () => Promise<void>;
 }
 
@@ -85,6 +90,7 @@ export function useAssetData(
   );
 
   const fetchAsset = useCallback(() => loadAsset(false), [loadAsset]);
+  const reloadAsset = useCallback(() => loadAsset(true), [loadAsset]);
 
   useEffect(() => {
     // why: when orgId is briefly undefined (org context still hydrating)
@@ -134,6 +140,7 @@ export function useAssetData(
     setError,
     setIsLoading,
     fetchAsset,
+    reloadAsset,
     onRefresh,
   };
 }
