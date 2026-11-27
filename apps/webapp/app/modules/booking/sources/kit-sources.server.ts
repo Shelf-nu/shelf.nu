@@ -20,6 +20,8 @@
  *   and the caller folds the slice's quantity and `checkedOutQuantity` into it.
  * - {@link lockKitDetachPools}: the one asset lock a kit detach path takes
  *   before it deletes or detaches kit slices.
+ * - {@link seedKitRowsForNewKitSlices}: kit slices a membership change adds to
+ *   bookings join a converted group as KIT slices with one KIT row each.
  *
  * Kit paths take asset locks only (one sorted statement covering every asset
  * the path touches), never booking locks:
@@ -601,6 +603,166 @@ export async function detachKitSliceSources(
     plan.upsertRows.push(...sessionPlan.upsertRows);
     plan.insertShares.push(...sessionPlan.insertShares);
     plan.setModes.push(...sessionPlan.setModes);
+  }
+  await writeSourcePlan(tx, { organizationId, plan });
+  return { convertedSliceIds };
+}
+
+/** A kit slice just created on a booking, as the kit service wrote it. */
+export type NewKitSlice = {
+  bookingId: string;
+  assetId: string;
+  /** The new membership the slice was created for (`AssetKit.id`). */
+  assetKitId: string;
+};
+
+/**
+ * Gives kit slices just added to bookings by a kit membership change their
+ * sources, the way `allocateNewSlices` (booking-sources.server.ts) treats a
+ * kit slice a booking adds: in a converted group the slice becomes KIT with one KIT row holding
+ * its quantity; in a LEGACY group on an active booking with adoption on, the
+ * group converts first (held back: it stays LEGACY), its seeded pending units
+ * are placed without refusing, and the slice is adopted the same way. Any
+ * other LEGACY group is left alone.
+ *
+ * A new kit slice has nothing out, so it needs no allocation and no
+ * admission. Kit paths take asset locks only: this takes the asset lock of
+ * the pools concerned (a re-lock for a caller that holds it) and reads the
+ * bookings, the slices and every group after it.
+ *
+ * Queries: with adoption off, one probe for converted groups among the
+ * slices' (booking, asset) pairs, and nothing else when there is none.
+ * Otherwise the lock, the bookings, the new slices, then per booking the
+ * group session, and one write for the whole call.
+ *
+ * @param tx - The caller's transaction
+ * @param args.organizationId - The trusted workspace id; bookings outside it
+ *   are ignored
+ * @param args.kitSlices - The kit slices just created, each keyed by its
+ *   booking and new membership
+ * @param args.adoptionEnabled - Defaults to `BOOKING_SOURCES_ENABLED`
+ * @param args.now - The current time, for the allocation window
+ * @returns Ids of the new slices whose group ends converted
+ */
+export async function seedKitRowsForNewKitSlices(
+  tx: BookingSourcesTx,
+  args: {
+    organizationId: string;
+    kitSlices: NewKitSlice[];
+    adoptionEnabled?: boolean;
+    now?: Date;
+  }
+): Promise<{ convertedSliceIds: Set<string> }> {
+  const { organizationId, kitSlices } = args;
+  const adoptionEnabled = args.adoptionEnabled ?? BOOKING_SOURCES_ENABLED;
+  const now = args.now ?? new Date();
+  const convertedSliceIds = new Set<string>();
+  if (kitSlices.length === 0) return { convertedSliceIds };
+
+  const pairKey = (slice: { bookingId: string; assetId: string }) =>
+    groupMapKey({ bookingId: slice.bookingId, assetId: slice.assetId });
+
+  // Converted groups among the pairs. The new slices are stored LEGACY, so
+  // only a slice the group already had can match.
+  let candidates = kitSlices;
+  if (!adoptionEnabled) {
+    const converted = await tx.bookingAsset.findMany({
+      where: {
+        booking: { organizationId },
+        sourceAllocation: { not: "LEGACY" },
+        OR: kitSlices.map((s) => ({
+          bookingId: s.bookingId,
+          assetId: s.assetId,
+        })),
+      },
+      select: { bookingId: true, assetId: true },
+      distinct: ["bookingId", "assetId"],
+    });
+    const convertedPairs = new Set(converted.map(pairKey));
+    candidates = kitSlices.filter((s) => convertedPairs.has(pairKey(s)));
+    if (candidates.length === 0) return { convertedSliceIds };
+  }
+
+  // Lock first: the bookings, the slices and every group are read after it.
+  const pools = await lockGroupAssets(
+    tx,
+    organizationId,
+    candidates.map((s) => s.assetId)
+  );
+  const bookings = await tx.booking.findMany({
+    where: {
+      id: { in: [...new Set(candidates.map((s) => s.bookingId))] },
+      organizationId,
+    },
+    select: { id: true, status: true, from: true, to: true },
+  });
+  const bookingById = new Map(bookings.map((b) => [b.id, b]));
+  const created = await tx.bookingAsset.findMany({
+    where: {
+      bookingId: { in: [...bookingById.keys()] },
+      assetKitId: { in: [...new Set(candidates.map((s) => s.assetKitId))] },
+    },
+    select: { id: true, bookingId: true, assetId: true, assetKitId: true },
+  });
+  const wanted = new Set(
+    candidates.map((s) => `${s.bookingId}:${s.assetKitId}`)
+  );
+  const newSlices = created.filter(
+    (s) => pools.has(s.assetId) && wanted.has(`${s.bookingId}:${s.assetKitId}`)
+  );
+  if (newSlices.length === 0) return { convertedSliceIds };
+
+  const newSliceIds = new Set(newSlices.map((s) => s.id));
+  const assetsByBooking = new Map<string, Set<string>>();
+  for (const slice of newSlices) {
+    const set = assetsByBooking.get(slice.bookingId) ?? new Set<string>();
+    set.add(slice.assetId);
+    assetsByBooking.set(slice.bookingId, set);
+  }
+
+  const plan: SourcePlanWrite = {
+    upsertRows: [],
+    deleteRowIds: [],
+    insertShares: [],
+    repointShares: [],
+    setModes: [],
+  };
+  for (const [bookingId, assetIds] of assetsByBooking) {
+    const booking = bookingById.get(bookingId);
+    if (!booking) continue;
+    const active = KIT_PROPAGATION_STATUSES.includes(booking.status);
+    const session = await openGroupSession(tx, {
+      organizationId,
+      groups: [...assetIds].map((assetId) => ({ bookingId, assetId })),
+      adoptionEnabled: adoptionEnabled && active,
+      window: settlementWindow(booking, now),
+      newSliceIds,
+      loadFree: active,
+    });
+    // Conversion seeds pending units on standalone slices; the kit change is
+    // not the booking's choice, so they are placed without refusing.
+    await allocateSessionPending(tx, session, "involuntary");
+
+    for (const assetId of assetIds) {
+      const group = session.groups.get(groupMapKey({ bookingId, assetId }));
+      if (!group || group.status !== "converted") continue;
+      for (const slice of group.slices) {
+        if (newSliceIds.has(slice.id)) convertedSliceIds.add(slice.id);
+      }
+    }
+
+    const sessionPlan = buildSessionPlan(session);
+    plan.upsertRows.push(...sessionPlan.upsertRows);
+    plan.insertShares.push(...sessionPlan.insertShares);
+    plan.setModes.push(...sessionPlan.setModes);
+  }
+  // Every group stayed LEGACY (held back, or a finished booking): no write.
+  if (
+    plan.upsertRows.length === 0 &&
+    plan.insertShares.length === 0 &&
+    plan.setModes.length === 0
+  ) {
+    return { convertedSliceIds };
   }
   await writeSourcePlan(tx, { organizationId, plan });
   return { convertedSliceIds };

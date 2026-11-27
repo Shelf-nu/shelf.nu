@@ -35,6 +35,7 @@ import {
   lockKitDetachPools,
   probeKitDetachPools,
   resizeKitSourceRows,
+  seedKitRowsForNewKitSlices,
 } from "../booking/sources/kit-sources.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 
@@ -338,6 +339,9 @@ vitest.mock(
     ),
     lockKitDetachPools: vitest.fn(() => Promise.resolve(new Set<string>())),
     probeKitDetachPools: vitest.fn(() => Promise.resolve([] as string[])),
+    seedKitRowsForNewKitSlices: vitest.fn(() =>
+      Promise.resolve({ convertedSliceIds: new Set<string>() })
+    ),
   })
 );
 
@@ -722,7 +726,11 @@ describe("removeKitSlicesFromPlanningBookings: converted slices", () => {
 });
 
 describe("moveAssetKitUnits: converted destination slices", () => {
-  it("grows a converted destination slice's KIT row with clamp, never a refusal", async () => {
+  /**
+   * Moves 10 Pens from `kit-from` into `kit-to`, whose membership ends at 15
+   * units and has one converted active slice, `ba-dst`.
+   */
+  async function moveIntoConvertedDestination() {
     mocked(lockAssetForQuantityUpdate).mockResolvedValue({
       id: "pens",
       title: "Pens",
@@ -766,11 +774,45 @@ describe("moveAssetKitUnits: converted destination slices", () => {
       toKitId: "kit-to",
       quantity: 10,
     });
+  }
+
+  it("grows a converted destination slice's KIT row with clamp, never a refusal", async () => {
+    await moveIntoConvertedDestination();
 
     expect(resizeKitSourceRows).toHaveBeenCalledWith(expect.anything(), {
       organizationId: "org-1",
       slices: [{ sliceId: "ba-dst", assetId: "pens", quantity: 15 }],
       belowOut: "clamp",
+    });
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: {
+        assetKitId: "ak-dst",
+        booking: { status: { in: ACTIVE_STATUSES } },
+      },
+      data: { quantity: 15 },
+    });
+  });
+
+  it("writes a converted slice's clamped quantity when its units out exceed the destination", async () => {
+    // The ONGOING slice has 20 units out, so the KIT row keeps 20, not 15.
+    mocked(resizeKitSourceRows).mockResolvedValueOnce({
+      refused: [],
+      quantities: new Map([["ba-dst", 20]]),
+    });
+
+    await moveIntoConvertedDestination();
+
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: {
+        assetKitId: "ak-dst",
+        booking: { status: { in: ACTIVE_STATUSES } },
+        id: { notIn: ["ba-dst"] },
+      },
+      data: { quantity: 15 },
+    });
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ba-dst"] } },
+      data: { quantity: 20 },
     });
   });
 });
@@ -1067,5 +1109,107 @@ describe("kit detach paths: one asset lock, workspace-scoped", () => {
       kitSlices: [kitSlice],
       finishingBookingIds: ["booking-1"],
     });
+  });
+});
+
+describe("updateKitAssets: a pool added to a kit on a booking", () => {
+  /**
+   * Kit-1 holds a sitting member on a RESERVED booking; Pens, a pool the
+   * booking also holds as a converted standalone slice, joins the kit.
+   */
+  function arrangePensJoiningKit() {
+    mocked(db.kit.findUniqueOrThrow).mockResolvedValue({
+      id: "kit-1",
+      name: "Kit 1",
+      status: "AVAILABLE",
+      location: null,
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-sitting",
+          kitId: "kit-1",
+          quantity: 1,
+          asset: {
+            id: "sitting-member",
+            title: "Sitting member",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [
+              {
+                id: "ba-sitting",
+                bookingId: "booking-1",
+                assetId: "sitting-member",
+                assetKitId: "ak-sitting",
+                sourceKitId: "kit-1",
+                quantity: 1,
+                booking: { id: "booking-1", status: BookingStatus.RESERVED },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    mocked(db.asset.findMany).mockImplementation(
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null
+            ? []
+            : [
+                {
+                  id: "sitting-member",
+                  title: "Sitting member",
+                  type: AssetType.INDIVIDUAL,
+                  quantity: null,
+                  unitOfMeasure: null,
+                  assetKits: [{ kitId: "kit-1" }],
+                  custody: [],
+                  bookingAssets: [],
+                  assetLocations: [],
+                },
+                {
+                  id: "pens",
+                  title: "Pens",
+                  type: AssetType.QUANTITY_TRACKED,
+                  quantity: 100,
+                  unitOfMeasure: null,
+                  assetKits: [],
+                  custody: [],
+                  bookingAssets: [],
+                  assetLocations: [],
+                },
+              ]
+        )
+    );
+    // The membership the add just created, read back by the propagation.
+    mocked(db.assetKit.findMany).mockResolvedValue([
+      { id: "ak-pens-new", assetId: "pens", quantity: 4 },
+    ]);
+  }
+
+  it("hands the new kit slice to the sources after the slice insert, so a converted group seeds its KIT row", async () => {
+    arrangePensJoiningKit();
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["sitting-member", "pens"],
+      assetQuantities: { pens: 4 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(seedKitRowsForNewKitSlices).toHaveBeenCalledTimes(1);
+    expect(seedKitRowsForNewKitSlices).toHaveBeenCalledWith(db, {
+      organizationId: "org-1",
+      kitSlices: [
+        { bookingId: "booking-1", assetId: "pens", assetKitId: "ak-pens-new" },
+      ],
+    });
+    expect(
+      mocked(db.bookingAsset.createMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocked(seedKitRowsForNewKitSlices).mock.invocationCallOrder[0]
+    );
   });
 });

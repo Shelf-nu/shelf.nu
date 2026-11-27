@@ -42,6 +42,7 @@ import {
   loadPhysicalNow,
 } from "~/modules/booking/sources/capacity.server";
 import { removeAssets } from "~/modules/booking/service.server";
+import { seedKitRowsForNewKitSlices } from "~/modules/booking/sources/kit-sources.server";
 import { evacuateLocationsForDelete } from "~/modules/booking/sources/location-delete.server";
 
 import type {
@@ -1951,6 +1952,52 @@ describe("booking sources scenarios", () => {
       expect(shape(await readRows(seed.x.sliceId))).toEqual([
         ["LOCATION", seed.locationA, 5, 0, 0, 0],
       ]);
+    } finally {
+      await cleanupPools(created);
+    }
+  });
+
+  it("A pool joins a kit on a booking whose standalone slice is converted: the new kit slice is KIT with one KIT row holding its quantity, all checks pass at COMMIT", async () => {
+    const created: SeededOrgWithPool[] = [];
+    try {
+      const seed = await commitTx(async (tx) => {
+        const pool = await seedOrgWithPool(tx, {
+          total: 20,
+          placements: [{ name: "Shelf A", quantity: 10 }],
+        });
+        created.push(pool);
+        return { ...pool, ...(await reserveSlice(tx, pool, 3)) };
+      });
+
+      // The kit change, as `updateKitAssets` propagates it: a new membership,
+      // its LEGACY kit slice on the booking, then the seed, in one commit.
+      const kitSliceId = await commitTx(async (tx) => {
+        const { assetKitId } = await seedKit(tx, seed, 4);
+        const sliceId = await addSlice(tx, {
+          bookingId: seed.bookingId,
+          assetId: seed.assetId,
+          quantity: 4,
+          assetKitId,
+        });
+        const result = await seedKitRowsForNewKitSlices(tx, {
+          organizationId: seed.organizationId,
+          kitSlices: [
+            { bookingId: seed.bookingId, assetId: seed.assetId, assetKitId },
+          ],
+          adoptionEnabled: false,
+        });
+        expect(result.convertedSliceIds).toEqual(new Set([sliceId]));
+        return sliceId;
+      });
+
+      expect((await readSlice(kitSliceId))?.sourceAllocation).toBe("KIT");
+      expect(shape(await readRows(kitSliceId))).toEqual([
+        ["KIT", null, 4, 0, 0, 0],
+      ]);
+      await assertContractHolds({
+        sliceIds: [seed.sliceId, kitSliceId],
+        groups: [{ bookingId: seed.bookingId, assetId: seed.assetId }],
+      });
     } finally {
       await cleanupPools(created);
     }

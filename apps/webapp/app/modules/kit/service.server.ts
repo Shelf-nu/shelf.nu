@@ -135,6 +135,7 @@ import {
   lockKitDetachPools,
   probeKitDetachPools,
   resizeKitSourceRows,
+  seedKitRowsForNewKitSlices,
 } from "../booking/sources/kit-sources.server";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
@@ -7821,6 +7822,31 @@ export async function updateKitAssets({
             });
           }
 
+          /**
+           * A new kit slice of a quantity-tracked pool joins its booking's
+           * group: in a converted group it becomes KIT with one KIT row
+           * holding its quantity, which the database checks require at
+           * commit. Under the asset lock only; with adoption off and no
+           * converted group this costs one probe.
+           */
+          await seedKitRowsForNewKitSlices(tx, {
+            organizationId,
+            kitSlices: bookingsReceivingRows.flatMap((booking) =>
+              assetsToPropagate.flatMap((asset) => {
+                const ak = akByAssetId.get(asset.id);
+                return ak && asset.type === AssetType.QUANTITY_TRACKED
+                  ? [
+                      {
+                        bookingId: booking.id,
+                        assetId: asset.id,
+                        assetKitId: ak.id,
+                      },
+                    ]
+                  : [];
+              })
+            ),
+          });
+
           // Built from the same set the rows were written to, so the trail
           // reports exactly what persisted.
           const propagatedEvents = buildPropagatedEvents(
@@ -8830,9 +8856,12 @@ export async function moveAssetKitUnits(
       //     The source side needs no cascade: step 6 refuses the move when
       //     the source has active slices.
       //
-      //     The destination only grows, so a converted slice's KIT row takes
-      //     the new units as pending. One indexed probe
-      //     finds the converted slices; LEGACY ones need nothing more.
+      //     A converted slice's KIT row takes the new units as pending. A
+      //     slice never drops below its KIT row's units out (`clamp`), so a
+      //     converted slice with more units out than the destination's new
+      //     quantity keeps its units out, and that clamped value is the one
+      //     written to its `BookingAsset.quantity`. One indexed probe finds
+      //     the converted slices; LEGACY ones take the destination quantity.
       const convertedDestSlices: Array<{ id: string; assetId: string }> =
         await tx.bookingAsset.findMany({
           where: {
@@ -8842,24 +8871,46 @@ export async function moveAssetKitUnits(
           },
           select: { id: true, assetId: true },
         });
-      await resizeKitSourceRows(tx, {
-        organizationId,
-        slices: convertedDestSlices.map((slice) => ({
-          sliceId: slice.id,
-          assetId: slice.assetId,
-          quantity: dest.quantity,
-        })),
-        // An increase never goes below the units out; `clamp` keeps that
-        // true by construction instead of leaving a refusal unread.
-        belowOut: "clamp",
-      });
+      const { quantities: destQuantityBySliceId } = await resizeKitSourceRows(
+        tx,
+        {
+          organizationId,
+          slices: convertedDestSlices.map((slice) => ({
+            sliceId: slice.id,
+            assetId: slice.assetId,
+            quantity: dest.quantity,
+          })),
+          belowOut: "clamp",
+        }
+      );
+      // Converted slices clamped to a quantity other than the destination's
+      // get their own write, grouped by that quantity; every other active
+      // slice on the destination takes `dest.quantity`.
+      const clampedSliceIdsByQuantity = new Map<number, string[]>();
+      for (const [sliceId, sliceQuantity] of destQuantityBySliceId) {
+        if (sliceQuantity === dest.quantity) continue;
+        clampedSliceIdsByQuantity.set(sliceQuantity, [
+          ...(clampedSliceIdsByQuantity.get(sliceQuantity) ?? []),
+          sliceId,
+        ]);
+      }
+      const clampedSliceIds = [...clampedSliceIdsByQuantity.values()].flat();
       await tx.bookingAsset.updateMany({
         where: {
           assetKitId: dest.id,
           booking: { status: { in: KIT_PROPAGATION_STATUSES } },
+          ...(clampedSliceIds.length > 0
+            ? { id: { notIn: clampedSliceIds } }
+            : {}),
         },
         data: { quantity: dest.quantity },
       });
+      for (const [sliceQuantity, sliceIds] of clampedSliceIdsByQuantity) {
+        await tx.bookingAsset.updateMany({
+          where: { id: { in: sliceIds } },
+          data: { quantity: sliceQuantity },
+        });
+      }
 
       // 11. Paired ASSET_KIT_CHANGED events. `moveCorrelationId` lets
       //     reports rebuild the move from the two halves.

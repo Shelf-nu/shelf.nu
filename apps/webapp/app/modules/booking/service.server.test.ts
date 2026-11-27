@@ -3323,6 +3323,10 @@ describe("updateBookingAssets", () => {
     };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the row lock decides the status; it reads the draft
+    restoreMockImplementationAfterTest(db.$queryRaw).fn.mockImplementation(
+      lockReadsStagedBooking()
+    );
 
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
@@ -3334,9 +3338,8 @@ describe("updateBookingAssets", () => {
 
     expect(db.booking.findUniqueOrThrow).toHaveBeenCalledWith({
       where: { id: "booking-1", organizationId: "org-1" },
-      // `from`/`to` are selected for the QUANTITY_TRACKED windowed-availability
-      // guard (skipped here since the booking is DRAFT, not ACTIVE).
-      select: { id: true, name: true, status: true, from: true, to: true },
+      // The window and the status the guards use come from the row lock.
+      select: { id: true, name: true, status: true },
     });
     expect(db.$executeRaw).toHaveBeenCalled();
     expect(result).toEqual(mockBooking);
@@ -3711,6 +3714,9 @@ describe("updateBookingAssets", () => {
    * `bookingAsset.findMany` with `assetId: { in: [...] }`).
    */
   describe("QUANTITY_TRACKED availability guard on ACTIVE bookings", () => {
+    // The guard reads the status and window the booking lock returns.
+    lockReadsStagedBookingInEachTest();
+
     const QT_ASSET_ID = "asset-qty-add";
 
     const qtyParams = {
@@ -3938,6 +3944,88 @@ describe("updateBookingAssets", () => {
       const result = await updateBookingAssets(qtyParams);
 
       expect(result).toEqual(mockBooking);
+    });
+
+    it("measures the window read under the booking lock when an extension moved the end after the earlier read", async () => {
+      expect.assertions(1);
+
+      const mockBooking = {
+        id: "booking-1",
+        name: "Test Booking",
+        status: BookingStatus.RESERVED,
+        from: futureFromDate,
+        to: futureToDate,
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      // This booking holds none of the pool yet, so the 7 are an increase.
+      (
+        db.bookingAsset.groupBy as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      // A concurrent extension committed two days more before the lock.
+      const extendedTo = new Date(
+        futureToDate.getTime() + 2 * 24 * 60 * 60 * 1000
+      );
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        {
+          status: BookingStatus.RESERVED,
+          from: futureFromDate,
+          to: extendedTo,
+        },
+      ]);
+
+      // Another booking holds 5 of the 10 units, only inside the added days.
+      const otherFrom = new Date(futureToDate.getTime() + 24 * 60 * 60 * 1000);
+      mockOtherReservations([
+        {
+          bookingId: "other-booking",
+          quantity: 5,
+          from: otherFrom,
+          to: new Date(otherFrom.getTime() + 60 * 60 * 1000),
+        },
+      ]);
+
+      await expect(updateBookingAssets(qtyParams)).rejects.toThrow(
+        '"Folding Chairs": requested 7, only 5'
+      );
+    });
+
+    it("guards a draft that was reserved between the earlier read and the booking lock", async () => {
+      expect.assertions(1);
+
+      const mockBooking = {
+        id: "booking-1",
+        name: "Test Booking",
+        status: BookingStatus.DRAFT,
+        from: futureFromDate,
+        to: futureToDate,
+      };
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+      // This booking holds none of the pool yet, so the 7 are an increase.
+      (
+        db.bookingAsset.groupBy as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      // The row lock reads the booking RESERVED: it holds stock now.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        {
+          status: BookingStatus.RESERVED,
+          from: futureFromDate,
+          to: futureToDate,
+        },
+      ]);
+      mockOtherReservations([
+        {
+          bookingId: "other-booking",
+          quantity: 5,
+          from: futureFromDate,
+          to: futureToDate,
+        },
+      ]);
+
+      await expect(updateBookingAssets(qtyParams)).rejects.toThrow(
+        '"Folding Chairs": requested 7, only 5'
+      );
     });
   });
 });
@@ -4231,6 +4319,50 @@ describe("buildKitSlicesForBooking", () => {
     expect(db.assetKit.findMany).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * An answer for the booking row lock (a raw `SELECT ... FOR UPDATE` that reads
+ * the status and the window): the window of the booking the last
+ * `booking.findUniqueOrThrow` returned, and `status` (that booking's own status
+ * when omitted). The lock then sees the row the service read before it,
+ * unchanged, as with no concurrent writer.
+ *
+ * @param status - The status the lock reads; omitted, the staged booking's
+ * @returns An implementation for `db.$queryRaw`
+ */
+function lockReadsStagedBooking(status?: string) {
+  return async () => {
+    const reads = (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mock.results;
+    const staged = (await reads.at(-1)?.value) as
+      | { status?: string; from?: Date; to?: Date }
+      | undefined;
+    return [
+      { status: status ?? staged?.status, from: staged?.from, to: staged?.to },
+    ];
+  };
+}
+
+/**
+ * Answers the booking row lock with {@link lockReadsStagedBooking} in every
+ * test of the calling `describe`, and puts the prior answer back after each
+ * one. Writers that lock the window refuse or measure by it, so the lock must
+ * read the staged booking's window.
+ *
+ * @param status - The status the lock reads; omitted, the staged booking's
+ */
+function lockReadsStagedBookingInEachTest(status?: string) {
+  const queryRaw = db.$queryRaw as ReturnType<typeof vitest.fn>;
+  let prior: ReturnType<typeof queryRaw.getMockImplementation>;
+  beforeEach(() => {
+    prior = queryRaw.getMockImplementation();
+    queryRaw.mockImplementation(lockReadsStagedBooking(status));
+  });
+  afterEach(() => {
+    if (prior) queryRaw.mockImplementation(prior);
+    else queryRaw.mockReset();
+  });
+}
 
 /**
  * Puts `mock`'s current implementation back when the running test finishes.
@@ -5572,6 +5704,8 @@ describe("reserveBooking", () => {
   });
 });
 describe("checkoutBooking", () => {
+  lockReadsStagedBookingInEachTest("ONGOING");
+
   beforeEach(() => {
     vitest.clearAllMocks();
     // why: checkoutBooking now runs assertAssetsBelongToOrg over the booking's
@@ -5767,8 +5901,9 @@ describe("checkoutBooking", () => {
       status: BookingStatus.DRAFT,
       approvedAt: null,
     });
-    //@ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+      lockReadsStagedBooking("DRAFT")
+    );
 
     await expect(
       checkoutBooking({ ...mockCheckoutParams, userId: "user-1" })
@@ -5822,8 +5957,9 @@ describe("checkoutBooking", () => {
       status: BookingStatus.DRAFT,
       approvedAt: null,
     });
-    //@ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+      lockReadsStagedBooking("DRAFT")
+    );
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
 
@@ -5875,8 +6011,9 @@ describe("checkoutBooking", () => {
       status: BookingStatus.DRAFT,
       approvedAt: null,
     });
-    //@ts-expect-error missing vitest type
-    db.$queryRaw.mockResolvedValueOnce([{ status: "DRAFT" }]);
+    (db.$queryRaw as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+      lockReadsStagedBooking("DRAFT")
+    );
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
 
@@ -6023,9 +6160,9 @@ describe("checkoutBooking", () => {
     function lockReadsReserved() {
       // why: the shared mock defaults the `SELECT … FOR UPDATE` to ONGOING;
       // an expired-reservation answer is only honoured for a RESERVED row.
-      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: BookingStatus.RESERVED },
-      ]);
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+        lockReadsStagedBooking(BookingStatus.RESERVED)
+      );
     }
 
     it("lands in OVERDUE with the dates untouched when checked out as overdue", async () => {
@@ -6210,9 +6347,9 @@ describe("checkoutBooking", () => {
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValueOnce(expiredBooking());
-      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
-        { status: BookingStatus.OVERDUE },
-      ]);
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+        lockReadsStagedBooking(BookingStatus.OVERDUE)
+      );
 
       await expect(
         checkoutBooking({
@@ -20243,6 +20380,54 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     );
     expect(bookingSources.commitSettlement).toHaveBeenCalledTimes(1);
   });
+
+  it("refuses when a check-out sent out a pool the read before the locks did not see, completing nothing", async () => {
+    expect.assertions(4);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+    // why: the probe under the booking lock finds a slice of another pool,
+    // added and dispatched after the booking was read, still out.
+    restoreMockImplementationAfterTest(
+      db.bookingAsset.findFirst
+    ).fn.mockResolvedValue({ id: "ba-markers-late" });
+
+    await expect(checkinBooking(baseParams)).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The booking changed while you were checking it in. Reload it and try again.",
+    });
+    expect(db.bookingAsset.findFirst).toHaveBeenCalledWith({
+      where: {
+        bookingId: mockBookingId,
+        id: { notIn: ["ba-pens-standalone"] },
+        asset: { type: AssetType.QUANTITY_TRACKED },
+        checkedOutAt: { not: null },
+        checkedInAt: null,
+      },
+      select: { id: true },
+    });
+    expect(db.booking.update).not.toHaveBeenCalled();
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+  });
+
+  it("stamps only the slices it read and reconciled as checked in", async () => {
+    expect.assertions(1);
+
+    setupCheckinMocks(ConsumptionType.TWO_WAY);
+
+    await checkinBooking(baseParams);
+
+    const stamp = vitest
+      .mocked(db.bookingAsset.updateMany)
+      .mock.calls.map(([args]) => args)
+      .find((args) => "checkedInAt" in (args?.data ?? {}));
+    expect(stamp?.where).toEqual({
+      bookingId: mockBookingId,
+      id: { in: ["ba-pens-standalone"] },
+      checkedOutAt: { not: null },
+      checkedInAt: null,
+    });
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -23022,6 +23207,11 @@ describe("booking notes + events — qty-tracked axis", () => {
 
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the row lock decides the status; it reads the draft, which the
+    // quantity-tracked pool guard skips
+    restoreMockImplementationAfterTest(db.$queryRaw).fn.mockImplementation(
+      lockReadsStagedBooking()
+    );
 
     // Two findMany calls inside updateBookingAssets: the org-validation
     // call (`select: { id }`) and the event-meta lookup
@@ -24636,6 +24826,9 @@ describe("model reservation guard — write paths", () => {
       from: futureFromDate,
       to: futureToDate,
     };
+    // The row lock reads the draft and its window: a draft skips the
+    // quantity-tracked pool guard, so these cases see only the model guard.
+    lockReadsStagedBookingInEachTest();
 
     beforeEach(() => {
       //@ts-expect-error missing vitest type
@@ -24675,8 +24868,8 @@ describe("model reservation guard — write paths", () => {
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
-          // The status the row lock returned, not the one read before it.
-          bookingStatus: BookingStatus.ONGOING,
+          // The status and window the row lock returned.
+          bookingStatus: BookingStatus.DRAFT,
           organizationId: "org-1",
           from: futureFromDate,
           to: futureToDate,
@@ -26937,6 +27130,8 @@ describe("getBookingFlags - kits in custody", () => {
 });
 
 describe("check-in and check-out method on activity events", () => {
+  lockReadsStagedBookingInEachTest("ONGOING");
+
   // Every BOOKING_CHECKED_OUT / BOOKING_CHECKED_IN / BOOKING_PARTIAL_CHECKIN
   // event records how the row was handled (`meta.method`) and from where
   // (`meta.surface`), exactly as the route stated it. The service never guesses.
@@ -27352,6 +27547,8 @@ describe("check-in and check-out method on activity events", () => {
  * asset that moved, saying how the batch was made.
  */
 describe("asset activity lines for a whole-booking check-out and check-in", () => {
+  lockReadsStagedBookingInEachTest("ONGOING");
+
   const ACTOR = '{% link to="/settings/team/users/user-1" text="Test User" /%}';
   const BOOKING_LINK =
     '{% link to="/bookings/booking-1" text="Test Booking" /%}';
@@ -28847,6 +29044,10 @@ describe("booking emails name who acted", () => {
       (
         db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValue([]);
+      // why: the check-out's booking lock reads the window too
+      restoreMockImplementationAfterTest(db.$queryRaw).fn.mockImplementation(
+        lockReadsStagedBooking("ONGOING")
+      );
       mockBerlinRecipient();
       return reserved;
     }

@@ -59,6 +59,7 @@ import {
   ScanSubmitFailureAlert,
 } from "../scan-submit-failure-alert";
 import {
+  assetIdsWithPickedSource,
   buildPartialCheckoutBlockers,
   isAssetFullyCheckedOut,
 } from "./partial-checkout-blockers";
@@ -187,6 +188,8 @@ type CheckoutDispositionContextValue = {
   /** Map of `bookingAssetId` → slice info (remaining units, unitOfMeasure). */
   qtyByBookingAssetId: Record<string, CheckoutQtyInfo>;
   updateQuantity: (bookingAssetId: string, value: string) => void;
+  /** Records the operator's "From location" answer for a slice. */
+  pickSource: (bookingAssetId: string, value: string) => void;
 };
 
 /**
@@ -269,6 +272,7 @@ export default function PartialCheckoutDrawer({
     remainingToCheckOutByAsset,
     kitsBookedElsewhere,
     shortSourceAssetIds,
+    checkoutSourceQuestions,
   } = useLoaderData<typeof loader>();
 
   // Per-asset units-still-to-check-out map for QUANTITY_TRACKED assets,
@@ -313,6 +317,14 @@ export default function PartialCheckoutDrawer({
       ...prev,
       [bookingAssetId]: { quantity: value },
     }));
+  };
+
+  // The operator's "From location" answers, keyed by `bookingAssetId`. The
+  // selects post them on their own; the drawer keeps a copy because the
+  // `short-source` blocker depends on where the units leave from.
+  const [sourcePicks, setSourcePicks] = useState<Record<string, string>>({});
+  const pickSource = (bookingAssetId: string, value: string) => {
+    setSourcePicks((prev) => ({ ...prev, [bookingAssetId]: value }));
   };
 
   // Filter and prepare data for component rendering
@@ -683,6 +695,10 @@ export default function PartialCheckoutDrawer({
       kitsBookedElsewhere.flatMap((kit) => kit.assetIds)
     ),
     shortSourceAssetIds: new Set(shortSourceAssetIds),
+    pickedSourceAssetIds: assetIdsWithPickedSource(
+      checkoutSourceQuestions,
+      sourcePicks
+    ),
     removeAssetsFromList,
     removeItemsFromList,
   });
@@ -870,6 +886,7 @@ export default function PartialCheckoutDrawer({
     dispositions: checkoutDispositions,
     qtyByBookingAssetId,
     updateQuantity: updateCheckoutQuantity,
+    pickSource,
   };
 
   return (
@@ -1207,7 +1224,8 @@ function QuantityCheckoutBlock({
   bookingAssetId: string;
   info: CheckoutQtyInfo;
 }) {
-  const { dispositions, updateQuantity } = useCheckoutDispositionContext();
+  const { dispositions, updateQuantity, pickSource } =
+    useCheckoutDispositionContext();
   // A pool at two or more locations going out for the first time asks
   // where its units leave from. The select lives in this row, outside the
   // footer form, so it joins the submission through `form=`.
@@ -1271,6 +1289,7 @@ function QuantityCheckoutBlock({
           formId={PARTIAL_CHECKOUT_FORM_ID}
           variant="inline"
           className="mt-2"
+          onPick={(value) => pickSource(bookingAssetId, value)}
         />
       ) : null}
     </div>

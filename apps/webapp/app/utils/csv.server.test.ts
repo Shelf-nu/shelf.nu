@@ -1144,7 +1144,8 @@ describe("buildCsvExportDataFromBookings", () => {
 
     const [headers, mainRow] = buildCsvExportDataFromBookings(
       [booking as never],
-      HARDCODED_DEFAULT_PREFS
+      HARDCODED_DEFAULT_PREFS,
+      SEES_ALL_CUSTODY
     );
 
     expect(headers).toHaveLength(16);

@@ -604,7 +604,9 @@ describe("updateBasicBooking", () => {
   const oldFrom = new Date(from.getTime() - 24 * 60 * 60 * 1000);
   const oldTo = new Date(to.getTime() - 24 * 60 * 60 * 1000);
 
+  /** The booking as read before the transaction; the lock reads the same window. */
   function stageBooking(status: BookingStatus) {
+    store.lockedWindow = { from: oldFrom, to: oldTo };
     vitest.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
       id: BOOKING_ID,
       status,
@@ -689,6 +691,34 @@ describe("updateBasicBooking", () => {
     expect(admitWindowChange).not.toHaveBeenCalled();
   });
 
+  it("compares the dates with the window read under the booking lock, and admits from it", async () => {
+    stageBooking(BookingStatus.DRAFT);
+    // Another save moved the draft to the new window before this one locked
+    // it; this save puts back the dates it read.
+    store.lockedWindow = { from, to };
+    store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
+    store.slices = [
+      { id: "ba-qt-1", assetId: "qt-1", assetKitId: null, quantity: 3 },
+    ];
+    const tx = openTx();
+    vitest
+      .mocked(tx.booking.update)
+      .mockResolvedValue({ id: BOOKING_ID, from: oldFrom, to: oldTo } as never);
+
+    await updateBasicBooking({ ...params, from: oldFrom, to: oldTo });
+
+    expect(admitWindowChange).toHaveBeenCalledTimes(1);
+    expect(admitWindowChange).toHaveBeenCalledWith(tx, {
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from: oldFrom,
+      to: oldTo,
+      previous: { from, to },
+      kind: "dates",
+      sourcesInPlay: true,
+    });
+  });
+
   it("does not call the facade for a draft with no pool slices", async () => {
     stageBooking(BookingStatus.DRAFT);
     store.slices = [
@@ -770,6 +800,7 @@ describe("reserveBooking", () => {
     hints,
     alertsOrgOnReservation: false,
     tags: [],
+    actorApprovalSetting: null,
   };
   const reservedRow = {
     id: BOOKING_ID,
@@ -942,12 +973,14 @@ describe("checkoutBooking source admission", () => {
   /**
    * The outer read. Its slice is INDIVIDUAL so the legacy pool guard stays
    * out of the way; the pool slice is read in the transaction (`stagePool`).
+   * The booking lock reads the same window unless a case moves it.
    */
   function stageBooking(
     status: BookingStatus,
     window: { from: Date; to: Date } = { from, to }
   ) {
     store.lockedStatus = status;
+    store.lockedWindow = window;
     vitest.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
       ...bookingRow(status, [loadedSlice("ind-1", AssetType.INDIVIDUAL)]),
       ...window,
@@ -1124,6 +1157,26 @@ describe("checkoutBooking source admission", () => {
     // No pool lock beyond the legacy guard's own: the outer read holds no
     // standalone pool, and the kit-only lock is skipped with sources.
     expect(lockEveryAssetForQuantityUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a draft whose end moved between the outer read and the booking lock, admitting and writing nothing", async () => {
+    stageBooking(BookingStatus.DRAFT);
+    // Another tab moved the draft's end a day later before the lock.
+    store.lockedWindow = {
+      from,
+      to: new Date(to.getTime() + 24 * 60 * 60 * 1000),
+    };
+    stagePool();
+    const tx = openTx();
+
+    await expect(checkout()).rejects.toMatchObject({
+      status: 400,
+      message:
+        "The booking changed while you were checking it out. Reload it and try again.",
+    });
+    expect(admitWindowChange).not.toHaveBeenCalled();
+    expect(dispatchUnits).not.toHaveBeenCalled();
+    expect(tx.booking.update).not.toHaveBeenCalled();
   });
 });
 

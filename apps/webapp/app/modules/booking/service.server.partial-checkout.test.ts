@@ -3759,6 +3759,38 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       });
     });
 
+    it("reads the free stock over the window an adjusted early check-out commits", async () => {
+      expect.assertions(3);
+
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      // With sources out of play this read is the only aggregate check, so it
+      // must also cover the hours the moved start adds.
+      vitest.mocked(bookingSourcesInPlay).mockResolvedValueOnce(false);
+      // why: the booking lock is a raw `SELECT … FOR UPDATE` the model mocks
+      // cannot express; this queues the RESERVED row of a first scan
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        lockedBookingRow(BookingStatus.RESERVED),
+      ]);
+      freeStock({ "asset-qty-1": { physical: 10 } });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
+
+      const [, options] = vitest.mocked(getAssetAvailabilityBatch).mock
+        .calls[0] as [string[], { window: { from: Date; to: Date } }];
+      // The start moves to now, earlier than the booked start.
+      expect(options.window.from.getTime()).toBeLessThan(futureFrom.getTime());
+      expect(options.window.to).toEqual(futureTo);
+      expect(checkedOutIncrements()).toEqual([["ba-qty-1", 5]]);
+    });
+
     it("refuses a whole-booking scan that the Check out button's guard handles, when the units are not on the shelf", async () => {
       expect.assertions(2);
 

@@ -68,6 +68,11 @@ type CheckoutSourceSelectProps = {
    */
   variant?: "titled" | "inline";
   className?: string;
+  /**
+   * Called with the operator's answer each time they pick one (the value the
+   * hidden input posts), for a surface whose checks depend on the source.
+   */
+  onPick?: (value: string) => void;
 };
 
 /**
@@ -83,6 +88,7 @@ export function CheckoutSourceSelect({
   disabled,
   variant = "titled",
   className,
+  onPick,
 }: CheckoutSourceSelectProps) {
   const id = useId();
   const hintId = `${id}-hint`;
@@ -142,6 +148,7 @@ export function CheckoutSourceSelect({
             if (next === value) return;
             setValue(next);
             setPicked(true);
+            onPick?.(next);
           }}
           listLabel={`From location for ${question.title}`}
           triggerAriaLabel={

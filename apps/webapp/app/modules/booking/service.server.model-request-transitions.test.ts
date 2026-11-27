@@ -287,8 +287,10 @@ beforeEach(() => {
   vitest.clearAllMocks();
   // `clearAllMocks` clears calls, not implementations, so the defaults the
   // factory set survive. The two that a case routinely changes are restated.
+  // The booking lock answers with the staged row's window: check-out refuses
+  // a window that moved since its earlier read.
   // @ts-expect-error mocked
-  db.$queryRaw.mockResolvedValue([{ status: BookingStatus.DRAFT }]);
+  db.$queryRaw.mockResolvedValue([{ status: BookingStatus.DRAFT, from, to }]);
   // @ts-expect-error mocked
   db.booking.findUniqueOrThrow.mockResolvedValue(
     bookingRow(BookingStatus.DRAFT)
@@ -471,7 +473,9 @@ describe("checkoutBooking", () => {
       bookingRow(BookingStatus.RESERVED)
     );
     // @ts-expect-error mocked
-    db.$queryRaw.mockResolvedValue([{ status: BookingStatus.RESERVED }]);
+    db.$queryRaw.mockResolvedValue([
+      { status: BookingStatus.RESERVED, from, to },
+    ]);
     const tx = openTx();
     tx.booking.update.mockResolvedValue({ id: BOOKING_ID });
 

@@ -2066,47 +2066,55 @@ export async function updateBasicBooking({
       }
     }
 
-    /**
-     * A draft's new dates move its pool allocation with them. The date write
-     * and the re-allocation share one transaction, under the booking lock
-     * (the facade expects it and takes the asset lock itself). AUTO slices
-     * are re-allocated for the new window; a draft holds nothing, so nothing
-     * is refused. Only DRAFT bookings take new dates here.
-     */
-    // Same test as the date notes below: a date counts as changed only when
-    // it is provided and differs from the stored one. Renames and tag edits
-    // pass no dates and skip the re-allocation.
-    const datesChange =
-      booking.status === BookingStatus.DRAFT &&
-      ((!!from &&
-        !!booking.from &&
-        from.getTime() !== booking.from.getTime()) ||
-        (!!to && !!booking.to && to.getTime() !== booking.to.getTime()));
-
     const updatedBooking = await db.$transaction(async (tx) => {
+      /**
+       * A draft's new dates move its pool allocation with them. The date
+       * write and the re-allocation share one transaction, under the booking
+       * lock (the facade expects it and takes the asset lock itself). AUTO
+       * slices are re-allocated for the new window; a draft holds nothing, so
+       * nothing is refused. Only DRAFT bookings take new dates here.
+       */
+      let lockedWindow: { from: Date; to: Date } | null = null;
       // Dates and custodian are written only on a draft, decided from the read
       // above. Decided again on the locked row: a booking reserved (and maybe
       // approved) since then keeps the dates and custodian it was approved for,
       // and takes no draft re-allocation.
       if (booking.status === BookingStatus.DRAFT) {
-        const lockedStatus = await lockBookingForStatusCheck(
+        const locked = await lockBookingWithWindow(
           tx,
           booking.id,
           organizationId
         );
-        if (lockedStatus !== BookingStatus.DRAFT) {
+        if (locked.status !== BookingStatus.DRAFT) {
           throw new ShelfError({
             cause: null,
             title: "Update failed",
             message:
               "This booking changed while you were editing it. Reload the page and try again.",
-            additionalData: { bookingId: booking.id, lockedStatus },
+            additionalData: {
+              bookingId: booking.id,
+              lockedStatus: locked.status,
+            },
             label,
             status: 409,
             shouldBeCaptured: false,
           });
         }
+        lockedWindow = { from: locked.from, to: locked.to };
       }
+
+      // A date counts as changed only when it is provided and differs from
+      // the window read under the lock, so a concurrent edit of the same
+      // draft is compared against what the row holds now. Renames and tag
+      // edits pass no dates and skip the re-allocation.
+      const datesChange =
+        !!lockedWindow &&
+        ((!!from &&
+          !!lockedWindow.from &&
+          from.getTime() !== lockedWindow.from.getTime()) ||
+          (!!to &&
+            !!lockedWindow.to &&
+            to.getTime() !== lockedWindow.to.getTime()));
 
       const written = await tx.booking.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
@@ -2114,7 +2122,7 @@ export async function updateBasicBooking({
         data: dataToUpdate,
       });
 
-      if (datesChange) {
+      if (datesChange && lockedWindow) {
         // Asked once: with sources out of play every group is LEGACY and
         // no pool slice is read.
         const sourcesInPlay = await bookingSourcesInPlay(tx, {
@@ -2133,7 +2141,7 @@ export async function updateBasicBooking({
             bookingId: booking.id,
             from: written.from,
             to: written.to,
-            previous: { from: booking.from, to: booking.to },
+            previous: lockedWindow,
             kind: "dates",
             sourcesInPlay,
           });
@@ -5164,16 +5172,31 @@ export async function checkoutBooking({
         // The race is not theoretical: cancelling a RESERVED booking from
         // another tab while this checkout is in flight would otherwise leave a
         // CANCELLED booking whose assets are all CHECKED_OUT.
-        const lockedStatus = await lockBookingForStatusCheck(
-          tx,
-          id,
-          organizationId
-        );
+        const locked = await lockBookingWithWindow(tx, id, organizationId);
+        const lockedStatus = locked.status;
         assertBookingIsOpen({
           status: lockedStatus,
           operation: "check out",
           bookingId: id,
         });
+        /**
+         * Every guard below (conflicts, the expired-reservation answer, the
+         * windowed QT availability, the date rewrite) was worked out against
+         * the window read before the lock. A window moved meanwhile (an
+         * extension, an edit in another tab) invalidates all of it, so the
+         * check-out is refused rather than judged against a stale window.
+         */
+        if (windowMoved(locked, bookingFound)) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it out. Reload it and try again.",
+            additionalData: { bookingId: id },
+          });
+        }
 
         // An expired reservation re-dated to a new end later than the approved
         // one asks for more time than was approved: refused for a member whose
@@ -5283,7 +5306,8 @@ export async function checkoutBooking({
           // guard; see the doc comment on `checkoutBookingWritesWithinTx`.
           from: checkoutWindow.from,
           to: checkoutWindow.to,
-          storedWindow: { from: bookingFound.from, to: bookingFound.to },
+          // Read under the lock; equal to the pre-lock read, or refused above.
+          storedWindow: { from: locked.from, to: locked.to },
           // Pool assets are read inside the helper, after the booking lock.
           clientSupportsSources,
           checkedOutById: userId ?? null,
@@ -7815,6 +7839,48 @@ export async function checkinBooking({
         );
 
         /**
+         * The slices this check-in reconciles: every slice of the pre-lock
+         * read, plus the slices a converted group's settlement read under the
+         * locks. The closing `checkedInAt` stamp is scoped to them.
+         */
+        const reconciledSliceIds = [
+          ...new Set([
+            ...bookingFound.bookingAssets.map((ba) => ba.id),
+            ...checkinSlices.map((slice) => slice.id),
+          ]),
+        ];
+
+        /**
+         * A check-out that committed between the pre-lock read and the
+         * booking lock can have sent out a quantity-tracked slice this
+         * check-in never read: a new asset, or a new slice of a LEGACY group.
+         * Its units would stay out while the booking completes, so the
+         * check-in is refused. The booking lock keeps any later check-out out
+         * until this transaction ends, so one probe here is enough.
+         */
+        const unreadSliceOut = await tx.bookingAsset.findFirst({
+          where: {
+            bookingId: id,
+            id: { notIn: reconciledSliceIds },
+            asset: { type: AssetType.QUANTITY_TRACKED },
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          select: { id: true },
+        });
+        if (unreadSliceOut) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message:
+              "The booking changed while you were checking it in. Reload it and try again.",
+            additionalData: { bookingId: id, sliceId: unreadSliceOut.id },
+          });
+        }
+
+        /**
          * Per-qty-tracked-asset disposition work. Runs FIRST so the
          * pool-drain guard can read the current `Asset.quantity` before
          * downstream status flips, locking each asset row before it writes.
@@ -8330,12 +8396,16 @@ export async function checkinBooking({
          * leaves its slices looking permanently checked out.
          *
          * Scoped to slices that actually went out: one never checked out has
-         * nothing to reconcile, and stamping it would claim it came back.
+         * nothing to reconcile, and stamping it would claim it came back. And
+         * scoped to the slices this check-in read and reconciled: a slice
+         * that joined the booking after the pre-lock read was never returned
+         * here, so it must not be marked as back.
          */
         await tx.bookingAsset.updateMany({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}})
           where: {
             bookingId: bookingFound.id,
+            id: { in: reconciledSliceIds },
             checkedOutAt: { not: null },
             checkedInAt: null,
           },
@@ -12171,14 +12241,15 @@ export async function partialCheckoutBooking({
          * after attribution measures this session's departures against the
          * pool as it found it. `physicalAvailable` (stock less what custody,
          * kits and every booking hold out) ignores the window; `bookable`
-         * also sets aside other bookings' reservations over this booking's
-         * window, the figure the Check out button's guard reads.
+         * also sets aside other bookings' reservations over the window this
+         * check-out commits (an adjusted early start included), the figure
+         * the Check out button's guard reads.
          */
         const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
           qtyDispositionAssetIds,
           {
             organizationId,
-            window: storedWindow,
+            window: committedWindow,
             excludeBookingId: id,
             db: tx,
           }
@@ -13595,15 +13666,7 @@ export async function updateBookingAssets({
       // instead of a FK violation (P2003)
       const b = await tx.booking.findUniqueOrThrow({
         where: { id, organizationId },
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          // Needed to window the QUANTITY_TRACKED availability guard below
-          // to this booking's own dates.
-          from: true,
-          to: true,
-        },
+        select: { id: true, name: true, status: true },
       });
 
       // Every caller checks the status in a read of its own first, so the
@@ -13613,8 +13676,9 @@ export async function updateBookingAssets({
       // cancellation or reservation could still commit before the writes.
       // The closed-booking refusal applies to everyone; the add-items rule is
       // the caller's own (restricted roles add only to drafts). The window is
-      // read in the same locked statement: the source writes below measure
-      // it, and no concurrent extension can move it while the row is held.
+      // read in the same locked statement: the source writes and both
+      // availability guards below measure it, and no concurrent extension can
+      // move it while the row is held.
       const locked = await lockBookingWithWindow(tx, id, organizationId);
       const lockedStatus = locked.status;
       assertBookingIsOpen({
@@ -13821,7 +13885,9 @@ export async function updateBookingAssets({
        * over-reservation dead-end.
        */
       if (
-        (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(b.status)
+        (ACTIVE_BOOKING_STATUSES as readonly BookingStatus[]).includes(
+          lockedStatus
+        )
       ) {
         const qtAssetIds = new Set(
           validAssets
@@ -13887,7 +13953,7 @@ export async function updateBookingAssets({
               {
                 organizationId,
                 tx,
-                window: b.from && b.to ? { from: b.from, to: b.to } : null,
+                window: { from: locked.from, to: locked.to },
                 excludeBookingId: id,
               }
             );
@@ -14032,8 +14098,8 @@ export async function updateBookingAssets({
         bookingId: id,
         bookingStatus: lockedStatus,
         organizationId,
-        from: b.from,
-        to: b.to,
+        from: locked.from,
+        to: locked.to,
         tx,
         hints,
         userId,

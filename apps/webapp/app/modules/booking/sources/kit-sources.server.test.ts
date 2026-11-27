@@ -18,6 +18,7 @@ import {
   lockKitDetachPools,
   probeKitDetachPools,
   resizeKitSourceRows,
+  seedKitRowsForNewKitSlices,
 } from "./kit-sources.server";
 import { loadGroupStates } from "./repository.server";
 import type * as RepositoryModule from "./repository.server";
@@ -88,9 +89,28 @@ function fakeTx(
     kitRows?: Array<Partial<SourceRowRecord> & { bookingAssetId: string }>;
     /** Asset ids the detach-lock probe returns. */
     probeAssetIds?: string[];
+    /** (booking, asset) pairs the converted-group probe finds. */
+    convertedPairs?: Array<{ bookingId: string; assetId: string }>;
+    /** The kit slices a membership change just created. */
+    createdSlices?: Array<{
+      id: string;
+      bookingId: string;
+      assetId: string;
+      assetKitId: string;
+    }>;
   } = {}
 ) {
   return {
+    bookingAsset: {
+      findMany: vi.fn((query: { where?: Record<string, unknown> }) => {
+        if (query?.where && "sourceAllocation" in query.where) {
+          h.order.push("converted-probe");
+          return args.convertedPairs ?? [];
+        }
+        h.order.push("new-slices");
+        return args.createdSlices ?? [];
+      }),
+    },
     $queryRaw: vi.fn((query: unknown) => {
       if (sqlText(query).includes('FROM "AssetKit"')) {
         h.order.push("probe");
@@ -135,6 +155,7 @@ function fakeTx(
   } as unknown as BookingSourcesTx & {
     $queryRaw: ReturnType<typeof vi.fn>;
     booking: { findMany: ReturnType<typeof vi.fn> };
+    bookingAsset: { findMany: ReturnType<typeof vi.fn> };
   };
 }
 
@@ -907,5 +928,150 @@ describe("lockKitDetachPools", () => {
     });
 
     expect(tx.$queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("seedKitRowsForNewKitSlices", () => {
+  /** The kit slice a membership change just created: 4 pens, nothing out. */
+  const NEW_KIT_SLICE = {
+    id: "ba-new-kit",
+    bookingId: BOOKING,
+    assetId: POOL,
+    assetKitId: "ak-new",
+  };
+  const KIT_SLICES = [
+    { bookingId: BOOKING, assetId: POOL, assetKitId: "ak-new" },
+  ];
+
+  /** The group with a standalone slice and the new LEGACY kit slice. */
+  function seedGroupWithNewKitSlice(converted: boolean) {
+    seedGroups([
+      {
+        converted,
+        slices: [
+          converted
+            ? slice({
+                id: "ba-standalone",
+                quantity: 3,
+                mode: "AUTO",
+                rows: [row("ba-standalone", { kind: "UNPLACED", quantity: 3 })],
+              })
+            : slice({ id: "ba-standalone", quantity: 3 }),
+          slice({ id: "ba-new-kit", quantity: 4, assetKitId: "ak-new" }),
+        ],
+      },
+    ]);
+  }
+
+  it("in a converted group, makes the new slice KIT with one KIT row holding its quantity", async () => {
+    seedGroupWithNewKitSlice(true);
+    const tx = fakeTx({
+      convertedPairs: [{ bookingId: BOOKING, assetId: POOL }],
+      createdSlices: [NEW_KIT_SLICE],
+    });
+
+    const result = await seedKitRowsForNewKitSlices(tx, {
+      organizationId: ORG,
+      kitSlices: KIT_SLICES,
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    const plan = writtenPlan();
+    expect(result.convertedSliceIds).toEqual(new Set(["ba-new-kit"]));
+    expect(plan.setModes).toEqual([
+      { bookingAssetId: "ba-new-kit", mode: "KIT" },
+    ]);
+    expect(upsert(plan, "ba-new-kit", "KIT")).toMatchObject({
+      quantity: 4,
+      outQuantity: 0,
+      releasedQuantity: 0,
+      dispatchedTotal: 0,
+    });
+    // Nothing is out, so nothing is allocated: no loose row for the slice.
+    expect(
+      plan.upsertRows.filter(
+        (r) => r.bookingAssetId === "ba-new-kit" && r.kind !== "KIT"
+      )
+    ).toEqual([]);
+    // The asset lock comes before every read that decides anything.
+    expect(h.order.slice(0, 4)).toEqual([
+      "converted-probe",
+      "lock",
+      "bookings",
+      "new-slices",
+    ]);
+  });
+
+  it("with adoption off and no converted group, sends only the probe", async () => {
+    const tx = fakeTx({ convertedPairs: [] });
+
+    const result = await seedKitRowsForNewKitSlices(tx, {
+      organizationId: ORG,
+      kitSlices: KIT_SLICES,
+      adoptionEnabled: false,
+      now: NOW,
+    });
+
+    expect(result.convertedSliceIds.size).toBe(0);
+    expect(h.order).toEqual(["converted-probe"]);
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.booking.findMany).not.toHaveBeenCalled();
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("leaves a LEGACY group on a finished booking untouched, even with adoption on", async () => {
+    seedGroupWithNewKitSlice(false);
+    const tx = fakeTx({ status: "COMPLETE", createdSlices: [NEW_KIT_SLICE] });
+
+    const result = await seedKitRowsForNewKitSlices(tx, {
+      organizationId: ORG,
+      kitSlices: KIT_SLICES,
+      adoptionEnabled: true,
+      now: NOW,
+    });
+
+    expect(result.convertedSliceIds.size).toBe(0);
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("with adoption on, converts a LEGACY group on an active booking and adopts the new slice as KIT", async () => {
+    seedGroupWithNewKitSlice(false);
+    const tx = fakeTx({ createdSlices: [NEW_KIT_SLICE] });
+
+    const result = await seedKitRowsForNewKitSlices(tx, {
+      organizationId: ORG,
+      kitSlices: KIT_SLICES,
+      adoptionEnabled: true,
+      now: NOW,
+    });
+
+    const plan = writtenPlan();
+    expect(result.convertedSliceIds).toEqual(new Set(["ba-new-kit"]));
+    // Adoption on needs no probe: every pair may convert.
+    expect(h.order).not.toContain("converted-probe");
+    expect(plan.setModes).toContainEqual({
+      bookingAssetId: "ba-new-kit",
+      mode: "KIT",
+    });
+    expect(upsert(plan, "ba-new-kit", "KIT")).toMatchObject({ quantity: 4 });
+    // The standalone slice converts too, its units placed without refusing.
+    expect(plan.setModes).toContainEqual({
+      bookingAssetId: "ba-standalone",
+      mode: "AUTO",
+    });
+  });
+
+  it("sends no query for no new kit slices", async () => {
+    const tx = fakeTx();
+
+    await seedKitRowsForNewKitSlices(tx, {
+      organizationId: ORG,
+      kitSlices: [],
+      adoptionEnabled: true,
+      now: NOW,
+    });
+
+    expect(h.order).toEqual([]);
   });
 });

@@ -17,6 +17,11 @@ import { AssetStatus } from "@prisma/client";
 import type { AssetType } from "@prisma/client";
 import type { ScanListItems } from "~/atoms/qr-scanner";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
+import {
+  ALLOCATION_SOURCE_FORM_VALUE,
+  UNPLACED_SOURCE_FORM_VALUE,
+} from "~/modules/booking/checkout-source-location";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -100,6 +105,14 @@ export type PartialCheckoutBlockerArgs = {
    * message.
    */
   shortSourceAssetIds: Set<string>;
+  /**
+   * Quantity-tracked assets whose "From location" the operator set to a
+   * concrete source with room for the slice's units
+   * ({@link assetIdsWithPickedSource}). The check-out takes those units from
+   * the picked source, not the short plan, so `short-source` leaves them to
+   * the server: a pick the server refuses comes back as its own message.
+   */
+  pickedSourceAssetIds: Set<string>;
   /** Drops rows by ASSET id. */
   removeAssetsFromList: (assetIds: string[]) => void;
   /** Drops rows by the CODE that scanned them, which is how kits are keyed. */
@@ -113,6 +126,41 @@ export type PartialCheckoutBlockerArgs = {
 export type PartialCheckoutBlockers = {
   blockerConfigs: BlockerConfig[];
 };
+
+/** What {@link assetIdsWithPickedSource} reads of one source question. */
+export type PickedSourceQuestion = Pick<
+  CheckoutSourceQuestion,
+  "sliceId" | "assetId" | "quantity" | "placements" | "unplaced"
+>;
+
+/**
+ * The assets whose operator-picked source can supply their slice's units.
+ *
+ * A pick counts when it names a concrete source ("As planned" is the plan
+ * itself, so it does not) that holds at least the units the slice sends out:
+ * a location with that many units left, or "Unplaced" with that many units.
+ * Questions without a pick are skipped.
+ *
+ * @param questions - The booking's check-out source questions
+ * @param picks - The operator's answer per slice id, as the select posts it
+ * @returns The asset ids of the questions whose pick can supply the slice
+ */
+export function assetIdsWithPickedSource(
+  questions: readonly PickedSourceQuestion[],
+  picks: Readonly<Record<string, string>>
+): Set<string> {
+  const assetIds = new Set<string>();
+  for (const question of questions) {
+    const pick = picks[question.sliceId];
+    if (pick === undefined || pick === ALLOCATION_SOURCE_FORM_VALUE) continue;
+    const room =
+      pick === UNPLACED_SOURCE_FORM_VALUE
+        ? question.unplaced
+        : question.placements.find((p) => p.locationId === pick)?.left ?? 0;
+    if (room >= question.quantity) assetIds.add(question.assetId);
+  }
+  return assetIds;
+}
 
 /** Scanned rows that resolved to an asset. */
 function assetsOf(items: ScanListItems): AssetFromQr[] {
@@ -165,6 +213,7 @@ export function buildPartialCheckoutBlockers({
   kitsBookedElsewhere,
   assetsInKitsBookedElsewhere,
   shortSourceAssetIds,
+  pickedSourceAssetIds,
   removeAssetsFromList,
   removeItemsFromList,
 }: PartialCheckoutBlockerArgs): PartialCheckoutBlockers {
@@ -210,12 +259,14 @@ export function buildPartialCheckoutBlockers({
 
   // A booked pool with no healthy source left for its units still to go
   // out. Assets already reported as not booked or fully out are left to
-  // those blockers.
+  // those blockers, and so is a pool the operator sends out from a picked
+  // source with room: the plan's short source is then not where it leaves.
   const assetsShortAtSource = assets
     .filter(
       (asset) =>
         bookingAssetIds.has(asset.id) &&
         shortSourceAssetIds.has(asset.id) &&
+        !pickedSourceAssetIds.has(asset.id) &&
         !alreadyCheckedOutAssets.includes(asset.id)
     )
     .map((a) => a.id);

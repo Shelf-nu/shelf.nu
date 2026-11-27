@@ -15,11 +15,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ScanListItems } from "~/atoms/qr-scanner";
+import {
+  ALLOCATION_SOURCE_FORM_VALUE,
+  UNPLACED_SOURCE_FORM_VALUE,
+} from "~/modules/booking/checkout-source-location";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 
 import {
+  assetIdsWithPickedSource,
   buildPartialCheckoutBlockers,
   type PartialCheckoutBlockers,
+  type PickedSourceQuestion,
 } from "./partial-checkout-blockers";
 
 /** Every blocker the partial check-out drawer declares, in order. */
@@ -92,6 +98,7 @@ function build(
     kitsBookedElsewhere = [],
     assetsInKitsBookedElsewhere = [],
     shortSourceAssetIds = [],
+    pickedSourceAssetIds = [],
   }: {
     bookingAssetIds?: string[];
     remainingByAssetId?: Record<string, number>;
@@ -99,6 +106,7 @@ function build(
     kitsBookedElsewhere?: string[];
     assetsInKitsBookedElsewhere?: string[];
     shortSourceAssetIds?: string[];
+    pickedSourceAssetIds?: string[];
   } = {}
 ): PartialCheckoutBlockers & {
   removeAssetsFromList: ReturnType<typeof vi.fn>;
@@ -116,6 +124,7 @@ function build(
       kitsBookedElsewhere: new Set(kitsBookedElsewhere),
       assetsInKitsBookedElsewhere: new Set(assetsInKitsBookedElsewhere),
       shortSourceAssetIds: new Set(shortSourceAssetIds),
+      pickedSourceAssetIds: new Set(pickedSourceAssetIds),
       removeAssetsFromList,
       removeItemsFromList,
     }),
@@ -210,6 +219,30 @@ describe("buildPartialCheckoutBlockers", () => {
       { remainingByAssetId: { a1: 5 }, shortSourceAssetIds: ["a2"] }
     );
     expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a short pool the operator sends out from a picked source with room does not block", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      {
+        remainingByAssetId: { a1: 5 },
+        shortSourceAssetIds: ["a1"],
+        pickedSourceAssetIds: ["a1"],
+      }
+    );
+    expect(activeIds(built)).toEqual([]);
+  });
+
+  it("short-source: a pick for another pool leaves a short pool blocked", () => {
+    const built = build(
+      { qrPool: assetItem({ id: "a1", type: "QUANTITY_TRACKED" } as never) },
+      {
+        remainingByAssetId: { a1: 5 },
+        shortSourceAssetIds: ["a1"],
+        pickedSourceAssetIds: ["a2"],
+      }
+    );
+    expect(activeIds(built)).toEqual(["short-source"]);
   });
 
   it("short-source: a pool with nothing left to go out is reported as already out only", () => {
@@ -377,5 +410,65 @@ describe("buildPartialCheckoutBlockers", () => {
     expect(removedBy(built.removeItemsFromList)).toEqual(
       expect.arrayContaining(["qr2", "qrKit", "qrBad"])
     );
+  });
+});
+
+describe("assetIdsWithPickedSource", () => {
+  /** Pens: 5 units going out, Warehouse has 8 left, Shop 2, 6 unplaced. */
+  const question: PickedSourceQuestion = {
+    sliceId: "ba-pens",
+    assetId: "pens",
+    quantity: 5,
+    placements: [
+      {
+        locationId: "loc-warehouse",
+        name: "Warehouse",
+        placed: 8,
+        inCustody: 0,
+        onBooking: 0,
+        left: 8,
+      },
+      {
+        locationId: "loc-shop",
+        name: "Shop",
+        placed: 4,
+        inCustody: 2,
+        onBooking: 0,
+        left: 2,
+      },
+    ],
+    unplaced: 6,
+  };
+
+  it("counts a picked location with room for the slice's units", () => {
+    expect(
+      assetIdsWithPickedSource([question], { "ba-pens": "loc-warehouse" })
+    ).toEqual(new Set(["pens"]));
+  });
+
+  it("counts Unplaced when the unplaced units cover the slice", () => {
+    expect(
+      assetIdsWithPickedSource([question], {
+        "ba-pens": UNPLACED_SOURCE_FORM_VALUE,
+      })
+    ).toEqual(new Set(["pens"]));
+  });
+
+  it("skips a picked location without room for the slice's units", () => {
+    expect(
+      assetIdsWithPickedSource([question], { "ba-pens": "loc-shop" })
+    ).toEqual(new Set());
+  });
+
+  it("skips As planned, which is the short plan itself", () => {
+    expect(
+      assetIdsWithPickedSource([question], {
+        "ba-pens": ALLOCATION_SOURCE_FORM_VALUE,
+      })
+    ).toEqual(new Set());
+  });
+
+  it("skips a question the operator has not answered", () => {
+    expect(assetIdsWithPickedSource([question], {})).toEqual(new Set());
   });
 });
