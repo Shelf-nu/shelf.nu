@@ -148,17 +148,17 @@ export async function lockBooking(
 /**
  * Returns the element at `index`, or fails loudly.
  *
- * @param ids - Ids returned by a fixture.
+ * @param items - Ids (or other values) returned by a fixture.
  * @param index - Position wanted.
- * @returns The id.
+ * @returns The element.
  * @throws {Error} When the list is shorter than expected.
  */
-export function nth(ids: string[], index: number): string {
-  const id = ids[index];
-  if (!id) {
-    throw new Error(`Expected an id at position ${index}`);
+export function nth<T>(items: T[], index: number): T {
+  const item = items[index];
+  if (!item) {
+    throw new Error(`Expected an element at position ${index}`);
   }
-  return id;
+  return item;
 }
 
 /**
