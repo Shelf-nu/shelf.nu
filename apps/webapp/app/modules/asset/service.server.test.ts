@@ -2909,6 +2909,64 @@ describe("updateAsset cross-org guards", () => {
   });
 });
 
+describe("createAsset custody for a custodian", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: createAsset proves the custodian belongs to the org before
+    // connecting it; a hit is how the org-scoped lookup says it does.
+    vi.mocked(db.teamMember.findFirst).mockResolvedValue({
+      id: "tm-sam",
+    } as never);
+  });
+
+  /** The custody `createAsset` asked Prisma to create with the asset. */
+  function createdCustody() {
+    const [{ data }] = vi.mocked(db.asset.create).mock.calls[0] as unknown as [
+      { data: { custody?: { create: Record<string, unknown> } } },
+    ];
+    return data.custody?.create;
+  }
+
+  it("gives the custodian every unit of a quantity-tracked asset", async () => {
+    await createAsset({
+      title: "Chairs",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      custodian: "tm-sam",
+      type: "QUANTITY_TRACKED",
+      consumptionType: "TWO_WAY",
+      quantity: 40,
+    });
+
+    // Without a quantity the column default of 1 would apply, leaving 39 of
+    // the 40 units free.
+    expect(createdCustody()).toEqual({
+      custodian: { connect: { id: "tm-sam" } },
+      quantity: 40,
+    });
+  });
+
+  it("leaves an individual asset's custody at its one unit", async () => {
+    await createAsset({
+      title: "Sofa",
+      description: "",
+      userId: "user-1",
+      categoryId: null,
+      valuation: null,
+      organizationId: "org-1",
+      custodian: "tm-sam",
+      type: "INDIVIDUAL",
+    });
+
+    expect(createdCustody()).toEqual({
+      custodian: { connect: { id: "tm-sam" } },
+    });
+  });
+});
+
 describe("createAsset cross-org guards", () => {
   beforeEach(() => {
     vitest.clearAllMocks();

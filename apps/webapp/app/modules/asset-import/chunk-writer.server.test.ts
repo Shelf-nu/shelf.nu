@@ -360,12 +360,14 @@ describe("writeImportChunk", () => {
         quantity: 40,
       }),
     ]);
+    // The custodian holds every unit of the row, taken from where it sits.
     expect(tx.custody.createMany.mock.calls[0][0].data).toEqual([
-      expect.objectContaining({
+      {
         assetId: "q1",
         teamMemberId: "tm-sam",
+        quantity: 40,
         locationId: "loc-store",
-      }),
+      },
     ]);
     expect(tx.asset.createMany.mock.calls[0][0].data[0]).toMatchObject({
       status: "IN_CUSTODY",
@@ -373,6 +375,25 @@ describe("writeImportChunk", () => {
       type: "QUANTITY_TRACKED",
       consumptionType: "TWO_WAY",
     });
+  });
+
+  it("a quantity-tracked row with no location still gives its custodian every unit", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    await writeImportChunk(
+      args({
+        rows: [
+          row("q1", {
+            type: "QUANTITY_TRACKED",
+            quantity: "40",
+            consumptionType: "TWO_WAY",
+            custodian: "Sam",
+          }),
+        ],
+      })
+    );
+    expect(tx.custody.createMany.mock.calls[0][0].data).toEqual([
+      { assetId: "q1", teamMemberId: "tm-sam", quantity: 40 },
+    ]);
   });
 
   it("individual rows are placed with one unit and custody has no source", async () => {
