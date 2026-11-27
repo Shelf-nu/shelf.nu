@@ -1290,8 +1290,12 @@ export async function createAsset({
        * full (see the placement below), so that location is where the
        * custody's units come from, the same source `checkOutQuantity` fills
        * in for a pool at one location. `locationId` is org-verified in the
-       * create transaction below, before this nested create runs. */
-      if (custodian) {
+       * create transaction below, before this nested create runs.
+       *
+       * An asset created into a kit gets no direct custody: the kit slice
+       * already holds its units, and a kit member's custody comes from the
+       * kit. Giving the custodian the same units would count them twice. */
+      if (custodian && !hasKit) {
         Object.assign(data, {
           custody: {
             create: {

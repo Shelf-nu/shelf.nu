@@ -220,9 +220,9 @@ function warningFor(row: StoredImportRow, message: string): ImportWarning {
 }
 
 /**
- * Units a placement or kit pivot holds: the full pool for a
+ * Units a placement, kit pivot or direct custody holds: the full pool for a
  * QUANTITY_TRACKED asset, otherwise 1. Same rule as `createAsset`'s
- * placement and `buildAssetKitCreateData`.
+ * placement and custody, and `buildAssetKitCreateData`.
  */
 function poolQuantity(prepared: PreparedRow): number {
   return prepared.type === AssetType.QUANTITY_TRACKED && prepared.quantity
@@ -400,7 +400,7 @@ function toCustodyCreateManyInput(
   return {
     assetId: prepared.row.assetId,
     teamMemberId: prepared.custodianId!,
-    ...(isPool ? { quantity: prepared.quantity } : {}),
+    ...(isPool ? { quantity: poolQuantity(prepared) } : {}),
     ...(isPool && prepared.locationId
       ? { locationId: prepared.locationId }
       : {}),
