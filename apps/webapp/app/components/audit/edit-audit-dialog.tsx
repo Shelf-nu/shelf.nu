@@ -14,6 +14,7 @@ import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { toAssigneeDefaults } from "~/modules/audit/assignee-form";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 
@@ -24,6 +25,9 @@ export const EditAuditSchema = z.object({
     .max(1000, "Description must be 1000 characters or fewer")
     .optional(),
   dueDate: z.string().optional(),
+  /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
+  assignees: z.array(z.string()).optional(),
+  /** Singular field, still accepted from older clients and parsed server-side. */
   assignee: z.string().optional(),
 });
 
@@ -34,7 +38,7 @@ type EditAuditDialogProps = {
     description: string | null;
     dueDate: Date | null;
     status: AuditStatus;
-    /** Only `userId` is read — it maps back to the assignee's team member. */
+    /** Only `userId` is read: it maps back to each assignee's team member. */
     assignments: Array<{ userId: string }>;
   };
   teamMembers: Array<{
@@ -63,7 +67,7 @@ export function EditAuditDialog({
   const nameError = zo.errors.name()?.message;
   const descriptionError = zo.errors.description()?.message;
   const dueDateError = zo.errors.dueDate()?.message;
-  const assigneeError = zo.errors.assignee()?.message;
+  const assigneeError = zo.errors.assignees()?.message;
 
   // Resolved timezone preference — the SAME zone date DISPLAY uses. Seed the
   // datetime-local default from the stored UTC instant in this zone (not the
@@ -82,15 +86,15 @@ export function EditAuditDialog({
     );
   }, [audit.dueDate, timeZone]);
 
-  // Get current assignee's team member ID (convert from user ID)
-  const defaultAssigneeTeamMemberId = useMemo(() => {
-    if (audit.assignments.length === 0) {
-      return undefined;
-    }
-    const currentUserId = audit.assignments[0].userId;
-    const teamMember = teamMembers.find((tm) => tm.userId === currentUserId);
-    return teamMember?.id;
-  }, [teamMembers, audit.assignments]);
+  // Pre-select every current assignee (user ids mapped to team member ids).
+  const defaultAssignees = useMemo(
+    () => toAssigneeDefaults(audit.assignments, teamMembers),
+    [teamMembers, audit.assignments]
+  );
+
+  // The action answers a refusal with an error object; the fields below take
+  // its message, the fallback for anything client-side validation let through.
+  const serverError: string | undefined = actionData?.error?.message;
 
   const isActiveAudit = audit.status === "ACTIVE";
 
@@ -110,7 +114,7 @@ export function EditAuditDialog({
           <div className="-mb-3 w-full pb-6">
             <h3>Edit audit details</h3>
             <p className="text-gray-600">
-              Update the name, description, due date, and assignee of this
+              Update the name, description, due date, and assignees of this
               audit.
             </p>
           </div>
@@ -129,7 +133,7 @@ export function EditAuditDialog({
                 label="Audit name"
                 placeholder="Quarterly warehouse audit"
                 defaultValue={audit.name}
-                error={nameError || actionData?.error}
+                error={nameError || serverError}
                 required
                 disabled={disabled}
                 className="mb-4"
@@ -168,8 +172,8 @@ export function EditAuditDialog({
                       Active audit
                     </p>
                     <p className="mt-1 text-sm text-amber-700">
-                      This audit is currently active. Changing the assignee may
-                      affect ongoing scans.
+                      This audit is currently active. Removing an assignee takes
+                      away their access to scan it right away.
                     </p>
                   </div>
                 </div>
@@ -179,14 +183,16 @@ export function EditAuditDialog({
             {/* Right column: Team member selector */}
             <div className="!border-r">
               <Separator className="md:hidden" />
-              <p className="p-3 pb-0 font-medium">Select assignee (optional)</p>
+              <p className="p-3 pb-0 font-medium">
+                Select assignees (optional)
+              </p>
               <p className="border-b p-3">
                 {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets
                 those people perform it, including several at different times.
               </p>
               <AuditTeamMemberSelector
                 error={assigneeError}
-                defaultValue={defaultAssigneeTeamMemberId}
+                defaultSelected={defaultAssignees}
               />
             </div>
           </div>

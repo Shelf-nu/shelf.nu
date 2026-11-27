@@ -68,11 +68,11 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   /**
-   * Handles popover open/close transitions. Moved out of a `useEffect`
-   * (previously watched `isOpen`) so the search-reset side effects fire
-   * only on the actual state-changing user interaction, satisfying
-   * react-doctor/no-effect-event-handler and keeping the two related
-   * setState calls grouped in a single handler.
+   * Handles popover open/close transitions. The search reset lives in this
+   * handler, not in an effect watching `isOpen`, so it fires only on the
+   * user interaction that changes the state
+   * (react-doctor/no-effect-event-handler) and the two related setState calls
+   * stay grouped.
    */
   const handleOpenChange = (open: boolean) => {
     setIsOpen(open);
@@ -192,10 +192,14 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                 // "Unassigned" and "Unknown" mean different things: nobody is
                 // assigned, versus someone is but has no name on record — an
                 // SSO account whose IdP sent no name claims resolves to "".
-                const assigneeName =
+                const assigneeNames =
                   audit.assignments.length > 0
-                    ? resolveUserDisplayName(audit.assignments[0].user) ||
-                      "Unknown"
+                    ? audit.assignments
+                        .map(
+                          (assignment) =>
+                            resolveUserDisplayName(assignment.user) || "Unknown"
+                        )
+                        .join(", ")
                     : "Unassigned";
 
                 return (
@@ -219,7 +223,12 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                     </div>
                     <div className="mt-1 flex flex-col gap-0.5 text-xs text-gray-600">
                       <span>Created by: {creatorName}</span>
-                      <span>Assignee: {assigneeName}</span>
+                      <span>
+                        {audit.assignments.length > 1
+                          ? "Assignees"
+                          : "Assignee"}
+                        : {assigneeNames}
+                      </span>
                       <span>Expected assets: {audit.expectedAssetCount}</span>
                     </div>
                   </div>

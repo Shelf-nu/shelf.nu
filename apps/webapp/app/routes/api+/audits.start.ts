@@ -3,13 +3,14 @@ import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 
-import { db } from "~/database/db.server";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { lastAuditDateAccessFor } from "~/modules/asset/last-audit-date-access.server";
 import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { custodySearchScopeFor } from "~/modules/asset/search-union.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { resolveAssigneeUserIds } from "~/modules/audit/assignee-form";
+import { sendAuditAssignedEmails } from "~/modules/audit/assignment-emails.server";
 import { AUDIT_SCHEDULER_EVENTS_ENUM } from "~/modules/audit/constants";
 import type { AuditUnitScopeMeta } from "~/modules/audit/context-helpers.server";
 import {
@@ -17,7 +18,6 @@ import {
   resolveAssetIdsForKitSelection,
   resolveAssetIdsForLocationSelection,
 } from "~/modules/audit/context-helpers.server";
-import { sendAuditAssignedEmail } from "~/modules/audit/email-helpers";
 import {
   createAuditSession,
   scheduleNextAuditJob,
@@ -33,7 +33,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * Base schema with common audit fields shared across different entry points.
@@ -46,18 +45,12 @@ export const BaseAuditSchema = z.object({
     .max(1000, "Description must be 1000 characters or fewer")
     .optional(),
   dueDate: z.string().optional(),
-  assignee: z
-    .string()
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      try {
-        const parsed = JSON.parse(val);
-        return parsed.userId;
-      } catch {
-        return val;
-      }
-    }),
+  // One `assignees[i]` entry per selected member, each a JSON blob from
+  // AuditTeamMemberSelector; resolved to user ids by resolveAssigneeUserIds.
+  assignees: z.array(z.string()).optional(),
+  // Singular field, still accepted from older clients; merged into the list
+  // by resolveAssigneeUserIds.
+  assignee: z.string().optional(),
 });
 
 /**
@@ -125,6 +118,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       name,
       description,
       assetIds: directAssetIds,
+      assignees,
       assignee,
       contextType,
       contextId,
@@ -257,78 +251,27 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
     }
 
+    const assigneeIds = resolveAssigneeUserIds(assignees, assignee);
+
     const { session } = await createAuditSession({
       name,
       description: sanitizedDescription,
       assetIds,
       organizationId,
       createdById: userId,
-      assignee,
+      assigneeIds,
       dueDate: dueDateUTC,
       scopeMeta: unitScope,
     });
 
-    // Send email notification if audit is assigned to someone other than the creator
-    if (assignee && assignee !== userId) {
-      // Fetch full audit details for email. Scope by organizationId for
-      // defense-in-depth even though session was just created for this org.
-      const auditForEmail = await db.auditSession.findFirst({
-        where: { id: session.id, organizationId },
-        include: {
-          createdBy: {
-            select: {
-              firstName: true,
-              lastName: true,
-              displayName: true,
-            },
-          },
-          organization: {
-            include: {
-              owner: {
-                select: { email: true },
-              },
-            },
-          },
-          _count: {
-            select: { assets: true },
-          },
-          assignments: {
-            include: {
-              user: {
-                select: {
-                  email: true,
-                  firstName: true,
-                  lastName: true,
-                  displayName: true,
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (auditForEmail) {
-        const assigneeUser = auditForEmail.assignments.find(
-          (a: { userId: string }) => a.userId === assignee
-        );
-
-        if (assigneeUser?.user.email) {
-          const assigneeName =
-            resolveUserDisplayName(assigneeUser.user) || "Unknown User";
-
-          // Send async email (don't await to avoid blocking response).
-          // `assignee` is the recipient user id — plumbed so the email helper
-          // can resolve the assignee's own date/time format preferences.
-          void sendAuditAssignedEmail({
-            audit: auditForEmail,
-            assigneeEmail: assigneeUser.user.email,
-            assigneeName,
-            assigneeUserId: assignee,
-            hints,
-          });
-        }
-      }
-    }
+    // Everyone assigned other than the creator gets the assignment email.
+    // Fire-and-forget: the helper logs its own failures.
+    void sendAuditAssignedEmails({
+      auditId: session.id,
+      organizationId,
+      recipientUserIds: assigneeIds.filter((id) => id !== userId),
+      hints,
+    });
 
     // Schedule reminders if due date is set
     if (session.dueDate && session.dueDate > new Date()) {
@@ -382,9 +325,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     }
 
-    // If assigned to someone else, redirect to overview page
-    // If assigned to self or no assignee, redirect to scan page
-    const isAssignedToOther = assignee && assignee !== userId;
+    // Creator among the assignees (or nobody assigned): straight to the scanner.
+    // Assigned only to other people: the overview, so the creator can watch.
+    const isAssignedToOther =
+      assigneeIds.length > 0 && !assigneeIds.includes(userId);
     const redirectPath = isAssignedToOther ? "overview" : "scan";
 
     return data(

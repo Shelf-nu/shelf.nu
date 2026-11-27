@@ -12,6 +12,7 @@
  *
  * @see {@link file://./org-validation.server.ts}
  */
+import { db } from "~/database/db.server";
 import { ShelfError } from "./error";
 import {
   assertAssetsAreNotArchived,
@@ -31,13 +32,17 @@ import {
   assertTeamMemberBelongsToOrg,
   assertTeamMembersBelongToOrg,
   assertUserBelongsToOrg,
+  assertUsersBelongToOrg,
+  filterUsersInOrg,
 } from "./org-validation.server";
 import { hasPermission } from "./permissions/permission.validator.server";
 
 // why: importing the module pulls in ~/database/db.server (Prisma client
-// init). The guards never touch it here because every call passes an explicit
-// tx, so a hollow mock is enough and keeps the suite DB-free.
-vitest.mock("~/database/db.server", () => ({ db: {} }));
+// init). Every call passes an explicit tx, so the global client must stay
+// untouched: its one spy exists so a test can assert exactly that.
+vitest.mock("~/database/db.server", () => ({
+  db: { userOrganization: { findMany: vitest.fn() } },
+}));
 
 // why: the archived refusal looks up whether the actor may reinstate, only to
 // word the message; the permission matrix has its own suite.
@@ -743,6 +748,107 @@ describe("assertUserBelongsToOrg", () => {
     await expect(
       assertUserBelongsToOrg({ userId: "u-1", organizationId: ORG }, tx)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("assertUsersBelongToOrg", () => {
+  /** A tx whose membership table answers with `memberIds`. */
+  function membersTx(memberIds: string[]) {
+    return txWith({
+      userOrganization: {
+        findMany: vitest
+          .fn()
+          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
+      },
+    });
+  }
+
+  it("passes an empty list without a query", async () => {
+    const tx = membersTx([]);
+
+    await expect(
+      assertUsersBelongToOrg({ userIds: [], organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+
+  it("queries duplicate ids once, scoped to the org, and passes", async () => {
+    const tx = membersTx(["u-1", "u-2"]);
+
+    await expect(
+      assertUsersBelongToOrg(
+        { userIds: ["u-1", "u-2", "u-1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+    expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG, userId: { in: ["u-1", "u-2"] } },
+      select: { userId: true },
+    });
+  });
+
+  it("throws 400 naming the unknown ids when only some are members", async () => {
+    const tx = membersTx(["u-1"]);
+
+    const err = await assertUsersBelongToOrg(
+      { userIds: ["u-1", "u-foreign", "u-gone"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.additionalData).toEqual({
+      organizationId: ORG,
+      unknownUserIds: ["u-foreign", "u-gone"],
+    });
+  });
+
+  it("reads through the passed tx client, never the global db", async () => {
+    const tx = membersTx(["u-1"]);
+
+    await assertUsersBelongToOrg({ userIds: ["u-1"], organizationId: ORG }, tx);
+
+    expect(tx.userOrganization.findMany).toHaveBeenCalledTimes(1);
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("filterUsersInOrg", () => {
+  /** A tx whose membership table answers with `memberIds`. */
+  function membersTx(memberIds: string[]) {
+    return txWith({
+      userOrganization: {
+        findMany: vitest
+          .fn()
+          .mockResolvedValue(memberIds.map((userId) => ({ userId }))),
+      },
+    });
+  }
+
+  it("returns [] for an empty list without a query", async () => {
+    const tx = membersTx([]);
+
+    await expect(
+      filterUsersInOrg({ userIds: [], organizationId: ORG }, tx)
+    ).resolves.toEqual([]);
+    expect(tx.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the members in input order, once each, and drops the rest", async () => {
+    const tx = membersTx(["u-3", "u-1"]);
+
+    await expect(
+      filterUsersInOrg(
+        { userIds: ["u-1", "u-gone", "u-3", "u-1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toEqual(["u-1", "u-3"]);
+    expect(tx.userOrganization.findMany).toHaveBeenCalledWith({
+      where: { organizationId: ORG, userId: { in: ["u-1", "u-gone", "u-3"] } },
+      select: { userId: true },
+    });
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 });
 

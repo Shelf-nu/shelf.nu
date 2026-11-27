@@ -23,6 +23,8 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { resolveAssigneeUserIds } from "~/modules/audit/assignee-form";
+import { sendAuditAssignedEmails } from "~/modules/audit/assignment-emails.server";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -115,18 +117,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }).toJSDate()
         : null;
 
-      // Parse assignee from JSON (same pattern as create audit)
-      let assigneeUserId: string | null = null;
-      if (parsedData.assignee) {
-        try {
-          const parsed = JSON.parse(parsedData.assignee);
-          assigneeUserId = parsed.userId || null;
-        } catch {
-          assigneeUserId = parsedData.assignee || null;
-        }
-      }
+      // The edit form always renders the selector, so an empty list means
+      // "remove everyone". The singular `assignee` field is still accepted
+      // from older clients; resolveAssigneeUserIds merges it into the list.
+      const assigneeUserIds = resolveAssigneeUserIds(
+        parsedData.assignees,
+        parsedData.assignee
+      );
 
-      await updateAuditSession({
+      const { addedAssigneeIds } = await updateAuditSession({
         id: auditId,
         organizationId,
         userId,
@@ -134,8 +133,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           name: parsedData.name,
           description: parsedData.description || null,
           dueDate: dueDateUTC,
-          assigneeUserId,
+          assigneeUserIds,
         },
+      });
+
+      // Newly added people get the same email as on create; the editor is
+      // never emailed about their own change.
+      void sendAuditAssignedEmails({
+        auditId,
+        organizationId,
+        recipientUserIds: addedAssigneeIds.filter((id) => id !== userId),
+        hints,
       });
 
       return payload({ success: true });

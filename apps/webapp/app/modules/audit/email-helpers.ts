@@ -1,6 +1,6 @@
 import type { AuditForEmail } from "~/emails/audit-updates-template";
 import { auditUpdatesTemplateString } from "~/emails/audit-updates-template";
-import { sendEmail } from "~/emails/mail.server";
+import { sendEmail, sendEmailAndWait } from "~/emails/mail.server";
 import { auditEmailSubject, PUSH_MESSAGES } from "~/modules/push/messages";
 import { sendPush } from "~/modules/push/service.server";
 import type { ClientHint } from "~/utils/client-hints";
@@ -162,8 +162,39 @@ export const auditOverdueEmailContent = (args: BasicAuditEmailContentArgs) =>
   });
 
 /**
- * Notifies a user assigned to an audit: an email, and a push with the due
- * date in their own format.
+ * Pushes "You've been assigned to audit" to one assignee's devices, with the
+ * due date in their own format. Fire-and-forget: it only queues the push.
+ *
+ * @param params.audit - The audit the person was assigned to
+ * @param params.assigneeUserId - The recipient
+ * @param params.prefs - The recipient's resolved date and time preferences
+ */
+export function sendAuditAssignedPush({
+  audit,
+  assigneeUserId,
+  prefs,
+}: {
+  audit: AuditForEmail;
+  assigneeUserId: string;
+  prefs: ResolvedFormatPrefs;
+}) {
+  void sendPush({
+    userIds: [assigneeUserId],
+    ...PUSH_MESSAGES.AUDIT_ASSIGNED({
+      auditId: audit.id,
+      organizationId: audit.organizationId,
+      auditName: audit.name,
+      dueDate: audit.dueDate
+        ? formatDate(audit.dueDate, prefs, { includeTime: true })
+        : undefined,
+    }),
+  });
+}
+
+/**
+ * Emails a user assigned to an audit, with dates in their own format. The
+ * push is sent separately by {@link sendAuditAssignedPush}, so a slow mail
+ * server never holds it back.
  */
 export async function sendAuditAssignedEmail({
   audit,
@@ -197,7 +228,11 @@ export async function sendAuditAssignedEmail({
       assetCount,
     });
 
-    sendEmail({
+    // Awaited so the caller's loop only moves on once this email is sent or
+    // its queue fallback has been tried. sendEmailAndWait logs its own send
+    // and enqueue failures and does not reject; it resolves false when both
+    // failed, and then nothing was handed off.
+    const handedOff = await sendEmailAndWait({
       to: assigneeEmail,
       subject: auditEmailSubject("ASSIGNED", audit.name),
       text: auditAssignedEmailContent({
@@ -213,21 +248,11 @@ export async function sendAuditAssignedEmail({
       html,
     });
 
-    void sendPush({
-      userIds: [assigneeUserId],
-      ...PUSH_MESSAGES.AUDIT_ASSIGNED({
-        auditId: audit.id,
-        organizationId: audit.organizationId,
-        auditName: audit.name,
-        dueDate: audit.dueDate
-          ? formatDate(audit.dueDate, prefs, { includeTime: true })
-          : undefined,
-      }),
-    });
-
-    Logger.info(
-      `Audit assignment email sent to ${assigneeName} (${assigneeEmail}) for audit: ${audit.name}`
-    );
+    if (handedOff) {
+      Logger.info(
+        `Audit assignment email handed off for ${assigneeName} (${assigneeEmail}) for audit: ${audit.name}`
+      );
+    }
   } catch (emailError) {
     Logger.error(
       new ShelfError({
