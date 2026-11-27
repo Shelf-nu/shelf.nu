@@ -41,14 +41,18 @@ export function isStandalonePoolSlice(slice: {
  *
  * Only standalone pool slices (quantity-tracked and not kit-driven, which
  * includes units left behind when an asset leaves a kit) allocated by source
- * (`AUTO` or `MANUAL`) with something to show qualify. A pool without manual
- * placements keeps the ordinary cell while all its units come from Unplaced:
- * every unit of such a pool is unplaced, so the sources would say nothing
- * new. Individual assets, kit rows and `LEGACY` slices never reach this cell.
+ * (`AUTO` or `MANUAL`) with something to show qualify. A pool with no
+ * placements at all keeps the ordinary cell while all its units come from
+ * Unplaced: every unit of such a pool is unplaced and its Location cell is
+ * already empty, so the sources would say nothing new. A pool placed only
+ * through kits does show "Unplaced": its Location cell names the kit's
+ * location, which these loose units do not come from. Individual assets, kit
+ * rows and `LEGACY` slices never reach this cell.
  *
  * @param args.summary - The slice's source summary from the loader, if any
  * @param args.isStandalonePoolSlice - Output of {@link isStandalonePoolSlice}
- * @param args.hasManualPlacements - The pool has at least one non-kit placement
+ * @param args.hasPlacements - The pool has at least one placement, manual or
+ *   kit-driven
  * @returns The cell to render, or `null` to keep the ordinary Location cell
  */
 export function selectPoolSourceCell(args: {
@@ -56,14 +60,14 @@ export function selectPoolSourceCell(args: {
     | { parts: BookingSourcePart[]; mode: SourceAllocationMode }
     | undefined;
   isStandalonePoolSlice: boolean;
-  hasManualPlacements: boolean;
+  hasPlacements: boolean;
 }): PoolSourceCell | null {
-  const { summary, isStandalonePoolSlice, hasManualPlacements } = args;
+  const { summary, isStandalonePoolSlice, hasPlacements } = args;
   if (!summary || !isStandalonePoolSlice) return null;
   if (summary.mode !== "AUTO" && summary.mode !== "MANUAL") return null;
   if (summary.parts.length === 0) return null;
   if (
-    !hasManualPlacements &&
+    !hasPlacements &&
     summary.parts.every((part) => part.kind === "UNPLACED")
   ) {
     return null;

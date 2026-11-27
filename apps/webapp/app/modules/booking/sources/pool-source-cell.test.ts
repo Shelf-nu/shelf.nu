@@ -50,7 +50,7 @@ const UNASSIGNED = part({
 describe("selectPoolSourceCell", () => {
   const base = {
     isStandalonePoolSlice: true,
-    hasManualPlacements: true,
+    hasPlacements: true,
   };
 
   it("returns the parts of an allocated standalone pool slice", () => {
@@ -99,21 +99,33 @@ describe("selectPoolSourceCell", () => {
     ).toBeNull();
   });
 
-  it("keeps the ordinary cell for a pool without manual placements drawing from Unplaced", () => {
+  it("keeps the ordinary cell for a pool with no placements drawing from Unplaced", () => {
     expect(
       selectPoolSourceCell({
         ...base,
-        hasManualPlacements: false,
+        hasPlacements: false,
         summary: { parts: [UNPLACED], mode: "AUTO" },
       })
     ).toBeNull();
   });
 
-  it("still shows a pool without manual placements that needs a location", () => {
+  it("shows Unplaced for a pool placed only through kits", () => {
+    // The row's Location cell would name the kit's location, which these
+    // loose units do not come from; the caller counts kit-driven placements.
     expect(
       selectPoolSourceCell({
         ...base,
-        hasManualPlacements: false,
+        hasPlacements: true,
+        summary: { parts: [UNPLACED], mode: "AUTO" },
+      })
+    ).toEqual({ parts: [UNPLACED] });
+  });
+
+  it("still shows a pool with no placements that needs a location", () => {
+    expect(
+      selectPoolSourceCell({
+        ...base,
+        hasPlacements: false,
         summary: { parts: [UNASSIGNED], mode: "AUTO" },
       })
     ).toEqual({ parts: [UNASSIGNED] });

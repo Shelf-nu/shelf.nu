@@ -3557,6 +3557,11 @@ export type CheckoutDispatchOptions = {
    * Called once the check-out has committed, with where each converted pool
    * slice's units left from, so the mobile response can list the real
    * sources. Not called when the check-out fails.
+   *
+   * Must not throw. It runs after the commit and before the activity notes
+   * and the scheduler jobs: a throw there skips those for a check-out that
+   * already happened and reports a failure to a client whose units left.
+   * Record the value and do any fallible work after the service returns.
    */
   onDispatched?: (dispatched: DispatchedSlice[]) => void;
 };

@@ -411,7 +411,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       multiPlacedPoolIds,
       modelReservationShortfalls,
       sliceSourceSummaries,
-      manuallyPlacedPoolIds,
+      placedPoolIds,
     ] = await Promise.all([
       loadSliceSourceLocations({
         organizationId,
@@ -438,15 +438,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       sourcePlannedPoolIds.length > 0
         ? getSliceSourceSummaries({ organizationId, bookingId: booking.id })
         : new Map<string, SliceSourceSummary>(),
-      // Pools with at least one manual (non-kit) placement: a pool without
-      // one keeps the plain location while all its units are unplaced.
+      // Pools with at least one placement, kit-driven included: a pool with
+      // none keeps the plain location while all its units are unplaced (see
+      // `selectPoolSourceCell`).
       sourcePlannedPoolIds.length > 0
         ? db.assetLocation
             .findMany({
               where: {
                 assetId: { in: sourcePlannedPoolIds },
                 organizationId,
-                assetKitId: null,
               },
               select: { assetId: true },
               distinct: ["assetId"],
@@ -486,7 +486,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           selectPoolSourceCell({
             summary: sliceSourceSummaries.get(ba.id),
             isStandalonePoolSlice: isStandalonePoolSlice(ba),
-            hasManualPlacements: manuallyPlacedPoolIds.has(ba.asset.id),
+            hasPlacements: placedPoolIds.has(ba.asset.id),
           })?.parts ?? [],
         sourceAllocation: ba.sourceAllocation,
       };

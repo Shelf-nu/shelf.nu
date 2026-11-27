@@ -110,7 +110,7 @@ describe("BookingSourceCell", () => {
     const cell = selectPoolSourceCell({
       summary: { parts: [UNASSIGNED], mode: "AUTO" },
       isStandalonePoolSlice: isStandalonePoolSlice(slice),
-      hasManualPlacements: true,
+      hasPlacements: true,
     });
     expect(cell).not.toBeNull();
     if (!cell) return;

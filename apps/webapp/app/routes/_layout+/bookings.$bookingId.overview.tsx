@@ -768,11 +768,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         const cell = selectPoolSourceCell({
           summary: sliceSourceSummaries.get(ba.id),
           isStandalonePoolSlice: isStandalonePoolSlice(ba),
-          // Manual placements only: kit-driven placement rows belong to kits.
-          hasManualPlacements:
-            assetDetailsMap
-              .get(ba.assetId)
-              ?.assetLocations.some((al) => al.assetKitId === null) ?? false,
+          // Any placement, kit-driven included: see `selectPoolSourceCell`.
+          hasPlacements:
+            (assetDetailsMap.get(ba.assetId)?.assetLocations.length ?? 0) > 0,
         });
         if (cell) poolSourcesBySlice[ba.id] = cell;
       }

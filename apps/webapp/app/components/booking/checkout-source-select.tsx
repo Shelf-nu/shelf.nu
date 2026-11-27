@@ -21,8 +21,8 @@
  *
  * A slice that goes out by its plan pre-selects "As planned". The option names
  * the plan ("As planned: Demo Warehouse 8 · Unplaced 7") and a line under the
- * select says what leaving it alone does, linked to the select by
- * `aria-describedby`.
+ * picker names the plan and says what leaving it alone does, linked to the
+ * picker's trigger by `aria-describedby`.
  *
  * @see {@link file://../../modules/booking/checkout-source-location.ts} the rule and the option labels
  */
@@ -172,8 +172,9 @@ export function CheckoutSourceSelect({
 }
 
 /**
- * The line under a select that pre-selects "As planned": where the units go
- * out from when nothing is picked. Nothing for any other default.
+ * The line under a select that pre-selects "As planned": it names the stored
+ * plan and says that leaving the option alone sends the units out by it.
+ * Nothing for any other default.
  *
  * @param question - The pool being asked about
  * @returns The hint, or `null`
@@ -183,6 +184,6 @@ export function asPlannedHint(
 ): string | null {
   if (question.defaultLocationId !== ALLOCATION_SOURCE_FORM_VALUE) return null;
   return question.plannedSummary
-    ? `Leaves from ${question.plannedSummary}. Pick a location to take these units from it instead.`
+    ? `Planned: ${question.plannedSummary}. These units go out by that plan; pick a location to take them from it instead.`
     : "Shelf picks the locations with room for these units. Pick a location to take them from it instead.";
 }

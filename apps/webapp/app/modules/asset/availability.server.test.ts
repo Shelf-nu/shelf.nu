@@ -1056,6 +1056,9 @@ describe("getAssetAvailabilityBatch", () => {
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
       bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingDispositionShare: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
       partialBookingCheckout: { findMany: vitest.fn().mockResolvedValue([]) },
       consumptionLog: {
         findMany: vitest.fn().mockResolvedValue([]),
@@ -2020,6 +2023,9 @@ describe("assertAssetQuantitiesAvailable", () => {
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
       bookingAssetSource: { findMany: vitest.fn().mockResolvedValue([]) },
+      bookingDispositionShare: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
       partialBookingCheckout: { findMany: vitest.fn().mockResolvedValue([]) },
       consumptionLog: {
         findMany: vitest.fn().mockResolvedValue([]),

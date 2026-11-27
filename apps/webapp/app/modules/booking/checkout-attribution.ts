@@ -649,3 +649,45 @@ export function computeUnitsStillOutBySlice(args: {
   }
   return stillOut;
 }
+
+/**
+ * One `BookingDispositionShare` row as the checked-out readers see it: the
+ * slice its units came off (`null` once orphaned) and how many.
+ */
+export type DispositionShareUnits = {
+  bookingAssetId: string | null;
+  quantity: number;
+};
+
+/**
+ * The dispositions {@link computeUnitsStillOutBySlice} nets off one group
+ * (one asset on one booking).
+ *
+ * A LEGACY group reads its raw RETURN / CONSUME / LOSS / DAMAGE logs, spread
+ * by their slice tag. A converted group reads its disposition shares instead:
+ * each share names the slice its units came off, so it lands there as a
+ * tagged disposition. An orphaned share (its slice was removed, or nothing
+ * fitted at conversion) names no slice and nets nothing, because no slice on
+ * the booking holds its units.
+ *
+ * @param args.converted - Whether the group is converted (any non-LEGACY slice)
+ * @param args.logs - The group's disposition logs, read for a LEGACY group
+ * @param args.shares - The group's disposition shares, read for a converted group
+ * @returns The dispositions to net off the group's slices
+ */
+export function groupDispositionsForStillOut(args: {
+  converted: boolean;
+  logs: CheckoutAttributionLog[];
+  shares: DispositionShareUnits[];
+}): CheckoutAttributionLog[] {
+  if (!args.converted) return args.logs;
+  const tagged: CheckoutAttributionLog[] = [];
+  for (const share of args.shares) {
+    if (share.bookingAssetId === null) continue;
+    tagged.push({
+      bookingAssetId: share.bookingAssetId,
+      quantity: share.quantity,
+    });
+  }
+  return tagged;
+}

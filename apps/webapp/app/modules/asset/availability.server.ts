@@ -73,10 +73,12 @@ import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-ou
 import type {
   CheckoutAttributionLog,
   CheckoutSession,
+  DispositionShareUnits,
 } from "~/modules/booking/checkout-attribution";
 import {
   checkoutSessionsToLogsByAsset,
   computeUnitsStillOutBySlice,
+  groupDispositionsForStillOut,
 } from "~/modules/booking/checkout-attribution";
 import { isReservationExpired } from "~/modules/booking/helpers";
 import {
@@ -664,6 +666,29 @@ export type AvailabilityBatchClient = {
   };
   /** Source rows of converted standalone slices (see the reserved read). */
   bookingAssetSource: ConvertedSliceRowsClient["bookingAssetSource"];
+  /**
+   * The checked-out read's disposition shares of converted groups, each
+   * naming the slice its units came off. Issued only when an active booking
+   * holds a converted slice of a requested asset.
+   */
+  bookingDispositionShare: {
+    findMany: (args: {
+      where: Prisma.BookingDispositionShareWhereInput;
+      select: {
+        bookingId: true;
+        assetId: true;
+        bookingAssetId: true;
+        quantity: true;
+      };
+    }) => Promise<
+      Array<{
+        bookingId: string;
+        assetId: string;
+        bookingAssetId: string | null;
+        quantity: number;
+      }>
+    >;
+  };
   partialBookingCheckout: {
     findMany: (args: {
       where: Prisma.PartialBookingCheckoutWhereInput;
@@ -1066,7 +1091,10 @@ export type CheckedOutBreakdown = { total: number; standalone: number };
  * {@link computeCheckedOutBreakdownForAsset} runs: what left (the larger of the
  * slice's session claims, or the whole slice when only its `checkedOutAt`
  * records the departure, and the stored `checkedOutQuantity`) minus what came
- * back or was used up. The two are pinned together by
+ * back or was used up. A LEGACY group nets its raw disposition logs; a
+ * converted group nets its disposition shares on the slices they name (see
+ * {@link groupDispositionsForStillOut}), read in a fourth query issued only
+ * when a converted group is present. The two are pinned together by
  * `checked-out-batch-parity.test.ts`.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
@@ -1109,9 +1137,9 @@ async function computeCheckedOutBreakdownBatch(
 /**
  * {@link computeCheckedOutBreakdownBatch}, kept per booking: for every
  * requested asset, the units of it still off the shelf on each ONGOING /
- * OVERDUE booking it is on, in the same fixed three queries. The batched
- * sibling of `computeCheckedOutByBookingForAsset`, for list surfaces that show
- * one line per booking (the asset index status badge).
+ * OVERDUE booking it is on, in the same three queries (a fourth for converted
+ * groups). The batched sibling of `computeCheckedOutByBookingForAsset`, for
+ * list surfaces that show one line per booking (the asset index status badge).
  *
  * @param client - Batch Prisma surface (see {@link AvailabilityBatchClient}).
  * @param assetIds - Assets to compute checked-out units for (already deduped).
@@ -1146,11 +1174,20 @@ export async function computeCheckedOutByBookingBatch(
       assetKitId: true,
       checkedOutAt: true,
       checkedOutQuantity: true,
+      sourceAllocation: true,
       booking: { select: { from: true, to: true, status: true } },
     },
   });
 
   if (pivots.length === 0) return byAssetByBooking;
+
+  /**
+   * Converted groups, keyed `${bookingId}:${assetId}`. One slice's mode
+   * answers for its group, because conversion converts every slice at once.
+   */
+  const convertedGroups = new Set<string>();
+  const convertedBookingIds = new Set<string>();
+  const convertedAssetIds = new Set<string>();
 
   /** slices grouped: bookingId → assetId → its slices on that booking. */
   type Slice = {
@@ -1183,10 +1220,15 @@ export async function computeCheckedOutByBookingBatch(
     } else {
       byAsset.set(p.assetId, [slice]);
     }
+    if (isConvertedSlice(p.sourceAllocation)) {
+      convertedGroups.add(`${p.bookingId}:${p.assetId}`);
+      convertedBookingIds.add(p.bookingId);
+      convertedAssetIds.add(p.assetId);
+    }
   }
 
   const activeBookingIds = [...slicesByBookingByAsset.keys()];
-  const [sessions, dispositionLogs] = await Promise.all([
+  const [sessions, dispositionLogs, shares] = await Promise.all([
     client.partialBookingCheckout.findMany({
       where: { bookingId: { in: activeBookingIds } },
       select: {
@@ -1209,7 +1251,39 @@ export async function computeCheckedOutByBookingBatch(
         quantity: true,
       },
     }),
+    // Converted groups only: a batch with no converted group issues no share
+    // read. Orphaned shares name no slice and net nothing, so they are left out.
+    convertedGroups.size === 0
+      ? Promise.resolve([])
+      : client.bookingDispositionShare.findMany({
+          where: {
+            organizationId,
+            bookingId: { in: [...convertedBookingIds] },
+            assetId: { in: [...convertedAssetIds] },
+            bookingAssetId: { not: null },
+          },
+          select: {
+            bookingId: true,
+            assetId: true,
+            bookingAssetId: true,
+            quantity: true,
+          },
+        }),
   ]);
+
+  /** shares grouped: `${bookingId}:${assetId}` to its shares. */
+  const sharesByGroup = new Map<string, DispositionShareUnits[]>();
+  for (const share of shares) {
+    const key = `${share.bookingId}:${share.assetId}`;
+    // The two `in` filters form a cross product; keep converted groups only.
+    if (!convertedGroups.has(key)) continue;
+    const list = sharesByGroup.get(key) ?? [];
+    list.push({
+      bookingAssetId: share.bookingAssetId,
+      quantity: share.quantity,
+    });
+    sharesByGroup.set(key, list);
+  }
 
   /** dispositions grouped: bookingId → assetId → its logs on that booking. */
   const dispositionsByBookingByAsset = new Map<
@@ -1249,8 +1323,11 @@ export async function computeCheckedOutByBookingBatch(
       const stillOutBySlice = computeUnitsStillOutBySlice({
         slices,
         checkoutClaims: logsByAsset.get(assetId) ?? [],
-        dispositions:
-          dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
+        dispositions: groupDispositionsForStillOut({
+          converted: convertedGroups.has(`${bookingId}:${assetId}`),
+          logs: dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
+          shares: sharesByGroup.get(`${bookingId}:${assetId}`) ?? [],
+        }),
       });
 
       const acc: CheckedOutBreakdown = { total: 0, standalone: 0 };

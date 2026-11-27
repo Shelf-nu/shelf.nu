@@ -256,6 +256,7 @@ describe("settleUnits", () => {
   it("refuses units that are not out, changing nothing", () => {
     const rowA = row("r-a", "LOCATION", { quantity: 10, out: 2 }, "loc-a");
     const settlement = settlementOf([slice("s1", [rowA])]);
+    const rowBefore = structuredClone(rowA);
 
     let error: unknown;
     try {
@@ -269,7 +270,7 @@ describe("settleUnits", () => {
     expect((error as ShelfError).message).toBe(
       "Cannot check in 3 units. Only 2 are out on this booking."
     );
-    expect(rowA.outQuantity).toBe(2);
+    expect(rowA).toEqual(rowBefore);
     expect(settlement.planned).toEqual([]);
   });
 
@@ -381,7 +382,7 @@ describe("matchSharesToLogs", () => {
     ]);
   });
 
-  it("covers a ledger event split over two places with both of its rows", () => {
+  it("covers a ledger event logged in two parts from one row", () => {
     const settlement = settlementOf([
       slice("s1", [row("r-a", "LOCATION", { quantity: 5, out: 5 }, "loc-a")]),
     ]);
@@ -403,6 +404,42 @@ describe("matchSharesToLogs", () => {
     ]);
 
     expect(match.ok && match.shares.map((s) => s.quantity)).toEqual([3, 2]);
+  });
+
+  it("covers a ledger event split over two places with both of its rows", () => {
+    // Most out first: loc-a (3) settles before loc-b (2).
+    const settlement = settlementOf([
+      slice("s1", [
+        row("r-a", "LOCATION", { quantity: 3, out: 3 }, "loc-a"),
+        row("r-b", "LOCATION", { quantity: 2, out: 2 }, "loc-b"),
+      ]),
+    ]);
+    settleUnits(settlement, { sliceId: "s1", assetId: POOL, consumed: 5 });
+
+    const match = matchSharesToLogs(settlement.planned, [
+      log({
+        id: "c-1",
+        bookingAssetId: "s1",
+        category: "CONSUME",
+        quantity: 2,
+      }),
+      log({
+        id: "c-2",
+        bookingAssetId: "s1",
+        category: "CONSUME",
+        quantity: 3,
+      }),
+    ]);
+
+    // c-2 takes what c-1 left at loc-a, then all of loc-b.
+    expect(
+      match.ok &&
+        match.shares.map((s) => [s.consumptionLogId, s.sourceKey, s.quantity])
+    ).toEqual([
+      ["c-1", "LOCATION:loc-a", 2],
+      ["c-2", "LOCATION:loc-a", 1],
+      ["c-2", "LOCATION:loc-b", 2],
+    ]);
   });
 
   it("reports a log nobody settled and units nobody logged", () => {

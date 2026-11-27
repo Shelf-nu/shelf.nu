@@ -3302,9 +3302,10 @@ async function performKitDeletion({
       );
     }
 
-    // Deleting the kit cascades Kit → AssetKit → AssetLocation, which would
-    // unplace every member. Convert the kit-driven placements to manual ones
-    // first so the assets stay where the kit left them.
+    // Deleting the kit cascades Kit → AssetKit → AssetLocation. The membership
+    // rows read here feed the planning-booking cleanup, the collision merge
+    // and the placement preservation below, all of which must run before the
+    // kit (and so every AssetKit row) is deleted.
     const aksToDelete = await tx.assetKit.findMany({
       where: { kitId: { in: kitIdsToDelete }, organizationId },
       select: { id: true },
@@ -3317,18 +3318,22 @@ async function performKitDeletion({
     await removeKitSlicesFromPlanningBookings(tx, aksToDeleteIds, {
       actorUserId: userId,
       organizationId,
-      // The asset never left the kit here — the kit stopped existing.
+      // The asset never left the kit here: the kit stopped existing.
       reason: "kit-deleted",
     });
-    // The merge was missing here: an asset held BOTH standalone and via the kit
-    // on the same booking made the `SET NULL` cascade trip
-    // `BookingAsset_manual_unique`, rolling back the whole kit deletion with a
-    // P2002. Same guard the membership-removal paths already run.
+    // Merge before any AssetKit delete: an asset held BOTH standalone and via
+    // the kit on the same booking makes the `SET NULL` cascade trip
+    // `BookingAsset_manual_unique` (P2002) and roll back the whole deletion.
+    // The membership-removal paths run the same guard.
     await mergeStandaloneCollisionsForKitDetachment(
       tx,
       aksToDeleteIds,
       organizationId
     );
+    // INDIVIDUAL members keep the kit's location as a manual placement.
+    // Quantity-tracked members' kit-driven placements cascade away with the
+    // AssetKit rows, so those units become unplaced: converting them to manual
+    // rows could breach the manual-placement cap and abort the deletion.
     await preserveKitDrivenPlacements(tx, aksToDeleteIds);
 
     await tx.kit.deleteMany({
@@ -8410,15 +8415,18 @@ export async function bulkRemoveAssetsFromKits({
       // "detach from kit" means deleting the pivot rows for these
       // assets within this organization.
       //
-      // The merge runs first: an asset held BOTH standalone and via the kit
-      // on the same booking would otherwise make the `SET NULL` cascade trip
-      // `BookingAsset_manual_unique` and roll back the whole bulk op with a
-      // P2002. Same guard the singular paths run.
+      // Merge before the AssetKit delete: an asset held BOTH standalone and
+      // via the kit on the same booking makes the `SET NULL` cascade trip
+      // `BookingAsset_manual_unique` (P2002) and roll back the whole bulk op.
+      // The singular paths run the same guard.
       await mergeStandaloneCollisionsForKitDetachment(
         tx,
         aksToDeleteIds,
         organizationId
       );
+      // Keeps INDIVIDUAL members at the kit's location; quantity-tracked
+      // kit-driven placements cascade with the AssetKit rows and their units
+      // become unplaced.
       await preserveKitDrivenPlacements(tx, aksToDeleteIds);
       await tx.assetKit.deleteMany({
         where: {

@@ -162,7 +162,7 @@ const FUNCTION_LINE =
   /^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?const\s+(\w+)\s*(?::[^=]*)?=\s*(?:async\s*)?(?:\(|function\b|\w+\s*=>)/;
 
 /** A direct write of a `ConsumptionLog` row through the Prisma client. */
-const DIRECT_LOG_WRITE = /\.consumptionLog\s*\.\s*create(?:Many)?\(/;
+const DIRECT_LOG_WRITE = /\.consumptionLog\s*\.\s*create(?:Many)?\s*\(/;
 
 /**
  * The only files that write `ConsumptionLog` rows through the client: the two
@@ -185,8 +185,15 @@ function scannedSources(): Array<[string, string]> {
   ]);
 }
 
-/** A call of one of the writers (not their declarations). */
-const WRITER_CALL = /\b(createConsumptionLog|recordStockChanges)\(/;
+/**
+ * A call of one of the writers, whitespace before the parenthesis allowed.
+ * Also matches their declarations, which {@link WRITER_DECLARATION} excludes.
+ */
+const WRITER_CALL = /\b(createConsumptionLog|recordStockChanges)\s*\(/;
+
+/** The declaration of a writer, as a function or a `const`. */
+const WRITER_DECLARATION =
+  /\b(?:function|const)\s+(createConsumptionLog|recordStockChanges)\b/;
 
 /**
  * The top-level functions of every scanned file that call a writer, with
@@ -205,13 +212,11 @@ function findCallers(): Map<string, string> {
     starts.forEach((start, index) => {
       const end = starts[index + 1]?.line ?? lines.length;
       const body = lines.slice(start.line, end);
-      const calls = body
-        .slice(1)
-        .some(
-          (line) =>
-            WRITER_CALL.test(line) &&
-            !/function\s+(createConsumptionLog|recordStockChanges)/.test(line)
-        );
+      // The declaration line counts too: a one-line arrow can call a writer
+      // on it.
+      const calls = body.some(
+        (line) => WRITER_CALL.test(line) && !WRITER_DECLARATION.test(line)
+      );
       if (calls) callers.set(`${path}#${start.name}`, body.join("\n"));
     });
   }
@@ -239,7 +244,7 @@ describe("disposition log writers", () => {
       const body = callers.get(key) ?? "";
       for (const call of entry.mustCall) {
         expect(body, `${key} must call ${call}`).toMatch(
-          new RegExp(`\\b${call}\\(`)
+          new RegExp(`\\b${call}\\s*\\(`)
         );
       }
     }
@@ -247,7 +252,7 @@ describe("disposition log writers", () => {
 
   it("names a booking disposition writer only when it settles by source", () => {
     for (const [key, entry] of Object.entries(CALLERS)) {
-      const settles = /\bsettleUnits\(/.test(callers.get(key) ?? "");
+      const settles = /\bsettleUnits\s*\(/.test(callers.get(key) ?? "");
       expect(settles, key).toBe(entry.writesBookingDispositions);
     }
   });
@@ -263,7 +268,7 @@ describe("disposition log writers", () => {
     for (const [key, entry] of Object.entries(CALLERS)) {
       if (!entry.writesBookingDispositions) continue;
       const body = callers.get(key) ?? "";
-      const at = (call: string) => body.search(new RegExp(`\\b${call}\\(`));
+      const at = (call: string) => body.search(new RegExp(`\\b${call}\\s*\\(`));
       const assetLock = entry.assetLock ?? "lockEveryAssetForQuantityUpdate";
       expect(at(assetLock), key).toBeGreaterThan(-1);
       expect(at("lockBookingForStatusCheck"), key).toBeLessThan(at(assetLock));

@@ -4603,11 +4603,15 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         status: 400,
         message: expect.stringContaining("short at Demo Warehouse"),
       });
-      expect(db.bookingAsset.updateMany).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { checkedOutQuantity: expect.anything() },
-        })
-      );
+      // No slice write carries a departure count, whatever else it sets.
+      const updateManyCalls = (
+        db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
+      ).mock.calls as Array<[{ data?: Record<string, unknown> }]>;
+      expect(
+        updateManyCalls.some(
+          ([args]) => "checkedOutQuantity" in (args.data ?? {})
+        )
+      ).toBe(false);
       expect(reported).toEqual([]);
     });
 

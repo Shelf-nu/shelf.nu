@@ -233,11 +233,13 @@ export type CheckoutSourceQuestion = {
    */
   defaultLocationId: string | null;
   /**
-   * True when the slice already has sources planned (its group is
-   * converted): the default is "as planned", and a check-out that picks
-   * nothing dispatches by that plan. Surfaces that cannot ask the
-   * question may check such a slice out without refusing it. Absent means
-   * false (a LEGACY slice).
+   * True when the slice has a stored plan (its group is converted): a
+   * check-out that picks nothing dispatches by that plan, so surfaces that
+   * cannot ask the question may check such a slice out without refusing it.
+   * Absent means false (a LEGACY slice). It does not name the pre-selected
+   * option: that is {@link CheckoutSourceQuestion.defaultLocationId}, which
+   * is "as planned" for a client with the `booking-sources` capability and,
+   * for an older phone, the single pending source or the shelf default.
    */
   fromAllocation?: boolean;
   /**

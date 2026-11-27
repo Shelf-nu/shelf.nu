@@ -100,6 +100,7 @@ const KIT = { id: "kit-1", name: "Camera kit", location: null };
 const BOOKING_ASSETS = [
   {
     id: "ba-standalone",
+    assetId: "asset-1",
     quantity: 2,
     assetKitId: null,
     sourceKitId: null,
@@ -107,6 +108,7 @@ const BOOKING_ASSETS = [
   },
   {
     id: "ba-via-kit",
+    assetId: "asset-1",
     quantity: 3,
     assetKitId: "ak-1",
     sourceKitId: "kit-1",
@@ -725,11 +727,11 @@ describe("booking PDF: custom field values", () => {
 });
 
 describe("booking PDF: where a pool's units come from", () => {
-  /** A pool kept at one manual placement and in one kit. */
+  /** A pool kept at one placement and in one kit. */
   const POOL = {
     ...ASSET,
     type: "QUANTITY_TRACKED",
-    assetLocations: [{ assetKitId: null, location: { name: "Studio" } }],
+    assetLocations: [{ location: { name: "Studio" } }],
   };
 
   /** Parts as the source facade builds them. */
@@ -818,14 +820,27 @@ describe("booking PDF: where a pool's units come from", () => {
     expect(row("ba-via-kit")?.location).toEqual({ name: "Studio" });
   });
 
-  it("asks which placements are manual, so kit placements never count", async () => {
+  it("reads every placement of the pool, kit-driven ones included", async () => {
     await runWithSources("AUTO", [part("Demo Warehouse", 8)]);
 
     expect(
       mockOf(db.asset.findMany).mock.calls[0][0].include.assetLocations
     ).toEqual({
-      select: { assetKitId: true, location: { select: { name: true } } },
+      select: { location: { select: { name: true } } },
     });
+  });
+
+  it("prints Unplaced for a placed pool whose units all come from Unplaced", async () => {
+    // The pool has a placement (its kit's counts as one), so the Location
+    // cell would name a place these loose units do not come from.
+    const result = await runWithSources("AUTO", [
+      part("Unplaced", 7, "UNPLACED"),
+    ]);
+
+    const standalone = result.assets.find(
+      (asset) => asset.bookingAssetId === "ba-standalone"
+    );
+    expect(standalone?.sourceLine).toEqual({ text: "Unplaced", warnings: [] });
   });
 
   it("names a short source on the row", async () => {

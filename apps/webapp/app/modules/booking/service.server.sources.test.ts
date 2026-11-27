@@ -415,11 +415,12 @@ const to = new Date(from.getTime() + 8 * 60 * 60 * 1000);
 
 /**
  * Hands every `$transaction` callback a client of its own, built on the same
- * spies (so call order is comparable) but a distinct object (so a facade
- * call made with the outer `db` fails the `tx` assertion).
+ * spies (so call order is comparable). The `__client` marker makes it unequal
+ * to the outer `db` under deep equality, so a facade call made with `db`
+ * fails a `toHaveBeenCalledWith(tx, ...)` assertion.
  */
 function openTx() {
-  const tx = { ...db, booking: { ...db.booking } };
+  const tx = { ...db, booking: { ...db.booking }, __client: "tx" as const };
   vitest
     .mocked(db.$transaction)
     .mockImplementation(((callbackOrArray: unknown) =>
@@ -434,9 +435,28 @@ function firstCallOrder(mock: unknown) {
   return (mock as ReturnType<typeof vitest.fn>).mock.invocationCallOrder[0];
 }
 
-/** Call order of the booking lock: the first raw query of the test. */
+/**
+ * Call order of the booking lock: the first raw `SELECT ... FROM "Booking"
+ * ... FOR UPDATE` bound to this booking and organization. Fails the test when
+ * no such statement ran.
+ */
 function bookingLockOrder() {
-  return firstCallOrder(db.$queryRaw);
+  const mock = vitest.mocked(db.$queryRaw);
+  const index = mock.mock.calls.findIndex((call) => {
+    const [strings, ...values] = call as unknown as [
+      TemplateStringsArray | string[],
+      ...unknown[],
+    ];
+    const sql = Array.isArray(strings) ? strings.join("?") : "";
+    return (
+      sql.includes('FROM "Booking"') &&
+      sql.includes("FOR UPDATE") &&
+      values.includes(BOOKING_ID) &&
+      values.includes(ORG_ID)
+    );
+  });
+  expect(index).toBeGreaterThanOrEqual(0);
+  return mock.mock.invocationCallOrder[index];
 }
 
 /** The `where` of the pool-slice read, the one filtering on asset type. */
@@ -564,6 +584,24 @@ describe("createBooking", () => {
     });
     expect(firstCallOrder(tx.booking.create)).toBeLessThan(
       firstCallOrder(allocateNewSlices)
+    );
+    // The staged slices stand for the rows this create writes: the kit slice
+    // and the standalone pool slice are both in its nested create.
+    expect(tx.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bookingAssets: {
+            create: expect.arrayContaining([
+              { assetId: "qt-1" },
+              expect.objectContaining({
+                assetId: "qt-2",
+                assetKitId: "ak-1",
+                quantity: 2,
+              }),
+            ]),
+          },
+        }),
+      })
     );
   });
 
@@ -1067,27 +1105,42 @@ describe("checkoutBooking source admission", () => {
   });
 
   it("admits a reservation's early check-out as a date change from its stored window", async () => {
-    stageBooking(BookingStatus.RESERVED);
-    stagePool();
-    const tx = openTx();
-    vitest
-      .mocked(tx.booking.update)
-      .mockResolvedValue({ id: BOOKING_ID } as never);
+    // why: an early check-out moves `from` to now; pinning now on a minute
+    // boundary makes that instant exact whether or not the writer rounds it.
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    const now = new Date(Math.floor(Date.now() / 60_000) * 60_000);
+    vitest.setSystemTime(now);
+    try {
+      stageBooking(BookingStatus.RESERVED);
+      stagePool();
+      const tx = openTx();
+      vitest
+        .mocked(tx.booking.update)
+        .mockResolvedValue({ id: BOOKING_ID } as never);
 
-    await checkout({ intentChoice: CheckoutIntentEnum["with-adjusted-date"] });
+      await checkout({
+        intentChoice: CheckoutIntentEnum["with-adjusted-date"],
+      });
 
-    const written = writtenWindow({ from, to });
-    expect(written.from.getTime()).toBeLessThan(from.getTime());
-    expect(admitWindowChange).toHaveBeenCalledTimes(1);
-    expect(admitWindowChange).toHaveBeenCalledWith(tx, {
-      organizationId: ORG_ID,
-      bookingId: BOOKING_ID,
-      from: written.from,
-      to,
-      previous: { from, to },
-      kind: "dates",
-      sourcesInPlay: true,
-    });
+      // Read straight from the status write: no fallback to the stored start.
+      const statusWrite = vitest
+        .mocked(db.booking.update)
+        .mock.calls.map(([args]) => args as { data?: Record<string, unknown> })
+        .find((args) => args?.data?.status);
+      expect(statusWrite?.data?.from).toEqual(now);
+      expect(admitWindowChange).toHaveBeenCalledTimes(1);
+      expect(admitWindowChange).toHaveBeenCalledWith(tx, {
+        organizationId: ORG_ID,
+        bookingId: BOOKING_ID,
+        from: now,
+        to,
+        previous: { from, to },
+        kind: "dates",
+        sourcesInPlay: true,
+      });
+    } finally {
+      vitest.useRealTimers();
+    }
   });
 
   it("admits a rescheduled expired reservation as a date change to its new window", async () => {
@@ -1732,8 +1785,14 @@ describe("extendBooking source admission", () => {
   const newEndDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
   const checkedOutAt = new Date(startedAt.getTime() + 60 * 1000);
 
-  /** A standalone pool slice with 5 units out, in the given mode. */
-  function outSlice(sourceAllocation: string) {
+  /**
+   * A standalone pool slice with 5 units out, in the given mode. `counters`
+   * overrides the booked quantity and the departure counter.
+   */
+  function outSlice(
+    sourceAllocation: string,
+    counters: { quantity?: number; checkedOutQuantity?: number } = {}
+  ) {
     return {
       id: "ba-qt-1",
       assetId: "qt-1",
@@ -1743,6 +1802,7 @@ describe("extendBooking source admission", () => {
       checkedOutAt,
       checkedInAt: null,
       sourceAllocation,
+      ...counters,
     };
   }
 
@@ -1750,8 +1810,11 @@ describe("extendBooking source admission", () => {
    * Stages an ONGOING booking holding one pool slice, both for the outer
    * read and for the read under the locks.
    */
-  function stageBooking(sourceAllocation: string) {
-    const slice = outSlice(sourceAllocation);
+  function stageBooking(
+    sourceAllocation: string,
+    counters: { quantity?: number; checkedOutQuantity?: number } = {}
+  ) {
+    const slice = outSlice(sourceAllocation, counters);
     store.assetTypes = { "qt-1": "QUANTITY_TRACKED" };
     store.slices = [slice];
     store.lockedStatus = BookingStatus.ONGOING;
@@ -1853,7 +1916,9 @@ describe("extendBooking source admission", () => {
   });
 
   it("measures a converted group's own units from its source rows, never from the logs", async () => {
-    stageBooking("AUTO");
+    // The slice books 8 and its counter says 6 went out, so a figure read
+    // from the slice (8 or 6) differs from the one its rows give (5).
+    stageBooking("AUTO", { quantity: 8, checkedOutQuantity: 6 });
     // 3 of the 8 planned units came back: 5 remain (out plus pending), more
     // than the 4 the pool has free over the added days.
     store.sourceRows = [

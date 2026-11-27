@@ -29,7 +29,6 @@ import {
 
 import type { TestWindow } from "./booking-sources-helpers";
 import {
-  addSlice,
   cleanupPools,
   commitTx,
   countersOf,
@@ -210,21 +209,17 @@ describe("booking sources tenant isolation", () => {
             assetIds: [b.assetId],
             adoptionEnabled: true,
           }),
-        async (tx) => {
-          const sliceId = await addSlice(tx, {
-            bookingId: b.bookingId,
-            assetId: b.assetId,
-            quantity: 1,
-          });
-          return allocateNewSlices(tx, {
+        // The other workspace's existing slice: a second standalone slice of
+        // the same asset would break the booking's one-standalone unique key.
+        (tx) =>
+          allocateNewSlices(tx, {
             organizationId: a.organizationId,
             bookingId: b.bookingId,
-            sliceIds: [sliceId],
+            sliceIds: [b.sliceId],
             window: W,
             holdsNow: true,
             adoptionEnabled: true,
-          });
-        },
+          }),
       ];
       for (const call of calls) {
         await expect(withRollback(call)).rejects.toMatchObject({

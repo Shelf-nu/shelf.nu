@@ -6801,7 +6801,7 @@ describe("checkoutBooking", () => {
   });
 
   it("dispatches each pool slice by the units its counter grows by: whole slices by quantity, partly-sent ones by residue, once each", async () => {
-    expect.assertions(3);
+    expect.assertions(4);
 
     // Three kit-driven pool slices (kit-driven keeps the free-pool sweep out):
     // - ba-whole never left: departs whole, 6 units;
@@ -6958,13 +6958,18 @@ describe("checkoutBooking", () => {
         };
       }
     ).mock.calls;
+    /** Increments whose `where` names no slice id: none may exist. */
+    let untargetedIncrements = 0;
     for (const [call] of updateManyCalls) {
       const increment = call?.data?.checkedOutQuantity?.increment;
       if (increment === undefined) continue;
-      for (const id of call.where?.id?.in ?? []) {
+      const ids = call.where?.id?.in ?? [];
+      if (ids.length === 0) untargetedIncrements += 1;
+      for (const id of ids) {
         counterIncrements.set(id, (counterIncrements.get(id) ?? 0) + increment);
       }
     }
+    expect(untargetedIncrements).toBe(0);
     expect(counterIncrements).toEqual(
       new Map(picks.map((pick) => [pick.sliceId, pick.units]))
     );
@@ -9074,7 +9079,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
   });
 
   it("locks a pool the booking holds only through a kit, read under the booking lock, together with the scan and before it", async () => {
-    expect.assertions(4);
+    expect.assertions(6);
 
     // The pre-transaction read sees no pool slice at all: the kit's pool is
     // known only from the read made under the booking lock.
@@ -9112,6 +9117,16 @@ describe("fulfilModelRequestsAndCheckout", () => {
       (db.asset.findMany as ReturnType<typeof vitest.fn>).mock
         .invocationCallOrder[0]
     );
+    // The pool read asks for every quantity-tracked slice of the booking, kit
+    // slices included: a standalone-only filter would never have found the
+    // kit slice the staged answer returns.
+    const poolRead = (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mock.calls[0][0] as { where: Record<string, unknown> };
+    expect(poolRead.where).toMatchObject({
+      bookingId: "booking-1",
+      booking: { organizationId: "org-1" },
+    });
+    expect(JSON.stringify(poolRead.where)).not.toContain('"assetKitId":null');
   });
 
   it("decides the pool lock from the window read under the booking lock, not the earlier read", async () => {
@@ -20242,11 +20257,15 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     setupCheckinMocks(ConsumptionType.TWO_WAY);
     // why: the group is converted; 6 of the 10 booked units are out from
     // Demo Warehouse, so the auto-default returns 6, not the booked 10.
-    const settlement = convertedSettlement(mockQtyAssetId, [
-      settlementSlice("ba-pens-standalone", null, [
-        { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
-      ]),
-    ]);
+    const settlement = convertedSettlement(
+      mockQtyAssetId,
+      [
+        settlementSlice("ba-pens-standalone", null, [
+          { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
+        ]),
+      ],
+      mockBookingId
+    );
     vitest
       .mocked(bookingSources.openSettlement)
       .mockResolvedValueOnce(settlement);
@@ -20313,11 +20332,15 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     vitest
       .mocked(bookingSources.openSettlement)
       .mockResolvedValueOnce(
-        convertedSettlement(mockQtyAssetId, [
-          settlementSlice("ba-pens-standalone", null, [
-            { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
-          ]),
-        ])
+        convertedSettlement(
+          mockQtyAssetId,
+          [
+            settlementSlice("ba-pens-standalone", null, [
+              { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
+            ]),
+          ],
+          mockBookingId
+        )
       );
 
     await checkinBooking(baseParams);
@@ -20347,14 +20370,18 @@ describe("checkinBooking — qty-tracked auto-default", () => {
     vitest
       .mocked(bookingSources.openSettlement)
       .mockResolvedValueOnce(
-        convertedSettlement(mockQtyAssetId, [
-          settlementSlice("ba-pens-standalone", null, [
-            { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
-          ]),
-          settlementSlice("ba-pens-late-kit", "ak-pens-late", [
-            { kind: "LOCATION", locationId: "loc-b", quantity: 4, out: 4 },
-          ]),
-        ])
+        convertedSettlement(
+          mockQtyAssetId,
+          [
+            settlementSlice("ba-pens-standalone", null, [
+              { kind: "LOCATION", locationId: "loc-a", quantity: 10, out: 6 },
+            ]),
+            settlementSlice("ba-pens-late-kit", "ak-pens-late", [
+              { kind: "LOCATION", locationId: "loc-b", quantity: 4, out: 4 },
+            ]),
+          ],
+          mockBookingId
+        )
       );
 
     await checkinBooking(baseParams);
@@ -26527,21 +26554,14 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       })
     );
     // Each ledger row is tagged with the slice its units were settled on, so
-    // `commitSettlement` shares it on that slice's own rows.
-    expect(recordedStockEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          category: "CONSUME",
-          change: -2,
-          bookingAssetId: "ba-loose",
-        }),
-        expect.objectContaining({
-          category: "CONSUME",
-          change: -4,
-          bookingAssetId: "ba-kit",
-        }),
-      ])
-    );
+    // `commitSettlement` shares it on that slice's own rows. Exactly these
+    // two rows: no untagged row and no second row per slice.
+    expect(
+      recordedStockEvents().map((e) => [e.category, e.change, e.bookingAssetId])
+    ).toEqual([
+      ["CONSUME", -2, "ba-loose"],
+      ["CONSUME", -4, "ba-kit"],
+    ]);
     expect(settlement.planned.map((p) => [p.sliceId, p.units])).toEqual([
       ["ba-loose", 2],
       ["ba-kit", 4],
@@ -26599,20 +26619,12 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       })
     );
     // One ledger row per slice, standalone first, each tagged with its slice.
-    expect(recordedStockEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          category: "CONSUME",
-          change: -2,
-          bookingAssetId: "ba-loose",
-        }),
-        expect.objectContaining({
-          category: "CONSUME",
-          change: -3,
-          bookingAssetId: "ba-late-kit",
-        }),
-      ])
-    );
+    expect(
+      recordedStockEvents().map((e) => [e.category, e.change, e.bookingAssetId])
+    ).toEqual([
+      ["CONSUME", -2, "ba-loose"],
+      ["CONSUME", -3, "ba-late-kit"],
+    ]);
   });
 
   it("refuses more units than a converted group has out", async () => {
@@ -26668,6 +26680,8 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
             quantity: 10,
             out: 5,
             released: 5,
+            // 10 left on the first trip, all came back, 5 left again.
+            dispatched: 15,
           },
         ]),
       ])
@@ -29208,6 +29222,11 @@ type SettlementRowInput = {
   out: number;
   /** Units that came back or were used up; 0 when omitted. */
   released?: number;
+  /**
+   * Units sent out from the row over every trip; `out + released` when
+   * omitted. A row re-dispatched after a return sends more than that.
+   */
+  dispatched?: number;
 };
 
 /** A converted slice of a settlement, its rows with `out` units out. */
@@ -29216,24 +29235,26 @@ function settlementSlice(
   assetKitId: string | null,
   rows: SettlementRowInput[]
 ): WorkingSlice {
-  const working = rows.map((r, index) => ({
-    id: `${id}-row-${index}`,
-    kind: r.kind,
-    locationId: r.locationId,
-    quantity: r.quantity,
-    outQuantity: r.out,
-    releasedQuantity: r.released ?? 0,
-    dispatchedTotal: r.out + (r.released ?? 0),
-    sharedQuantity: 0,
-  }));
+  const working = rows.map((r, index) => {
+    const dispatchedTotal = r.dispatched ?? r.out + (r.released ?? 0);
+    return {
+      id: `${id}-row-${index}`,
+      kind: r.kind,
+      locationId: r.locationId,
+      quantity: r.quantity,
+      outQuantity: r.out,
+      releasedQuantity: r.released ?? 0,
+      dispatchedTotal,
+      // Every unit that left and is no longer out came off through a share.
+      sharedQuantity: dispatchedTotal - r.out,
+    };
+  });
   return {
     id,
     assetKitId,
     quantity: rows.reduce((sum, r) => sum + r.quantity, 0),
-    checkedOutQuantity: rows.reduce(
-      (sum, r) => sum + r.out + (r.released ?? 0),
-      0
-    ),
+    // The slice counter is cumulative over every trip, like `dispatchedTotal`.
+    checkedOutQuantity: working.reduce((sum, r) => sum + r.dispatchedTotal, 0),
     originalMode: assetKitId ? "KIT" : "AUTO",
     mode: assetKitId ? "KIT" : "AUTO",
     rows: working,
@@ -29244,19 +29265,25 @@ function settlementSlice(
 /**
  * A settlement whose one group (the asset on the booking) is converted, as
  * `openSettlement` returns it; `settleUnits` runs for real on it.
+ *
+ * @param assetId - The group's asset
+ * @param slices - The group's converted slices
+ * @param bookingId - The booking under test, so the settlement and its group
+ *   key name the same booking the service was called for
  */
 function convertedSettlement(
   assetId: string,
-  slices: WorkingSlice[]
+  slices: WorkingSlice[],
+  bookingId = "booking-1"
 ): Settlement {
   return {
     organizationId: "org-1",
-    bookingId: "booking-1",
+    bookingId,
     groups: new Map<string, WorkingGroup>([
       [
         assetId,
         {
-          key: { bookingId: "booking-1", assetId },
+          key: { bookingId, assetId },
           status: "converted",
           slices,
           insertShares: [],

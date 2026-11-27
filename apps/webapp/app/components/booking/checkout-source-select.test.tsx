@@ -1,13 +1,12 @@
 /**
- * "From location" select tests: the "As planned" option names the plan, the
- * hint under it says what leaving it alone does and is linked to the select,
- * and nothing is posted until the operator changes the answer.
+ * "From location" picker tests: the "As planned" option names the plan, the
+ * hint under it names the plan and is linked to the picker's trigger, and
+ * nothing is posted until the operator changes the answer.
  *
  * @see {@link file://./checkout-source-select.tsx}
  */
 
-import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ALLOCATION_SOURCE_FORM_VALUE } from "~/modules/booking/checkout-source-location";
 import { asPlannedHint, CheckoutSourceSelect } from "./checkout-source-select";
@@ -44,38 +43,68 @@ const plannedQuestion = {
   plannedSummary: "Studio 8 · Unplaced 7",
 };
 
+/** The hint the planned question shows under its picker. */
+const PLANNED_HINT =
+  "Planned: Studio 8 · Unplaced 7. These units go out by that plan; pick a location to take them from it instead.";
+
+/** The picker's trigger, named by the titled label ("Cables · 15 units"). */
+function getTrigger() {
+  return screen.getByRole("button", { name: /Cables/ });
+}
+
+/** The hidden input that posts the answer, or `null` while none is posted. */
+function getPostedInput(container: HTMLElement) {
+  return container.querySelector<HTMLInputElement>(
+    'input[type="hidden"][name="sourceLocation.ba-1"]'
+  );
+}
+
 describe("CheckoutSourceSelect", () => {
   it('pre-selects "As planned" and names the split plan', () => {
     render(<CheckoutSourceSelect question={plannedQuestion} fieldKey="ba-1" />);
 
-    const select = screen.getByRole("combobox");
-    expect(select).toHaveValue(ALLOCATION_SOURCE_FORM_VALUE);
+    const trigger = getTrigger();
+    expect(trigger).toHaveTextContent("As planned: Studio 8 · Unplaced 7");
+
+    fireEvent.click(trigger);
     expect(
       screen.getByRole("option", {
         name: "As planned: Studio 8 · Unplaced 7",
       })
-    ).toBeInTheDocument();
+    ).toHaveAttribute("aria-selected", "true");
   });
 
-  it("describes the select with what the plan sends out", () => {
+  it("describes the picker with the plan it sends the units out by", () => {
     render(<CheckoutSourceSelect question={plannedQuestion} fieldKey="ba-1" />);
 
-    expect(screen.getByRole("combobox")).toHaveAccessibleDescription(
-      "Leaves from Studio 8 · Unplaced 7. Pick a location to take these units from it instead."
+    expect(getTrigger()).toHaveAccessibleDescription(PLANNED_HINT);
+  });
+
+  it("posts nothing until the operator picks, then posts the pick", () => {
+    const { container } = render(
+      <CheckoutSourceSelect question={plannedQuestion} fieldKey="ba-1" />
     );
+
+    expect(getPostedInput(container)).toBeNull();
+
+    fireEvent.click(getTrigger());
+    fireEvent.click(screen.getByRole("option", { name: /^Camera Room/ }));
+
+    expect(getPostedInput(container)).toHaveValue("loc-camera");
+    expect(getTrigger()).toHaveTextContent(/^Camera Room/);
   });
 
-  it("posts nothing until the operator picks, then posts the pick", async () => {
-    const user = userEvent.setup();
-    render(<CheckoutSourceSelect question={plannedQuestion} fieldKey="ba-1" />);
+  it("posts nothing when the operator re-picks the pre-selected option", () => {
+    const { container } = render(
+      <CheckoutSourceSelect question={plannedQuestion} fieldKey="ba-1" />
+    );
 
-    const select = screen.getByRole("combobox");
-    expect(select).not.toHaveAttribute("name");
+    fireEvent.click(getTrigger());
+    fireEvent.click(
+      screen.getByRole("option", { name: "As planned: Studio 8 · Unplaced 7" })
+    );
 
-    await user.selectOptions(select, "loc-camera");
-
-    expect(select).toHaveAttribute("name", "sourceLocation.ba-1");
-    expect(select).toHaveValue("loc-camera");
+    expect(getPostedInput(container)).toBeNull();
   });
 
   it("shows no hint for a question that defaults to a location", () => {
@@ -86,10 +115,8 @@ describe("CheckoutSourceSelect", () => {
       />
     );
 
-    expect(screen.getByRole("combobox")).not.toHaveAttribute(
-      "aria-describedby"
-    );
-    expect(screen.queryByText(/Leaves from/)).not.toBeInTheDocument();
+    expect(getTrigger()).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(/^Planned:/)).not.toBeInTheDocument();
   });
 });
 

@@ -341,6 +341,8 @@ describe("apiUpload", () => {
       assert.deepEqual(sent.headers, {
         Authorization: "Bearer token-a",
         "User-Agent": "shelf-companion-test",
+        // Every request names what this build understands.
+        "X-Shelf-Capabilities": "booking-sources",
       });
     } finally {
       globalThis.fetch = realFetch;

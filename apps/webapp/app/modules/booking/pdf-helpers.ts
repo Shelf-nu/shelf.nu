@@ -294,11 +294,11 @@ export async function fetchAllPdfRelatedData(
           // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
           // its barcode value printed instead of the QR id.
           barcodes: { select: { id: true, type: true, value: true } },
+          // Every placement, kit-driven included: whether a pool has any
+          // decides whether its sources say anything beyond "Unplaced" (see
+          // `selectPoolSourceCell`).
           assetLocations: {
             select: {
-              // Manual placements (no kit) decide whether a pool's sources
-              // say anything beyond "Unplaced"; see `selectPoolSourceCell`.
-              assetKitId: true,
               location: {
                 select: {
                   name: true,
@@ -413,10 +413,9 @@ export async function fetchAllPdfRelatedData(
       const cell = selectPoolSourceCell({
         summary: sliceSourceSummaries.get(ba.id),
         isStandalonePoolSlice: isStandalonePoolSlice(ba),
-        hasManualPlacements:
-          rawAssetsById
-            .get(ba.assetId)
-            ?.assetLocations.some((al) => al.assetKitId === null) ?? false,
+        // Any placement, kit-driven included: see `selectPoolSourceCell`.
+        hasPlacements:
+          (rawAssetsById.get(ba.assetId)?.assetLocations.length ?? 0) > 0,
       });
       const line = cell ? describeSourceLine(cell.parts) : null;
       if (line) sourceLineBySlice.set(ba.id, line);

@@ -315,8 +315,8 @@ describe("GET /api/mobile/bookings/:bookingId pool sources", () => {
         },
       ]) as never
     );
-    // why: the pool has a manual placement, so its sources say more than
-    // "Unplaced".
+    // why: the pool has a placement, so its sources say more than its
+    // ordinary Location cell.
     vi.mocked(db.assetLocation.findMany).mockResolvedValue([
       { assetId: "pool-1" },
     ] as never);
@@ -339,13 +339,12 @@ describe("GET /api/mobile/bookings/:bookingId pool sources", () => {
     expect(slice("ba-pool")?.sourceAllocation).toBe("MANUAL");
     expect(slice("ba-kit")?.sources).toEqual([]);
     expect(slice("ba-cam")?.sources).toEqual([]);
-    // The manual placement read is org-scoped and skips kit placements.
+    // The placement read is org-scoped and counts kit placements too.
     expect(db.assetLocation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           assetId: { in: ["pool-1"] },
           organizationId: "org-1",
-          assetKitId: null,
         },
       })
     );
@@ -387,7 +386,7 @@ describe("GET /api/mobile/bookings/:bookingId pool sources", () => {
     });
   });
 
-  it("sends no parts for a pool with no manual placement whose units are all unplaced", async () => {
+  it("sends no parts for a pool with no placement whose units are all unplaced", async () => {
     vi.mocked(db.booking.findFirst).mockResolvedValue(
       bookingRow("RESERVED", [
         {
@@ -410,6 +409,36 @@ describe("GET /api/mobile/bookings/:bookingId pool sources", () => {
     const slice = await getSlices();
 
     expect(slice("ba-pool")?.sources).toEqual([]);
+  });
+
+  it("sends the Unplaced part for a pool placed only through a kit", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow("RESERVED", [
+        {
+          id: "ba-pool",
+          quantity: 7,
+          assetKitId: null,
+          sourceKitId: null,
+          sourceLocationId: null,
+          sourceAllocation: "AUTO",
+          asset: POOL,
+        },
+      ]) as never
+    );
+    // why: the read counts kit-driven placements, so a pool placed only
+    // through its kit comes back as placed.
+    vi.mocked(db.assetLocation.findMany).mockResolvedValue([
+      { assetId: "pool-1" },
+    ] as never);
+    vi.mocked(getSliceSourceSummaries).mockResolvedValue(
+      new Map([
+        ["ba-pool", { parts: [PARTS[1]], short: false, mode: "AUTO" as const }],
+      ])
+    );
+
+    const slice = await getSlices();
+
+    expect(slice("ba-pool")?.sources).toEqual([PARTS[1]]);
   });
 
   it("reads no summaries for a booking whose pool slices are not planned by source", async () => {

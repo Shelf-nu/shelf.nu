@@ -6,20 +6,28 @@
  * the FULL total (standalone + kit-driven). Lives apart from
  * `booking/service.server` so `asset/availability.server` can consume it
  * without the two modules forming an import cycle: this module depends only on
- * the pure `./checkout-attribution` primitives, `@shelf/quantity-control` and
+ * the pure `./checkout-attribution` primitives, the converted-slice test in
+ * `asset/availability-primitives.server`, `@shelf/quantity-control` and
  * `@prisma/client`.
  *
  * @see {@link file://./checkout-attribution.ts} per-slice attribution and the shared session parser.
  * @see {@link file://../asset/availability.server.ts} the main consumer (`getAssetAvailability`).
  */
-import { BookingStatus, type Asset } from "@prisma/client";
+import {
+  BookingStatus,
+  type Asset,
+  type BookingSourceAllocation,
+} from "@prisma/client";
 import { RESERVATION_REDUCING_CATEGORIES } from "@shelf/quantity-control";
 
+import { isConvertedSlice } from "~/modules/asset/availability-primitives.server";
 import {
   checkoutSessionsToLogsByAsset,
   computeUnitsStillOutBySlice,
+  groupDispositionsForStillOut,
   type CheckoutAttributionLog,
   type CheckoutSession,
+  type DispositionShareUnits,
 } from "./checkout-attribution";
 
 /**
@@ -81,10 +89,13 @@ export async function computeCheckedOutForAsset(
  * Per (booking, asset), the units still out come from
  * {@link computeUnitsStillOutBySlice}: what left (the larger of the slice's
  * session claims, or the whole slice when only its `checkedOutAt` records the
- * departure, and the stored `checkedOutQuantity`) minus what came back or was used up
- * (RETURN / CONSUME / LOSS / DAMAGE). A partial check-in therefore puts its
- * units back on the shelf straight away, and a consumed unit is not counted as
- * both gone from the stock and still out.
+ * departure, and the stored `checkedOutQuantity`) minus what came back or was
+ * used up (RETURN / CONSUME / LOSS / DAMAGE). A LEGACY group reads those as raw
+ * logs; a converted group reads its disposition shares, each landing on the
+ * slice it names (see {@link groupDispositionsForStillOut}), in a read issued
+ * only when a converted group is present. A partial check-in therefore puts
+ * its units back on the shelf straight away, and a consumed unit is not
+ * counted as both gone from the stock and still out.
  *
  * The batched sibling in `asset/availability.server.ts` runs the same helper,
  * and `checked-out-batch-parity.test.ts` pins the two together.
@@ -152,6 +163,7 @@ export async function computeCheckedOutByBookingForAsset(
       bookingId: true,
       checkedOutAt: true,
       checkedOutQuantity: true,
+      sourceAllocation: true,
     },
   })) as Array<{
     id: string;
@@ -160,6 +172,7 @@ export async function computeCheckedOutByBookingForAsset(
     bookingId: string;
     checkedOutAt?: Date | null;
     checkedOutQuantity?: number | null;
+    sourceAllocation?: BookingSourceAllocation;
   }>;
 
   if (slices.length === 0) return byBooking;
@@ -176,7 +189,15 @@ export async function computeCheckedOutByBookingForAsset(
       checkedOutQuantity: number;
     }>
   >();
+  /**
+   * Bookings whose group for this asset is converted. One slice's mode answers
+   * for its group, because conversion converts every slice at once.
+   */
+  const convertedBookingIds = new Set<string>();
   for (const slice of slices) {
+    if (isConvertedSlice(slice.sourceAllocation)) {
+      convertedBookingIds.add(slice.bookingId);
+    }
     const entry = {
       id: slice.id,
       quantity: slice.quantity,
@@ -193,7 +214,7 @@ export async function computeCheckedOutByBookingForAsset(
   }
 
   const bookingIds = [...slicesByBooking.keys()];
-  const [sessions, dispositionLogs] = await Promise.all([
+  const [sessions, dispositionLogs, shares] = await Promise.all([
     tx.partialBookingCheckout.findMany({
       where: { bookingId: { in: bookingIds } },
       select: {
@@ -224,6 +245,18 @@ export async function computeCheckedOutByBookingForAsset(
         quantity: number;
       }>
     >,
+    // Converted groups only: a LEGACY-only asset issues no share read.
+    convertedBookingIds.size === 0
+      ? Promise.resolve([])
+      : (tx.bookingDispositionShare.findMany({
+          where: {
+            organizationId,
+            assetId,
+            bookingId: { in: [...convertedBookingIds] },
+            bookingAssetId: { not: null },
+          },
+          select: { bookingId: true, bookingAssetId: true, quantity: true },
+        }) as Promise<Array<DispositionShareUnits & { bookingId: string }>>),
   ]);
 
   const sessionsByBooking = new Map<string, CheckoutSession[]>();
@@ -249,6 +282,16 @@ export async function computeCheckedOutByBookingForAsset(
     dispositionsByBooking.set(log.bookingId, list);
   }
 
+  const sharesByBooking = new Map<string, DispositionShareUnits[]>();
+  for (const share of shares) {
+    const list = sharesByBooking.get(share.bookingId) ?? [];
+    list.push({
+      bookingAssetId: share.bookingAssetId,
+      quantity: share.quantity,
+    });
+    sharesByBooking.set(share.bookingId, list);
+  }
+
   for (const [bookingId, bookingSlices] of slicesByBooking) {
     const stillOutBySlice = computeUnitsStillOutBySlice({
       slices: bookingSlices,
@@ -257,7 +300,11 @@ export async function computeCheckedOutByBookingForAsset(
           sessionsByBooking.get(bookingId) ?? [],
           (id) => id === assetId
         ).get(assetId) ?? [],
-      dispositions: dispositionsByBooking.get(bookingId) ?? [],
+      dispositions: groupDispositionsForStillOut({
+        converted: convertedBookingIds.has(bookingId),
+        logs: dispositionsByBooking.get(bookingId) ?? [],
+        shares: sharesByBooking.get(bookingId) ?? [],
+      }),
     });
 
     let total = 0;
