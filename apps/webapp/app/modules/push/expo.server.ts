@@ -25,6 +25,7 @@ import { z } from "zod";
 import { EXPO_ACCESS_TOKEN } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * The Shelf companion's identity on Expo, as `apps/companion/app.json`
@@ -41,7 +42,10 @@ const SHELF_EXPO_PROJECTS = new Set([
 const MIXED_PROJECTS_CODE = "PUSH_TOO_MANY_EXPERIENCE_IDS";
 
 /** The `details` of a mixed-projects refusal: project to its tokens. */
-const TokensByProjectSchema = z.record(z.array(z.string()));
+const TokensByProjectSchema = z.record(
+  z.string(),
+  z.array(z.string()).max(MAX_LIST_ITEMS)
+);
 
 /**
  * How long a request waits for Expo's response headers, and then for each

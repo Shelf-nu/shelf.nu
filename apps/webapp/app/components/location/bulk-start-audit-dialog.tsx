@@ -40,6 +40,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { BaseAuditSchema } from "~/routes/api+/audits.start";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Client-side schema for the Locations bulk-audit dialog. The harness injects
@@ -47,7 +48,7 @@ import { isSelectingAllItems } from "~/utils/list";
  * Server-side validation lives in `StartAuditSchema` (`/api/audits/start`).
  */
 export const LocationsBulkStartAuditSchema = BaseAuditSchema.extend({
-  locationIds: z.array(z.string()).min(1),
+  locationIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 }).refine(
   (data) => {
     if (!data.dueDate) return true;

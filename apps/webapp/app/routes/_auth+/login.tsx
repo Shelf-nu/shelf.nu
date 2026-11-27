@@ -68,9 +68,7 @@ const LoginFormSchema = z.object({
   email: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
-    })),
+    .refine(validEmail, { message: "Please enter a valid email" }),
   password: z.string().min(8, "Password is too short. Minimum 8 characters."),
   redirectTo: z.string().optional(),
 });

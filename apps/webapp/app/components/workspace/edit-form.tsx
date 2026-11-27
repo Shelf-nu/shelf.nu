@@ -395,19 +395,19 @@ export const EditWorkspacePermissionsSettingsFormSchema = () =>
     selfServiceCanSeeCustody: z
       .string()
       .transform((val) => val === "on")
-      .default("false"),
+      .default(false),
     selfServiceCanSeeBookings: z
       .string()
       .transform((value) => value === "on")
-      .default("false"),
+      .default(false),
     baseUserCanSeeCustody: z
       .string()
       .transform((value) => value === "on")
-      .default("false"),
+      .default(false),
     baseUserCanSeeBookings: z
       .string()
       .transform((value) => value === "on")
-      .default("false"),
+      .default(false),
   });
 
 const WorkspacePermissionsEditForm = ({

@@ -1,6 +1,7 @@
 import { CustomFieldType } from "@prisma/client";
 import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export type Column = {
   name: ColumnLabelKey;
@@ -489,7 +490,7 @@ export const generateColumnsSchema = (customFields: string[]) => {
 
   return z.object({
     intent: z.literal("changeColumns"),
-    columns: z.array(columnSchema),
+    columns: z.array(columnSchema).max(MAX_LIST_ITEMS),
   });
 };
 

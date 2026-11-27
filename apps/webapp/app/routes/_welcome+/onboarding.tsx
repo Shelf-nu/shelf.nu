@@ -138,16 +138,7 @@ function createOnboardingSchema({
     })
     .superRefine(
       (
-        {
-          password,
-          confirmPassword,
-          username,
-          firstName,
-          lastName,
-          jobTitle,
-          teamSize,
-          companyName,
-        },
+        { password, confirmPassword, jobTitle, teamSize, companyName },
         ctx
       ) => {
         if (password !== confirmPassword) {
@@ -184,8 +175,6 @@ function createOnboardingSchema({
             });
           }
         }
-
-        return { password, confirmPassword, username, firstName, lastName };
       }
     );
 }

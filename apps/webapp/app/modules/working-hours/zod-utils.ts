@@ -7,7 +7,7 @@ export const WorkingHoursToggleSchema = z.object({
   enableWorkingHours: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 // Base time string schema with proper validation
@@ -94,7 +94,7 @@ export const WeeklyScheduleSchema = z
 const FlexibleBooleanSchema = z
   .string()
   .transform((val) => val === "on")
-  .default("false");
+  .default(false);
 
 // / Clean create override schema - focused on validation only
 export const CreateOverrideFormSchema = z

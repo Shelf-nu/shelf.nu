@@ -1,12 +1,13 @@
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { MAX_LIST_ITEMS, requiredError } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared/button";
 
 export const KitBulkLocationUpdateSchema = z.object({
-  kitIds: z.array(z.string()).min(1),
-  newLocationId: z.string({ required_error: "Please select a location" }),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
+  newLocationId: z.string(requiredError("Please select a location")),
 });
 
 export default function KitBulkLocationUpdateDialog() {

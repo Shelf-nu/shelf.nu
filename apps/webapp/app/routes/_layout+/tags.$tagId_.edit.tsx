@@ -37,7 +37,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { zodFieldIsRequired } from "~/utils/zod";
+import { MAX_LIST_ITEMS, zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateTagFormSchema = z.object({
   name: labelNameSchema,
@@ -46,8 +46,10 @@ export const UpdateTagFormSchema = z.object({
   useFor: z
     .string()
     .optional()
+    // A blank or absent field becomes an empty list here, so the pipe always
+    // receives an array and needs no optional or default of its own.
     .transform((value) => (value && value.length > 0 ? value.split(",") : []))
-    .pipe(z.array(z.nativeEnum(TagUseFor)).optional().default([])),
+    .pipe(z.array(z.nativeEnum(TagUseFor)).max(MAX_LIST_ITEMS)),
 });
 
 const title = "Edit Tag";

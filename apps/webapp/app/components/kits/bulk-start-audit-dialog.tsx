@@ -41,6 +41,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { BaseAuditSchema } from "~/routes/api+/audits.start";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Client-side schema for the Kits bulk-audit dialog. The harness injects the
@@ -48,7 +49,7 @@ import { isSelectingAllItems } from "~/utils/list";
  * validation lives in `StartAuditSchema` (`/api/audits/start`).
  */
 export const KitsBulkStartAuditSchema = BaseAuditSchema.extend({
-  kitIds: z.array(z.string()).min(1),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 }).refine(
   (data) => {
     if (!data.dueDate) return true;

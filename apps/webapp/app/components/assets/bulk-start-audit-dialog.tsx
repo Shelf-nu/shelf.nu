@@ -17,13 +17,14 @@ import type { IndexResponse } from "~/components/list";
 import { BaseAuditSchema } from "~/routes/api+/audits.start";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Schema for bulk audit creation from asset index.
  * Extends the base audit schema with required assetIds array.
  */
 export const BulkStartAuditSchema = BaseAuditSchema.extend({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 }).refine(
   (data) => {
     if (!data.dueDate) return true;

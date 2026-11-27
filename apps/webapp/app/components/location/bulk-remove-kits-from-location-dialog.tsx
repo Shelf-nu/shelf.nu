@@ -3,11 +3,15 @@ import { useParams } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 export const BulkRemoveKitsFromLocationSchema = z.object({
-  kitIds: z.array(z.string()).min(1, "Please select at least one kit."),
+  kitIds: z
+    .array(z.string())
+    .max(MAX_LIST_ITEMS)
+    .min(1, "Please select at least one kit."),
 });
 
 export default function BulkRemoveKitsFromLocationDialog() {

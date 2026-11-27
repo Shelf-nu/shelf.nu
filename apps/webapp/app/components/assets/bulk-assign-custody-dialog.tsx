@@ -12,13 +12,14 @@ import {
 } from "~/utils/asset-quantities-schema";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { QuantityTrackedSkipWarning } from "./quantity-tracked-skip-warning";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
 export const BulkAssignCustodySchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   custodian: createCustodianSchema(),
   /**
    * Units per quantity-tracked asset, sent only by the scanner, which shows a

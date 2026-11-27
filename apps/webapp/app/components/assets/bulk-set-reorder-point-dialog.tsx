@@ -14,6 +14,7 @@
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { MAX_LIST_ITEMS, invalidTypeError } from "~/utils/zod";
 import { optionalNumberFromString } from "~/utils/zod-numeric";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import Input from "../forms/input";
@@ -29,13 +30,13 @@ const MAX_MIN_QUANTITY = 2_147_483_647;
  * as "no threshold set".
  */
 export const BulkSetReorderPointSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   minQuantity: optionalNumberFromString({
     blank: null,
     fieldName: "Min quantity",
   }).pipe(
     z
-      .number({ invalid_type_error: "Min quantity must be a number" })
+      .number(invalidTypeError("Min quantity must be a number"))
       .int("Enter a whole number, or leave empty to clear the min quantity")
       .nonnegative("Min quantity cannot be negative")
       .max(MAX_MIN_QUANTITY, "Enter a number no larger than 2,147,483,647")

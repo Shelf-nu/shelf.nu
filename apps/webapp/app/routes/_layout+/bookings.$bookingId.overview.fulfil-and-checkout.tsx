@@ -83,6 +83,7 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { scanSaveError } from "~/utils/scan-save-error.server";
 import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -108,8 +109,8 @@ export const links: LinksFunction = () => [
  * client-side form validation.
  */
 export const fulfilAndCheckoutSchema = z.object({
-  assetIds: z.array(z.string()).default([]),
-  kitIds: z.array(z.string()).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).default([]),
+  kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
   checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
 });
 

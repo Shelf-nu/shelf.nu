@@ -109,9 +109,7 @@ export function UserDetailsForm({
         <FormRow
           rowLabel="Email address"
           className="relative"
-          required={zodFieldIsRequired(
-            UserDetailsFormSchema.shape.email._def.schema
-          )}
+          required={zodFieldIsRequired(UserDetailsFormSchema.shape.email.in)}
         >
           {/* Actial field used for resetting pwd and updating user */}
           <input
@@ -132,9 +130,7 @@ export function UserDetailsForm({
             className="w-full"
             disabled={true}
             title="To change your email address, please contact support."
-            required={zodFieldIsRequired(
-              UserDetailsFormSchema.shape.email._def.schema
-            )}
+            required={zodFieldIsRequired(UserDetailsFormSchema.shape.email.in)}
           />
           <ChangeEmailForm currentEmail={user?.email} />
         </FormRow>

@@ -68,6 +68,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -175,8 +176,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
-        kitIds: z.array(z.string()).optional().default([]),
-        removedKitIds: z.array(z.string()).optional().default([]),
+        kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
+        removedKitIds: z
+          .array(z.string())
+          .max(MAX_LIST_ITEMS)
+          .optional()
+          .default([]),
         redirectTo: z.string().optional(),
       }),
       { additionalData: { userId, organizationId, locationId } }

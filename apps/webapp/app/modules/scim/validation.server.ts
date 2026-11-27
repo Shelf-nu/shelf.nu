@@ -19,6 +19,7 @@
  * @see {@link file://./../../routes/api+/scim+/v2+/Users._index.ts}
  */
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { ScimError } from "./errors.server";
 
 /** SCIM `name` sub-object (RFC 7643 §4.1.1). */
@@ -49,12 +50,12 @@ export const scimEmailSchema = z
  */
 export const scimUserInputSchema = z
   .object({
-    schemas: z.array(z.string()).optional(),
+    schemas: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
     externalId: z.string().optional(),
     userName: z.string().optional(),
     name: scimNameSchema.optional(),
     displayName: z.string().optional(),
-    emails: z.array(scimEmailSchema).optional(),
+    emails: z.array(scimEmailSchema).max(MAX_LIST_ITEMS).optional(),
     active: z.boolean().optional(),
   })
   .passthrough();
@@ -77,8 +78,8 @@ export const scimPatchOperationSchema = z
 /** The body of a SCIM PATCH request (RFC 7644 §3.5.2). */
 export const scimPatchOpSchema = z
   .object({
-    schemas: z.array(z.string()).optional(),
-    Operations: z.array(scimPatchOperationSchema),
+    schemas: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
+    Operations: z.array(scimPatchOperationSchema).max(MAX_LIST_ITEMS),
   })
   .passthrough();
 

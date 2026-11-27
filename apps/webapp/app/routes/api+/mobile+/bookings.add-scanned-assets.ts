@@ -31,6 +31,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/bookings/add-scanned-assets
@@ -102,8 +103,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z
   .object({
     bookingId: z.string().min(1),
-    assetIds: z.array(z.string().min(1)).optional().default([]),
-    kitIds: z.array(z.string().min(1)).optional().default([]),
+    assetIds: z
+      .array(z.string().min(1))
+      .max(MAX_LIST_ITEMS)
+      .optional()
+      .default([]),
+    kitIds: z
+      .array(z.string().min(1))
+      .max(MAX_LIST_ITEMS)
+      .optional()
+      .default([]),
     // Same bounds as the web picker's `quantitiesSchema`: a positive integer
     // per asset id. Non-integers and zero are rejected at the edge rather than
     // reaching the availability guard as a nonsense ask.

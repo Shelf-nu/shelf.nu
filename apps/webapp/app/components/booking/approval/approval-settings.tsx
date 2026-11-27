@@ -27,7 +27,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 const onOff = z
   .string()
   .transform((val) => val === "on")
-  .default("false");
+  .default(false);
 
 export const ApprovalSettingsSchema = z.object({
   requireApprovalForBase: onOff,

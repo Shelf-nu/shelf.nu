@@ -276,7 +276,7 @@ export async function action({ request }: ActionFunctionArgs) {
       if (cause instanceof z.ZodError) {
         throw new ShelfError({
           cause,
-          message: cause.errors[0]?.message ?? "Booking cannot be reserved.",
+          message: cause.issues[0]?.message ?? "Booking cannot be reserved.",
           label: "Booking",
           status: 400,
           shouldBeCaptured: false,

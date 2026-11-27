@@ -4,12 +4,13 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 import { WarningBox } from "../shared/warning-box";
 
 export const BulkReleaseCustodySchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   /**
    * Units per quantity-tracked asset, sent only by the scanner, which shows a
    * quantity input on each scanned row. This dialog selects rows on the assets

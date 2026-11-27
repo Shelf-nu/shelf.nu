@@ -17,9 +17,7 @@ export const SendOtpSchema = z.object({
   email: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
-    })),
+    .refine(validEmail, { message: "Please enter a valid email" }),
   mode: z.enum(["login", "signup", "confirm_signup"]).optional(),
 });
 

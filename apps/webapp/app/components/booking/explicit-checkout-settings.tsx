@@ -33,11 +33,11 @@ export const ExplicitCheckoutSettingsSchema = z.object({
   requireExplicitCheckoutForAdmin: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
   requireExplicitCheckoutForSelfService: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 type ExplicitCheckoutField = keyof z.infer<

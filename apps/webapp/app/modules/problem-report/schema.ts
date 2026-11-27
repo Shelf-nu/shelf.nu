@@ -9,6 +9,7 @@
  */
 import { z } from "zod";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+import { requiredError } from "~/utils/zod";
 
 /** The fewest characters a report may have, after trimming. */
 export const PROBLEM_REPORT_MIN_LENGTH = 3;
@@ -35,7 +36,7 @@ const TOO_LONG = `Keep the description to ${PROBLEM_REPORT_MAX_LENGTH.toLocaleSt
  *    longer than step 1 allowed: stripping and trimming only shorten it.
  */
 export const problemReportContentSchema = z
-  .string({ required_error: "Describe the problem." })
+  .string(requiredError("Describe the problem."))
   .max(PROBLEM_REPORT_MAX_LENGTH, TOO_LONG)
   .transform((value) => stripMarkdocDelimiters(value).trim())
   .pipe(

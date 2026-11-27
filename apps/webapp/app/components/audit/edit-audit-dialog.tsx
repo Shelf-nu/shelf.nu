@@ -17,6 +17,7 @@ import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { toAssigneeDefaults } from "~/modules/audit/assignee-form";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const EditAuditSchema = z.object({
   name: z.string().trim().min(1, "Audit name is required"),
@@ -26,7 +27,7 @@ export const EditAuditSchema = z.object({
     .optional(),
   dueDate: z.string().optional(),
   /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
-  assignees: z.array(z.string()).optional(),
+  assignees: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   /** Singular field, still accepted from older clients and parsed server-side. */
   assignee: z.string().optional(),
 });

@@ -39,9 +39,7 @@ const SSOLoginFormSchema = z.object({
   domain: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(isValidDomain, () => ({
-      message: "Please enter a valid domain name",
-    })),
+    .refine(isValidDomain, { message: "Please enter a valid domain name" }),
   redirectTo: z.string().optional(),
   // "mobile" routes the post-auth redirect to the native-app callback so the
   // companion app can complete SSO login (see startSsoSignIn).

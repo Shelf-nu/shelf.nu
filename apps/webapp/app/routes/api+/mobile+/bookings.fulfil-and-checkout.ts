@@ -26,6 +26,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { isExplicitScanRequired } from "~/utils/permissions/role-access";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/bookings/fulfil-and-checkout
@@ -83,8 +84,12 @@ export async function action({ request }: ActionFunctionArgs) {
       await parseMobileBody(
         z.object({
           bookingId: z.string().min(1),
-          assetIds: z.array(z.string()).default([]),
-          kitIds: z.array(z.string()).optional().default([]),
+          assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).default([]),
+          kitIds: z
+            .array(z.string())
+            .max(MAX_LIST_ITEMS)
+            .optional()
+            .default([]),
           // The fulfil scanner only ever declares `"scanned"`. Anything else,
           // or nothing (an older bundle), is recorded as null rather than
           // guessed, and never refuses the hand-over.

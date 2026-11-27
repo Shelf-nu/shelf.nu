@@ -23,6 +23,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * POST /api/mobile/bookings/create
@@ -76,8 +77,8 @@ const BodySchema = z.object({
     .string()
     .min(1, "Time zone is required")
     .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
-  tags: z.array(z.string()).optional().default([]),
-  assetIds: z.array(z.string()).optional().default([]),
+  tags: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -186,7 +187,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // must be at least N hours from now") as a 400, not a 500.
         throw new ShelfError({
           cause,
-          message: cause.errors[0]?.message ?? "Invalid booking details.",
+          message: cause.issues[0]?.message ?? "Invalid booking details.",
           label: "Booking",
           status: 400,
           shouldBeCaptured: false,

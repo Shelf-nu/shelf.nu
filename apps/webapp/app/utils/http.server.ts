@@ -1,6 +1,7 @@
 /** Shared HTTP request, response, and header utilities for the web application. */
 import { data, type Params } from "react-router";
 import { parseFormAny } from "react-zorm";
+import { z } from "zod";
 import type { ZodType } from "zod";
 import { isSelfReferer } from "./cancel-destination";
 import { sendNotification } from "./emitter/send-notification.server";
@@ -179,7 +180,7 @@ export function parseData<Schema extends ZodType<any, any, any>>(
   if (!submission.success) {
     const validationErrors = {} as ValidationError<Schema>;
 
-    Object.entries(submission.error.formErrors.fieldErrors).forEach(
+    Object.entries(z.flattenError(submission.error).fieldErrors).forEach(
       ([key, values]) => {
         validationErrors[key as keyof Schema["_output"]] = {
           message: values?.[0],

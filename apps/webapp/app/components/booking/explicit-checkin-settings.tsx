@@ -32,11 +32,11 @@ export const ExplicitCheckinSettingsSchema = z.object({
   requireExplicitCheckinForAdmin: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
   requireExplicitCheckinForSelfService: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 type ExplicitCheckinField = keyof z.infer<typeof ExplicitCheckinSettingsSchema>;

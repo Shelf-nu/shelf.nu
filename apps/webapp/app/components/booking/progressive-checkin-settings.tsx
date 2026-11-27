@@ -33,7 +33,7 @@ export const CountKitsAsUnitSettingsSchema = z.object({
   countKitsAsSingleUnit: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 /**

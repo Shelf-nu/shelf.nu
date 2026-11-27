@@ -376,7 +376,8 @@ export const action = async ({
         const { skipSubscriptionCheck } = parseData(
           await request.formData(),
           z.object({
-            skipSubscriptionCheck: z.coerce.boolean(),
+            // An unchecked checkbox sends no field at all, which reads as off.
+            skipSubscriptionCheck: z.coerce.boolean().default(false),
           })
         );
 

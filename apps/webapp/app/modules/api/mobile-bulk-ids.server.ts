@@ -20,8 +20,8 @@
  */
 
 import { z } from "zod";
-
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * A non-empty list of explicit entity ids for a mobile bulk action.
@@ -36,6 +36,7 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 export function mobileBulkIdsSchema(field: string) {
   return z
     .array(z.string().min(1))
+    .max(MAX_LIST_ITEMS)
     .min(1)
     .refine((ids) => !ids.includes(ALL_SELECTED_KEY), {
       message: `${field} must contain explicit ids. "Select all" is not supported on mobile.`,

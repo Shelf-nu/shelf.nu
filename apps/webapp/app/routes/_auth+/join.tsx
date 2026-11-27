@@ -97,9 +97,7 @@ const JoinFormSchema = z
     email: z
       .string()
       .transform((email) => email.toLowerCase())
-      .refine(validEmail, () => ({
-        message: "Please enter a valid email",
-      })),
+      .refine(validEmail, { message: "Please enter a valid email" }),
     password: passwordSchema(),
     confirmPassword: passwordSchema(),
     redirectTo: z.string().optional(),

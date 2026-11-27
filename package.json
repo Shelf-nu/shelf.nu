@@ -121,7 +121,8 @@
     "patchedDependencies": {
       "expo-in-app-updates@0.12.0": "patches/expo-in-app-updates@0.12.0.patch",
       "expo-quick-actions@6.0.1": "patches/expo-quick-actions@6.0.1.patch",
-      "expo-asset@58.0.19": "patches/expo-asset@58.0.19.patch"
+      "expo-asset@58.0.19": "patches/expo-asset@58.0.19.patch",
+      "react-zorm@0.9.0": "patches/react-zorm@0.9.0.patch"
     }
   },
   "engines": {

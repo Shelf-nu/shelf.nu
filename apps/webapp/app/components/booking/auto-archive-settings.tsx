@@ -18,14 +18,14 @@ export const AutoArchiveToggleSchema = z.object({
   autoArchiveBookings: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 export const AutoArchiveExpiredToggleSchema = z.object({
   autoArchiveExpiredReservations: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 export const AutoArchiveDaysSchema = z.object({

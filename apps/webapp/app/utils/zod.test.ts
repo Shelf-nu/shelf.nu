@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  MAX_LIST_ITEMS,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MAX_LENGTH_MESSAGE,
   passwordSchema,
@@ -110,5 +111,30 @@ describe("onboarding optional password branch", () => {
 
   it("allows an empty password", () => {
     expect(optionalBranch.safeParse("").success).toBe(true);
+  });
+});
+
+/**
+ * The cap every request list carries. What matters is not only that an
+ * oversized list is refused, but that it is refused in one step: the length is
+ * checked before any entry is.
+ */
+describe("MAX_LIST_ITEMS", () => {
+  const ids = z.array(z.string()).max(MAX_LIST_ITEMS);
+
+  it("accepts a list at the cap", () => {
+    expect(ids.safeParse(Array(MAX_LIST_ITEMS).fill("id")).success).toBe(true);
+  });
+
+  it("refuses a list over the cap with a single issue, whatever it holds", () => {
+    // Every entry is invalid too (a number, not a string). A single issue
+    // shows the entries were never validated one by one.
+    const result = ids.safeParse(Array(MAX_LIST_ITEMS + 1).fill(0));
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toHaveLength(1);
+    expect(result.error?.issues[0].message).toBe(
+      "Too many items. The limit is 10,000."
+    );
   });
 });

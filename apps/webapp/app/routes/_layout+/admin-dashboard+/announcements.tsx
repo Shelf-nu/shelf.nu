@@ -58,7 +58,8 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     const { published, id: announcementId } = parseData(
       await request.formData(),
       z.object({
-        published: z.coerce.boolean(),
+        // An unchecked checkbox sends no field at all, which reads as off.
+        published: z.coerce.boolean().default(false),
         id: z.string(),
       })
     );

@@ -15,6 +15,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import type { PendingAudit } from "../audit/audit-selector";
 import AuditSelector from "../audit/audit-selector";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -22,7 +23,7 @@ import type { IndexResponse } from "../list";
 import { Button } from "../shared/button";
 
 export const BulkAddToAuditSchema = z.object({
-  assetIds: z.string().array().min(1),
+  assetIds: z.string().array().max(MAX_LIST_ITEMS).min(1),
   auditId: z.string().min(1, "Please select an audit"),
 });
 

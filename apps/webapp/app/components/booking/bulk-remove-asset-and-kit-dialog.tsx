@@ -6,12 +6,14 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 export const BulkRemoveAssetsAndKitSchema = z.object({
   assetOrKitIds: z
     .array(z.string())
+    .max(MAX_LIST_ITEMS)
     .min(1, "Please select at least one asset or kit."),
   /**
    * Asset ids whose *standalone* booking row the user ticked directly.
@@ -22,7 +24,11 @@ export const BulkRemoveAssetsAndKitSchema = z.object({
    * this field the server has to guess, and it guesses "kit member" — which
    * left the standalone row of an asset booked BOTH ways on the booking.
    */
-  standaloneAssetIds: z.array(z.string()).optional().default([]),
+  standaloneAssetIds: z
+    .array(z.string())
+    .max(MAX_LIST_ITEMS)
+    .optional()
+    .default([]),
 });
 
 export default function BulkRemoveAssetAndKitDialog() {

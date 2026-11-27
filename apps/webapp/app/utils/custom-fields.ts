@@ -17,6 +17,7 @@ import {
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { linkifyBareUrls } from "./markdoc-linkify";
+import { requiredError } from "./zod";
 import {
   optionalNumberFromString,
   requiredNumberFromString,
@@ -34,11 +35,8 @@ const getSchema = ({
   storedValue,
 }: {
   id: string;
-  params: {
-    invalid_type_error?: string | undefined;
-    required_error?: string | undefined;
-    description?: string | undefined;
-  };
+  /** Params handed to each zod constructor, built with `requiredError`. */
+  params: ReturnType<typeof requiredError>;
   field_name?: string | undefined;
   required?: boolean;
   options?: CustomField["options"];
@@ -161,12 +159,9 @@ function buildSchema(
     const fieldSchema = z.object({
       [`cf-${field.id}`]: getSchema({
         id: field.id,
-        params: {
-          description: field.helpText,
-          required_error: field.name
-            ? `${field.name} is required`
-            : `This field is required`,
-        },
+        params: requiredError(
+          field.name ? `${field.name} is required` : `This field is required`
+        ),
         field_name: field.name,
         required: field.required,
         options: field.options,

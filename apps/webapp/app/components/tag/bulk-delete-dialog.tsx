@@ -5,6 +5,7 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/tags";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   BulkDeleteConfirmation,
   bulkDeleteCount,
@@ -12,7 +13,7 @@ import {
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteTagsSchema = z.object({
-  tagIds: z.array(z.string()).min(1),
+  tagIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   /** The typed count; checked by the server, see `assertBulkDeleteConfirmed`. */
   confirmation: z.string().optional(),
 });

@@ -117,6 +117,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 const paramsSchema = z.object({ locationId: z.string() });
 
@@ -346,7 +347,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           formData,
           z
             .object({
-              assetIds: z.array(z.string()).min(1),
+              assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
             })
             .and(CurrentSearchParamsSchema)
         );

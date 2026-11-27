@@ -8,13 +8,14 @@ import {
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
 import useApiQuery from "~/hooks/use-api-query";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { QuantityTrackedSkipWarning } from "./quantity-tracked-skip-warning";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import KitSelector from "../kits/kit-selector";
 import { Button } from "../shared/button";
 
 export const BulkAddToKitSchema = z.object({
-  assetIds: z.string().array().min(1),
+  assetIds: z.string().array().max(MAX_LIST_ITEMS).min(1),
   kit: z.string().min(1),
 });
 

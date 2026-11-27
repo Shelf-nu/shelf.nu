@@ -65,7 +65,7 @@ export async function parseMobileBody<Schema extends z.ZodTypeAny>(
         cause,
         // Name the offending field so "Time zone must be a valid IANA zone"
         // reaches the client instead of a generic failure.
-        message: cause.errors[0]?.message ?? "Invalid request body.",
+        message: cause.issues[0]?.message ?? "Invalid request body.",
         label,
         status: 400,
         shouldBeCaptured: false,

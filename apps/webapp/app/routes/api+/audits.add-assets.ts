@@ -23,10 +23,14 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 const AddAssetsToAuditSchema = z.object({
   auditId: z.string().min(1, "Audit ID is required"),
-  assetIds: z.array(z.string()).min(1, "At least one asset must be selected"),
+  assetIds: z
+    .array(z.string())
+    .max(MAX_LIST_ITEMS)
+    .min(1, "At least one asset must be selected"),
 });
 
 export async function action({ request, context }: ActionFunctionArgs) {

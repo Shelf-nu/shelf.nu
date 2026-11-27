@@ -16,12 +16,13 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AuditsIndexLoaderData } from "~/routes/_layout+/audits._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 /** Zod schema for validating the bulk archive form submission. */
 export const BulkArchiveAuditsSchema = z.object({
-  auditIds: z.array(z.string()).min(1),
+  auditIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 /**

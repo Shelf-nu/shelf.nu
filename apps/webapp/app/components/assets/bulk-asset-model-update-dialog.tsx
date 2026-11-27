@@ -29,6 +29,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -47,7 +48,7 @@ import { WarningBox } from "../shared/warning-box";
  * and this is the same place the sibling bulk dialogs keep their schemas.
  */
 export const BulkAssetModelActionSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   assetModelId: z.string(),
 });
 

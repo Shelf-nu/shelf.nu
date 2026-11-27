@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isRouteError } from "~/utils/http";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 /**
  * Base schema for additional error data.
@@ -48,7 +49,7 @@ export const error404AdditionalDataSchema = z.discriminatedUnion("model", [
     /** Specific case for team member not found errors */
     model: z.literal("teamMember"),
     /** List of organizations the team member could belong to */
-    organizations: organizationSchema.array(),
+    organizations: organizationSchema.array().max(MAX_LIST_ITEMS),
   }),
 ]);
 

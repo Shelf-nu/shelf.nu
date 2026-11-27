@@ -21,6 +21,7 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AuditsIndexLoaderData } from "~/routes/_layout+/audits._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   BulkDeleteConfirmation,
   bulkDeleteCount,
@@ -32,7 +33,7 @@ import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialo
  * service, which knows how many audits the selection resolves to.
  */
 export const BulkDeleteAuditsSchema = z.object({
-  auditIds: z.array(z.string()).min(1),
+  auditIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
   /** The typed count; checked by the server, see `assertBulkDeleteConfirmed`. */
   confirmation: z.string().optional(),
 });

@@ -106,6 +106,7 @@ import {
 import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
@@ -401,8 +402,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
-        kitIds: z.array(z.string()).optional().default([]),
-        removedKitIds: z.array(z.string()).optional().default([]),
+        kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
+        removedKitIds: z
+          .array(z.string())
+          .max(MAX_LIST_ITEMS)
+          .optional()
+          .default([]),
         redirectTo: z.string().optional().nullable(),
       }),
       { additionalData: { userId, bookingId } }

@@ -32,10 +32,13 @@ import { z } from "zod";
 /**
  * The text of a numeric field, before it becomes a number.
  *
- * `undefined` is admitted because an unchecked or absent input never reaches the
- * request at all, and that is a blank field rather than a malformed one.
+ * The field is optional because an unchecked or absent input never reaches the
+ * request at all, and that is a blank field rather than a malformed one. It has
+ * to be `.optional()` rather than a union member of `z.undefined()`: only an
+ * optional schema lets its key be missing from the parsed object, so the
+ * builders below get to decide what a missing value means.
  */
-const numericFieldText = z.union([z.string(), z.number(), z.undefined()]);
+const numericFieldText = z.union([z.string(), z.number()]).optional();
 
 /**
  * The number this text represents, or the caller's absent value when it is blank.

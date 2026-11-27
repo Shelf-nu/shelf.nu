@@ -58,6 +58,7 @@ import {
 } from "~/utils/scan-submit-failure";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   assetLabelPresets,
   createAvailabilityLabels,
@@ -75,13 +76,13 @@ import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const AssignCustodyToSignedItemsSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1),
 });
 
 const BulkAssignCustodySchema = z
   .object({
-    assetIds: z.array(z.string()).optional().default([]),
-    kitIds: z.array(z.string()).optional().default([]),
+    assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
+    kitIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
     custodian: createCustodianSchema(),
   })
   .refine((data) => data.assetIds.length > 0 || data.kitIds.length > 0, {

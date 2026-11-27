@@ -30,6 +30,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { scanSaveError } from "~/utils/scan-save-error.server";
 import { keepScanListOnSubmitFailure } from "~/utils/scan-submit-failure";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 
 export type LoaderData = typeof loader;
 
@@ -108,7 +109,7 @@ export const handle = {
  * contain, only what to put in it.
  */
 const ScanAssetsToKitActionSchema = z.object({
-  assetIds: z.array(z.string()).optional().default([]),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional().default([]),
   assetQuantities: AssetQuantitiesSchema,
 });
 

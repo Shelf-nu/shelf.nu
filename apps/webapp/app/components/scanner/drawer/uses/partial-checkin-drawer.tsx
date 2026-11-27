@@ -78,6 +78,7 @@ import type {
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import {
   createAvailabilityLabels,
   kitLabelPresets,
@@ -234,7 +235,7 @@ export const partialCheckinAssetsSchema = z.object({
    * scanner flows that don't carry per-asset quantities (e.g. individual
    * assets only). Present when no `checkins` JSON payload is submitted.
    */
-  assetIds: z.array(z.string()).min(1).optional(),
+  assetIds: z.array(z.string()).max(MAX_LIST_ITEMS).min(1).optional(),
   /**
    * Slices (`BookingAsset` ids) the operator checked "without scanning" rather
    * than scanning. The action records them as `"selected"` while the rest of
@@ -243,7 +244,7 @@ export const partialCheckinAssetsSchema = z.object({
    * standalone slice and a kit slice of the same booking, one scanned and the
    * other ticked.
    */
-  selectedBookingAssetIds: z.array(z.string()).optional(),
+  selectedBookingAssetIds: z.array(z.string()).max(MAX_LIST_ITEMS).optional(),
   /**
    * Modern per-asset disposition payload — JSON-encoded to sidestep the
    * limits of form-encoded arrays-of-objects (same pattern the
@@ -256,7 +257,10 @@ export const partialCheckinAssetsSchema = z.object({
       if (value == null || value === "") return undefined;
       try {
         const parsed = JSON.parse(value);
-        const result = z.array(checkinDispositionSchema).safeParse(parsed);
+        const result = z
+          .array(checkinDispositionSchema)
+          .max(MAX_LIST_ITEMS)
+          .safeParse(parsed);
         if (!result.success) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,

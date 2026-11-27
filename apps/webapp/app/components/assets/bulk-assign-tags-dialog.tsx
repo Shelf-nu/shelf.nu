@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { TagUseFor } from "@prisma/client";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { MAX_LIST_ITEMS } from "~/utils/zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 import { BulkTagsPicker } from "../tag/bulk-tags-picker";
@@ -12,13 +13,16 @@ import { BulkTagsPicker } from "../tag/bulk-tags-picker";
  */
 export const BulkUpdateTagsSchema = z.object({
   // Validate array of asset IDs
-  assetIds: z.array(z.string()).min(1, "At least one asset must be selected"),
+  assetIds: z
+    .array(z.string())
+    .max(MAX_LIST_ITEMS)
+    .min(1, "At least one asset must be selected"),
   // Transform comma-separated string to array and validate
   tags: z
     .string()
     .transform((str) => str.split(",").filter(Boolean))
     .pipe(
-      z.array(z.string()).min(1, {
+      z.array(z.string()).max(MAX_LIST_ITEMS).min(1, {
         message: "At least one tag must be selected",
       })
     ),

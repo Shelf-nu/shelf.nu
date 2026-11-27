@@ -61,9 +61,7 @@ export const InviteUserFormSchema = z.object({
   email: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
-    })),
+    .refine(validEmail, { message: "Please enter a valid email" }),
   teamMemberId: z.string().optional(),
   // The invitable list is shared with the CSV import and resend paths. OWNER
   // is never in it, and that exclusion is a security control.
