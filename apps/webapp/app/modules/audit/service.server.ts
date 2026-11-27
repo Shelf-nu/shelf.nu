@@ -260,6 +260,13 @@ export type CreateAuditSessionInput = {
   createdById: string;
   /** User ids to assign. Every id must belong to a workspace member. */
   assigneeIds?: string[];
+  /**
+   * What happens to an assignee who is not a workspace member. `"reject"`
+   * (the default) fails the create with a 400, for ids a person just picked.
+   * `"drop"` leaves them out, for a team carried over from an older audit
+   * whose members may have left since.
+   */
+  nonMemberAssignees?: "reject" | "drop";
   scopeMeta?: AuditScopeMeta | null;
   dueDate?: Date;
 };
@@ -514,6 +521,7 @@ export async function createAuditSession(
     organizationId,
     createdById,
     assigneeIds,
+    nonMemberAssignees = "reject",
     scopeMeta,
     dueDate,
   } = input;
@@ -564,136 +572,157 @@ export async function createAuditSession(
 
   // Only add assignees who are explicitly selected
   // Creator is NOT automatically added as an assignee
-  const uniqueAssigneeIds = Array.from(new Set(assigneeIds ?? []));
+  const requestedAssigneeIds = Array.from(new Set(assigneeIds ?? []));
 
-  const result = await db.$transaction(async (tx) => {
-    // Assignees arrive from the form: prove they are workspace members before
-    // the assignments give them access to the audit.
-    await assertUsersBelongToOrg(
-      { userIds: uniqueAssigneeIds, organizationId },
-      tx
-    );
+  const result = await db.$transaction(
+    async (tx) => {
+      // Only workspace members may be assigned: the assignment gives them
+      // access to the audit. Read inside the transaction, so a member removed
+      // a moment earlier is either refused or dropped, never assigned.
+      let uniqueAssigneeIds = requestedAssigneeIds;
+      if (nonMemberAssignees === "drop") {
+        const members =
+          requestedAssigneeIds.length > 0
+            ? await tx.userOrganization.findMany({
+                where: { organizationId, userId: { in: requestedAssigneeIds } },
+                select: { userId: true },
+              })
+            : [];
+        const memberIds = new Set(members.map((member) => member.userId));
+        uniqueAssigneeIds = requestedAssigneeIds.filter((id) =>
+          memberIds.has(id)
+        );
+      } else {
+        await assertUsersBelongToOrg(
+          { userIds: requestedAssigneeIds, organizationId },
+          tx
+        );
+      }
 
-    const session = await tx.auditSession.create({
-      data: {
-        name,
-        description,
-        organizationId,
+      const session = await tx.auditSession.create({
+        data: {
+          name,
+          description,
+          organizationId,
+          createdById,
+          expectedAssetCount: assets.length,
+          missingAssetCount: assets.length,
+          scopeMeta: scopeMeta ?? undefined,
+          dueDate,
+        },
+      });
+
+      if (assets.length > 0) {
+        await tx.auditAsset.createMany({
+          data: assets.map((asset) => ({
+            auditSessionId: session.id,
+            assetId: asset.id,
+            expected: true,
+            expectedQuantity: expectedQuantities.get(asset.id) ?? null,
+          })),
+        });
+      }
+
+      if (uniqueAssigneeIds.length > 0) {
+        await tx.auditAssignment.createMany({
+          data: uniqueAssigneeIds.map((userId) => ({
+            auditSessionId: session.id,
+            userId,
+            // LEAD/PARTICIPANT roles are reserved; every assignee is a peer today
+            role: undefined,
+          })),
+          skipDuplicates: true,
+        });
+
+        // One event per assignee, the same shape updateAuditSession records, so
+        // a count of assignments reads one action whether the person was picked
+        // at creation or added by an edit.
+        await recordEvents(
+          uniqueAssigneeIds.map((targetUserId) => ({
+            organizationId,
+            actorUserId: createdById,
+            action: "AUDIT_ASSIGNEE_ADDED" as const,
+            entityType: "AUDIT" as const,
+            entityId: session.id,
+            auditSessionId: session.id,
+            targetUserId,
+          })),
+          tx
+        );
+      }
+
+      const sessionWithAssignments = await tx.auditSession.findFirst({
+        where: { id: session.id, organizationId },
+        include: {
+          assignments: true,
+        },
+      });
+
+      if (!sessionWithAssignments) {
+        throw new ShelfError({
+          cause: null,
+          message: "Unable to load the newly created audit session.",
+          label,
+          additionalData: { sessionId: session.id },
+        });
+      }
+
+      // Create automatic note for audit creation
+      await createAuditCreationNote({
+        auditSessionId: session.id,
         createdById,
         expectedAssetCount: assets.length,
-        missingAssetCount: assets.length,
-        scopeMeta: scopeMeta ?? undefined,
-        dueDate,
-      },
-    });
-
-    if (assets.length > 0) {
-      await tx.auditAsset.createMany({
-        data: assets.map((asset) => ({
-          auditSessionId: session.id,
-          assetId: asset.id,
-          expected: true,
-          expectedQuantity: expectedQuantities.get(asset.id) ?? null,
-        })),
-      });
-    }
-
-    if (uniqueAssigneeIds.length > 0) {
-      await tx.auditAssignment.createMany({
-        data: uniqueAssigneeIds.map((userId) => ({
-          auditSessionId: session.id,
-          userId,
-          // LEAD/PARTICIPANT roles are reserved; every assignee is a peer today
-          role: undefined,
-        })),
-        skipDuplicates: true,
+        tx,
       });
 
-      // One event per assignee, the same shape updateAuditSession records, so
-      // a count of assignments reads one action whether the person was picked
-      // at creation or added by an edit.
-      await recordEvents(
-        uniqueAssigneeIds.map((targetUserId) => ({
+      // Activity event: AUDIT_CREATED.
+      await recordEvent(
+        {
           organizationId,
           actorUserId: createdById,
-          action: "AUDIT_ASSIGNEE_ADDED" as const,
-          entityType: "AUDIT" as const,
+          action: "AUDIT_CREATED",
+          entityType: "AUDIT",
           entityId: session.id,
           auditSessionId: session.id,
-          targetUserId,
-        })),
+          meta: { expectedAssetCount: assets.length },
+        },
         tx
       );
-    }
 
-    const sessionWithAssignments = await tx.auditSession.findFirst({
-      where: { id: session.id, organizationId },
-      include: {
-        assignments: true,
-      },
-    });
-
-    if (!sessionWithAssignments) {
-      throw new ShelfError({
-        cause: null,
-        message: "Unable to load the newly created audit session.",
-        label,
-        additionalData: { sessionId: session.id },
+      // Fetch the created audit assets to get their IDs
+      const createdAuditAssets = await tx.auditAsset.findMany({
+        where: {
+          auditSessionId: session.id,
+          expected: true,
+        },
+        select: {
+          id: true,
+          assetId: true,
+        },
       });
-    }
 
-    // Create automatic note for audit creation
-    await createAuditCreationNote({
-      auditSessionId: session.id,
-      createdById,
-      expectedAssetCount: assets.length,
-      tx,
-    });
+      // Create a map for quick lookup
+      const auditAssetMap = new Map(
+        createdAuditAssets.map((aa) => [aa.assetId, aa.id])
+      );
 
-    // Activity event — AUDIT_CREATED.
-    await recordEvent(
-      {
-        organizationId,
-        actorUserId: createdById,
-        action: "AUDIT_CREATED",
-        entityType: "AUDIT",
-        entityId: session.id,
-        auditSessionId: session.id,
-        meta: { expectedAssetCount: assets.length },
-      },
-      tx
-    );
-
-    // Fetch the created audit assets to get their IDs
-    const createdAuditAssets = await tx.auditAsset.findMany({
-      where: {
-        auditSessionId: session.id,
-        expected: true,
-      },
-      select: {
-        id: true,
-        assetId: true,
-      },
-    });
-
-    // Create a map for quick lookup
-    const auditAssetMap = new Map(
-      createdAuditAssets.map((aa) => [aa.assetId, aa.id])
-    );
-
-    return {
-      session: sessionWithAssignments,
-      expectedAssets: assets.map((asset) => ({
-        id: asset.id,
-        name: asset.title,
-        auditAssetId: auditAssetMap.get(asset.id) ?? "",
-        expectedQuantity: expectedQuantities.get(asset.id) ?? null,
-        foundQuantity: null,
-        unitOfMeasure: asset.unitOfMeasure,
-        status: AuditAssetStatus.PENDING,
-      })),
-    } satisfies CreateAuditSessionResult;
-  });
+      return {
+        session: sessionWithAssignments,
+        expectedAssets: assets.map((asset) => ({
+          id: asset.id,
+          name: asset.title,
+          auditAssetId: auditAssetMap.get(asset.id) ?? "",
+          expectedQuantity: expectedQuantities.get(asset.id) ?? null,
+          foundQuantity: null,
+          unitOfMeasure: asset.unitOfMeasure,
+          status: AuditAssetStatus.PENDING,
+        })),
+      } satisfies CreateAuditSessionResult;
+    },
+    // The asset rows, the membership check, the assignee events and the
+    // notes all share this transaction; a large audit outgrows the 5s default.
+    { timeout: 15_000 }
+  );
 
   // Create asset notes outside the transaction
   if (assets.length > 0) {
@@ -5176,28 +5205,18 @@ export async function duplicateAuditSession({
       });
     }
 
-    // Only people who are still workspace members can be assigned; anyone
-    // who left since the original audit ran is dropped here rather than
-    // failing the whole duplicate on the membership guard.
-    const originalAssigneeIds = originalAudit.assignments.map(
-      (assignment) => assignment.userId
-    );
-    const activeMembers =
-      originalAssigneeIds.length > 0
-        ? await db.userOrganization.findMany({
-            where: { organizationId, userId: { in: originalAssigneeIds } },
-            select: { userId: true },
-          })
-        : [];
-    const carriedOverAssigneeIds = activeMembers.map((member) => member.userId);
-
     const { session: newSession } = await createAuditSession({
       name: `${originalAudit.name} (Copy)`,
       description: originalAudit.description,
       assetIds: resolvedAssetIds,
       organizationId,
       createdById: userId,
-      assigneeIds: carriedOverAssigneeIds,
+      // The original team: anyone who has left the workspace since is dropped
+      // inside the create transaction rather than failing the duplicate.
+      assigneeIds: originalAudit.assignments.map(
+        (assignment) => assignment.userId
+      ),
+      nonMemberAssignees: "drop",
       // PRD: scopeMeta copied as-is. The DB column is Json?, the typed surface
       // is AuditScopeMeta — cast through and let createAuditSession persist it.
       scopeMeta: (originalAudit.scopeMeta ?? null) as AuditScopeMeta | null,
@@ -5207,7 +5226,10 @@ export async function duplicateAuditSession({
       newSession,
       droppedAssetCount,
       originalAssetCount,
-      carriedOverAssigneeIds,
+      // Read from the rows written, so it names exactly who was assigned.
+      carriedOverAssigneeIds: newSession.assignments.map(
+        (assignment) => assignment.userId
+      ),
     };
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;

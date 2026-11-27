@@ -570,6 +570,16 @@ describe("audit service", () => {
     );
   });
 
+  it("gives the create transaction a 15s budget", async () => {
+    await createAuditSession(defaultInput);
+
+    // The asset rows, membership check, assignee events and notes share one
+    // transaction; the 5s default is too short for a large audit.
+    expect(mockDb.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15_000,
+    });
+  });
+
   it("creates no assignments, no assignee events and skips the membership check when nobody is assigned", async () => {
     await createAuditSession({ ...defaultInput, assigneeIds: [] });
 
@@ -2084,19 +2094,24 @@ describe("audit service", () => {
               : {
                   id: "audit-copy",
                   name: "Hull PC Bank Audit (Copy)",
-                  assignments: [],
+                  // The rows the create wrote, which the result reports.
+                  assignments: [
+                    { auditSessionId: "audit-copy", userId: "user-2" },
+                  ],
                 }
           )
       );
-      // user-gone is not a member of org-1. Once: the carry-over lookup gets
-      // this answer, the membership guard inside createAuditSession gets the
-      // default.
+      // user-gone is not a member of org-1.
       mockDb.userOrganization.findMany.mockResolvedValueOnce([
         { userId: "user-2" },
       ]);
 
       const result = await duplicateAuditSession(baseInput);
 
+      // One membership read, inside the create transaction (mockDb is the
+      // transaction client): a departed member is dropped, not refused.
+      expect(mockDb.userOrganization.findMany).toHaveBeenCalledTimes(1);
+      expect(mockDb.$transaction).toHaveBeenCalledTimes(1);
       expect(mockDb.userOrganization.findMany).toHaveBeenCalledWith({
         where: {
           organizationId: "org-1",

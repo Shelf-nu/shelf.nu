@@ -190,6 +190,20 @@ export async function sendAuditAssignedEmail({
     // an unhandled rejection in the fire-and-forget caller.
     const prefs = await resolveUserFormatPrefsById(assigneeUserId, hints);
 
+    // Pushed before the email is rendered and sent: the email below is
+    // awaited, and a phone should not wait on the mail server.
+    void sendPush({
+      userIds: [assigneeUserId],
+      ...PUSH_MESSAGES.AUDIT_ASSIGNED({
+        auditId: audit.id,
+        organizationId: audit.organizationId,
+        auditName: audit.name,
+        dueDate: audit.dueDate
+          ? formatDate(audit.dueDate, prefs, { includeTime: true })
+          : undefined,
+      }),
+    });
+
     const html = await auditUpdatesTemplateString({
       audit,
       heading: `🔍 You've been assigned to audit: "${audit.name}"`,
@@ -214,18 +228,6 @@ export async function sendAuditAssignedEmail({
         customEmailFooter: audit.organization.customEmailFooter,
       }),
       html,
-    });
-
-    void sendPush({
-      userIds: [assigneeUserId],
-      ...PUSH_MESSAGES.AUDIT_ASSIGNED({
-        auditId: audit.id,
-        organizationId: audit.organizationId,
-        auditName: audit.name,
-        dueDate: audit.dueDate
-          ? formatDate(audit.dueDate, prefs, { includeTime: true })
-          : undefined,
-      }),
     });
 
     Logger.info(

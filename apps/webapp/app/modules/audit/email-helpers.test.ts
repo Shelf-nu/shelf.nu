@@ -118,6 +118,37 @@ describe("sendAuditAssignedEmail", () => {
     ]);
   });
 
+  it("pushes without waiting for the email send to finish", async () => {
+    vi.mocked(resolveUserFormatPrefsById).mockResolvedValue({
+      dateFormat: "DD_MM_YYYY",
+      timeFormat: "H24",
+      weekStartsOn: 1,
+      timeZone: "UTC",
+    });
+    // Hold the email send open, as a slow mail server would.
+    let finishSend: () => void = () => {};
+    vi.mocked(sendEmailAndWait).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSend = resolve;
+        })
+    );
+
+    const sending = sendAuditAssignedEmail({
+      audit,
+      assigneeEmail: "user-a@example.com",
+      assigneeName: "Ana",
+      assigneeUserId: "user-a",
+      hints,
+    });
+    await vi.waitFor(() => expect(sendEmailAndWait).toHaveBeenCalledOnce());
+
+    expect(sendPush).toHaveBeenCalledOnce();
+
+    finishSend();
+    await sending;
+  });
+
   it("logs a failure for that recipient, sends no push and does not throw", async () => {
     const lookupDown = new Error("connection lost");
     vi.mocked(resolveUserFormatPrefsById).mockRejectedValueOnce(lookupDown);
