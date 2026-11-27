@@ -28,7 +28,7 @@ export const TimeSettingsSchema = z.object({
   maxBookingLengthSkipClosedDays: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 export function TimeSettings({

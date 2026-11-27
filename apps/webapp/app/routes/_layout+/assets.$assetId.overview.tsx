@@ -136,7 +136,7 @@ export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

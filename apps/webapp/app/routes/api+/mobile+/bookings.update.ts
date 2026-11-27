@@ -196,7 +196,7 @@ export async function action({ request }: ActionFunctionArgs) {
       if (cause instanceof z.ZodError) {
         throw new ShelfError({
           cause,
-          message: cause.errors[0]?.message ?? "Invalid booking details.",
+          message: cause.issues[0]?.message ?? "Invalid booking details.",
           label: "Booking",
           status: 400,
           shouldBeCaptured: false,

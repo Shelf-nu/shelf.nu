@@ -79,9 +79,7 @@ const OtpSchema = z.object({
   email: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
-    })),
+    .refine(validEmail, { message: "Please enter a valid email" }),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {

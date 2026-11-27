@@ -368,8 +368,8 @@ describe("NewAssetBulkFormSchema - count", () => {
  * Unreadable numeric text has to keep naming its field.
  *
  * The shared builder rejects before the bound piped after it runs, so a builder
- * that answered generically would shadow the field-specific `invalid_type_error`
- * these schemas already set.
+ * that answered generically would shadow the field-specific wrong-type message
+ * these schemas set with `invalidTypeError`.
  */
 describe("NewAssetFormSchema - named messages for unreadable numbers", () => {
   const baseValidData = {

@@ -45,8 +45,10 @@ export function modelReservationsField(emptyMessage: string) {
       .min(1, emptyMessage)
       // A submission carrying no `models[…]` fields at all reads as an empty
       // list, so it is refused by the same message as an emptied one rather
-      // than by Zod's bare "Required".
-      .default([])
+      // than by the bare "Required". It has to be `prefault`, which runs the
+      // fallback through the checks above; `default` would return the empty
+      // list as it is and accept the submission.
+      .prefault([])
   );
 }
 

@@ -11,7 +11,7 @@ export const TagsRequiredSettingsSchema = z.object({
   tagsRequired: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 export function TagsRequiredSettings({

@@ -41,7 +41,7 @@ const SHELF_EXPO_PROJECTS = new Set([
 const MIXED_PROJECTS_CODE = "PUSH_TOO_MANY_EXPERIENCE_IDS";
 
 /** The `details` of a mixed-projects refusal: project to its tokens. */
-const TokensByProjectSchema = z.record(z.array(z.string()));
+const TokensByProjectSchema = z.record(z.string(), z.array(z.string()));
 
 /**
  * How long a request waits for Expo's response headers, and then for each

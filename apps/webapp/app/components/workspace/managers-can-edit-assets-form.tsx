@@ -30,7 +30,7 @@ export const ManagersCanEditAssetsSchema = z.object({
   managersCanEditAssets: z
     .string()
     .transform((value) => value === "on")
-    .default("false"),
+    .default(false),
 });
 
 const SWITCH_ID = "managersCanEditAssets";

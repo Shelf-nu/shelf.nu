@@ -43,7 +43,12 @@ export const NewTagFormSchema = z.object({
   useFor: z
     .string()
     .optional()
-    .transform((value) => (value && value.length > 0 ? value.split(",") : []))
+    .transform(
+      (value) =>
+        // why: the pipe below checks every entry against the enum, so this
+        // cast only describes the input the pipe is about to validate
+        (value && value.length > 0 ? value.split(",") : []) as TagUseFor[]
+    )
     .pipe(z.array(z.nativeEnum(TagUseFor)).optional().default([])),
 });
 

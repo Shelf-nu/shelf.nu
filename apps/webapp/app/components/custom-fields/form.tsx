@@ -119,10 +119,10 @@ export const NewCustomFieldFormSchema = z.object({
  * cannot hold on one page and not the other. The edit action keeps a field's
  * saved type, so `updateCustomField` checks the format against that type too.
  *
- * `NewCustomFieldFormSchema` stays a plain `ZodObject` because the form reads
- * `.shape` for its required markers and hands the schema to `useZorm`, neither of
- * which works on the `ZodEffects` a refinement produces. The cross-field message
- * reaches the UI through the server-error fallback the form already renders.
+ * `NewCustomFieldFormSchema` holds only the per-field rules: the form hands it
+ * to `useZorm` and reads its `.shape` for the required markers. The cross-field
+ * rule lives here instead, and its message reaches the UI through the
+ * server-error fallback the form already renders.
  */
 export const CustomFieldSubmissionSchema = NewCustomFieldFormSchema.superRefine(
   (data, ctx) => {

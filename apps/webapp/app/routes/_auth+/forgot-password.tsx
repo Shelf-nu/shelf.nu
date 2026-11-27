@@ -42,9 +42,7 @@ const ForgotPasswordSchema = z.object({
   email: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
-    })),
+    .refine(validEmail, { message: "Please enter a valid email" }),
 });
 
 const OtpSchema = z
@@ -56,16 +54,14 @@ const OtpSchema = z
       "Password is too short. Minimum 8 characters."
     ),
   })
-  .superRefine(({ password, confirmPassword, otp, email }, ctx) => {
+  .superRefine(({ password, confirmPassword }, ctx) => {
     if (password !== confirmPassword) {
-      return ctx.addIssue({
+      ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Password and confirm password must match",
         path: ["confirmPassword"],
       });
     }
-
-    return { password, confirmPassword, otp, email };
   });
 
 export function loader({ context, request }: LoaderFunctionArgs) {

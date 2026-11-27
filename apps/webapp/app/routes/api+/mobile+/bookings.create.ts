@@ -186,7 +186,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // must be at least N hours from now") as a 400, not a 500.
         throw new ShelfError({
           cause,
-          message: cause.errors[0]?.message ?? "Invalid booking details.",
+          message: cause.issues[0]?.message ?? "Invalid booking details.",
           label: "Booking",
           status: 400,
           shouldBeCaptured: false,

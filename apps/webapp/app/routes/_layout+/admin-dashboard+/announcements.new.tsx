@@ -42,7 +42,8 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         content: z.string(),
         link: z.string(),
         linkText: z.string(),
-        published: z.coerce.boolean(),
+        // An unchecked checkbox sends no field at all, which reads as off.
+        published: z.coerce.boolean().default(false),
       })
     );
 

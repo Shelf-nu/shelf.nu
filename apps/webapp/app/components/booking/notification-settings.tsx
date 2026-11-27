@@ -36,7 +36,7 @@ export const NotifyBookingCreatorSchema = z.object({
   notifyBookingCreator: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 /** Zod schema for the "notify admins on new booking" toggle form. */
@@ -44,7 +44,7 @@ export const NotifyAdminsOnNewBookingSchema = z.object({
   notifyAdminsOnNewBooking: z
     .string()
     .transform((val) => val === "on")
-    .default("false"),
+    .default(false),
 });
 
 /** Subset of workspace booking settings relevant to notification configuration. */

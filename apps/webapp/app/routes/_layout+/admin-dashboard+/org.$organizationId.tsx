@@ -133,7 +133,7 @@ export const action = async ({
             enabledSso: z
               .string()
               .transform((val) => val === "on")
-              .default("false"),
+              .default(false),
           })
         );
         await toggleOrganizationSso({ organizationId, enabledSso });
@@ -147,7 +147,7 @@ export const action = async ({
             workspaceDisabled: z
               .string()
               .transform((val) => val === "on")
-              .default("false"),
+              .default(false),
           })
         );
         // console.log("workspaceDisabled", workspaceDisabled);
@@ -164,7 +164,7 @@ export const action = async ({
             barcodesEnabled: z
               .string()
               .transform((val) => val === "on")
-              .default("false"),
+              .default(false),
           })
         );
         await toggleBarcodeEnabled({ organizationId, barcodesEnabled });
@@ -180,7 +180,7 @@ export const action = async ({
             auditsEnabled: z
               .string()
               .transform((val) => val === "on")
-              .default("false"),
+              .default(false),
           })
         );
         await toggleAuditEnabled({ organizationId, auditsEnabled });
@@ -196,7 +196,7 @@ export const action = async ({
             requireSsoLogin: z
               .string()
               .transform((val) => val === "on")
-              .default("false"),
+              .default(false),
           })
         );
         await setRequireSsoLogin({

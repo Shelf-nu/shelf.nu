@@ -25,9 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
             email: z
               .string()
               .transform((email) => email.toLowerCase())
-              .refine(validEmail, () => ({
-                message: "Please enter a valid email",
-              })),
+              .refine(validEmail, { message: "Please enter a valid email" }),
           }),
           { shouldBeCaptured: false }
         );
