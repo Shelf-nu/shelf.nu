@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { QuantityTrackedOneUnitNotice } from "~/components/assets/quantity-tracked-one-unit-notice";
 import { CustodianField } from "~/components/booking/forms/fields/custodian";
 import { DatesFields } from "~/components/booking/forms/fields/dates";
 import { DescriptionField } from "~/components/booking/forms/fields/description";
@@ -110,6 +111,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
         );
         return (
           <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
+            <QuantityTrackedOneUnitNotice selectedItems={selectedAssets} />
             <Card className="m-0 mb-2">
               <NameField
                 name={undefined}

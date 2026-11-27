@@ -107,6 +107,55 @@ describe("add assets to an existing booking", () => {
     expect(result.status).toBe(400);
     expect(updateBookingAssets).not.toHaveBeenCalled();
   });
+  it("names the assets the booking already holds, once each, by id and title", async () => {
+    // why: a quantity-tracked asset can sit on a booking as several slices
+    // (loose and through a kit); the dialog lists and counts assets.
+    vi.mocked(processBooking).mockResolvedValue({
+      finalAssetIds: ["asset-1", "asset-2"],
+      bookingInfo: {
+        bookingAssets: [
+          {
+            id: "ba-loose",
+            assetId: "asset-1",
+            asset: { id: "asset-1", title: "Cable ties" },
+          },
+          {
+            id: "ba-kit",
+            assetId: "asset-1",
+            asset: { id: "asset-1", title: "Cable ties" },
+          },
+        ],
+      },
+    } as never);
+
+    const body = new URLSearchParams({ id: "booking-1" });
+    body.append("assetsIds[]", "asset-1");
+    body.append("assetsIds[]", "asset-2");
+    const response = await action(
+      createActionArgs({
+        request: new Request("http://localhost/api/assets/add-to-booking", {
+          method: "POST",
+          body,
+        }),
+        context: { getSession: () => ({ userId: "user-1" }) } as never,
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    const { error } = response.data as {
+      error: { additionalData: Record<string, unknown> };
+    };
+    // The shape `AddAssetsToExistingBookingDialog` reads: asset ids and
+    // titles, never booking-row ids.
+    expect(error.additionalData).toEqual(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        alreadyAddedAssets: [{ id: "asset-1", title: "Cable ties" }],
+        allAssetsInBooking: false,
+      })
+    );
+  });
+
   it("hands the add the caller's access and client hints, for the pool guard's refusal", async () => {
     expect.assertions(1);
     // why: a booking that holds neither asset, so the add goes through.
