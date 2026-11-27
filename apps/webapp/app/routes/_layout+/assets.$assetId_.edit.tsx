@@ -96,9 +96,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
         },
         // Pull the primary placement so the edit form can pre-fill the
-        // location picker.
+        // location picker. `assetKitId` rides along so the loader can
+        // count manual placements from these rows (see below).
         assetLocations: {
-          select: { location: { select: { id: true } } },
+          select: {
+            assetKitId: true,
+            location: { select: { id: true } },
+          },
         },
         barcodes: {
           select: {
@@ -111,6 +115,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    // Manual placements only: kit-driven rows (`assetKitId` set) follow
+    // the kit. Counted from the placements `getAsset` already loaded
+    // above, so the loader needs no extra query. The edit form disables
+    // its Location picker when a quantity-tracked asset has more than
+    // one manual placement, because a single-location save would
+    // collapse them all into one.
+    const manualPlacementCount = asset.assetLocations.filter(
+      (placement) => placement.assetKitId === null
+    ).length;
 
     // An archived asset is read-only (issue #382), and Save would be refused.
     // Say so before the form is filled in, and send the user back to the asset.
@@ -165,6 +179,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       asset,
+      manualPlacementCount,
       header,
       categories,
       totalCategories,
@@ -402,7 +417,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AssetEditPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { asset, referer } = useLoaderData<typeof loader>();
+  const { asset, referer, manualPlacementCount } =
+    useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
     [asset.tags]
@@ -433,6 +449,7 @@ export default function AssetEditPage() {
           categoryId={asset.categoryId}
           assetModelId={asset.assetModelId}
           locationId={getPrimaryLocation(asset)?.id ?? null}
+          manualPlacementCount={manualPlacementCount}
           description={asset.description}
           valuation={asset.valuation}
           type={asset.type}

@@ -69,6 +69,14 @@ type Props = ModelFilterProps & {
    * Naming matches `~/components/forms/input.tsx`, which takes the same prop.
    */
   error?: string;
+  /**
+   * Id of an element that describes the trigger, for callers whose
+   * explanation of the picker lives outside this component (for example the
+   * reason a disabled picker is disabled). Added to the trigger's
+   * `aria-describedby`, alongside the error id when both are set. Only this
+   * component can wire it, because it owns the trigger element.
+   */
+  descriptionId?: string;
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
@@ -135,6 +143,7 @@ export default function DynamicSelect({
   hideLabel,
   required,
   error,
+  descriptionId,
   searchIcon = "search",
   showSearch = true,
   defaultValue,
@@ -392,7 +401,11 @@ export default function DynamicSelect({
               // `aria-haspopup="dialog"`, not a listbox. The announcement comes
               // from the message's `role="alert"` and the association from
               // `aria-describedby`; the red border carries the visual half.
-              aria-describedby={error ? errorId : undefined}
+              aria-describedby={
+                [error ? errorId : undefined, descriptionId]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
             >
               {label && (
                 <InnerLabel hideLg={hideLabel} required={required}>

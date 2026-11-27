@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { Asset, Barcode, Qr } from "@prisma/client";
 import { AssetType, ConsumptionType } from "@prisma/client";
 import {
@@ -297,6 +297,14 @@ type Props = Partial<
    */
   locationId?: string | null;
   /**
+   * Number of manual placements (placement rows not driven by a kit)
+   * the asset currently has, loaded by the edit route. When a
+   * quantity-tracked asset has more than one, the Location picker is
+   * disabled: a single-location save would collapse every placement
+   * into one.
+   */
+  manualPlacementCount?: number;
+  /**
    * When `true`, the form renders in bulk-create mode:
    * - The Title field is replaced with Name template + Count + Start at
    *   inputs (and the rendered first preview is also submitted as `title`
@@ -344,6 +352,7 @@ const AssetFormInner = ({
   categoryId,
   assetModelId,
   locationId,
+  manualPlacementCount,
   description,
   valuation,
   type: assetType,
@@ -372,6 +381,11 @@ const AssetFormInner = ({
   // about silent fallback when this asset can't satisfy the workspace preference).
   const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  // Id of the hidden node that carries the location restriction reason to
+  // assistive tech: the hover card renders it, and the location picker
+  // points at it with `aria-describedby` (see the Location row below).
+  const locationDisabledReasonId = useId();
 
   // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
   // removing a barcode in the section above immediately removes the matching
@@ -489,6 +503,12 @@ const AssetFormInner = ({
     bulkMode ? AssetType.INDIVIDUAL : assetType ?? AssetType.INDIVIDUAL
   );
   const isQtyTracked = isQuantityTracked(selectedAssetType);
+
+  /** A quantity-tracked asset placed at more than one location cannot
+   * take a single Location here: saving would collapse every placement
+   * into one. The picker is disabled below, with a pointer to the
+   * Manage placements dialog. */
+  const isMultiPlacedPool = isQtyTracked && (manualPlacementCount ?? 0) > 1;
 
   // ── Bulk-mode controlled state ─────────────────────────────────────
   // Three related inputs grouped into one useState object so they
@@ -1454,19 +1474,30 @@ const AssetFormInner = ({
             name="currentLocationId"
             value={locationId || ""}
           />
-          {isKitAsset ? (
+          {isKitAsset || isMultiPlacedPool ? (
             <DisabledReasonHoverCard
+              descriptionId={locationDisabledReasonId}
               triggerClassName="disabled w-full cursor-not-allowed"
               reason={
-                <>
-                  This asset's location is managed by its parent kit{" "}
-                  <strong>"{kitMembership?.name}"</strong>. Update the kit's
-                  location instead.
-                </>
+                isKitAsset ? (
+                  <>
+                    This asset's location is managed by its parent kit{" "}
+                    <strong>"{kitMembership?.name}"</strong>. Update the kit's
+                    location instead.
+                  </>
+                ) : (
+                  <>
+                    This asset is placed at multiple locations, so its location
+                    cannot be changed here. Use the{" "}
+                    <strong>Manage placements</strong> dialog on the asset page
+                    to move units between locations.
+                  </>
+                )
               }
             >
               <DynamicSelect
-                disabled={locationDisabled}
+                disabled={locationDisabled || isMultiPlacedPool}
+                descriptionId={locationDisabledReasonId}
                 selectionMode="set"
                 fieldName="newLocationId"
                 triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "

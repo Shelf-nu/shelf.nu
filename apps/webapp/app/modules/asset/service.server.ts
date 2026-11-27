@@ -2021,6 +2021,12 @@ export async function updateAsset({
           assetKits: {
             select: { kit: { select: { id: true, name: true } } },
           },
+          // Manual placements only (`assetKitId IS NULL`): the
+          // multi-placement guard below counts these rows.
+          assetLocations: {
+            where: { assetKitId: null },
+            select: { id: true },
+          },
         },
       });
 
@@ -2044,6 +2050,44 @@ export async function updateAsset({
       assetForValidation = assetWithKit
         ? { type: assetWithKit.type, quantity: assetWithKit.quantity }
         : null;
+
+      /**
+       * Multi-placement guard. A QUANTITY_TRACKED pool can be placed at
+       * several locations at once (5 at A, 5 at B, 4 at C), but the
+       * placement rewrite below deletes every manual row and creates at
+       * most one, so a plain location change would silently move the
+       * whole pool to the new location. The surfaces that submit a
+       * location change WITHOUT a per-location quantity (the asset edit
+       * form, the companion edit screen, the CSV import update) show no
+       * warning before saving, so this guard refuses the change here, at
+       * the single write chokepoint every surface goes through, and
+       * points at the flows built for this: the manage-placements dialog
+       * moves units between locations, and the asset-overview "Update
+       * location" dialog, which warns that saving replaces all
+       * placements and submits an explicit `newLocationQuantity`, stays
+       * available for a deliberate collapse, so it is exempt.
+       */
+      const manualPlacementCount = assetWithKit?.assetLocations?.length ?? 0;
+      if (
+        assetWithKit?.type === AssetType.QUANTITY_TRACKED &&
+        !isSettingNewQuantity &&
+        manualPlacementCount > 1
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset is placed at multiple locations",
+          message: newLocationId
+            ? `This asset is placed at ${manualPlacementCount} locations. Changing its location here would move every placed unit to the new location. Use the manage placements dialog to move units between locations instead.`
+            : `This asset is placed at ${manualPlacementCount} locations. Clearing its location here would remove every placement. Use the manage placements dialog to move units between locations instead.`,
+          additionalData: {
+            assetId: id,
+            manualPlacementCount,
+          },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
     }
 
     /**
@@ -2548,6 +2592,37 @@ export async function updateAsset({
             assetId: id,
             total: locked.quantity ?? 0,
           });
+        }
+
+        // Re-check the multi-placement guard under the lock. The
+        // pre-transaction count can go stale: a placement added between
+        // that read and this lock would otherwise be collapsed by the
+        // placement rewrite below.
+        if (
+          shouldUpdatePlacement &&
+          !isSettingNewQuantity &&
+          locked.type === AssetType.QUANTITY_TRACKED
+        ) {
+          const manualPlacementsInTx = await tx.assetLocation.findMany({
+            where: { assetId: id, assetKitId: null },
+            select: { id: true },
+          });
+          if (manualPlacementsInTx.length > 1) {
+            throw new ShelfError({
+              cause: null,
+              title: "Asset is placed at multiple locations",
+              message: newLocationId
+                ? `This asset is placed at ${manualPlacementsInTx.length} locations. Changing its location here would move every placed unit to the new location. Use the manage placements dialog to move units between locations instead.`
+                : `This asset is placed at ${manualPlacementsInTx.length} locations. Clearing its location here would remove every placement. Use the manage placements dialog to move units between locations instead.`,
+              additionalData: {
+                assetId: id,
+                manualPlacementCount: manualPlacementsInTx.length,
+              },
+              label: "Assets",
+              status: 400,
+              shouldBeCaptured: false,
+            });
+          }
         }
 
         /**
